@@ -513,7 +513,11 @@ describe('fading is dots, not opacity', () => {
   }
 
   it('screens worn tone into strictly binary coverage', () => {
-    let tone = new Float32Array(N * N).fill(0.7)
+    // Annotated: `new Float32Array(...)` infers the narrow
+    // `Float32Array<ArrayBuffer>`, while the engine returns the general
+    // `Float32Array<ArrayBufferLike>`, so an inferred `let` cannot be
+    // reassigned from one.
+    let tone: Float32Array = new Float32Array(N * N).fill(0.7)
     tone = applyDropoutPatches(tone, N, N, 0.9, 3)
     tone = applyStreaks(tone, N, N, 0.9, 3)
     tone = applySmear(tone, N, N, 0.6)

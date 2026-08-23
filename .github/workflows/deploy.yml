@@ -30,10 +30,11 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci # requires the committed lockfile
-      - run: npm run lint # must be green — `npm run build` does not run ESLint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      # One script, so "the gate is green" means the same thing locally as it
+      # does here. Running the steps separately let a typecheck failure through
+      # once, because `npm test` transpiles without type-checking and looked
+      # like proof the whole chain passed.
+      - run: npm run verify
         env:
           PAGES: '1' # base = /PrintMachine/ for the Pages sub-path
       - run: test -s dist/index.html # smoke: the bundle isn't empty

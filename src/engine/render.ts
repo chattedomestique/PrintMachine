@@ -43,7 +43,7 @@ import { roughenEdges } from './rough.ts'
 import { applyRollerBanding, paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
-import { rasterizeText } from './text.ts'
+import { rasterizeBoxes, rasterizeText } from './text.ts'
 import { ASPECTS, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
@@ -90,8 +90,9 @@ export interface RenderCache {
   paper: PaperField
   mottle: Float32Array
   speckle: Float32Array
-  /** Rasterised glyph tone per layer, keyed on the properties that affect it.
-   *  Dragging a press slider must not re-run getImageData for every plate. */
+  /** Rasterised tone per plate, keyed on the properties that affect it.
+   *  Dragging a press slider must not re-run getImageData for every plate.
+   *  Boxes are keyed separately from glyphs under the same layer id. */
   tone: Map<string, { key: string; field: Float32Array }>
 }
 
@@ -110,6 +111,7 @@ function toneKey(l: TextLayer): string {
     l.size,
     l.lineHeight,
     l.tracking,
+    l.wordSpacing,
     l.align,
     l.x,
     l.y,
@@ -155,6 +157,26 @@ function cachedTone(
   return field
 }
 
+/** Same, for one box group. Keyed on the layout *and* the chosen words, so
+ *  re-selecting words re-rasterises but moving a press slider does not. */
+function cachedBoxTone(
+  scratch: CanvasRenderingContext2D,
+  layer: TextLayer,
+  boxIndex: number,
+  cache: RenderCache,
+  w: number,
+  h: number,
+): Float32Array {
+  const box = layer.boxes[boxIndex]
+  const id = `${layer.id}:box:${box.id}`
+  const key = [toneKey(layer), layer.boxPadding, layer.boxRadius, box.words.join(',')].join('|')
+  const hit = cache.tone.get(id)
+  if (hit && hit.key === key) return hit.field
+  const field = rasterizeBoxes(scratch, layer, w, h, new Set(box.words))
+  cache.tone.set(id, { key, field })
+  return field
+}
+
 /** Get a valid cache for these settings, rebuilding only when the inputs move. */
 export function ensureCache(
   cache: RenderCache | null,
@@ -167,10 +189,16 @@ export function ensureCache(
   return buildCache(s, w, h)
 }
 
-/** Build one plate's coverage field. Exported so tests can drive it directly. */
-export function renderPlate(
-  scratch: CanvasRenderingContext2D,
-  layer: TextLayer,
+/**
+ * Run the press over one tone field: everything from the stencil edge to the
+ * screen. Shared by type and by background boxes — a box that skipped this
+ * would be the one clean, undistressed rectangle on an otherwise convincingly
+ * printed sheet.
+ *
+ * Exported so tests can drive it without a canvas.
+ */
+export function pressPlate(
+  tone: Float32Array,
   index: number,
   s: PrintSettings,
   cache: RenderCache,
@@ -178,8 +206,6 @@ export function renderPlate(
   h: number,
 ): Float32Array {
   const scale = h / REFERENCE_HEIGHT
-
-  const tone = cachedTone(scratch, layer, cache, w, h)
 
   // Ragged stencil edge + ink spread, before anything downstream sees the
   // outline. Seeded per plate so two plates don't tear identically.
@@ -256,15 +282,31 @@ export function renderPrint(
   const cache = ensureCache(cacheRef.current, s, w, h)
   cacheRef.current = cache
 
+  // Plate order is print order: boxes go down first so the type overprints
+  // them, which is also what makes a box in a second ink read as a real
+  // second pass rather than a shape pasted on top.
   const plates: CompositeLayer[] = []
-  for (let i = 0; i < s.layers.length; i++) {
-    const layer = s.layers[i]
+  let plateIndex = 0
+  for (const layer of s.layers) {
     if (layer.opacity <= 0) continue
+
+    for (let b = 0; b < layer.boxes.length; b++) {
+      const box = layer.boxes[b]
+      if (box.words.length === 0 || box.opacity <= 0) continue
+      plates.push({
+        coverage: pressPlate(cachedBoxTone(scratch, layer, b, cache, w, h), plateIndex, s, cache, w, h),
+        rgb: inkById(box.inkId).rgb,
+        opacity: box.opacity * layer.opacity,
+      })
+      plateIndex++
+    }
+
     plates.push({
-      coverage: renderPlate(scratch, layer, i, s, cache, w, h),
+      coverage: pressPlate(cachedTone(scratch, layer, cache, w, h), plateIndex, s, cache, w, h),
       rgb: inkById(layer.inkId).rgb,
       opacity: layer.opacity,
     })
+    plateIndex++
   }
 
   const image = ctx.createImageData(w, h)

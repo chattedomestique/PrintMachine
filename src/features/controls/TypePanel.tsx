@@ -87,13 +87,23 @@ export default function TypePanel() {
       />
 
       <Slider
-        label="Tracking"
+        label="Letter tracking"
         value={layer.tracking}
         min={-0.1}
         max={0.4}
         step={0.005}
         format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(3)}em`}
         onChange={(tracking) => patch({ tracking }, true)}
+      />
+
+      <Slider
+        label="Word spacing"
+        value={layer.wordSpacing}
+        min={-0.2}
+        max={2}
+        step={0.01}
+        format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}em`}
+        onChange={(wordSpacing) => patch({ wordSpacing }, true)}
       />
 
       <Slider

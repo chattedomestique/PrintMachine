@@ -22,6 +22,7 @@ printed, all of which this engine models:
 | Density ceiling    | Riso ink never reaches full black. Capping density is what keeps it from looking like inkjet.      |
 | Torn edges         | The master is a thermal stencil burned as a coarse raster, then ink is forced through it into paper fibre. Nothing in that chain makes a clean curve. |
 | Misprints          | Drum streaks, ink drag along the feed direction, and patches where ink never transferred at all.  |
+| Boxes as plates    | A background box is its own plate in its own ink, so it screens, misregisters and wears like everything else — and the type overprints it. |
 
 ## Running it
 
@@ -52,6 +53,24 @@ src/
   features/  app-aware composition — the only layer that knows what the app is.
   styles/    tokens.css (the design system) + index.css.
 ```
+
+### Boxes, and why they are plates
+
+A background box behind a word is not a rectangle drawn on top of the render.
+It is its own plate, with its own ink and opacity, laid down *before* the type
+and pushed through the identical roughen → wear → screen → misregister
+pipeline. Anything less and it would be the one clean, undistressed rectangle
+on an otherwise convincingly printed sheet.
+
+Because the inks are transparent, the type then genuinely overprints the box:
+pink type on a blue box comes out navy, and where two boxes overlap you get the
+third colour. That is what a real second pass does.
+
+Word positions come from the same layout pass that places the glyphs. A box
+computed from one set of numbers while the glyphs are drawn from another drifts
+apart, and drifts differently at every size — so there is one layout, and a
+test asserting the engine's word grouping matches the plain whitespace split
+the selection UI shows you.
 
 ### Why fading is dots, not opacity
 

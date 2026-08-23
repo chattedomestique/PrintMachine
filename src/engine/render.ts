@@ -14,18 +14,24 @@
  *                    on the tone, so the screen bites on the real edge
  *   density/gamma    ink can't reach full black; cap before screening so the
  *                    screen sees the tone that will actually be printed
+ *   wear             mottle, dropout patches, drum streaks, smear, banding —
+ *                    ALL on the tone, so they change how many dots print
+ *                    rather than how transparent the ink is
  *   plate shift      the artwork moves on the plate...
  *   screen/dither    ...and the lattice moves with it, so dots don't crawl
- *   mottle/dropout   uneven ink film and drum dust, applied to real dots
- *   patches          regions where ink never transferred
- *   streaks          pale drum lines down the length of the sheet
- *   smear            ink dragged along the feed direction
- *   banding          feed-roller variation across the sheet
  *   composite        subtractive overprint onto textured paper
  *
- * Reordering this is not a refactor, it is a regression — the shift has to
- * happen before screening or the dots slide underneath the artwork, and the
- * density cap has to happen before screening or the highlights clip.
+ * Reordering this is not a refactor, it is a regression:
+ *
+ *  - The shift has to precede screening or the dots slide underneath the
+ *    artwork instead of travelling with the plate.
+ *  - The density cap has to precede screening or the highlights clip.
+ *  - Every wear pass has to precede screening. Coverage is read by the
+ *    compositor as ink transmittance, so scaling it after the screen thins the
+ *    ink film and a faded region renders as grey — the "just turn the opacity
+ *    down" look. Ink that fails to transfer does not go grey; there are fewer
+ *    and smaller dots of full-strength pigment. Only a pre-screen fade can
+ *    produce that.
  */
 
 import { compositeLayers, type CompositeLayer } from './composite.ts'
@@ -184,32 +190,41 @@ export function renderPlate(
     seed: s.seed ^ (index * 0x9e3779b9),
   })
 
-  const capped = applyDensity(rough, s.density, s.gamma)
+  let tone2 = applyDensity(rough, s.density, s.gamma)
+
+  // ── Wear, applied to TONE and therefore before the screen ───────────
+  //
+  // This ordering is the whole difference between a print that fades and a
+  // print that goes grey. The compositor reads coverage as ink transmittance,
+  // so scaling coverage *after* screening thins the ink film — a half-covered
+  // pixel renders as half-strength ink, which is exactly "turn the opacity
+  // down" and looks nothing like a real print.
+  //
+  // Ink that fails to transfer does not go grey. The dots that do print are
+  // still full-strength pigment; there are simply fewer and smaller of them.
+  // Modulating tone lets the screen convert a fade into *sparser dots*, so a
+  // failing area visibly breaks up into halftone instead of dimming.
+  tone2 = applyMottle(tone2, cache.mottle, cache.speckle, s.mottle, s.dropout)
+  tone2 = applyDropoutPatches(tone2, w, h, s.patches, s.seed ^ (index * 0x165667b1))
+  tone2 = applyStreaks(tone2, w, h, s.streaks, s.seed ^ (index * 0x27d4eb2d))
+  tone2 = applySmear(tone2, w, h, s.smear)
+  tone2 = applyRollerBanding(tone2, w, h, s.banding, s.seed ^ (index * 0x27d4eb2d))
 
   const { dx, dy } = registrationOffset(s.seed, index, s.misregistration * scale)
-  const shifted = shiftField(capped, w, h, dx, dy)
+  const shifted = shiftField(tone2, w, h, dx, dy)
 
-  let coverage: Float32Array
   if (s.method === 'dither') {
-    coverage = ditherField(shifted, w, h, s.ditherType, s.ditherThreshold)
-  } else {
-    coverage = screenField(shifted, w, h, {
-      shape: s.screenShape,
-      pitch: s.screenPitch * scale,
-      // Each plate gets its own angle; the beat between them is the rosette.
-      angle: defaultAngle(index),
-      softness: s.screenSoftness * scale,
-      originX: dx,
-      originY: dy,
-    })
+    return ditherField(shifted, w, h, s.ditherType, s.ditherThreshold)
   }
-
-  coverage = applyMottle(coverage, cache.mottle, cache.speckle, s.mottle, s.dropout)
-  coverage = applyDropoutPatches(coverage, w, h, s.patches, s.seed ^ (index * 0x165667b1))
-  coverage = applyStreaks(coverage, w, h, s.streaks, s.seed ^ (index * 0x27d4eb2d))
-  coverage = applySmear(coverage, w, h, s.smear)
-  coverage = applyRollerBanding(coverage, w, h, s.banding, s.seed ^ (index * 0x27d4eb2d))
-  return coverage
+  return screenField(shifted, w, h, {
+    shape: s.screenShape,
+    pitch: s.screenPitch * scale,
+    // Each plate gets its own angle; the beat between them is the rosette.
+    angle: defaultAngle(index),
+    softness: s.screenSoftness * scale,
+    originX: dx,
+    originY: dy,
+  })
 }
 
 /**

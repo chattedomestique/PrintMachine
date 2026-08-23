@@ -494,3 +494,51 @@ describe('forced justification', () => {
     expect(alignOffset(40, 100, 'justify')).toBe(0)
   })
 })
+
+describe('fading is dots, not opacity', () => {
+  // The regression this pins: wear used to run *after* screening and scale
+  // coverage directly. The compositor reads coverage as ink transmittance, so
+  // a half-covered pixel rendered as half-strength ink — grey. Real ink
+  // failure leaves full-strength pigment in fewer, smaller dots.
+  const N = 64
+  const opts = {
+    shape: 'circle' as const,
+    pitch: 6,
+    angle: 45,
+    // Zero softness makes the assertion exact: a correct pipeline can only
+    // emit bare paper or solid ink here, never a partial film.
+    softness: 0,
+    originX: 0,
+    originY: 0,
+  }
+
+  it('screens worn tone into strictly binary coverage', () => {
+    // Annotated: `new Float32Array(...)` infers the narrow
+    // `Float32Array<ArrayBuffer>`, while the engine returns the general
+    // `Float32Array<ArrayBufferLike>`, so an inferred `let` cannot be
+    // reassigned from one.
+    let tone: Float32Array = new Float32Array(N * N).fill(0.7)
+    tone = applyDropoutPatches(tone, N, N, 0.9, 3)
+    tone = applyStreaks(tone, N, N, 0.9, 3)
+    tone = applySmear(tone, N, N, 0.6)
+
+    const coverage = screenField(tone, N, N, opts)
+    for (const v of coverage) expect(v === 0 || v === 1).toBe(true)
+  })
+
+  it('a worn area prints less ink than a clean one', () => {
+    const sum = (f: Float32Array) => f.reduce((a, b) => a + b, 0)
+    const clean = new Float32Array(N * N).fill(0.7)
+    const worn = applyDropoutPatches(clean, N, N, 0.9, 11)
+    expect(sum(screenField(worn, N, N, opts))).toBeLessThan(sum(screenField(clean, N, N, opts)))
+  })
+
+  it('would NOT be binary if wear ran after the screen — the bug, stated', () => {
+    // Documents why the order matters rather than trusting a comment: apply
+    // the same wear to coverage instead of tone and mid-tones appear, which is
+    // precisely the grey the compositor would render as thin ink.
+    const tone = new Float32Array(N * N).fill(0.7)
+    const afterScreen = applyDropoutPatches(screenField(tone, N, N, opts), N, N, 0.9, 3)
+    expect([...afterScreen].some((v) => v > 0.02 && v < 0.98)).toBe(true)
+  })
+})

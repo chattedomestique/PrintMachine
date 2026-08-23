@@ -6,12 +6,15 @@
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
 .tabs::-webkit-scrollbar {
   display: none;
 }
 
 .tab {
+  touch-action: manipulation;
   position: relative;
   flex: 1 0 auto;
   min-height: 40px;
@@ -68,6 +71,9 @@
   max-height: min(38dvh, 340px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* Vertical only, and never chained to the document — a flick that runs off
+     the end of the panel must not bounce the whole page behind it. */
+  touch-action: pan-y;
   overscroll-behavior: contain;
   padding: var(--space-2) var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--line);
@@ -112,12 +118,15 @@
   overflow-x: auto;
   padding-bottom: var(--space-2);
   scrollbar-width: none;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
 .plate-strip::-webkit-scrollbar {
   display: none;
 }
 
 .plate {
+  touch-action: manipulation;
   flex: none;
   display: grid;
   grid-template-columns: auto 1fr;

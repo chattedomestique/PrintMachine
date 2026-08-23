@@ -1,0 +1,70 @@
+/* Design tokens (playbook §9.2). Every component consumes these — never a raw
+   pixel or hex value.
+
+   Palette note: the chrome is a deliberately neutral light gray. This app's
+   whole job is showing you what ink looks like on paper, and a warm/tinted UI
+   would shift how those inks read — the same reason you don't colour-grade in
+   a coloured room. The one accent is Riso Fluorescent Pink, which is both the
+   signature Riso ink and the only thing on screen allowed to be loud. */
+
+:root {
+  /* palette — light */
+  --bg: #ededec;
+  --surface: #f7f7f6;
+  --surface-2: #fdfdfc;
+  --ink-1: #1a1a19;
+  --ink-2: #4a4a48;
+  --ink-3: #767673;
+  --line: #dcdcda;
+  --accent: #ff48b0; /* RISO FLUORESCENTPINK */
+  --accent-ink: #ffffff;
+  --glass: rgb(247 247 246 / 0.72);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 12px rgb(0 0 0 / 0.05);
+  --shadow-2: 0 8px 32px rgb(0 0 0 / 0.12);
+
+  /* space */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* type */
+  --text-xs: 10px;
+  --text-sm: 12px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 22px;
+  --text-display: 26px;
+  --font-display: ui-serif, 'New York', Georgia, serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* shape & motion */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur: 260ms;
+  --touch-min: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Not an inversion — warm near-blacks, a brightened accent, re-tuned
+       lines and shadows (§9.1). */
+    --bg: #1a1a1a;
+    --surface: #242423;
+    --surface-2: #2c2c2b;
+    --ink-1: #ededec;
+    --ink-2: #b8b8b5;
+    --ink-3: #868683;
+    --line: #363635;
+    --accent: #ff5cba; /* brightened for dark, not the same hex */
+    --accent-ink: #1a1a1a;
+    --glass: rgb(36 36 35 / 0.72);
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px rgb(0 0 0 / 0.3);
+    --shadow-2: 0 8px 32px rgb(0 0 0 / 0.5);
+  }
+}

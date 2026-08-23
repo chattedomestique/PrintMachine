@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Turn type into an authentic Risograph print, on your phone." />
+
+    <!-- Must match manifest theme_color in vite.config.ts (playbook §3.1). -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#EDEDEC" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1A1A" />
+
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Print" />
+    <!-- `default`, not `black-translucent`: the top of this app is light gray in
+         light mode, and black-translucent forces light status-bar text (§3.4). -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+    <title>Print Machine</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

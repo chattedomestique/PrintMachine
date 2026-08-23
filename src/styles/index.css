@@ -1,0 +1,80 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* dvh, never vh — handles the iOS dynamic toolbar (playbook §3.4). */
+#root {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Global a11y block (playbook §16.8) ─────────────────────────────── */
+
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+button,
+[role='button'] {
+  min-height: var(--touch-min);
+  font-family: inherit;
+}
+
+/* Applied everywhere, not just the canvas — partial application is more
+   jarring than none (§7). */
+button,
+canvas,
+[role='button'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input[type='range'] {
+  min-height: var(--touch-min);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

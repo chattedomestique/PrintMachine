@@ -1,0 +1,25 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+dev-dist
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# NOTE: package-lock.json is deliberately NOT ignored. CI runs `npm ci`,
+# which requires it, and it is what makes a past green build reproducible
+# (playbook N10 / §11.2).

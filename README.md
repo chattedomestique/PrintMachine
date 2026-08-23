@@ -73,6 +73,15 @@ same code the preview uses.
   The one accent is Riso Fluorescent Pink.
 - **`verify` also runs on pull requests**, not just pushes to `main`. §11.1 wants
   the CI gate hung on the PR; the §16.7 template only triggers on push.
+- **Deploys to a `gh-pages` branch, not the OIDC Pages pipeline.** §2.1/§11.2
+  prefer `configure-pages`/`deploy-pages` with `contents: read`, specifically to
+  avoid handing a third-party action `contents: write`. This repo instead builds
+  in CI and pushes `dist/` to `gh-pages` with `peaceiris/actions-gh-pages`,
+  because every other PWA in this collection deploys that way and has its Pages
+  source set to that branch. One deployment model across all of them is worth
+  more than the narrower token scope. The `verify` gate is unchanged, and
+  `deploy` publishes the artifact `verify` produced rather than rebuilding, so
+  what ships is byte-for-byte what was checked.
 
 ## Status
 

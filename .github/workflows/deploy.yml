@@ -7,10 +7,14 @@ on:
     branches: [main] # verify gates the PR too; deploy is skipped below
   workflow_dispatch:
 
+# `contents: write` is needed to push the built site to the gh-pages branch.
+# This is a deliberate deviation from playbook §11.2, which prefers the OIDC
+# Pages pipeline precisely to avoid this scope — see the README. The reason is
+# consistency: every other PWA in this collection publishes to gh-pages and has
+# its Pages source set to that branch, and one deployment model across all of
+# them is worth more here than the narrower token.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -31,22 +35,35 @@ jobs:
       - run: npm test
       - run: npm run build
         env:
-          PAGES: '1'
+          PAGES: '1' # base = /PrintMachine/ for the Pages sub-path
       - run: test -s dist/index.html # smoke: the bundle isn't empty
-      - name: Upload Pages artifact
+
+      # Hand the *verified* build to the deploy job rather than rebuilding it
+      # there. Whatever ships is then byte-for-byte what the gate checked.
+      - name: Upload built site
         if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
+          name: site
           path: dist
+          retention-days: 1
 
   deploy:
     needs: verify # the gate
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/configure-pages@v5
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Download built site
+        uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: dist
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          # Vite emits an assets/ directory; Jekyll would also swallow any
+          # future underscore-prefixed file. Disabling it writes .nojekyll.
+          enable_jekyll: false

@@ -1,0 +1,269 @@
+/* Token-driven primitives. No component here knows what the app is. */
+
+/* ── Field: label + value readout above a control ────────────────────── */
+.field {
+  display: block;
+  padding: var(--space-2) 0;
+}
+.field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+.field-label {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  letter-spacing: 0.01em;
+}
+.field-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Slider ──────────────────────────────────────────────────────────── */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  background: transparent;
+  min-height: var(--touch-min);
+  cursor: pointer;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.slider::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -9.5px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1.5px solid var(--ink-2);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1.5px solid var(--ink-2);
+  box-shadow: var(--shadow-1);
+}
+.slider:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+  border-color: var(--accent);
+}
+
+/* ── Segmented ───────────────────────────────────────────────────────── */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.segmented::-webkit-scrollbar {
+  display: none;
+}
+.segmented-option {
+  flex: 1 0 auto;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.segmented-option[aria-checked='true'] {
+  background: var(--surface-2);
+  color: var(--ink-1);
+  box-shadow: var(--shadow-1);
+  font-weight: 550;
+}
+
+/* ── Toggle ──────────────────────────────────────────────────────────── */
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.toggle-track {
+  flex: none;
+  /* Must be a block/flex container: the knob is a <span>, and an inline box
+     ignores width and height entirely. */
+  display: flex;
+  align-items: center;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--line);
+  padding: 3px;
+  transition: background var(--dur) var(--ease);
+}
+.toggle[aria-checked='true'] .toggle-track {
+  background: var(--accent);
+}
+.toggle-knob {
+  display: block;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur) var(--ease);
+}
+.toggle[aria-checked='true'] .toggle-knob {
+  transform: translateX(18px);
+}
+
+/* ── Swatch grid ─────────────────────────────────────────────────────── */
+.swatches {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 44px;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-1) 0 var(--space-3);
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.swatches::-webkit-scrollbar {
+  display: none;
+}
+.swatch {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid rgb(0 0 0 / 0.12);
+  cursor: pointer;
+  scroll-snap-align: center;
+  position: relative;
+  transition: transform var(--dur) var(--ease);
+}
+.swatch[aria-checked='true'] {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+.swatch:active {
+  transform: scale(0.94);
+}
+
+/* ── Panel (animates to auto height, no JS measurement) ──────────────── */
+.panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur) var(--ease);
+}
+.panel[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+.panel-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--glass);
+  backdrop-filter: saturate(180%) blur(24px);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  border-top: 1px solid var(--line);
+}
+
+/* ── Icon button ─────────────────────────────────────────────────────── */
+.icon-button {
+  display: grid;
+  place-items: center;
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.icon-button:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--ink-1);
+}
+.icon-button:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+.icon-button[data-variant='primary'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 0 var(--space-6);
+  font-weight: 600;
+  font-size: var(--text-md);
+  font-family: inherit;
+}
+.icon-button[data-variant='primary']:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.06);
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-8) + env(safe-area-inset-bottom) + 64px);
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: var(--space-3) var(--space-6);
+  border-radius: 999px;
+  background: var(--ink-1);
+  color: var(--bg);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  animation: toast-in 220ms var(--ease);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}

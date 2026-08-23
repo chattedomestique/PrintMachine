@@ -10,11 +10,16 @@
  * Pass order, and why it is this order:
  *
  *   type → tone      glyph alpha is the tone field
+ *   roughen/bleed    the burned stencil's ragged outline and ink spread —
+ *                    on the tone, so the screen bites on the real edge
  *   density/gamma    ink can't reach full black; cap before screening so the
  *                    screen sees the tone that will actually be printed
  *   plate shift      the artwork moves on the plate...
  *   screen/dither    ...and the lattice moves with it, so dots don't crawl
  *   mottle/dropout   uneven ink film and drum dust, applied to real dots
+ *   patches          regions where ink never transferred
+ *   streaks          pale drum lines down the length of the sheet
+ *   smear            ink dragged along the feed direction
  *   banding          feed-roller variation across the sheet
  *   composite        subtractive overprint onto textured paper
  *
@@ -27,6 +32,8 @@ import { compositeLayers, type CompositeLayer } from './composite.ts'
 import { ditherField } from './dither.ts'
 import { applyDensity, applyMottle, registrationOffset, shiftField } from './ink.ts'
 import { inkById, paperById } from './inks.ts'
+import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
+import { roughenEdges } from './rough.ts'
 import { applyRollerBanding, paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
@@ -167,7 +174,17 @@ export function renderPlate(
   const scale = h / REFERENCE_HEIGHT
 
   const tone = cachedTone(scratch, layer, cache, w, h)
-  const capped = applyDensity(tone, s.density, s.gamma)
+
+  // Ragged stencil edge + ink spread, before anything downstream sees the
+  // outline. Seeded per plate so two plates don't tear identically.
+  const rough = roughenEdges(tone, w, h, {
+    roughness: s.roughness,
+    scale: Math.max(1, s.roughScale * scale),
+    bleed: s.bleed,
+    seed: s.seed ^ (index * 0x9e3779b9),
+  })
+
+  const capped = applyDensity(rough, s.density, s.gamma)
 
   const { dx, dy } = registrationOffset(s.seed, index, s.misregistration * scale)
   const shifted = shiftField(capped, w, h, dx, dy)
@@ -188,6 +205,9 @@ export function renderPlate(
   }
 
   coverage = applyMottle(coverage, cache.mottle, cache.speckle, s.mottle, s.dropout)
+  coverage = applyDropoutPatches(coverage, w, h, s.patches, s.seed ^ (index * 0x165667b1))
+  coverage = applyStreaks(coverage, w, h, s.streaks, s.seed ^ (index * 0x27d4eb2d))
+  coverage = applySmear(coverage, w, h, s.smear)
   coverage = applyRollerBanding(coverage, w, h, s.banding, s.seed ^ (index * 0x27d4eb2d))
   return coverage
 }

@@ -107,23 +107,21 @@ export default function Canvas({ showGuides }: { showGuides: boolean }) {
   )
 
   return (
-    <div className="stage">
-      <div className="sheet" data-aspect={settings.aspect}>
-        <canvas ref={canvasRef} className="print-canvas" />
-        <div
-          ref={surfaceRef}
-          className="drag-surface"
-          role="application"
-          aria-label="Print preview. Drag to move the selected layer; arrow keys nudge it."
-          tabIndex={0}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          onDoubleClick={onDoubleClick}
-          onKeyDown={onKeyDown}
-        />
-      </div>
+    <div className="sheet" data-aspect={settings.aspect}>
+      <canvas ref={canvasRef} className="print-canvas" />
+      <div
+        ref={surfaceRef}
+        className="drag-surface"
+        role="application"
+        aria-label="Print preview. Drag to move the selected layer; arrow keys nudge it."
+        tabIndex={0}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={onDoubleClick}
+        onKeyDown={onKeyDown}
+      />
     </div>
   )
 }

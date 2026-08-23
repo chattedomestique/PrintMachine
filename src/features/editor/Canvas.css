@@ -1,14 +1,10 @@
-.stage {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  overflow: hidden;
-}
-
+/* The sheet fills whatever the shell gives it, preserving its aspect. Height
+   drives, width follows from aspect-ratio, and max-width pulls both back when
+   the space is wider than it is tall. */
 .sheet {
   position: relative;
+  height: 100%;
+  width: auto;
   max-width: 100%;
   max-height: 100%;
   box-shadow: var(--shadow-2);

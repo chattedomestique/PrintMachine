@@ -7,6 +7,9 @@ const ALIGNS: readonly { value: TextAlign; label: string }[] = [
   { value: 'left', label: 'Left' },
   { value: 'center', label: 'Centre' },
   { value: 'right', label: 'Right' },
+  // Forced justification: every line, including the last, stretched to fill
+  // the measure by spacing between characters. The solid rectangular block.
+  { value: 'justify', label: 'Justify' },
 ]
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -21,7 +24,7 @@ export default function TypePanel() {
     dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce })
 
   return (
-    <div className="control-group">
+    <div className="control-stack">
       <Field label="Text" htmlFor={textId}>
         <textarea
           id={textId}

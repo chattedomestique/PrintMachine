@@ -89,7 +89,47 @@ export function alignOffset(lineWidth: number, blockWidth: number, align: TextAl
       return blockWidth - lineWidth
     case 'center':
       return (blockWidth - lineWidth) / 2
+    case 'justify':
+      // A justified line is stretched to the full measure by definition, so
+      // there is no slack left to distribute.
+      return 0
   }
+}
+
+/**
+ * Forced justification: place every glyph by hand, splitting the line's
+ * leftover space evenly across the gaps so it fills `targetWidth` exactly.
+ *
+ * "Forced" is the operative word — this justifies every line including the
+ * last, and it stretches *between characters*, not just between words. That is
+ * what produces the solid rectangular block of type the style depends on,
+ * rather than the ragged final line a text engine would normally leave.
+ *
+ * `targetWidth` must be the width of the *widest line in the block*, never an
+ * arbitrary measure. That is what keeps the extra gap non-negative: pass
+ * something narrower than a line's natural width and the gap goes negative,
+ * which pulls glyphs on top of each other and swallows the spaces between
+ * words. Scale the type to the measure first (fit-to-width), then justify to
+ * the widest line — in that order.
+ *
+ * A single-character line has no gaps to absorb the slack, so it is left where
+ * it is instead of being scaled.
+ *
+ * @param widths per-character advance widths, in order.
+ * @returns the x offset for each character, relative to the line start.
+ */
+export function justifyOffsets(widths: readonly number[], targetWidth: number): number[] {
+  const gaps = widths.length - 1
+  const natural = widths.reduce((a, b) => a + b, 0)
+  const extra = gaps > 0 ? (targetWidth - natural) / gaps : 0
+
+  const xs: number[] = []
+  let pen = 0
+  for (let i = 0; i < widths.length; i++) {
+    xs.push(pen)
+    pen += widths[i] + extra
+  }
+  return xs
 }
 
 /** Does this context support the `letterSpacing` property? Safari picked it up
@@ -164,7 +204,16 @@ export function rasterizeText(
     const ox = alignOffset(line.width, blockWidth, layer.align) - blockWidth / 2
     const oy = firstBaseline + i * layout.lineHeight
 
-    if (canTrack) {
+    if (layer.align === 'justify') {
+      // letterSpacing would fight the computed gaps, so measure and place
+      // without it, then re-apply it after the block.
+      if (canTrack) ctx.letterSpacing = '0px'
+      const chars = Array.from(line.text)
+      const widths = chars.map((c) => ctx.measureText(c).width)
+      const xs = justifyOffsets(widths, blockWidth)
+      for (let k = 0; k < chars.length; k++) ctx.fillText(chars[k], ox + xs[k], oy)
+      if (canTrack) ctx.letterSpacing = `${layout.tracking}px`
+    } else if (canTrack) {
       ctx.fillText(line.text, ox, oy)
     } else if (layout.tracking !== 0) {
       // Manual advance so tracking still works on engines without the property.

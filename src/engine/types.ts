@@ -13,7 +13,7 @@
 import type { DitherType } from './dither.ts'
 import type { ScreenShape } from './screen.ts'
 
-export type TextAlign = 'left' | 'center' | 'right'
+export type TextAlign = 'left' | 'center' | 'right' | 'justify'
 
 /** Screening method. A duplicator's RIP does one or the other, not both. */
 export type ScreenMethod = 'halftone' | 'dither'
@@ -89,6 +89,19 @@ export interface PrintSettings {
   mottle: number
   dropout: number
   banding: number
+
+  /** Edge raggedness from the burned stencil, 0..1. */
+  roughness: number
+  /** Feature size of that raggedness, in px at the reference height. */
+  roughScale: number
+  /** Ink spread past the artwork edge, 0..1. */
+  bleed: number
+  /** Pale drum streaks running the length of the sheet, 0..1. */
+  streaks: number
+  /** Ink drag along the feed direction, 0..1. */
+  smear: number
+  /** Regions where ink did not transfer at all, 0..1. */
+  patches: number
   /** Max plate offset in pixels at the reference render size. */
   misregistration: number
 

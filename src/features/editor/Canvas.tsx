@@ -1,109 +1,79 @@
 import { useCallback, useRef } from 'react'
 import { useSettings } from '../../state/settingsStore.ts'
 import { useRenderer } from './useRenderer.ts'
+import { MAX_SIZE, MIN_SIZE, useLayerGestures } from './useLayerGestures.ts'
+import type { TextLayer } from '../../engine/types.ts'
 import './Canvas.css'
 
 /**
- * The print preview, plus the drag surface that moves the selected layer.
+ * The print preview, plus the surface that manipulates the selected layer.
  *
  * Input lives on a dedicated transparent sibling with `touch-action: none`,
  * not on the canvas itself — that avoids the whole genre of "the canvas is
- * eating my taps" bug, and it means the canvas can stay `pointer-events: none`
+ * eating my taps" bug, and lets the canvas stay `pointer-events: none`
  * (playbook §7).
  */
 export default function Canvas({ showGuides }: { showGuides: boolean }) {
   const { settings, dispatch, selectedLayerId, selectLayer, selectedLayer } = useSettings()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ id: string; startX: number; startY: number; originX: number; originY: number } | null>(null)
 
   useRenderer(canvasRef, settings, { selectedLayerId, showGuides })
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      const surface = surfaceRef.current
-      if (!surface) return
-      const layer = selectedLayer ?? settings.layers[0]
+  const layer = selectedLayer ?? settings.layers[0] ?? null
+
+  // A whole gesture — drag, pinch, rotate — collapses into one undo step.
+  const patch = useCallback(
+    (p: Partial<TextLayer>) => {
       if (!layer) return
-      if (!selectedLayerId) selectLayer(layer.id)
-
-      surface.setPointerCapture(e.pointerId)
-      dragRef.current = {
-        id: layer.id,
-        startX: e.clientX,
-        startY: e.clientY,
-        originX: layer.x,
-        originY: layer.y,
-      }
+      dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce: true })
     },
-    [selectedLayer, selectedLayerId, selectLayer, settings.layers],
+    [dispatch, layer],
   )
 
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      const drag = dragRef.current
-      const surface = surfaceRef.current
-      if (!drag || !surface) return
-      const rect = surface.getBoundingClientRect()
-      if (rect.width === 0 || rect.height === 0) return
+  const ensureSelected = useCallback(() => {
+    if (!selectedLayerId && layer) selectLayer(layer.id)
+  }, [selectedLayerId, layer, selectLayer])
 
-      // Anchors are stored 0..1 of the sheet, so translate in the same space.
-      // Clamped a little outside the sheet so type can deliberately bleed off
-      // the edge, but never so far that it is lost off-screen.
-      const nx = drag.originX + (e.clientX - drag.startX) / rect.width
-      const ny = drag.originY + (e.clientY - drag.startY) / rect.height
-      dispatch({
-        type: 'patchLayer',
-        id: drag.id,
-        patch: {
-          x: Math.max(-0.25, Math.min(1.25, nx)),
-          y: Math.max(-0.25, Math.min(1.25, ny)),
-        },
-        // One drag is one undo step.
-        coalesce: true,
-      })
-    },
-    [dispatch],
-  )
-
-  const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    surfaceRef.current?.releasePointerCapture?.(e.pointerId)
-    dragRef.current = null
-  }, [])
+  const gestures = useLayerGestures(surfaceRef, layer, patch, ensureSelected)
 
   const onDoubleClick = useCallback(() => {
-    const layer = selectedLayer ?? settings.layers[0]
     if (!layer) return
     dispatch({ type: 'patchLayer', id: layer.id, patch: { x: 0.5, y: 0.5, rotation: 0 } })
-  }, [dispatch, selectedLayer, settings.layers])
+  }, [dispatch, layer])
 
-  // A keyboard path to the same value the drag writes (§10.1). Without this
-  // the primary spatial interaction has no non-pointer equivalent.
+  /**
+   * A keyboard path to every value the gestures write (playbook §10.1). If the
+   * primary editing interaction is a drag, there has to be a focusable,
+   * arrow-adjustable equivalent — this is that.
+   *
+   * Arrows move, +/- size, [/] rotate; Shift coarsens every step.
+   */
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      const layer = selectedLayer ?? settings.layers[0]
       if (!layer) return
-      const step = e.shiftKey ? 0.05 : 0.005
-      const moves: Record<string, [number, number]> = {
-        ArrowLeft: [-step, 0],
-        ArrowRight: [step, 0],
-        ArrowUp: [0, -step],
-        ArrowDown: [0, step],
+      const big = e.shiftKey
+      const move = big ? 0.05 : 0.005
+      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
+      const patches: Record<string, () => Partial<TextLayer>> = {
+        ArrowLeft: () => ({ x: clamp(layer.x - move, -0.3, 1.3) }),
+        ArrowRight: () => ({ x: clamp(layer.x + move, -0.3, 1.3) }),
+        ArrowUp: () => ({ y: clamp(layer.y - move, -0.3, 1.3) }),
+        ArrowDown: () => ({ y: clamp(layer.y + move, -0.3, 1.3) }),
+        '+': () => ({ size: clamp(layer.size * (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE), fitWidth: false }),
+        '=': () => ({ size: clamp(layer.size * (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE), fitWidth: false }),
+        '-': () => ({ size: clamp(layer.size / (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE), fitWidth: false }),
+        '[': () => ({ rotation: clamp(layer.rotation - (big ? 15 : 1), -180, 180) }),
+        ']': () => ({ rotation: clamp(layer.rotation + (big ? 15 : 1), -180, 180) }),
       }
-      const move = moves[e.key]
-      if (!move) return
+
+      const build = patches[e.key]
+      if (!build) return
       e.preventDefault()
-      dispatch({
-        type: 'patchLayer',
-        id: layer.id,
-        patch: {
-          x: Math.max(-0.25, Math.min(1.25, layer.x + move[0])),
-          y: Math.max(-0.25, Math.min(1.25, layer.y + move[1])),
-        },
-        coalesce: true,
-      })
+      dispatch({ type: 'patchLayer', id: layer.id, patch: build(), coalesce: true })
     },
-    [dispatch, selectedLayer, settings.layers],
+    [dispatch, layer],
   )
 
   return (
@@ -113,14 +83,11 @@ export default function Canvas({ showGuides }: { showGuides: boolean }) {
         ref={surfaceRef}
         className="drag-surface"
         role="application"
-        aria-label="Print preview. Drag to move the selected layer; arrow keys nudge it."
+        aria-label="Print preview. Drag to move the selected plate, pinch to scale and rotate, double-tap to centre. Arrow keys move, plus and minus scale, brackets rotate."
         tabIndex={0}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
         onDoubleClick={onDoubleClick}
         onKeyDown={onKeyDown}
+        {...gestures}
       />
     </div>
   )

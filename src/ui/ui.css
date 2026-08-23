@@ -32,6 +32,12 @@
   background: transparent;
   min-height: var(--touch-min);
   cursor: pointer;
+  /* The slider owns every gesture that lands on it. Without this a drag with
+     any vertical component scrolls the drawer instead of moving the value,
+     which on a phone is most drags — you are aiming with a thumb, not a mouse.
+     The cost is that you cannot scroll by starting on a slider; the label rows
+     and gaps between fields give plenty of grab area for that. */
+  touch-action: none;
 }
 .slider::-webkit-slider-runnable-track {
   height: 3px;
@@ -78,11 +84,17 @@
   border-radius: var(--radius-md);
   overflow-x: auto;
   scrollbar-width: none;
+  /* Lock horizontal strips to horizontal panning, so a swipe along one cannot
+     drift into scrolling the drawer, and contain the overscroll so hitting the
+     end never chains to the page (or to iOS back-swipe navigation). */
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
 .segmented::-webkit-scrollbar {
   display: none;
 }
 .segmented-option {
+  touch-action: manipulation;
   flex: 1 0 auto;
   min-height: 36px;
   padding: 0 var(--space-3);
@@ -105,6 +117,7 @@
 
 /* ── Toggle ──────────────────────────────────────────────────────────── */
 .toggle {
+  touch-action: manipulation;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -161,11 +174,14 @@
   scrollbar-width: none;
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
 .swatches::-webkit-scrollbar {
   display: none;
 }
 .swatch {
+  touch-action: manipulation;
   width: 44px;
   height: 44px;
   padding: 0;
@@ -200,6 +216,7 @@
 
 /* ── Icon button ─────────────────────────────────────────────────────── */
 .icon-button {
+  touch-action: manipulation;
   display: grid;
   place-items: center;
   min-width: var(--touch-min);

@@ -53,6 +53,20 @@ src/
   styles/    tokens.css (the design system) + index.css.
 ```
 
+### Why fading is dots, not opacity
+
+The compositor reads coverage as ink transmittance, so anything that scales
+coverage *after* screening thins the ink film — a half-covered pixel renders as
+half-strength ink, which is grey, and looks exactly like turning an opacity
+slider down. Ink that fails to transfer does not go grey: the dots that print
+are still full-strength pigment, there are simply fewer and smaller of them.
+
+So every wear pass runs on the **tone**, before the screen. A failing region
+then visibly breaks up into halftone rather than dimming. There is a test that
+screens heavily-worn tone at zero dot softness and asserts the result is
+strictly binary — no partial ink film anywhere — plus one that demonstrates the
+opposite ordering producing the mid-tones it must not.
+
 ### How the edge tearing works
 
 Not "add noise to the edge" — that gives a fuzzy edge, which is a different
@@ -61,6 +75,21 @@ and then cut back to hard with a threshold that itself wanders across the
 image. Where the threshold noise runs high the edge bites inward; where it runs
 low the ink bulges out. The result is a *hard* edge in the *wrong place* by a
 varying amount, which is what a burned stencil actually produces.
+
+### Touch
+
+Gestures are scoped per control rather than left to the browser's guess.
+Sliders take `touch-action: none` so a thumb drag with any vertical component
+moves the value instead of scrolling the drawer; horizontal strips (swatches,
+segmented controls, tabs, the plate strip) take `pan-x` so a swipe along one
+cannot drift into a vertical scroll; the scrolling panel takes `pan-y` with
+contained overscroll so a flick off its end never bounces the page behind it.
+
+On the sheet: drag to move, two-finger pinch to scale and rotate, double-tap to
+centre. A finger lifting mid-pinch re-seeds the gesture from the remaining one,
+so the layer keeps panning instead of jumping. Every gesture writes the same
+layer fields the sliders write, and arrow keys / +- / brackets mirror all of it
+for keyboards.
 
 ### Layout
 

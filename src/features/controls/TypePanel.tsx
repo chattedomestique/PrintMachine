@@ -1,6 +1,7 @@
 import { useId } from 'react'
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import { FONTS, type TextAlign, type TextLayer } from '../../engine/types.ts'
+import { MAX_SIZE, MIN_SIZE } from '../editor/useLayerGestures.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const ALIGNS: readonly { value: TextAlign; label: string }[] = [
@@ -25,6 +26,9 @@ export default function TypePanel() {
 
   return (
     <div className="control-stack">
+      <p className="panel-note">
+        On the sheet: drag to move, pinch to scale and rotate, double-tap to centre.
+      </p>
       <Field label="Text" htmlFor={textId}>
         <textarea
           id={textId}
@@ -58,17 +62,19 @@ export default function TypePanel() {
 
       <Toggle label="Fit to width" checked={layer.fitWidth} onChange={(fitWidth) => patch({ fitWidth })} />
 
-      {!layer.fitWidth && (
-        <Slider
-          label="Size"
-          value={layer.size}
-          min={0.02}
-          max={0.6}
-          step={0.005}
-          format={pct}
-          onChange={(size) => patch({ size }, true)}
-        />
-      )}
+      {/* Always available, never hidden behind fit-to-width — a control that
+          disappears when a toggle flips is a control you cannot find again.
+          Setting a size explicitly is a statement about size, so it releases
+          fit-to-width rather than being silently overridden by it. */}
+      <Slider
+        label={layer.fitWidth ? 'Size · fit to width' : 'Size'}
+        value={layer.size}
+        min={MIN_SIZE}
+        max={MAX_SIZE}
+        step={0.005}
+        format={pct}
+        onChange={(size) => patch({ size, fitWidth: false }, true)}
+      />
 
       <Slider
         label="Line height"
@@ -93,8 +99,8 @@ export default function TypePanel() {
       <Slider
         label="Rotation"
         value={layer.rotation}
-        min={-45}
-        max={45}
+        min={-180}
+        max={180}
         step={0.5}
         format={(v) => `${v}°`}
         onChange={(rotation) => patch({ rotation }, true)}

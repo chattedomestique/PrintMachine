@@ -76,5 +76,17 @@ same code the preview uses.
 
 ## Status
 
-Text is the first input. Photo intake runs through the same
-separate → screen → misregister → overprint pipeline and lands next.
+Working: multi-plate type, the full press model, undo/redo, persistence, and
+save via the share sheet. Text is the first input; photo intake runs through the
+same separate → screen → misregister → overprint pipeline and lands next.
+
+**Not yet verified on a real device.** The precache manifest demonstrably
+contains the real hashed assets, and the `<a download>` save branch is proven in
+a headless browser — but "boots in airplane mode from the home screen" and "the
+share sheet actually puts the file in Photos" are claims only an iPhone can
+settle. See `DEVICE-CHECKLIST.md`.
+
+Export weighs in around 600 KB rather than the ~300 KB the playbook cites for
+photographs. A halftone screen over paper grain is close to worst case for
+JPEG — high-frequency detail in every block. Lowering quality to compensate
+smears the dots, so the size stands as a deliberate trade.

@@ -16,7 +16,10 @@ import { inkById, overprint, paperById, RISO_INKS } from './inks.ts'
 import { paperField } from './paper.ts'
 import { mulberry32, valueNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
-import { alignOffset, layoutText } from './text.ts'
+import { alignOffset, justifyOffsets, layoutText } from './text.ts'
+import { blurField } from './blur.ts'
+import { roughenEdges } from './rough.ts'
+import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
 import type { TextLayer } from './types.ts'
 
 const W = 24
@@ -329,5 +332,165 @@ describe('ink table', () => {
         expect(c).toBeLessThanOrEqual(255)
       }
     }
+  })
+})
+
+describe('blur', () => {
+  it('preserves a constant field — no edge rim from the window seed', () => {
+    // The classic box-blur bug seeds the running sum from a negative index and
+    // double-counts the edge sample, which shows up as a bright rim. On a
+    // constant field any such error is immediately visible.
+    const flat = new Float32Array(W * H).fill(0.4)
+    const out = blurField(flat, W, H, 3)
+    for (const v of out) expect(v).toBeCloseTo(0.4, 5)
+  })
+
+  it('conserves total mass to within rounding', () => {
+    const f = ramp()
+    const before = f.reduce((a, b) => a + b, 0)
+    const after = blurField(f, W, H, 2).reduce((a, b) => a + b, 0)
+    // Edge clamping redistributes slightly; a gross mismatch means a bug.
+    expect(after / before).toBeGreaterThan(0.95)
+    expect(after / before).toBeLessThan(1.05)
+  })
+
+  it('is a copy, not a reference, at radius 0', () => {
+    const f = ramp()
+    const out = blurField(f, W, H, 0)
+    expect(out).not.toBe(f)
+    expect(Array.from(out)).toEqual(Array.from(f))
+  })
+})
+
+describe('rough edges', () => {
+  const solidSquare = (): Float32Array => {
+    const f = new Float32Array(W * H)
+    for (let y = 6; y < H - 6; y++) for (let x = 6; x < W - 6; x++) f[y * W + x] = 1
+    return f
+  }
+
+  it('is a no-op when both roughness and bleed are zero', () => {
+    const f = solidSquare()
+    expect(roughenEdges(f, W, H, { roughness: 0, scale: 3, bleed: 0, seed: 1 })).toBe(f)
+  })
+
+  it('never punches holes in the middle of a solid', () => {
+    const out = roughenEdges(solidSquare(), W, H, { roughness: 1, scale: 3, bleed: 0, seed: 5 })
+    // Well inside the square, ink must still be solid however torn the edge is.
+    for (let y = 11; y < H - 11; y++) {
+      for (let x = 11; x < W - 11; x++) expect(out[y * W + x]).toBe(1)
+    }
+  })
+
+  it('leaves bare paper bare', () => {
+    const out = roughenEdges(new Float32Array(W * H), W, H, {
+      roughness: 1,
+      scale: 3,
+      bleed: 1,
+      seed: 5,
+    })
+    expect(out.every((v) => v === 0)).toBe(true)
+  })
+
+  it('stays in range and actually moves the edge', () => {
+    const src = solidSquare()
+    const out = roughenEdges(src, W, H, { roughness: 0.8, scale: 3, bleed: 0.5, seed: 9 })
+    for (const v of out) {
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(1)
+    }
+    expect(Array.from(out)).not.toEqual(Array.from(src))
+  })
+
+  it('bleed grows the shape rather than shrinking it', () => {
+    const src = solidSquare()
+    const sum = (f: Float32Array) => f.reduce((a, b) => a + b, 0)
+    const bled = roughenEdges(src, W, H, { roughness: 0, scale: 2, bleed: 1, seed: 3 })
+    expect(sum(bled)).toBeGreaterThan(sum(src))
+  })
+})
+
+describe('misprints', () => {
+  const inked = (): Float32Array => new Float32Array(W * H).fill(0.8)
+
+  it('are all no-ops at zero', () => {
+    const f = inked()
+    expect(applyStreaks(f, W, H, 0, 1)).toBe(f)
+    expect(applySmear(f, W, H, 0)).toBe(f)
+    expect(applyDropoutPatches(f, W, H, 0, 1)).toBe(f)
+  })
+
+  it('keep coverage in range', () => {
+    let f = applyStreaks(inked(), W, H, 1, 3)
+    f = applySmear(f, W, H, 1)
+    f = applyDropoutPatches(f, W, H, 1, 3)
+    for (const v of f) {
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('streaks and patches only ever remove ink', () => {
+    const src = inked()
+    const streaked = applyStreaks(src, W, H, 1, 7)
+    for (let i = 0; i < src.length; i++) expect(streaked[i]).toBeLessThanOrEqual(src[i] + 1e-6)
+    const patched = applyDropoutPatches(src, W, H, 1, 7)
+    for (let i = 0; i < src.length; i++) expect(patched[i]).toBeLessThanOrEqual(src[i] + 1e-6)
+  })
+
+  it('smear cannot invent ink on a blank sheet', () => {
+    const out = applySmear(new Float32Array(W * H), W, H, 1)
+    expect(out.every((v) => v === 0)).toBe(true)
+  })
+
+  it('smear trails downward, never upward', () => {
+    // A single inked row: the drag must appear below it and nowhere above.
+    const f = new Float32Array(W * H)
+    for (let x = 0; x < W; x++) f[10 * W + x] = 1
+    const out = applySmear(f, W, H, 1)
+    for (let x = 0; x < W; x++) {
+      expect(out[9 * W + x]).toBe(0)
+      expect(out[12 * W + x]).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('forced justification', () => {
+  it('makes every line exactly the target width', () => {
+    const widths = [10, 20, 30]
+    const xs = justifyOffsets(widths, 100)
+    // Last glyph's right edge lands on the target.
+    expect(xs[2] + widths[2]).toBeCloseTo(100, 6)
+  })
+
+  it('spaces every gap equally', () => {
+    const widths = [10, 10, 10, 10]
+    const xs = justifyOffsets(widths, 70)
+    const gaps = [xs[1] - xs[0] - 10, xs[2] - xs[1] - 10, xs[3] - xs[2] - 10]
+    for (const g of gaps) expect(g).toBeCloseTo(10, 6)
+  })
+
+  it('never returns a negative gap when justifying to the widest line', () => {
+    // The bug this guards: targeting an arbitrary measure narrower than the
+    // line pulls glyphs on top of each other and swallows word spaces. The
+    // target must be the widest natural line, so slack is never negative.
+    const lines = [[10, 10], [10, 10, 10], [40, 5]]
+    const naturals = lines.map((l) => l.reduce((a, b) => a + b, 0))
+    const target = Math.max(...naturals)
+    for (const widths of lines) {
+      const xs = justifyOffsets(widths, target)
+      for (let i = 1; i < xs.length; i++) {
+        expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(widths[i - 1] - 1e-9)
+      }
+    }
+  })
+
+  it('leaves a single glyph where it is rather than scaling it', () => {
+    expect(justifyOffsets([12], 500)).toEqual([0])
+  })
+
+  it('starts every line at the block origin', () => {
+    expect(justifyOffsets([5, 5, 5], 60)[0]).toBe(0)
+    expect(alignOffset(40, 100, 'justify')).toBe(0)
   })
 })

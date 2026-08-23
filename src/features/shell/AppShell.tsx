@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Canvas from '../editor/Canvas.tsx'
-import Controls from '../controls/Controls.tsx'
+import Controls, { TABS, type TabId } from '../controls/Controls.tsx'
 import { IconButton } from '../../ui/controls.tsx'
 import { GridIcon, RedoIcon, UndoIcon } from '../../ui/icons.tsx'
 import { savePrint, saveMessage } from '../../engine/export.ts'
@@ -11,10 +11,34 @@ import './AppShell.css'
 export default function AppShell() {
   const { settings, undo, redo, canUndo, canRedo } = useSettings()
   const [showGuides, setShowGuides] = useState(false)
+  const [tab, setTab] = useState<TabId | null>(null)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [hintDismissed, setHintDismissed] = useState(() => loadPrefs().hintDismissed)
+
   const toastTimer = useRef<number | undefined>(undefined)
+  const appRef = useRef<HTMLDivElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * Track the live height of the bottom overlay and publish it as `--overlay-h`.
+   *
+   * This is what makes the sheet as large as it can possibly be: the canvas
+   * reserves exactly the space the controls currently occupy and not a pixel
+   * more, and it re-measures as panels open, close and change height. A fixed
+   * reservation either wastes space or lets the drawer cover the artwork.
+   */
+  useEffect(() => {
+    const el = overlayRef.current
+    const root = appRef.current
+    if (!el || !root) return
+    const ro = new ResizeObserver((entries) => {
+      root.style.setProperty('--overlay-h', `${Math.round(entries[0].contentRect.height)}px`)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const announce = useCallback((message: string | null) => {
     if (!message) return
@@ -29,6 +53,21 @@ export default function AppShell() {
     setHintDismissed(true)
     savePrefs({ ...loadPrefs(), hintDismissed: true })
   }, [])
+
+  // Tapping the open tab closes the drawer — the only way to get the sheet to
+  // full size on a phone, and the reason the tabs live in the bottom bar.
+  const toggleTab = useCallback((id: TabId) => {
+    setTab((prev) => (prev === id ? null : id))
+  }, [])
+
+  // Move focus into a panel as it opens (playbook §10.1).
+  useEffect(() => {
+    if (!tab) return
+    const frame = requestAnimationFrame(() => {
+      panelRef.current?.querySelector<HTMLElement>('input, textarea, button')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [tab])
 
   const onSave = useCallback(async () => {
     if (busy) return
@@ -54,7 +93,7 @@ export default function AppShell() {
   }, [busy, settings, announce])
 
   return (
-    <>
+    <div className="app" ref={appRef}>
       <header className="header">
         <h1 className="wordmark">
           Print<span>Machine</span>
@@ -80,24 +119,55 @@ export default function AppShell() {
         </div>
       </header>
 
-      {/* The hint belongs over the sheet it is describing, so it is anchored
-          to the stage rather than to an arbitrary offset from the viewport
-          bottom — which lands it on top of a slider as the drawer resizes. */}
-      <div className="stage-wrap">
-        <Canvas showGuides={showGuides} />
-        {!hintDismissed && (
-          <button type="button" className="hint" onClick={dismissHint}>
-            Drag the sheet to move type · double-tap to centre
-          </button>
-        )}
-      </div>
+      <main className="app__main">
+        <div className="app__canvas-wrap">
+          <Canvas showGuides={showGuides} />
+          {!hintDismissed && (
+            <button type="button" className="hint" onClick={dismissHint}>
+              Drag the sheet to move type · double-tap to centre
+            </button>
+          )}
+        </div>
+      </main>
 
-      <Controls />
+      {/* Fixed to the viewport bottom so it never takes flow space from the
+          sheet; the canvas reserves --overlay-h for it instead. */}
+      <div className="app__overlay" ref={overlayRef}>
+        <div className="drawer" data-open={tab !== null}>
+          <div
+            className="drawer-inner"
+            ref={panelRef}
+            id={tab ? `panel-${tab}` : undefined}
+            role="tabpanel"
+            aria-labelledby={tab ? `tab-${tab}` : undefined}
+            inert={tab === null ? true : undefined}
+          >
+            <Controls tab={tab} />
+          </div>
+        </div>
 
-      <div className="toolbar save-bar">
-        <IconButton label="Save this print" variant="primary" onClick={onSave} disabled={busy}>
-          {busy ? 'Printing…' : 'Save'}
-        </IconButton>
+        <div className="toolbar">
+          <div className="tabs" role="tablist" aria-label="Control groups">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                id={`tab-${t.id}`}
+                aria-selected={t.id === tab}
+                aria-controls={t.id === tab ? `panel-${t.id}` : undefined}
+                aria-expanded={t.id === tab}
+                className="tab"
+                onClick={() => toggleTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <IconButton label="Save this print" variant="primary" onClick={onSave} disabled={busy}>
+            {busy ? 'Printing…' : 'Save'}
+          </IconButton>
+        </div>
       </div>
 
       {/* One shared live region for state changes (playbook §10.1). */}
@@ -105,6 +175,6 @@ export default function AppShell() {
         {toast}
       </div>
       {toast && <div className="toast">{toast}</div>}
-    </>
+    </div>
   )
 }

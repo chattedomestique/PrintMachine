@@ -19,7 +19,7 @@ export default function PaperPanel() {
   const patch = (p: Partial<PrintSettings>, coalesce = false) => dispatch({ type: 'patch', patch: p, coalesce })
 
   return (
-    <div className="control-group">
+    <div className="control-stack">
       <Field label="Sheet">
         <Segmented
           label="Sheet proportions"

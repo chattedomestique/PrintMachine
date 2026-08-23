@@ -34,7 +34,7 @@ export default function PressPanel() {
   const patch = (p: Partial<PrintSettings>, coalesce = false) => dispatch({ type: 'patch', patch: p, coalesce })
 
   return (
-    <div className="control-group">
+    <div className="control-stack">
       <Field label="Screening">
         <Segmented
           label="Screening method"

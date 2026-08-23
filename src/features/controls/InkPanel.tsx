@@ -17,7 +17,7 @@ export default function InkPanel() {
   const layer = selectedLayer ?? settings.layers[0]
 
   return (
-    <div className="control-group">
+    <div className="control-stack">
       <Field label={`Plates · ${settings.layers.length}`}>
         <div className="plate-strip">
           {settings.layers.map((l, i) => {

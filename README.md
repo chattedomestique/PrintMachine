@@ -20,6 +20,8 @@ printed, all of which this engine models:
 | Ink mottle         | Drum ink lays down unevenly — low-frequency blotch plus speckle dropout.                          |
 | Paper tooth        | The stock is not white and not smooth.                                                            |
 | Density ceiling    | Riso ink never reaches full black. Capping density is what keeps it from looking like inkjet.      |
+| Torn edges         | The master is a thermal stencil burned as a coarse raster, then ink is forced through it into paper fibre. Nothing in that chain makes a clean curve. |
+| Misprints          | Drum streaks, ink drag along the feed direction, and patches where ink never transferred at all.  |
 
 ## Running it
 
@@ -50,6 +52,23 @@ src/
   features/  app-aware composition — the only layer that knows what the app is.
   styles/    tokens.css (the design system) + index.css.
 ```
+
+### How the edge tearing works
+
+Not "add noise to the edge" — that gives a fuzzy edge, which is a different
+thing and reads as a blur. Instead the glyph is softened into a wide gradient
+and then cut back to hard with a threshold that itself wanders across the
+image. Where the threshold noise runs high the edge bites inward; where it runs
+low the ink bulges out. The result is a *hard* edge in the *wrong place* by a
+varying amount, which is what a burned stencil actually produces.
+
+### Layout
+
+The controls are a fixed overlay, not a flow sibling. Their live height is
+measured with a `ResizeObserver` and published as `--overlay-h`, which the
+canvas reserves as bottom padding — so the sheet is always as large as it can
+be, re-measuring as panels open and close. Tapping the open tab collapses the
+drawer entirely for a full-height sheet.
 
 `engine/` must never import from `state/`, `ui/`, or `features/`, and must never
 touch React or the DOM beyond a canvas context handed to it. That constraint is
@@ -85,9 +104,16 @@ same code the preview uses.
 
 ## Status
 
-Working: multi-plate type, the full press model, undo/redo, persistence, and
-save via the share sheet. Text is the first input; photo intake runs through the
-same separate → screen → misregister → overprint pipeline and lands next.
+Working: multi-plate type, the full press and wear model, forced paragraph
+justification, undo/redo, persistence, and save via the share sheet. Text is the
+first input; photo intake runs through the same separate → screen → misregister
+→ overprint pipeline and lands next.
+
+**Forced justification** stretches every line — including the last — to the
+width of the widest line in the block, spacing between *characters* rather than
+words. Justifying to an arbitrary measure instead of the widest line is what
+makes the gap go negative and pulls glyphs on top of each other; there is a test
+for that.
 
 **Not yet verified on a real device.** The precache manifest demonstrably
 contains the real hashed assets, and the `<a download>` save branch is proven in

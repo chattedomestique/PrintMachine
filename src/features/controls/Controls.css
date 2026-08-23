@@ -1,40 +1,43 @@
-.controls {
-  flex: none;
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-}
-
-/* ── Tabs ────────────────────────────────────────────────────────────── */
+/* ── Tabs (in the bottom toolbar) ────────────────────────────────────── */
 .tabs {
+  flex: 1;
   display: flex;
-  gap: var(--space-1);
-  padding: 0 var(--space-3);
-  border-bottom: 1px solid var(--line);
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
   position: relative;
-  flex: 1;
-  min-height: var(--touch-min);
+  flex: 1 0 auto;
+  min-height: 40px;
+  padding: 0 var(--space-2);
   border: 0;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--ink-3);
   font-family: var(--font-display);
   font-size: var(--text-md);
   letter-spacing: 0.01em;
+  white-space: nowrap;
   cursor: pointer;
-  transition: color var(--dur) var(--ease);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 .tab[aria-selected='true'] {
   color: var(--ink-1);
+  background: var(--surface-2);
 }
-/* The one accent, on the active tab underline. */
+/* The one accent, on the active tab. */
 .tab[aria-selected='true']::after {
   content: '';
   position: absolute;
-  left: 20%;
-  right: 20%;
-  bottom: -1px;
+  left: 30%;
+  right: 30%;
+  bottom: 4px;
   height: 2px;
   border-radius: 2px;
   background: var(--accent);
@@ -54,12 +57,31 @@
   min-height: 0;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .drawer {
+    transition: none;
+  }
+}
+
 .control-group {
-  max-height: min(46dvh, 420px);
+  /* Capped so the drawer can never eat the sheet, and scrollable past that. */
+  max-height: min(38dvh, 340px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.control-stack > * + * {
+  margin-top: var(--space-1);
+}
+
+.panel-note {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--ink-3);
 }
 
 /* ── Text input ──────────────────────────────────────────────────────── */
@@ -71,11 +93,11 @@
   background: var(--surface-2);
   color: var(--ink-1);
   font-family: var(--font-ui);
+  /* 16px minimum stops iOS zooming the viewport on focus. */
   font-size: var(--text-lg);
   line-height: 1.3;
   resize: vertical;
-  /* 16px minimum stops iOS zooming the viewport on focus. */
-  min-height: 60px;
+  min-height: 58px;
 }
 .text-input:focus {
   outline: 2px solid var(--accent);

@@ -56,6 +56,16 @@ export function defaultSettings(): PrintSettings {
     mottle: 0.22,
     dropout: 0.012,
     banding: 0.5,
+
+    // The wear. A Riso that prints perfectly clean is a Riso nobody would
+    // choose over a laser printer, so these are on by default — enough to
+    // read as a real pull without tipping into pastiche.
+    roughness: 0.55,
+    roughScale: 3,
+    bleed: 0.35,
+    streaks: 0.3,
+    smear: 0.18,
+    patches: 0.22,
     // ~5px at the 1800px reference — clearly visible without looking broken.
     misregistration: 5,
 

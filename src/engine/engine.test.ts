@@ -19,7 +19,8 @@ import { defaultAngle, screenField } from './screen.ts'
 import { alignOffset, justifyOffsets, layoutText, wordsOf } from './text.ts'
 import { detailFactor } from './render.ts'
 import { coverRect, lightMask, separateLuminance } from './media.ts'
-import { pressProfile } from '../state/defaults.ts'
+import { defaultSettings, makeLayer, pressProfile } from '../state/defaults.ts'
+import { applySettings } from '../state/settingsReducer.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
@@ -1177,5 +1178,59 @@ describe('per-word press overrides', () => {
     // misprints — the same contract the box selection relies on.
     const words = wordsOf(layoutText(base(), 1000, 600, measure)).map((w) => w.text)
     expect(words).toEqual(['one', 'two', 'three'])
+  })
+})
+
+describe('box word selection', () => {
+  const layerWith = (boxes: { id: string; words: number[] }[]) => {
+    const l = makeLayer({
+      text: 'one two three four',
+      boxes: boxes.map((b) => ({ id: b.id, words: b.words, inkId: 'blue', opacity: 1 })),
+    })
+    return { ...defaultSettings(), layers: [l] }
+  }
+
+  it('select all claims every word for the chosen box', () => {
+    const s = layerWith([{ id: 'a', words: [] }])
+    const next = applySettings(s, {
+      type: 'setBoxWords',
+      layerId: s.layers[0].id,
+      boxId: 'a',
+      words: [0, 1, 2, 3],
+    })
+    expect(next.layers[0].boxes[0].words).toEqual([0, 1, 2, 3])
+  })
+
+  it('takes words away from any other box rather than sharing them', () => {
+    // A word in two boxes stacks two inks in the same rectangle and the result
+    // is neither colour. Select all has to honour that the same way a single
+    // tap does — this is the case that made the bulk action worth testing.
+    const s = layerWith([
+      { id: 'a', words: [0, 1, 2, 3] },
+      { id: 'b', words: [] },
+    ])
+    const next = applySettings(s, {
+      type: 'setBoxWords',
+      layerId: s.layers[0].id,
+      boxId: 'b',
+      words: [0, 1, 2, 3],
+    })
+    expect(next.layers[0].boxes[1].words).toEqual([0, 1, 2, 3])
+    expect(next.layers[0].boxes[0].words).toEqual([])
+  })
+
+  it('clear empties only the chosen box', () => {
+    const s = layerWith([
+      { id: 'a', words: [0, 1] },
+      { id: 'b', words: [2, 3] },
+    ])
+    const next = applySettings(s, {
+      type: 'setBoxWords',
+      layerId: s.layers[0].id,
+      boxId: 'b',
+      words: [],
+    })
+    expect(next.layers[0].boxes[1].words).toEqual([])
+    expect(next.layers[0].boxes[0].words).toEqual([0, 1])
   })
 })

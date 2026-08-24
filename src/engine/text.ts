@@ -207,6 +207,23 @@ export function layoutText(
       layer.justifyBy === 'words'
         ? p.glyphs.slice(0, -1).map((g, k) => isSpace(g.ch) || isSpace(p.glyphs[k + 1].ch))
         : []
+
+    // A line with no space has no word gap to open. Stretching it anyway means
+    // pulling its letters apart to span the measure, which tears the word in
+    // half — "go" printing as "g" at one margin and "o" at the other. Nothing
+    // is worth that, so the line keeps its natural spacing and parks against
+    // an edge instead.
+    if (layer.justifyBy === 'words' && !absorb.some(Boolean)) {
+      const shift = layer.soloAlign === 'right' ? target - p.width : 0
+      const glyphs = p.glyphs.map((g) => ({ ...g, x: g.x + shift }))
+      return {
+        text: source[i],
+        width: p.width,
+        glyphs,
+        words: p.words.map((wd) => ({ ...wd, x: wd.x + shift })),
+      }
+    }
+
     const xs = justifyOffsets(
       p.glyphs.map((g) => g.width),
       target,

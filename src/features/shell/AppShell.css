@@ -64,6 +64,9 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  /* Makes cqw/cqh below resolve against this box's content area, so the sheet
+     can size itself from whichever axis actually binds. */
+  container-type: size;
   padding: var(--space-3) var(--space-3) calc(var(--overlay-h, 92px) + var(--space-3));
   transition: padding-bottom var(--dur) var(--ease);
 }

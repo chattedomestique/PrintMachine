@@ -114,6 +114,7 @@ function toneKey(l: TextLayer): string {
     l.wordSpacing,
     l.align,
     l.justifyBy,
+    l.soloAlign,
     l.x,
     l.y,
     l.rotation,

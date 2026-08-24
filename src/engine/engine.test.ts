@@ -276,6 +276,7 @@ describe('text layout', () => {
     wordSpacing: 0,
     align: 'left',
     justifyBy: 'letters',
+    soloAlign: 'left',
     x: 0.5,
     y: 0.5,
     rotation: 0,
@@ -566,6 +567,7 @@ describe('word layout', () => {
     wordSpacing: 0,
     align: 'left',
     justifyBy: 'letters',
+    soloAlign: 'left',
     x: 0.5,
     y: 0.5,
     rotation: 0,
@@ -653,6 +655,7 @@ describe('word tracking', () => {
     wordSpacing: 0,
     align: 'left',
     justifyBy: 'letters',
+    soloAlign: 'left',
     x: 0.5,
     y: 0.5,
     rotation: 0,
@@ -746,20 +749,57 @@ describe('word tracking', () => {
     expect(end(out.lines[0])).toBeCloseTo(end(out.lines[1]), 6)
   })
 
-  it('falls back to spreading letters when a line has no spaces to open', () => {
-    // One long word has no word gap, so words mode has nowhere to put the
-    // slack. Refusing to justify would leave the line visibly short.
+  it('never tears a single-word line apart to reach the measure', () => {
+    // The failure this replaced: "go" on its own line justified to "g" at one
+    // margin and "o" at the other. A word has no word gap to open, so words
+    // mode must leave its letters exactly as set rather than spanning it.
+    const l = (over: Partial<TextLayer>) =>
+      layoutText(
+        layer({ text: 'go\nthe quick brown fox', align: 'justify', justifyBy: 'words', ...over }),
+        1000,
+        600,
+        measure,
+      )
+    const natural = layoutText(
+      layer({ text: 'go', align: 'left' }),
+      1000,
+      600,
+      measure,
+    ).lines[0]
+    const solo = l({}).lines[0]
+    const gap = (line: typeof solo) => line.glyphs[1].x - line.glyphs[0].x - line.glyphs[0].width
+
+    expect(gap(solo)).toBeCloseTo(gap(natural), 6)
+    expect(solo.width).toBeCloseTo(natural.width, 6)
+  })
+
+  it('parks a single-word line against the chosen margin', () => {
+    const l = (soloAlign: 'left' | 'right') =>
+      layoutText(
+        layer({ text: 'go\nthe quick brown fox', align: 'justify', justifyBy: 'words', soloAlign }),
+        1000,
+        600,
+        measure,
+      )
+    const left = l('left')
+    const right = l('right')
+    const block = left.widest
+
+    expect(left.lines[0].glyphs[0].x).toBeCloseTo(0, 6)
+    const last = right.lines[0].glyphs[right.lines[0].glyphs.length - 1]
+    expect(last.x + last.width).toBeCloseTo(block, 6)
+  })
+
+  it('still spreads a lone word in letters mode, where that is the point', () => {
     const out = layoutText(
-      layer({ text: 'AAAA\nBBBBBBBBBB', align: 'justify', justifyBy: 'words' }),
+      layer({ text: 'go\nthe quick brown fox', align: 'justify', justifyBy: 'letters' }),
       1000,
       600,
       measure,
     )
-    const end = (l: (typeof out.lines)[number]) => {
-      const g = l.glyphs[l.glyphs.length - 1]
-      return g.x + g.width
-    }
-    expect(end(out.lines[0])).toBeCloseTo(end(out.lines[1]), 6)
+    const solo = out.lines[0]
+    const last = solo.glyphs[solo.glyphs.length - 1]
+    expect(last.x + last.width).toBeCloseTo(out.widest, 6)
   })
 
   it('measures a line to its ink, not to the trailing tracking gap', () => {

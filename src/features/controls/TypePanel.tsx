@@ -1,6 +1,12 @@
 import { useId } from 'react'
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
-import { FONTS, type JustifyBy, type TextAlign, type TextLayer } from '../../engine/types.ts'
+import {
+  FONTS,
+  type JustifyBy,
+  type SoloAlign,
+  type TextAlign,
+  type TextLayer,
+} from '../../engine/types.ts'
 import { MAX_SIZE, MIN_SIZE } from '../editor/useLayerGestures.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
@@ -16,6 +22,11 @@ const ALIGNS: readonly { value: TextAlign; label: string }[] = [
 const JUSTIFY_BY: readonly { value: JustifyBy; label: string }[] = [
   { value: 'words', label: 'Words' },
   { value: 'letters', label: 'Letters' },
+]
+
+const SOLO_ALIGN: readonly { value: SoloAlign; label: string }[] = [
+  { value: 'left', label: 'Left' },
+  { value: 'right', label: 'Right' },
 ]
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -145,6 +156,19 @@ export default function TypePanel() {
             Filling the measure needs slack somewhere. Words keeps the words tight and opens
             the spaces; letters spreads every gap for the solid block.
           </p>
+        </Field>
+      )}
+
+      {/* A line of one word has no space to open, so words mode leaves it at its
+          natural width — this is which margin it sits against. */}
+      {layer.align === 'justify' && layer.justifyBy === 'words' && (
+        <Field label="Lines of one word">
+          <Segmented
+            label="Lines of one word"
+            value={layer.soloAlign}
+            options={SOLO_ALIGN}
+            onChange={(soloAlign) => patch({ soloAlign })}
+          />
         </Field>
       )}
 

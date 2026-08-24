@@ -25,6 +25,7 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     // Words tight, gaps open — the reason justification exists is the block,
     // not letterspaced words.
     justifyBy: 'words',
+    soloAlign: 'left',
     x: 0.5,
     y: 0.5,
     rotation: 0,

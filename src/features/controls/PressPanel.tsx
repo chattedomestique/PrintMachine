@@ -1,7 +1,8 @@
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import type { DitherType } from '../../engine/dither.ts'
 import type { ScreenShape } from '../../engine/screen.ts'
-import type { PrintSettings, ScreenMethod } from '../../engine/types.ts'
+import type { PressProfile, ScreenMethod } from '../../engine/types.ts'
+import type { PressTarget } from '../../state/settingsReducer.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const METHODS: readonly { value: ScreenMethod; label: string }[] = [
@@ -29,34 +30,36 @@ const pct = (v: number) => `${Math.round(v * 100)}%`
 const px = (v: number) => `${v.toFixed(1)}px`
 
 /** The machine, not the artwork. Everything here applies to every plate. */
-export default function PressPanel() {
+export default function PressPanel({ target }: { target: PressTarget }) {
   const { settings, dispatch } = useSettings()
-  const patch = (p: Partial<PrintSettings>, coalesce = false) => dispatch({ type: 'patch', patch: p, coalesce })
+  const press = settings[target]
+  const patch = (p: Partial<PressProfile>, coalesce = false) =>
+    dispatch({ type: 'patchPress', target, patch: p, coalesce })
 
   return (
     <div className="control-stack">
       <Field label="Screening">
         <Segmented
           label="Screening method"
-          value={settings.method}
+          value={press.method}
           options={METHODS}
           onChange={(method) => patch({ method })}
         />
       </Field>
 
-      {settings.method === 'halftone' ? (
+      {press.method === 'halftone' ? (
         <>
           <Field label="Dot shape">
             <Segmented
               label="Dot shape"
-              value={settings.screenShape}
+              value={press.screenShape}
               options={SHAPES}
               onChange={(screenShape) => patch({ screenShape })}
             />
           </Field>
           <Slider
             label="Screen pitch"
-            value={settings.screenPitch}
+            value={press.screenPitch}
             min={2}
             max={24}
             step={0.5}
@@ -65,7 +68,7 @@ export default function PressPanel() {
           />
           <Slider
             label="Dot softness"
-            value={settings.screenSoftness}
+            value={press.screenSoftness}
             min={0}
             max={3}
             step={0.05}
@@ -78,14 +81,14 @@ export default function PressPanel() {
           <Field label="Dither">
             <Segmented
               label="Dither algorithm"
-              value={settings.ditherType === 'none' ? 'atkinson' : settings.ditherType}
+              value={press.ditherType === 'none' ? 'atkinson' : press.ditherType}
               options={DITHERS}
               onChange={(ditherType) => patch({ ditherType })}
             />
           </Field>
           <Slider
             label="Threshold"
-            value={settings.ditherThreshold}
+            value={press.ditherThreshold}
             min={0.1}
             max={0.9}
             step={0.01}
@@ -97,7 +100,7 @@ export default function PressPanel() {
 
       <Slider
         label="Ink density"
-        value={settings.density}
+        value={press.density}
         min={0.3}
         max={1}
         step={0.01}
@@ -107,7 +110,7 @@ export default function PressPanel() {
 
       <Slider
         label="Midtones"
-        value={settings.gamma}
+        value={press.gamma}
         min={0.4}
         max={2.4}
         step={0.02}
@@ -117,7 +120,7 @@ export default function PressPanel() {
 
       <Toggle
         label="Scale detail to type size"
-        checked={settings.detailScaling}
+        checked={press.detailScaling}
         onChange={(detailScaling) => patch({ detailScaling })}
       />
       <p className="panel-note">
@@ -128,7 +131,7 @@ export default function PressPanel() {
 
       <Slider
         label="Misregistration"
-        value={settings.misregistration}
+        value={press.misregistration}
         min={0}
         max={30}
         step={0.5}
@@ -138,7 +141,7 @@ export default function PressPanel() {
 
       <Slider
         label="Ink mottle"
-        value={settings.mottle}
+        value={press.mottle}
         min={0}
         max={0.8}
         step={0.01}
@@ -148,7 +151,7 @@ export default function PressPanel() {
 
       <Slider
         label="Dropout"
-        value={settings.dropout}
+        value={press.dropout}
         min={0}
         max={0.08}
         step={0.002}
@@ -158,7 +161,7 @@ export default function PressPanel() {
 
       <Slider
         label="Roller banding"
-        value={settings.banding}
+        value={press.banding}
         min={0}
         max={1}
         step={0.01}

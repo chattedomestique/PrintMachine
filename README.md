@@ -108,6 +108,55 @@ rather than a subtraction, so lifting the highlights out leaves the shadows as
 black as they were; subtracting dims the whole image, which is the same "turned
 the opacity down" mistake the wear passes exist to avoid.
 
+#### Two presses, because a photo and a headline want different ones
+
+The press settings are a `PressProfile`, and a document holds two — one for the
+type, one for the photo. A screen coarse enough to read as *print* on a poster
+word turns a photograph into mud; wear tuned to tear a letterform pleasantly
+just reads as damage across a face. The first cut shared one profile, and every
+change made for one ruined the other.
+
+The Press and Wear tabs carry a **Type / Photo** switch, shared between them so
+that moving from one tab to the other does not silently drop a photo edit onto
+the type's pass. The seed is deliberately *not* per-profile: it is one sheet
+going through one machine, so both passes vary together.
+
+Documents written before the split carried the press fields at the top level.
+They are lifted into both profiles on load, so a saved print reopens looking
+exactly as it did and can be dialled apart from there.
+
+#### Type that reads across the whole photograph
+
+Type in one ink over a photograph is unreadable by construction: the image runs
+from paper-white to solid, and no single transparent ink has contrast against
+both ends. Black type disappears into the shadows; light type disappears into
+the highlights.
+
+So the pass switches ink by what is underneath it — a **split fountain driven
+by the image** rather than by position across the drum. The type is pressed
+*once* and then split by the mask, so the letterforms stay coherent; pressing
+twice would misregister the halves against each other and tear every glyph
+straddling the boundary.
+
+Three things make it actually work:
+
+- **The mask is thresholded on blurred luminance.** A photograph is full of
+  local contrast — a bright speck in a shadow, a dark seam across a highlight —
+  and thresholding raw pixels makes the ink flicker letter by letter, which is
+  harder to read than either colour alone. Blurring lets the mask follow the
+  large shapes the eye is judging against.
+- **The switch is a soft band, not a cut**, so a glyph crossing the boundary
+  cross-fades instead of changing colour mid-stem. The band has to be wide
+  enough that the blurred gradient lands inside it; the first attempt used ±0.08
+  and squeezed the blur straight back into a hard edge.
+- **The photo is knocked back to paper under the second ink** — a transparent
+  light ink over solid black is still solid black, so without this the second
+  ink buys nothing. The knockout runs deliberately wider than the ink split:
+  across the blend both inks print at partial coverage, so a line landing
+  exactly on the switch point comes out grey on grey. Clearing more of the photo
+  than strictly asked for puts that line back on paper. The light side is
+  untouched, so type over the bright half still overprints the photo.
+
 #### Nothing is ever stretched
 
 The scale factor is the same on both axes, always. That is asserted directly —

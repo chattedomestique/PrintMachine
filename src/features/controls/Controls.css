@@ -258,3 +258,10 @@
 .media-actions .icon-button {
   flex: 1;
 }
+
+/* The Type/Photo switch that sits above both the Press and Wear panels. */
+.press-target {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--space-1);
+}

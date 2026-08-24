@@ -43,9 +43,9 @@ import { roughenEdges } from './rough.ts'
 import { applyRollerBanding, paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
-import { coverRect, separateLuminance } from './media.ts'
+import { coverRect, lightMask, separateLuminance } from './media.ts'
 import { rasterizeBoxes, rasterizeText } from './text.ts'
-import { ASPECTS, type PrintSettings, type TextLayer } from './types.ts'
+import { ASPECTS, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
  * Every pitch and offset in the settings is expressed against this height, so
@@ -232,7 +232,9 @@ export function detailFactor(fontSize: number, canvasHeight: number): number {
 export function pressPlate(
   plate: { field: Float32Array; fontSize: number },
   index: number,
-  s: PrintSettings,
+  /** Which press this pass goes through — the type's or the photo's. */
+  s: PressProfile,
+  seed: number,
   cache: RenderCache,
   w: number,
   h: number,
@@ -249,7 +251,7 @@ export function pressPlate(
     // Bleed is a threshold offset, so at small sizes it eats the counters —
     // the holes in a, e, o fill and the word turns into a row of blobs.
     bleed: s.bleed * detail,
-    seed: s.seed ^ (index * 0x9e3779b9),
+    seed: seed ^ (index * 0x9e3779b9),
   })
 
   let tone2 = applyDensity(rough, s.density, s.gamma)
@@ -267,15 +269,15 @@ export function pressPlate(
   // Modulating tone lets the screen convert a fade into *sparser dots*, so a
   // failing area visibly breaks up into halftone instead of dimming.
   tone2 = applyMottle(tone2, cache.mottle, cache.speckle, s.mottle, s.dropout)
-  tone2 = applyDropoutPatches(tone2, w, h, s.patches, s.seed ^ (index * 0x165667b1))
-  tone2 = applyStreaks(tone2, w, h, s.streaks, s.seed ^ (index * 0x27d4eb2d))
+  tone2 = applyDropoutPatches(tone2, w, h, s.patches, seed ^ (index * 0x165667b1))
+  tone2 = applyStreaks(tone2, w, h, s.streaks, seed ^ (index * 0x27d4eb2d))
   tone2 = applySmear(tone2, w, h, s.smear)
-  tone2 = applyRollerBanding(tone2, w, h, s.banding, s.seed ^ (index * 0x27d4eb2d))
+  tone2 = applyRollerBanding(tone2, w, h, s.banding, seed ^ (index * 0x27d4eb2d))
 
   // Misregistration is a paper-feed error, physically the same for the whole
   // sheet — but at 5px it obliterates 20px type while barely showing on a
   // poster. Scaled by sqrt so it stays visible on small type without eating it.
-  const { dx, dy } = registrationOffset(s.seed, index, s.misregistration * scale * Math.sqrt(detail))
+  const { dx, dy } = registrationOffset(seed, index, s.misregistration * scale * Math.sqrt(detail))
   const shifted = shiftField(tone2, w, h, dx, dy)
 
   if (s.method === 'dither') {
@@ -329,32 +331,13 @@ export function renderPrint(
   // second pass rather than a shape pasted on top.
   const plates: CompositeLayer[] = []
   let plateIndex = 0
-  for (const layer of s.layers) {
-    if (layer.opacity <= 0) continue
 
-    for (let b = 0; b < layer.boxes.length; b++) {
-      const box = layer.boxes[b]
-      if (box.words.length === 0 || box.opacity <= 0) continue
-      plates.push({
-        coverage: pressPlate(cachedBoxTone(scratch, layer, b, cache, w, h), plateIndex, s, cache, w, h),
-        rgb: inkById(box.inkId).rgb,
-        opacity: box.opacity * layer.opacity,
-      })
-      plateIndex++
-    }
-
-    plates.push({
-      coverage: pressPlate(cachedTone(scratch, layer, cache, w, h), plateIndex, s, cache, w, h),
-      rgb: inkById(layer.inkId).rgb,
-      opacity: layer.opacity,
-    })
-    plateIndex++
-  }
-
-  // The photo goes down first, into the scratch buffer, at the rectangle
-  // coverRect computes — one scale factor on both axes, so it is cropped to
-  // fill rather than stretched to fit.
+  // The photo is laid down first — before any type is rasterised — because the
+  // type needs to know what is underneath it before it can decide what colour
+  // to be. `ground` is a copy, so `scratch` is free for glyph rasterisation
+  // immediately after.
   let ground: Uint8ClampedArray | undefined
+  let light: Float32Array | undefined
   if (media && s.media) {
     const r = coverRect({ width: s.media.width, height: s.media.height }, w, h, s.media)
     scratch.clearRect(0, 0, w, h)
@@ -366,20 +349,110 @@ export function renderPrint(
     scratch.drawImage(media, r.dx, r.dy, r.dw, r.dh)
     scratch.globalAlpha = 1
     ground = scratch.getImageData(0, 0, w, h).data
+  }
 
+  // Everywhere the type had to switch to its second ink, accumulated across
+  // layers. The photo is knocked back to paper here: a transparent light ink
+  // over a solid dark area is still a solid dark area, so without this the
+  // second ink buys nothing.
+  let knockout: Float32Array | undefined
+
+  for (const layer of s.layers) {
+    if (layer.opacity <= 0) continue
+
+    for (let b = 0; b < layer.boxes.length; b++) {
+      const box = layer.boxes[b]
+      if (box.words.length === 0 || box.opacity <= 0) continue
+      plates.push({
+        coverage: pressPlate(
+          cachedBoxTone(scratch, layer, b, cache, w, h),
+          plateIndex,
+          s.press,
+          s.seed,
+          cache,
+          w,
+          h,
+        ),
+        rgb: inkById(box.inkId).rgb,
+        opacity: box.opacity * layer.opacity,
+      })
+      plateIndex++
+    }
+
+    const coverage = pressPlate(
+      cachedTone(scratch, layer, cache, w, h),
+      plateIndex,
+      s.press,
+      s.seed,
+      cache,
+      w,
+      h,
+    )
+    plateIndex++
+
+    if (layer.contrastInkId && ground) {
+      // One pass whose ink changes with what is under it — a split fountain
+      // driven by the image rather than by position across the drum. Pressed
+      // once and then split, so the letterforms stay coherent; pressing twice
+      // would misregister the two halves against each other and tear every
+      // glyph that happens to straddle the boundary.
+      if (!light) {
+        light = lightMask(ground, w, h, layer.contrastThreshold, Math.max(2, h * 0.012))
+      }
+      const onLight = new Float32Array(w * h)
+      const onDark = new Float32Array(w * h)
+      for (let i = 0; i < coverage.length; i++) {
+        onLight[i] = coverage[i] * light[i]
+        onDark[i] = coverage[i] * (1 - light[i])
+      }
+      plates.push({ coverage: onLight, rgb: inkById(layer.inkId).rgb, opacity: layer.opacity })
+      plates.push({
+        coverage: onDark,
+        rgb: inkById(layer.contrastInkId).rgb,
+        opacity: layer.opacity,
+      })
+
+      if (!knockout) knockout = new Float32Array(w * h)
+      for (let i = 0; i < coverage.length; i++) {
+        // Knocked out wider than the second ink is strong. Across the blend
+        // the two inks each print at partial coverage, so neither has full
+        // contrast — a line landing exactly on the switch point comes out grey
+        // on grey and is the least readable thing on the sheet. Clearing more
+        // of the photo than strictly asked for puts that line back on paper,
+        // where both inks read. The light side is untouched, so type over the
+        // bright half still overprints the photo the way it should.
+        const k = Math.min(1, coverage[i] * (1 - light[i]) * 1.6)
+        if (k > knockout[i]) knockout[i] = k
+      }
+    } else {
+      plates.push({ coverage, rgb: inkById(layer.inkId).rgb, opacity: layer.opacity })
+    }
+  }
+
+  if (ground && s.media) {
     if (s.media.printed) {
-      // Through the same press as everything else, so the photo wears, screens
-      // and misregisters exactly like the type sitting on it.
+      // Through its own press — a photograph and a headline want genuinely
+      // different rulings, and one profile for both ruins whichever it was not
+      // tuned for.
       const tone = separateLuminance(ground, new Float32Array(w * h), {
         contrast: s.media.contrast,
         lift: s.media.lift,
       })
+      if (knockout) for (let i = 0; i < tone.length; i++) tone[i] *= 1 - knockout[i]
       plates.unshift({
         // Its own plate index, not 0: sharing a seed with the first type plate
         // would misregister the two identically, which reads as the photo and
         // the type being in perfect register — the one thing a Riso never is.
         // A photo is poster-sized by definition, so it takes the full press.
-        coverage: pressPlate({ field: tone, fontSize: h * 0.16 }, plateIndex, s, cache, w, h),
+        coverage: pressPlate(
+          { field: tone, fontSize: h * 0.16 },
+          plateIndex,
+          s.photoPress,
+          s.seed,
+          cache,
+          w,
+          h,
+        ),
         rgb: inkById(s.media.inkId).rgb,
         opacity: s.media.opacity,
       })
@@ -387,6 +460,13 @@ export function renderPrint(
       // Printed means separated *onto* paper, so the photo is no longer the
       // ground — its ink plate is the whole of its contribution.
       ground = undefined
+    } else if (knockout) {
+      // Not printed: the photo is the ground, so knocking out means taking its
+      // alpha down and letting the paper underneath come back through.
+      ground = new Uint8ClampedArray(ground)
+      for (let i = 0; i < knockout.length; i++) {
+        ground[i * 4 + 3] = ground[i * 4 + 3] * (1 - knockout[i])
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { Field, IconButton, Slider, Swatches } from '../../ui/controls.tsx'
+import { Field, IconButton, Slider, Swatches, Toggle } from '../../ui/controls.tsx'
 import { PlusIcon, TrashIcon } from '../../ui/icons.tsx'
 import { cssRgb, inkById, overprint, RISO_INKS } from '../../engine/inks.ts'
 import { useSettings } from '../../state/settingsStore.ts'
@@ -67,6 +67,59 @@ export default function InkPanel() {
               onChange={(inkId) => dispatch({ type: 'patchLayer', id: layer.id, patch: { inkId } })}
             />
           </Field>
+
+          {/* The second ink only means anything with a photo under the type. */}
+          {settings.media && (
+            <>
+              <Toggle
+                label="Second ink over dark areas"
+                checked={layer.contrastInkId !== null}
+                onChange={(on: boolean) =>
+                  dispatch({
+                    type: 'patchLayer',
+                    id: layer.id,
+                    patch: { contrastInkId: on ? 'white' : null },
+                  })
+                }
+              />
+              <p className="panel-note">
+                Type in one ink cannot read across a whole photograph. With this on the pass
+                switches ink wherever the image goes dark, and knocks the photo back to paper
+                underneath — a transparent light ink over solid black is still solid black.
+              </p>
+
+              {layer.contrastInkId && (
+                <>
+                  <Field label="Dark-area ink" value={inkById(layer.contrastInkId).name}>
+                    <Swatches
+                      label="Dark-area ink"
+                      value={layer.contrastInkId}
+                      options={RISO_INKS}
+                      onChange={(contrastInkId) =>
+                        dispatch({ type: 'patchLayer', id: layer.id, patch: { contrastInkId } })
+                      }
+                    />
+                  </Field>
+                  <Slider
+                    label="Switch point"
+                    value={layer.contrastThreshold}
+                    min={0.1}
+                    max={0.9}
+                    step={0.01}
+                    format={pct}
+                    onChange={(contrastThreshold) =>
+                      dispatch({
+                        type: 'patchLayer',
+                        id: layer.id,
+                        patch: { contrastThreshold },
+                        coalesce: true,
+                      })
+                    }
+                  />
+                </>
+              )}
+            </>
+          )}
 
           <Slider
             label="Plate opacity"

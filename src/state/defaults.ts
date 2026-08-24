@@ -1,4 +1,4 @@
-import type { PrintSettings, TextLayer } from '../engine/types.ts'
+import type { PressProfile, PrintSettings, TextLayer } from '../engine/types.ts'
 
 /**
  * Opinionated defaults. Every one of these is a decision made once here so it
@@ -21,6 +21,8 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     lineHeight: 0.94,
     tracking: -0.02,
     wordSpacing: 0,
+    contrastInkId: null,
+    contrastThreshold: 0.5,
     align: 'center',
     // Words tight, gaps open — the reason justification exists is the block,
     // not letterspaced words.
@@ -39,19 +41,10 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
   }
 }
 
-export function defaultSettings(): PrintSettings {
+/** One pass's worth of press settings. Overrides let the photo start from a
+ *  different, gentler place than the type without duplicating the whole list. */
+export function pressProfile(over: Partial<PressProfile> = {}): PressProfile {
   return {
-    aspect: '4:5',
-
-    media: null,
-    // Full stock character by default — with no photo this is what the paper
-    // has always done, and with one it is the sane starting point to dial back.
-    paperAmount: 1,
-
-    paperId: 'natural',
-    paperTexture: 0.4,
-    paperBlotch: 0.5,
-
     method: 'halftone',
     screenShape: 'circle',
     // Against the 1800px reference sheet. Finer than this and the rosette is
@@ -82,6 +75,38 @@ export function defaultSettings(): PrintSettings {
     // ~5px at the 1800px reference — clearly visible without looking broken.
     misregistration: 5,
     detailScaling: true,
+
+    ...over,
+  }
+}
+
+export function defaultSettings(): PrintSettings {
+  return {
+    aspect: '4:5',
+
+    media: null,
+    // Full stock character by default — with no photo this is what the paper
+    // has always done, and with one it is the sane starting point to dial back.
+    paperAmount: 1,
+
+    paperId: 'natural',
+    paperTexture: 0.4,
+    paperBlotch: 0.5,
+
+    press: pressProfile(),
+    // The photo starts finer and calmer than the type: a screen coarse enough
+    // to read as print on a headline turns a photograph into mud.
+    photoPress: pressProfile({
+      screenPitch: 5,
+      screenSoftness: 0.5,
+      roughness: 0.25,
+      bleed: 0.1,
+      streaks: 0.15,
+      smear: 0.08,
+      patches: 0.08,
+      misregistration: 3,
+      detailScaling: false,
+    }),
 
     seed: 12345,
     layers: [

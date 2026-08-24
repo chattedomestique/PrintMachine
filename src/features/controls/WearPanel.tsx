@@ -1,5 +1,6 @@
 import { Slider } from '../../ui/controls.tsx'
-import type { PrintSettings } from '../../engine/types.ts'
+import type { PressProfile } from '../../engine/types.ts'
+import type { PressTarget } from '../../state/settingsReducer.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -11,10 +12,11 @@ const pct = (v: number) => `${Math.round(v * 100)}%`
  * press tab is what you'd dial in deliberately, this is what the drum does to
  * you. Every one of them is off at zero, so a clean pull is still reachable.
  */
-export default function WearPanel() {
+export default function WearPanel({ target }: { target: PressTarget }) {
   const { settings, dispatch } = useSettings()
-  const patch = (p: Partial<PrintSettings>, coalesce = false) =>
-    dispatch({ type: 'patch', patch: p, coalesce })
+  const press = settings[target]
+  const patch = (p: Partial<PressProfile>, coalesce = false) =>
+    dispatch({ type: 'patchPress', target, patch: p, coalesce })
 
   return (
     <div className="control-stack">
@@ -25,7 +27,7 @@ export default function WearPanel() {
 
       <Slider
         label="Edge tear"
-        value={settings.roughness}
+        value={press.roughness}
         min={0}
         max={1}
         step={0.01}
@@ -35,7 +37,7 @@ export default function WearPanel() {
 
       <Slider
         label="Tear scale"
-        value={settings.roughScale}
+        value={press.roughScale}
         min={1}
         max={14}
         step={0.5}
@@ -45,7 +47,7 @@ export default function WearPanel() {
 
       <Slider
         label="Ink bleed"
-        value={settings.bleed}
+        value={press.bleed}
         min={0}
         max={1}
         step={0.01}
@@ -55,7 +57,7 @@ export default function WearPanel() {
 
       <Slider
         label="Drum streaks"
-        value={settings.streaks}
+        value={press.streaks}
         min={0}
         max={1}
         step={0.01}
@@ -65,7 +67,7 @@ export default function WearPanel() {
 
       <Slider
         label="Smear"
-        value={settings.smear}
+        value={press.smear}
         min={0}
         max={1}
         step={0.01}
@@ -75,7 +77,7 @@ export default function WearPanel() {
 
       <Slider
         label="Dropout patches"
-        value={settings.patches}
+        value={press.patches}
         min={0}
         max={1}
         step={0.01}

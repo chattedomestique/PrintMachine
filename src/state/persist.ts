@@ -1,5 +1,5 @@
-import type { PrintSettings } from '../engine/types.ts'
-import { defaultSettings } from './defaults.ts'
+import type { PressProfile, PrintSettings } from '../engine/types.ts'
+import { defaultSettings, pressProfile } from './defaults.ts'
 
 /**
  * Settings persistence (playbook N11 / §8.3).
@@ -33,7 +33,20 @@ export function loadSettings(): PrintSettings {
 
     // Merge over defaults so a document written by an older build still opens
     // when new fields are added.
-    const merged = { ...fallback, ...(parsed as Partial<PrintSettings>) }
+    const doc = parsed as Partial<PrintSettings> & Partial<PressProfile>
+    const merged = { ...fallback, ...(doc as Partial<PrintSettings>) }
+
+    // Documents written before the press was split carried its fields at the
+    // top level. Lift them into both profiles so a saved print reopens looking
+    // exactly as it did, rather than silently reverting to defaults — the
+    // photo then starts matching the type and can be dialled apart from there.
+    if (!doc.press && typeof doc.screenPitch === 'number') {
+      const lifted = pressProfile(doc as Partial<PressProfile>)
+      merged.press = lifted
+      merged.photoPress = merged.photoPress ?? pressProfile(doc as Partial<PressProfile>)
+    }
+    merged.press = { ...fallback.press, ...merged.press }
+    merged.photoPress = { ...fallback.photoPress, ...merged.photoPress }
     // A stored photo is only a reference; the bytes live in IndexedDB and may
     // have been evicted independently. Anything not shaped like a placement is
     // dropped rather than handed to the renderer to crash on.

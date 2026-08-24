@@ -17,7 +17,13 @@ import { paperField } from './paper.ts'
 import { mulberry32, valueNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { alignOffset, justifyOffsets, layoutText, wordsOf } from './text.ts'
-import { detailFactor } from './render.ts'
+import {
+  DRAFT_HEIGHT,
+  PREVIEW_HEIGHT,
+  REFERENCE_HEIGHT,
+  detailFactor,
+  outputSize,
+} from './render.ts'
 import { coverRect, lightMask, separateLuminance } from './media.ts'
 import { defaultSettings, makeLayer, pressProfile } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
@@ -1232,5 +1238,34 @@ describe('box word selection', () => {
     })
     expect(next.layers[0].boxes[1].words).toEqual([])
     expect(next.layers[0].boxes[0].words).toEqual([0, 1])
+  })
+})
+
+describe('draft rendering', () => {
+  it('is the same picture at lower fidelity, not a different one', () => {
+    // Rendering smaller while a control moves is only safe because every
+    // spatial quantity is expressed against REFERENCE_HEIGHT. If the draft had
+    // a different aspect the preview would jump shape on every drag.
+    for (const aspect of ['1:1', '4:5', '3:4', '2:3'] as const) {
+      const draft = outputSize(aspect, DRAFT_HEIGHT)
+      const full = outputSize(aspect, PREVIEW_HEIGHT)
+      expect(draft.w / draft.h).toBeCloseTo(full.w / full.h, 2)
+    }
+  })
+
+  it('is enough smaller to be worth switching to', () => {
+    // The press is a dozen full-image passes per plate, so its cost goes with
+    // the pixel count. A draft that is not several times cheaper buys nothing
+    // and only costs a second cache.
+    const draft = outputSize('4:5', DRAFT_HEIGHT)
+    const full = outputSize('4:5', PREVIEW_HEIGHT)
+    const ratio = (full.w * full.h) / (draft.w * draft.h)
+    expect(ratio).toBeGreaterThan(4)
+  })
+
+  it('never reaches the export, which always renders at reference height', () => {
+    const exported = outputSize('4:5')
+    expect(exported.h).toBe(REFERENCE_HEIGHT)
+    expect(exported.h).toBeGreaterThan(PREVIEW_HEIGHT)
   })
 })

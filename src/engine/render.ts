@@ -64,6 +64,22 @@ export const REFERENCE_HEIGHT = 1800
  */
 export const PREVIEW_HEIGHT = 1000
 
+/**
+ * Resolution used while a control is still moving.
+ *
+ * The press is a dozen full-image passes per plate, so its cost is quadratic in
+ * the preview height. Measured on a 4x-throttled phone profile, a full-height
+ * preview took over a second per change: dragging a slider froze the main
+ * thread, which made *everything* — the drag, the scroll, the tap — feel
+ * broken, not just the picture.
+ *
+ * Every spatial quantity is already scaled by h / REFERENCE_HEIGHT, so a
+ * smaller render is the same print at lower fidelity rather than a different
+ * one. Dropping to this while a value is in motion is roughly a seven-fold cut
+ * in pixels; the full-height frame lands as soon as the control settles.
+ */
+export const DRAFT_HEIGHT = 280
+
 /** Output pixel dimensions for an aspect at a given render height. */
 export function outputSize(
   aspect: PrintSettings['aspect'],

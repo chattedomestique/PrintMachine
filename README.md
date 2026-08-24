@@ -174,6 +174,56 @@ shifts. Keeping the blurred skirt instead of cutting back gives the opposite
 failure: a halo of bare paper round every reversed word, a glow rather than a
 trap.
 
+### Four ways to lay ink, not two
+
+A halftone breaks tone into dots and a dither scatters it. Neither is how a cut
+block or a drawn mark behaves, and both of those are printmaking too.
+
+**Woodcut** is ink carried by whatever the blade left standing. Three things
+have to happen at once or it reads as a filter: grooves cut *across* the shape
+that wander the way a blade pushed through timber does, the block's own grain
+showing through what remains, and a groove that narrows as the tone darkens
+because a darker area is one the carver left more of.
+
+**Scribble** is a shape hatched rather than flooded. Strokes bow away from
+straight, darker tone means a fatter stroke rather than more strokes — which is
+what a pen actually gives you — and a second pass crosses the first only where
+the shape wants to be darker. The technique follows
+[p5.scribble.js](https://github.com/generative-light/p5.scribble.js), itself a
+port of Jo Wood's *handy* for Processing. As with p5.riso it is reimplemented
+rather than depended on: p5.scribble needs all of p5.js, and it draws
+primitives, not text. What this app needs is a *fill rule for an arbitrary tone
+field*, which is a different problem and is expressed here as pure typed-array
+maths with no canvas involved.
+
+Both run in the same place as the screen — after the wear and the plate shift —
+so a carved block still tears and misregisters like everything else.
+
+#### The mistake both of them made first
+
+Each has to reach **nothing at nothing**. The first cut of both left a constant
+term in the mark width, so the faint tone a smear leaves behind printed as
+crisp full-strength lines trailing off the bottom of every letter. A block
+either carries ink or it is bare; a pen either touched the paper or it did not.
+
+The reverse matters too and is the other easy mistake: at full tone neither may
+close up into a flood, because the solid areas of a woodcut are exactly where
+the gouge marks show, and the white between hatch strokes is what makes them
+read as drawn. There are tests for both ends — a solid field must come back
+broken up, and the mark must track the artwork rather than sit on top of it.
+
+### Ink that covers instead of overprinting
+
+Riso ink is transparent, and that is why type genuinely overprints a photograph
+rather than sitting on it. Sometimes the opposite is what you want: the words at
+full strength regardless of what the image is doing underneath. **Print over the
+photo** switches that plate and its boxes from multiplying into the ground to
+covering it.
+
+A new flag through the compositor's inner loop has to be provably nothing when
+unset, so there is a test asserting the transparent path is byte-identical with
+and without it.
+
 ### Dithering as a real choice
 
 Thirteen algorithms, because they are genuinely different textures rather than

@@ -53,7 +53,7 @@ export type JustifyBy = 'words' | 'letters'
 export type SoloAlign = 'left' | 'right'
 
 /** Screening method. A duplicator's RIP does one or the other, not both. */
-export type ScreenMethod = 'halftone' | 'dither'
+export type ScreenMethod = 'halftone' | 'dither' | 'woodcut' | 'scribble'
 
 export interface FontChoice {
   readonly id: string
@@ -130,6 +130,16 @@ export interface TextLayer {
    */
   wordPress: Record<string, { bleed?: number; offset?: number }>
 
+  /**
+   * Print this layer's type and boxes *over* the photo instead of into it.
+   *
+   * Riso ink is transparent, so by default a plate multiplies down from
+   * whatever it lands on — which is the whole reason type genuinely overprints
+   * a photograph. Sometimes what you want is the opposite: the words sitting on
+   * the image at full strength, unaffected by whatever is underneath.
+   */
+  opaque: boolean
+
   contrastInkId: string | null
   /** Luminance below which the photo counts as dark, 0..1. */
   contrastThreshold: number
@@ -178,6 +188,13 @@ export interface PressProfile {
   ditherThreshold: number
   /** Dither cell size in pixels at the reference render size. */
   ditherScale: number
+
+  /** Spacing of woodcut grooves or scribble strokes, in px at reference size. */
+  carvePitch: number
+  /** Direction of the cut or the hatch, in degrees. */
+  carveAngle: number
+  /** 0..1. How far those marks wander from straight. */
+  carveRoughness: number
 
   /** Ink density ceiling in [0,1]. */
   density: number

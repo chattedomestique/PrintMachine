@@ -25,6 +25,7 @@ import {
   outputSize,
 } from './render.ts'
 import { coverRect, lightMask, separateLuminance } from './media.ts'
+import { scribbleField, woodcutField } from './carve.ts'
 import { defaultSettings, makeLayer, pressProfile } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
 import { blurField } from './blur.ts'
@@ -285,6 +286,7 @@ describe('text layout', () => {
     wordSpacing: 0,
     align: 'left',
     wordPress: {},
+    opaque: false,
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -579,6 +581,7 @@ describe('word layout', () => {
     wordSpacing: 0,
     align: 'left',
     wordPress: {},
+    opaque: false,
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -670,6 +673,7 @@ describe('word tracking', () => {
     wordSpacing: 0,
     align: 'left',
     wordPress: {},
+    opaque: false,
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -1162,7 +1166,7 @@ describe('per-word press overrides', () => {
   const base = (over: Partial<TextLayer> = {}): TextLayer => ({
     id: 't', text: 'one two three', inkId: 'black', fontId: 'grotesk', weight: 400,
     size: 0.1, lineHeight: 1, tracking: 0, wordSpacing: 0, wordPress: {},
-    contrastInkId: null, contrastThreshold: 0.5, align: 'left', justifyBy: 'letters',
+    opaque: false,     contrastInkId: null, contrastThreshold: 0.5, align: 'left', justifyBy: 'letters',
     soloAlign: 'left', x: 0.5, y: 0.5, rotation: 0, caps: false, opacity: 1,
     fitWidth: false, boxes: [], boxPadding: 0.1, boxRadius: 0, ...over,
   })
@@ -1267,5 +1271,110 @@ describe('draft rendering', () => {
     const exported = outputSize('4:5')
     expect(exported.h).toBe(REFERENCE_HEIGHT)
     expect(exported.h).toBeGreaterThan(PREVIEW_HEIGHT)
+  })
+})
+
+describe('opaque plates', () => {
+  const paper = { shade: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const }
+
+  it('covers what is under it instead of multiplying into it', () => {
+    // The whole point: unaffected by whatever the photo is doing there.
+    const dark = new Uint8ClampedArray([10, 10, 10, 255])
+    const light = new Uint8ClampedArray([240, 240, 240, 255])
+    const ink = [
+      { coverage: new Float32Array(1).fill(1), rgb: [255, 0, 128] as const, opacity: 1, opaque: true },
+    ]
+    const a = new Uint8ClampedArray(4)
+    const b = new Uint8ClampedArray(4)
+    compositeLayers(a, 1, 1, { ...paper, base: dark, paperAmount: 0 }, ink)
+    compositeLayers(b, 1, 1, { ...paper, base: light, paperAmount: 0 }, ink)
+
+    expect([...a]).toEqual([...b])
+    expect(a[0]).toBeCloseTo(255, 0)
+    expect(a[1]).toBeCloseTo(0, 0)
+  })
+
+  it('leaves the transparent default exactly as it was', () => {
+    // A new flag through the inner loop has to be provably inert when unset.
+    const base = new Uint8ClampedArray([200, 200, 200, 255])
+    const cov = new Float32Array(1).fill(0.6)
+    const withFlag = new Uint8ClampedArray(4)
+    const without = new Uint8ClampedArray(4)
+    compositeLayers(withFlag, 1, 1, { ...paper, base, paperAmount: 0 }, [
+      { coverage: cov, rgb: [0, 0, 255] as const, opacity: 1, opaque: false },
+    ])
+    compositeLayers(without, 1, 1, { ...paper, base, paperAmount: 0 }, [
+      { coverage: cov, rgb: [0, 0, 255] as const, opacity: 1 },
+    ])
+    expect([...withFlag]).toEqual([...without])
+  })
+
+  it('still respects plate opacity, so it can be dialled back', () => {
+    const base = new Uint8ClampedArray([0, 0, 0, 255])
+    const out = new Uint8ClampedArray(4)
+    compositeLayers(out, 1, 1, { ...paper, base, paperAmount: 0 }, [
+      { coverage: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const, opacity: 0.5, opaque: true },
+    ])
+    expect(out[0]).toBeGreaterThan(100)
+    expect(out[0]).toBeLessThan(160)
+  })
+})
+
+describe('woodcut and scribble', () => {
+  const W = 48
+  const H = 48
+  const solid = () => new Float32Array(W * H).fill(1)
+  const ramp = () => {
+    const f = new Float32Array(W * H)
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) f[y * W + x] = x / (W - 1)
+    return f
+  }
+  const opts = { pitch: 8, angle: 30, roughness: 0.5, seed: 7 }
+
+  it('never inks outside the shape', () => {
+    // Both are fills, not effects layered over the sheet. Ink appearing where
+    // the tone was zero would print marks in the margins.
+    const tone = new Float32Array(W * H)
+    for (let i = 0; i < 100; i++) tone[i] = 1
+    for (const f of [woodcutField(tone, W, H, opts), scribbleField(tone, W, H, opts)]) {
+      for (let i = 100; i < f.length; i++) expect(f[i]).toBe(0)
+    }
+  })
+
+  it('stays in range', () => {
+    for (const f of [woodcutField(ramp(), W, H, opts), scribbleField(ramp(), W, H, opts)]) {
+      for (const v of f) {
+        expect(v).toBeGreaterThanOrEqual(0)
+        expect(v).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  it('breaks a solid area up rather than flooding it', () => {
+    // If a solid shape comes back solid, the grooves and strokes are not
+    // happening and the method is a no-op wearing a name.
+    for (const f of [woodcutField(solid(), W, H, opts), scribbleField(solid(), W, H, opts)]) {
+      const inked = [...f].filter((v) => v > 0.5).length
+      expect(inked).toBeGreaterThan(0)
+      expect(inked).toBeLessThan(f.length)
+    }
+  })
+
+  it('lays more ink where the tone is darker', () => {
+    // The mark has to track the artwork, or it is a texture pasted on top.
+    for (const make of [woodcutField, scribbleField]) {
+      const f = make(ramp(), W, H, opts)
+      const left = [...f].filter((_, i) => i % W < W / 4).reduce((a, b) => a + b, 0)
+      const right = [...f].filter((_, i) => i % W >= (W * 3) / 4).reduce((a, b) => a + b, 0)
+      expect(right).toBeGreaterThan(left)
+    }
+  })
+
+  it('is deterministic for a seed, so the export matches the preview', () => {
+    const a = woodcutField(ramp(), W, H, opts)
+    const b = woodcutField(ramp(), W, H, opts)
+    expect([...a]).toEqual([...b])
+    const c = woodcutField(ramp(), W, H, { ...opts, seed: 8 })
+    expect([...a]).not.toEqual([...c])
   })
 })

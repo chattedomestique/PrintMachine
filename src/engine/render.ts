@@ -44,6 +44,7 @@ import { roughenEdges } from './rough.ts'
 import { applyRollerBanding, paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
+import { scribbleField, woodcutField } from './carve.ts'
 import { coverRect, lightMask, separateLuminance } from './media.ts'
 import { rasterizeBoxes, rasterizeText } from './text.ts'
 import { ASPECTS, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
@@ -321,6 +322,25 @@ export function pressPlate(
   const { dx, dy } = registrationOffset(seed, index, s.misregistration * scale * Math.sqrt(detail))
   const shifted = shiftField(tone2, w, h, dx, dy)
 
+  if (s.method === 'woodcut' || s.method === 'scribble') {
+    // Not screens: the ink is carried by what a blade left standing, or laid
+    // by a hand hatching. Both still run *here*, after the wear and the plate
+    // shift, so a carved block still tears and misregisters like everything
+    // else on the sheet.
+    const carve = {
+      pitch: Math.max(2, s.carvePitch * scale * detail),
+      // The cut direction is a deliberate choice, not a screen angle chosen to
+      // dodge moiré — so it is taken as given and only nudged per plate, so two
+      // blocks are not carved identically.
+      angle: s.carveAngle + index * 7,
+      roughness: s.carveRoughness,
+      seed: seed ^ (index * 0x9e3779b9),
+    }
+    return s.method === 'woodcut'
+      ? woodcutField(shifted, w, h, carve)
+      : scribbleField(shifted, w, h, carve)
+  }
+
   if (s.method === 'dither') {
     return ditherField(shifted, w, h, s.ditherType, {
       threshold: s.ditherThreshold,
@@ -478,6 +498,7 @@ export function renderPrint(
         ),
         rgb: inkById(box.inkId).rgb,
         opacity: box.opacity * layer.opacity,
+        opaque: layer.opaque,
       })
       plateIndex++
     }
@@ -526,6 +547,7 @@ export function renderPrint(
         ),
         rgb: inkById(layer.inkId).rgb,
         opacity: layer.opacity,
+        opaque: layer.opaque,
       })
       plateIndex++
       gi++
@@ -554,11 +576,17 @@ export function renderPrint(
         onLight[i] = coverage[i] * light[i]
         onDark[i] = coverage[i] * (1 - light[i])
       }
-      plates.push({ coverage: onLight, rgb: inkById(layer.inkId).rgb, opacity: layer.opacity })
+      plates.push({
+        coverage: onLight,
+        rgb: inkById(layer.inkId).rgb,
+        opacity: layer.opacity,
+        opaque: layer.opaque,
+      })
       plates.push({
         coverage: onDark,
         rgb: inkById(layer.contrastInkId).rgb,
         opacity: layer.opacity,
+        opaque: layer.opaque,
       })
 
       // The knockout is cut from the *unpressed* tone, not from the screened
@@ -575,7 +603,12 @@ export function renderPrint(
         if (k > knockout[i]) knockout[i] = k
       }
     } else {
-      plates.push({ coverage, rgb: inkById(layer.inkId).rgb, opacity: layer.opacity })
+      plates.push({
+        coverage,
+        rgb: inkById(layer.inkId).rgb,
+        opacity: layer.opacity,
+        opaque: layer.opaque,
+      })
     }
   }
 

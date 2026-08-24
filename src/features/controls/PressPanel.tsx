@@ -8,6 +8,8 @@ import { useSettings } from '../../state/settingsStore.ts'
 const METHODS: readonly { value: ScreenMethod; label: string }[] = [
   { value: 'halftone', label: 'Halftone' },
   { value: 'dither', label: 'Dither' },
+  { value: 'woodcut', label: 'Woodcut' },
+  { value: 'scribble', label: 'Scribble' },
 ]
 
 const SHAPES: readonly { value: ScreenShape; label: string }[] = [
@@ -42,7 +44,7 @@ export default function PressPanel({ target }: { target: PressTarget }) {
         />
       </Field>
 
-      {press.method === 'halftone' ? (
+      {press.method === 'halftone' && (
         <>
           <Field label="Dot shape">
             <Segmented
@@ -71,7 +73,9 @@ export default function PressPanel({ target }: { target: PressTarget }) {
             onChange={(screenSoftness) => patch({ screenSoftness }, true)}
           />
         </>
-      ) : (
+      )}
+
+      {press.method === 'dither' && (
         <>
           <Field label="Dither" value={DITHER_TYPES.find((d) => d.id === press.ditherType)?.name}>
             <Segmented
@@ -103,6 +107,43 @@ export default function PressPanel({ target }: { target: PressTarget }) {
             step={0.01}
             format={pct}
             onChange={(ditherThreshold) => patch({ ditherThreshold }, true)}
+          />
+        </>
+      )}
+
+      {(press.method === 'woodcut' || press.method === 'scribble') && (
+        <>
+          <p className="panel-note">
+            {press.method === 'woodcut'
+              ? 'Ink carried by whatever the blade left standing — grooves cut across the shape, and the block’s own grain showing through what remains.'
+              : 'Hatched rather than flooded. Strokes bow instead of ruling straight, and a second pass crosses the first only where the shape wants to be darker.'}
+          </p>
+          <Slider
+            label={press.method === 'woodcut' ? 'Groove spacing' : 'Stroke spacing'}
+            value={press.carvePitch}
+            min={3}
+            max={40}
+            step={1}
+            format={(v) => `${v}px`}
+            onChange={(carvePitch) => patch({ carvePitch }, true)}
+          />
+          <Slider
+            label={press.method === 'woodcut' ? 'Cut direction' : 'Hatch direction'}
+            value={press.carveAngle}
+            min={0}
+            max={180}
+            step={1}
+            format={(v) => `${v}°`}
+            onChange={(carveAngle) => patch({ carveAngle }, true)}
+          />
+          <Slider
+            label="Wander"
+            value={press.carveRoughness}
+            min={0}
+            max={1}
+            step={0.01}
+            format={pct}
+            onChange={(carveRoughness) => patch({ carveRoughness }, true)}
           />
         </>
       )}

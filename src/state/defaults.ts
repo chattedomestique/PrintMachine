@@ -22,6 +22,7 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     tracking: -0.02,
     wordSpacing: 0,
     wordPress: {},
+    opaque: false,
     contrastInkId: null,
     contrastThreshold: 0.5,
     align: 'center',
@@ -57,6 +58,10 @@ export function pressProfile(over: Partial<PressProfile> = {}): PressProfile {
     // One pixel per cell is invisible at export size and reads as flat tone;
     // the chunky duplicator look lives at several pixels per cell.
     ditherScale: 3,
+
+    carvePitch: 14,
+    carveAngle: 45,
+    carveRoughness: 0.5,
 
     // A realistic single-pass ink film. Pushed a little under the ~0.88 a real
     // drum lays down so the screen stays visible inside solids — at 100% the

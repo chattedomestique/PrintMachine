@@ -367,6 +367,37 @@ aspect ratio, so both constraints hold at once and neither axis is ever clamped
 alone. `container-type: size` on the wrapper is what makes `cqw`/`cqh` resolve
 against the space the sheet is actually given.
 
+### Why the preview drops resolution while you drag
+
+The press is a dozen full-image passes per plate, so its cost goes with the
+pixel count. A full-height preview frame measured over half a second on a
+throttled phone profile — which meant dragging a slider froze the main thread,
+and a frozen main thread makes *everything* feel broken: the drag, the scroll
+behind it, the next tap. The picture keeping up is not the point; the thread
+staying free is.
+
+So while a value is still moving the preview renders at a fraction of the
+height, and the full-quality frame lands once it settles. That is only safe
+because every spatial quantity is already expressed against `REFERENCE_HEIGHT`,
+so a smaller render is the same print at lower fidelity rather than a different
+one — there is a test asserting the aspect matches at both heights.
+
+Two things that are easy to get wrong here:
+
+- **A cache per resolution.** The paper field, the noise fields and the
+  rasterised glyphs are all keyed on size, so a single cache would be thrown
+  away and rebuilt on every switch between draft and full — most of what the
+  draft was meant to save.
+- **A floor between draft frames.** `requestAnimationFrame` will ask for one
+  every frame, and even a draft render is tens of milliseconds; without a floor
+  the thread stays saturated and the *input* stutters even though the picture
+  keeps up. The preview follows a drag at a comfortable rate instead of every
+  tick, which is the normal bargain for an expensive filter.
+
+Measured before and after on the same throttled profile, dragging a press
+slider: 90th-percentile frame time went from **595 ms to 41 ms**. The export is
+untouched — it always renders at reference height with its own cache.
+
 ### Touch
 
 Gestures are scoped per control rather than left to the browser's guess.

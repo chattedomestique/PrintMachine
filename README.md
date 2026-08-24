@@ -145,17 +145,62 @@ Three things make it actually work:
   and thresholding raw pixels makes the ink flicker letter by letter, which is
   harder to read than either colour alone. Blurring lets the mask follow the
   large shapes the eye is judging against.
-- **The switch is a soft band, not a cut**, so a glyph crossing the boundary
-  cross-fades instead of changing colour mid-stem. The band has to be wide
-  enough that the blurred gradient lands inside it; the first attempt used ±0.08
-  and squeezed the blur straight back into a hard edge.
+- **The switch is screened, not faded.** The mask starts soft so a glyph
+  crossing the boundary does not change colour mid-stem, and is then run
+  through the *same screen or dither the press is already using*. A soft mask
+  left soft makes both inks print at partial coverage through the transition —
+  which is an opacity crossfade wearing a print's clothes, and is exactly why
+  the switch point read as a fade. Screened, each ink lands at full strength
+  and the changeover breaks into dots the way a two-colour job actually does.
 - **The photo is knocked back to paper under the second ink** — a transparent
   light ink over solid black is still solid black, so without this the second
-  ink buys nothing. The knockout runs deliberately wider than the ink split:
-  across the blend both inks print at partial coverage, so a line landing
-  exactly on the switch point comes out grey on grey. Clearing more of the photo
-  than strictly asked for puts that line back on paper. The light side is
-  untouched, so type over the bright half still overprints the photo.
+  ink buys nothing.
+
+Two things about that knockout took a second pass to get right, and both
+turned reversed type to mush in the first cut:
+
+- It is cut from the **unpressed tone**, not from the screened coverage.
+  Knocking out with the halftone leaves the photo standing in every gap between
+  the type's own dots, so the light ink prints onto a still-black ground. A
+  stencil has a solid hole in it.
+- It is applied **after the photo's press**, not before. Cutting it beforehand
+  let the photo's own roughening, screening and misregistration carry the hole
+  away from the glyphs it was meant to clear.
+
+The hole is also **trapped** — spread a couple of pixels past the glyph, then
+cut back to hard. Nothing on a press lands twice in the same place, so a
+knockout cut exactly to the artwork shows a dark fringe the moment anything
+shifts. Keeping the blurred skirt instead of cutting back gives the opposite
+failure: a halo of bare paper round every reversed word, a glow rather than a
+trap.
+
+### Dithering as a real choice
+
+Thirteen algorithms, because they are genuinely different textures rather than
+one slider: Jarvis is smooth and slow, Burkes fast and contrasty, Sierra-Lite
+coarse and cheap, and clustered-dot the only ordered pattern that still reads
+as a *printing* screen rather than a computer effect — it grows one blob per
+cell the way a real screen does instead of scattering isolated pixels.
+
+**Dot size** matters as much as the algorithm. At one pixel per cell any of
+these is invisible at export resolution and reads as flat tone; the chunky
+duplicator look lives at several pixels per cell. It is implemented by
+dithering a reduced grid and expanding the result, so every algorithm coarsens
+the same way rather than each needing its own notion of size — and the
+reduction *averages* rather than samples, or the dither tracks the noise
+instead of the artwork.
+
+### Per-word misprints
+
+Bleed and offset are properties of a **plate**, not of a pixel: bleed is where
+the stencil's threshold sits, offset is where the paper landed. So a word given
+either comes off the main plate and goes through the press separately — which
+is also exactly how a real second hit on one word would behave.
+
+Words sharing a setting share a plate, so they tear and land together. Each
+group gets its own registration seed, which is what makes an offset word land
+somewhere the rest of the line did not. Both values are deltas on the layer's
+press, so the global controls still move everything.
 
 #### Nothing is ever stretched
 

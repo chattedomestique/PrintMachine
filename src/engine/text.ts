@@ -409,6 +409,17 @@ export function rasterizeText(
   layer: TextLayer,
   w: number,
   h: number,
+  /**
+   * Restrict the raster to (or exclude) a set of word indices.
+   *
+   * A word given its own bleed or its own offset has to become its own plate,
+   * because both of those happen *to a plate* — bleed is a threshold on the
+   * stencil, offset is where the paper landed. Faking them inside one plate
+   * would mean per-pixel parameters, which is not a thing a press has. So the
+   * layer is rasterised twice: everything except the special words, and then
+   * each group of special words on its own.
+   */
+  words?: { only: ReadonlySet<number> } | { except: ReadonlySet<number> },
 ): { tone: Float32Array; fontSize: number } {
   ctx.clearRect(0, 0, w, h)
   const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, w, h)
@@ -426,11 +437,22 @@ export function rasterizeText(
     // Older engines lack the property entirely, which is fine — nothing to undo.
   }
 
+  // Which word each glyph belongs to, by the same grouping the layout used —
+  // so an index here means the word the selection UI shows.
+  const wanted = (index: number) => {
+    if (!words) return true
+    return 'only' in words ? words.only.has(index) : !words.except.has(index)
+  }
+
   layout.lines.forEach((line, i) => {
     const ox = blockLeft + alignOffset(line.width, layout.widest, layer.align)
     const oy = firstBaseline + i * layout.lineHeight
     for (const g of line.glyphs) {
       if (isSpace(g.ch)) continue
+      if (words) {
+        const word = line.words.find((word) => g.x >= word.x && g.x < word.x + word.width)
+        if (!wanted(word?.index ?? -1)) continue
+      }
       ctx.fillText(g.ch, ox + g.x, oy)
     }
   })

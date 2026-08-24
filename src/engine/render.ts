@@ -34,6 +34,7 @@
  *    produce that.
  */
 
+import { blurField } from './blur.ts'
 import { compositeLayers, type CompositeLayer } from './composite.ts'
 import { ditherField } from './dither.ts'
 import { applyDensity, applyMottle, registrationOffset, shiftField } from './ink.ts'
@@ -151,14 +152,38 @@ function cachedTone(
   cache: RenderCache,
   w: number,
   h: number,
+  /** Word subset, for the plates a per-word override splits off. */
+  words?: { only: ReadonlySet<number> } | { except: ReadonlySet<number> },
+  slot = layer.id,
 ): { field: Float32Array; fontSize: number } {
-  const key = toneKey(layer)
-  const hit = cache.tone.get(layer.id)
+  const key = toneKey(layer) + '|' + slot
+  const hit = cache.tone.get(slot)
   if (hit && hit.key === key) return hit
-  const { tone, fontSize } = rasterizeText(scratch, layer, w, h)
+  const { tone, fontSize } = rasterizeText(scratch, layer, w, h, words)
   const entry = { key, field: tone, fontSize }
-  cache.tone.set(layer.id, entry)
+  cache.tone.set(slot, entry)
   return entry
+}
+
+/**
+ * Group the words that share the same per-word override.
+ *
+ * One plate per distinct setting rather than per word: three words all given
+ * the same extra bleed went through the press together on a real job, so they
+ * should tear and land together here too.
+ */
+function pressGroups(layer: TextLayer): Map<string, { words: Set<number>; bleed: number; offset: number }> {
+  const groups = new Map<string, { words: Set<number>; bleed: number; offset: number }>()
+  for (const [index, over] of Object.entries(layer.wordPress)) {
+    const bleed = over.bleed ?? 0
+    const offset = over.offset ?? 0
+    if (bleed === 0 && offset === 0) continue
+    const key = `${bleed}:${offset}`
+    const g = groups.get(key) ?? { words: new Set<number>(), bleed, offset }
+    g.words.add(Number(index))
+    groups.set(key, g)
+  }
+  return groups
 }
 
 /** Same, for one box group. Keyed on the layout *and* the chosen words, so
@@ -281,7 +306,13 @@ export function pressPlate(
   const shifted = shiftField(tone2, w, h, dx, dy)
 
   if (s.method === 'dither') {
-    return ditherField(shifted, w, h, s.ditherType, s.ditherThreshold)
+    return ditherField(shifted, w, h, s.ditherType, {
+      threshold: s.ditherThreshold,
+      // Cell size rides the render scale like every other spatial quantity, so
+      // the preview and the export show the same texture rather than the same
+      // pixel count.
+      scale: Math.max(1, Math.round(s.ditherScale * scale)),
+    })
   }
   return screenField(shifted, w, h, {
     shape: s.screenShape,
@@ -301,6 +332,62 @@ export function pressPlate(
  * @param scratch a same-sized scratch context used for glyph rasterisation.
  * @param overlay editing aids, or null. Export paths pass null.
  */
+
+/**
+ * Turn a soft 0..1 mask into a hard one through whichever press is running.
+ *
+ * A soft mask crossfades, and a crossfade between two inks is an opacity
+ * blend — both print at partial strength and neither reads. Screening the mask
+ * makes the changeover a *pattern*: full-strength ink either side, with the
+ * boundary broken into the same dots or diffusion the rest of the sheet is
+ * using. That is what a real two-colour transition looks like.
+ */
+function binarise(
+  mask: Float32Array,
+  index: number,
+  press: PressProfile,
+  seed: number,
+  w: number,
+  h: number,
+): Float32Array {
+  const scale = h / REFERENCE_HEIGHT
+  if (press.method === 'dither') {
+    return ditherField(mask, w, h, press.ditherType, {
+      threshold: press.ditherThreshold,
+      scale: Math.max(1, Math.round(press.ditherScale * scale)),
+    })
+  }
+  return screenField(mask, w, h, {
+    shape: press.screenShape,
+    pitch: Math.max(1.2, press.screenPitch * scale),
+    angle: defaultAngle(index),
+    softness: 0,
+    originX: seed % 7,
+    originY: seed % 5,
+  })
+}
+
+/**
+ * Grow a field outward by a few pixels.
+ *
+ * A knockout cut exactly to the glyph shows a dark fringe the moment anything
+ * shifts, because nothing on a press lands twice in the same place. Printers
+ * solve this by trapping — spreading the knockout slightly past the artwork so
+ * a small misregistration still lands inside the hole. Same trick here.
+ */
+function spread(field: Float32Array, w: number, h: number, radius: number): Float32Array {
+  const soft = blurField(field, w, h, radius)
+  const out = new Float32Array(field.length)
+  for (let i = 0; i < out.length; i++) {
+    // Cut back to *hard* rather than keeping the blurred skirt. Leaving the
+    // gradient in makes the hole fade out gradually, which prints as a halo of
+    // bare paper round every reversed word — a glow, not a trap. A low cut on
+    // the blur is a cheap dilation with a clean edge.
+    out[i] = soft[i] > 0.14 ? 1 : field[i]
+  }
+  return out
+}
+
 export function renderPrint(
   ctx: CanvasRenderingContext2D,
   scratch: CanvasRenderingContext2D,
@@ -379,16 +466,54 @@ export function renderPrint(
       plateIndex++
     }
 
-    const coverage = pressPlate(
-      cachedTone(scratch, layer, cache, w, h),
-      plateIndex,
-      s.press,
-      s.seed,
-      cache,
-      w,
-      h,
-    )
+    // Words carrying their own bleed or offset come off the main plate and go
+    // through the press separately, because both are things that happen to a
+    // plate rather than to a pixel.
+    const groups = pressGroups(layer)
+    const special = new Set<number>()
+    for (const g of groups.values()) for (const i of g.words) special.add(i)
+
+    const tone =
+      special.size > 0
+        ? cachedTone(scratch, layer, cache, w, h, { except: special }, `${layer.id}:base`)
+        : cachedTone(scratch, layer, cache, w, h)
+    const coverage = pressPlate(tone, plateIndex, s.press, s.seed, cache, w, h)
     plateIndex++
+
+    let gi = 0
+    for (const [key, g] of groups) {
+      const groupTone = cachedTone(
+        scratch,
+        layer,
+        cache,
+        w,
+        h,
+        { only: g.words },
+        `${layer.id}:w${key}`,
+      )
+      plates.push({
+        coverage: pressPlate(
+          groupTone,
+          // A distinct plate index gives a distinct registration seed, which is
+          // the whole point of an offset override — the word has to land
+          // somewhere the rest of the line did not.
+          plateIndex,
+          {
+            ...s.press,
+            bleed: Math.max(0, Math.min(1, s.press.bleed + g.bleed)),
+            misregistration: s.press.misregistration + g.offset,
+          },
+          s.seed ^ (gi * 0x85ebca6b),
+          cache,
+          w,
+          h,
+        ),
+        rgb: inkById(layer.inkId).rgb,
+        opacity: layer.opacity,
+      })
+      plateIndex++
+      gi++
+    }
 
     if (layer.contrastInkId && ground) {
       // One pass whose ink changes with what is under it — a split fountain
@@ -397,7 +522,15 @@ export function renderPrint(
       // would misregister the two halves against each other and tear every
       // glyph that happens to straddle the boundary.
       if (!light) {
-        light = lightMask(ground, w, h, layer.contrastThreshold, Math.max(2, h * 0.012))
+        const soft = lightMask(ground, w, h, layer.contrastThreshold, Math.max(2, h * 0.012))
+        // Screened, not left soft. A soft mask makes *both* inks print at
+        // partial coverage through the transition, which is an opacity
+        // crossfade wearing a print's clothes — and it is why the switch point
+        // read as a fade rather than as a switch. Running the mask through the
+        // same screen or dither the press is already using makes the changeover
+        // a real pattern: each ink lands at full strength, and the boundary
+        // breaks up into dots the way a two-colour job actually does.
+        light = binarise(soft, plateIndex, s.press, s.seed, w, h)
       }
       const onLight = new Float32Array(w * h)
       const onDark = new Float32Array(w * h)
@@ -412,16 +545,17 @@ export function renderPrint(
         opacity: layer.opacity,
       })
 
+      // The knockout is cut from the *unpressed* tone, not from the screened
+      // coverage. Knocking out with the halftone leaves the photo standing in
+      // every gap between the type's own dots, which is what turned the
+      // reversed lines to mush — the light ink was printing onto a still-black
+      // ground. A stencil has a solid hole in it.
       if (!knockout) knockout = new Float32Array(w * h)
-      for (let i = 0; i < coverage.length; i++) {
-        // Knocked out wider than the second ink is strong. Across the blend
-        // the two inks each print at partial coverage, so neither has full
-        // contrast — a line landing exactly on the switch point comes out grey
-        // on grey and is the least readable thing on the sheet. Clearing more
-        // of the photo than strictly asked for puts that line back on paper,
-        // where both inks read. The light side is untouched, so type over the
-        // bright half still overprints the photo the way it should.
-        const k = Math.min(1, coverage[i] * (1 - light[i]) * 1.6)
+      // Two pixels or so at export size: enough that a small misregistration
+      // still lands inside the hole, not so much that it reads as a halo.
+      const solid = spread(tone.field, w, h, Math.max(1, h * 0.0012))
+      for (let i = 0; i < solid.length; i++) {
+        const k = solid[i] * (1 - light[i])
         if (k > knockout[i]) knockout[i] = k
       }
     } else {
@@ -434,25 +568,30 @@ export function renderPrint(
       // Through its own press — a photograph and a headline want genuinely
       // different rulings, and one profile for both ruins whichever it was not
       // tuned for.
-      const tone = separateLuminance(ground, new Float32Array(w * h), {
+      const photoTone = separateLuminance(ground, new Float32Array(w * h), {
         contrast: s.media.contrast,
         lift: s.media.lift,
       })
-      if (knockout) for (let i = 0; i < tone.length; i++) tone[i] *= 1 - knockout[i]
+      const photoCoverage = pressPlate(
+        { field: photoTone, fontSize: h * 0.16 },
+        plateIndex,
+        s.photoPress,
+        s.seed,
+        cache,
+        w,
+        h,
+      )
+      // Applied *after* the photo's press, so the hole lands where the type
+      // actually is. Cutting it beforehand let the photo's own roughening,
+      // screening and misregistration carry the hole away from the glyphs it
+      // was meant to clear.
+      if (knockout) for (let i = 0; i < photoCoverage.length; i++) photoCoverage[i] *= 1 - knockout[i]
       plates.unshift({
         // Its own plate index, not 0: sharing a seed with the first type plate
         // would misregister the two identically, which reads as the photo and
         // the type being in perfect register — the one thing a Riso never is.
         // A photo is poster-sized by definition, so it takes the full press.
-        coverage: pressPlate(
-          { field: tone, fontSize: h * 0.16 },
-          plateIndex,
-          s.photoPress,
-          s.seed,
-          cache,
-          w,
-          h,
-        ),
+        coverage: photoCoverage,
         rgb: inkById(s.media.inkId).rgb,
         opacity: s.media.opacity,
       })

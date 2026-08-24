@@ -34,6 +34,13 @@ export type SettingsAction =
   | { type: 'patchBox'; layerId: string; boxId: string; patch: Partial<WordBox>; coalesce?: boolean }
   | { type: 'toggleBoxWord'; layerId: string; boxId: string; word: number }
   | { type: 'patchPress'; target: PressTarget; patch: Partial<PressProfile>; coalesce?: boolean }
+  | {
+      type: 'setWordPress'
+      layerId: string
+      words: number[]
+      patch: { bleed?: number; offset?: number }
+      coalesce?: boolean
+    }
   | { type: 'setMedia'; media: MediaLayer | null }
   | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean }
   | { type: 'reset'; settings: PrintSettings }
@@ -150,6 +157,20 @@ function applySettings(state: PrintSettings, action: SettingsAction): PrintSetti
 
     case 'patchPress':
       return { ...state, [action.target]: { ...state[action.target], ...action.patch } }
+
+    case 'setWordPress':
+      return mapLayer(state, action.layerId, (l) => {
+        const next = { ...l.wordPress }
+        for (const w of action.words) {
+          const merged = { ...next[String(w)], ...action.patch }
+          // Zero on both is the default, so store nothing rather than an entry
+          // meaning "normal" — otherwise the map grows forever and every one of
+          // those words needlessly becomes its own plate.
+          if (!merged.bleed && !merged.offset) delete next[String(w)]
+          else next[String(w)] = merged
+        }
+        return { ...l, wordPress: next }
+      })
 
     case 'setMedia':
       return { ...state, media: action.media }

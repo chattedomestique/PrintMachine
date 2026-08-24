@@ -33,6 +33,7 @@ export type SettingsAction =
   | { type: 'removeBox'; layerId: string; boxId: string }
   | { type: 'patchBox'; layerId: string; boxId: string; patch: Partial<WordBox>; coalesce?: boolean }
   | { type: 'toggleBoxWord'; layerId: string; boxId: string; word: number }
+  | { type: 'setBoxWords'; layerId: string; boxId: string; words: number[] }
   | { type: 'patchPress'; target: PressTarget; patch: Partial<PressProfile>; coalesce?: boolean }
   | {
       type: 'setWordPress'
@@ -77,7 +78,9 @@ function mapLayer(
   return { ...state, layers: state.layers.map((l) => (l.id === id ? fn(l) : l)) }
 }
 
-function applySettings(state: PrintSettings, action: SettingsAction): PrintSettings {
+/** The document transition, exported so the invariants it enforces — chiefly
+ *  that a word belongs to at most one box — can be tested without React. */
+export function applySettings(state: PrintSettings, action: SettingsAction): PrintSettings {
   switch (action.type) {
     case 'patch':
       return { ...state, ...action.patch }
@@ -154,6 +157,22 @@ function applySettings(state: PrintSettings, action: SettingsAction): PrintSetti
           }
         }),
       }))
+
+    case 'setBoxWords':
+      return mapLayer(state, action.layerId, (l) => {
+        const claimed = new Set(action.words)
+        return {
+          ...l,
+          boxes: l.boxes.map((b) =>
+            b.id === action.boxId
+              ? { ...b, words: [...action.words].sort((x, y) => x - y) }
+              // Same one-box-per-word rule the single toggle enforces: taking a
+              // word for this box has to release it from any other, or two inks
+              // stack in the same rectangle and the result is neither colour.
+              : { ...b, words: b.words.filter((n) => !claimed.has(n)) },
+          ),
+        }
+      })
 
     case 'patchPress':
       return { ...state, [action.target]: { ...state[action.target], ...action.patch } }

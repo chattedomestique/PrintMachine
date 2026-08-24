@@ -112,6 +112,34 @@ export default function BoxPanel() {
             {words.length === 0 ? (
               <p className="plate-hint">This plate has no text yet.</p>
             ) : (
+              <>
+              <div className="chip-actions">
+                <button
+                  type="button"
+                  className="icon-button"
+                  disabled={active.words.length === words.length}
+                  onClick={() =>
+                    dispatch({
+                      type: 'setBoxWords',
+                      layerId: layer.id,
+                      boxId: active.id,
+                      words: words.map((_, i) => i),
+                    })
+                  }
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  disabled={active.words.length === 0}
+                  onClick={() =>
+                    dispatch({ type: 'setBoxWords', layerId: layer.id, boxId: active.id, words: [] })
+                  }
+                >
+                  Clear
+                </button>
+              </div>
               <div className="word-chips" role="group" aria-label="Words in this plate">
                 {words.map((word, i) => {
                   const owner = ownerOf(i)
@@ -139,6 +167,7 @@ export default function BoxPanel() {
                   )
                 })}
               </div>
+              </>
             )}
           </Field>
 

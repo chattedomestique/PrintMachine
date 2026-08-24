@@ -22,6 +22,9 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     tracking: -0.02,
     wordSpacing: 0,
     align: 'center',
+    // Words tight, gaps open — the reason justification exists is the block,
+    // not letterspaced words.
+    justifyBy: 'words',
     x: 0.5,
     y: 0.5,
     rotation: 0,

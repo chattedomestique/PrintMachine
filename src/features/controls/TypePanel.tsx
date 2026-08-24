@@ -1,6 +1,6 @@
 import { useId } from 'react'
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
-import { FONTS, type TextAlign, type TextLayer } from '../../engine/types.ts'
+import { FONTS, type JustifyBy, type TextAlign, type TextLayer } from '../../engine/types.ts'
 import { MAX_SIZE, MIN_SIZE } from '../editor/useLayerGestures.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
@@ -11,6 +11,11 @@ const ALIGNS: readonly { value: TextAlign; label: string }[] = [
   // Forced justification: every line, including the last, stretched to fill
   // the measure by spacing between characters. The solid rectangular block.
   { value: 'justify', label: 'Justify' },
+]
+
+const JUSTIFY_BY: readonly { value: JustifyBy; label: string }[] = [
+  { value: 'words', label: 'Words' },
+  { value: 'letters', label: 'Letters' },
 ]
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -124,6 +129,24 @@ export default function TypePanel() {
           onChange={(align) => patch({ align })}
         />
       </Field>
+
+      {/* Only meaningful while justifying, and inert otherwise — so it appears
+          directly under the control that switches it on rather than sitting
+          dead in the panel the rest of the time. */}
+      {layer.align === 'justify' && (
+        <Field label="Justify by">
+          <Segmented
+            label="Justify by"
+            value={layer.justifyBy}
+            options={JUSTIFY_BY}
+            onChange={(justifyBy) => patch({ justifyBy })}
+          />
+          <p className="panel-note">
+            Filling the measure needs slack somewhere. Words keeps the words tight and opens
+            the spaces; letters spreads every gap for the solid block.
+          </p>
+        </Field>
+      )}
 
       <Toggle label="Uppercase" checked={layer.caps} onChange={(caps) => patch({ caps })} />
     </div>

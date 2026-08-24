@@ -200,10 +200,18 @@ export function layoutText(
     const naturalGaps = p.glyphs
       .slice(0, -1)
       .map((g, k) => p.glyphs[k + 1].x - g.x - g.width)
+    // Justifying by words means the slack lands beside the spaces: a gap counts
+    // if either glyph touching it is one, so the space itself grows on both
+    // sides and the words stay as tight as they were set.
+    const absorb =
+      layer.justifyBy === 'words'
+        ? p.glyphs.slice(0, -1).map((g, k) => isSpace(g.ch) || isSpace(p.glyphs[k + 1].ch))
+        : []
     const xs = justifyOffsets(
       p.glyphs.map((g) => g.width),
       target,
       naturalGaps,
+      absorb,
     )
     const glyphs = p.glyphs.map((g, k) => ({ ...g, x: xs[k] }))
 
@@ -291,6 +299,7 @@ export function justifyOffsets(
   widths: readonly number[],
   targetWidth: number,
   gaps: readonly number[] = [],
+  absorb: readonly boolean[] = [],
 ): number[] {
   const count = widths.length - 1
   // The slack is measured against the *placed* line, gaps included. Measuring
@@ -299,13 +308,21 @@ export function justifyOffsets(
   // tracking — the words end up no further apart than the letters.
   const natural =
     widths.reduce((a, b) => a + b, 0) + gaps.slice(0, count).reduce((a, b) => a + b, 0)
-  const extra = count > 0 ? (targetWidth - natural) / count : 0
+  // Only some gaps may be allowed to grow — the ones beside a space, when
+  // justifying by words. A line with no such gap (one long word) would have
+  // nowhere to put the slack and would not reach the measure, so it falls back
+  // to spreading across everything.
+  const eligible: number[] = []
+  for (let i = 0; i < count; i++) if (absorb.length === 0 || absorb[i]) eligible.push(i)
+  const takers = eligible.length > 0 ? eligible : Array.from({ length: count }, (_, i) => i)
+  const share = new Set(takers)
+  const extra = takers.length > 0 ? (targetWidth - natural) / takers.length : 0
 
   const xs: number[] = []
   let pen = 0
   for (let i = 0; i < widths.length; i++) {
     xs.push(pen)
-    pen += widths[i] + (gaps[i] ?? 0) + extra
+    pen += widths[i] + (gaps[i] ?? 0) + (share.has(i) ? extra : 0)
   }
   return xs
 }

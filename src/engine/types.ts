@@ -15,6 +15,12 @@ import type { ScreenShape } from './screen.ts'
 
 export type TextAlign = 'left' | 'center' | 'right' | 'justify'
 
+/** Where forced justification puts the slack it needs to fill the measure.
+ *  'words' keeps the words themselves tight and opens the spaces between them;
+ *  'letters' spreads every gap equally for the solid rectangular block. A line
+ *  with no spaces has nowhere to put word slack, so it falls back to letters. */
+export type JustifyBy = 'words' | 'letters'
+
 /** Screening method. A duplicator's RIP does one or the other, not both. */
 export type ScreenMethod = 'halftone' | 'dither'
 
@@ -71,6 +77,7 @@ export interface TextLayer {
   /** Word spacing in em — extra at each space, on top of tracking. */
   wordSpacing: number
   align: TextAlign
+  justifyBy: JustifyBy
   /** Anchor position, 0..1 of canvas width/height. */
   x: number
   y: number

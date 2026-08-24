@@ -119,6 +119,25 @@ wider than a letter gap by exactly the word tracking. There is a test, plus one
 asserting lines still reach the measure, since "preserve the gaps" is also
 satisfied by refusing to justify at all.
 
+### Justify by words, or by letters
+
+Filling the measure means putting slack somewhere, and there are two honest
+answers. **Justify by words** puts it beside the spaces: the words themselves
+stay exactly as set and the gaps between them open up. **Justify by letters**
+shares it across every gap, which is the solid rectangular block of type — and
+which necessarily letterspaces a short line.
+
+Words is the default, because a short line rendered as `S L O W  D O W N` is
+rarely what anyone wanted. The choice appears under Alignment only while
+justify is selected: it does nothing in any other mode, and putting it directly
+beneath the control that switches it on beats leaving it inert in the panel.
+
+A line with no spaces — one long word — has no word gap to open, so it falls
+back to spreading across the letters. The alternative is a line that quietly
+fails to reach the measure, which looks like a bug rather than a choice. Tested,
+along with both modes reaching the measure and words mode leaving intra-word
+letter gaps untouched.
+
 That is the whole model. An earlier version also had *per-word* tracking —
 select individual words from a row of chips, letterspace just those. It was
 removed: it answered a question nobody asked, and the selection UI was clutter

@@ -275,6 +275,7 @@ describe('text layout', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    justifyBy: 'letters',
     x: 0.5,
     y: 0.5,
     rotation: 0,
@@ -564,6 +565,7 @@ describe('word layout', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    justifyBy: 'letters',
     x: 0.5,
     y: 0.5,
     rotation: 0,
@@ -650,6 +652,7 @@ describe('word tracking', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    justifyBy: 'letters',
     x: 0.5,
     y: 0.5,
     rotation: 0,
@@ -712,6 +715,51 @@ describe('word tracking', () => {
       return g.x + g.width
     }
     expect(end(short)).toBeCloseTo(end(long), 6)
+  })
+
+  it('justifying by words leaves the letters alone entirely', () => {
+    const line = (l: TextLayer) => layoutText(l, 1000, 600, measure).lines[0]
+    // A short line stretched to a long one: all the slack has to go somewhere.
+    const opts = { text: 'AA BB\nCCCCCCCCCC', align: 'justify' as const }
+    const byLetters = line(layer({ ...opts, justifyBy: 'letters' }))
+    const byWords = line(layer({ ...opts, justifyBy: 'words' }))
+    const natural = line(layer({ ...opts, align: 'left' as const }))
+
+    const intra = (l: typeof natural) => l.glyphs[1].x - l.glyphs[0].x - l.glyphs[0].width
+    // Letters mode spreads into the word; words mode does not touch it.
+    expect(intra(byLetters)).toBeGreaterThan(intra(natural) + 1)
+    expect(intra(byWords)).toBeCloseTo(intra(natural), 6)
+  })
+
+  it('justifying by words still reaches the measure', () => {
+    // Leaving the letters alone must not mean leaving the line short.
+    const out = layoutText(
+      layer({ text: 'AA BB\nCCCCCCCCCC', align: 'justify', justifyBy: 'words' }),
+      1000,
+      600,
+      measure,
+    )
+    const end = (l: (typeof out.lines)[number]) => {
+      const g = l.glyphs[l.glyphs.length - 1]
+      return g.x + g.width
+    }
+    expect(end(out.lines[0])).toBeCloseTo(end(out.lines[1]), 6)
+  })
+
+  it('falls back to spreading letters when a line has no spaces to open', () => {
+    // One long word has no word gap, so words mode has nowhere to put the
+    // slack. Refusing to justify would leave the line visibly short.
+    const out = layoutText(
+      layer({ text: 'AAAA\nBBBBBBBBBB', align: 'justify', justifyBy: 'words' }),
+      1000,
+      600,
+      measure,
+    )
+    const end = (l: (typeof out.lines)[number]) => {
+      const g = l.glyphs[l.glyphs.length - 1]
+      return g.x + g.width
+    }
+    expect(end(out.lines[0])).toBeCloseTo(end(out.lines[1]), 6)
   })
 
   it('measures a line to its ink, not to the trailing tracking gap', () => {

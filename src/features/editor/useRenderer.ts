@@ -5,6 +5,7 @@ import type { PrintSettings } from '../../engine/types.ts'
 interface Pending {
   settings: PrintSettings
   overlay: OverlaySpec
+  media: ImageBitmap | null
 }
 
 /**
@@ -23,6 +24,7 @@ export function useRenderer(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   settings: PrintSettings,
   overlay: OverlaySpec,
+  media: ImageBitmap | null = null,
 ) {
   const scratchRef = useRef<CanvasRenderingContext2D | null>(null)
   const cacheRef = useRef<RenderCache | null>(null)
@@ -47,14 +49,22 @@ export function useRenderer(
       const ctx = canvas.getContext('2d')
       const scratch = getScratch()
       if (!ctx || !scratch) return
-      renderPrint(ctx, scratch, pending.settings, cacheRef, pending.overlay, PREVIEW_HEIGHT)
+      renderPrint(
+        ctx,
+        scratch,
+        pending.settings,
+        cacheRef,
+        pending.overlay,
+        PREVIEW_HEIGHT,
+        pending.media,
+      )
     })
   }, [canvasRef, getScratch])
 
   useEffect(() => {
-    pendingRef.current = { settings, overlay }
+    pendingRef.current = { settings, overlay, media }
     schedule()
-  }, [settings, overlay, schedule])
+  }, [settings, overlay, media, schedule])
 
   // Repaint on becoming visible again — iOS can discard the canvas backing
   // store while the tab is backgrounded, which leaves a blank preview.

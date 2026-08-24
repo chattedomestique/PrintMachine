@@ -1,4 +1,4 @@
-import type { PrintSettings, TextLayer, WordBox } from '../engine/types.ts'
+import type { PrintSettings, TextLayer, WordBox, MediaLayer } from '../engine/types.ts'
 import { makeLayer } from './defaults.ts'
 
 /**
@@ -24,6 +24,8 @@ export type SettingsAction =
   | { type: 'removeBox'; layerId: string; boxId: string }
   | { type: 'patchBox'; layerId: string; boxId: string; patch: Partial<WordBox>; coalesce?: boolean }
   | { type: 'toggleBoxWord'; layerId: string; boxId: string; word: number }
+  | { type: 'setMedia'; media: MediaLayer | null }
+  | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean }
   | { type: 'reset'; settings: PrintSettings }
 
 export type HistoryAction =
@@ -135,6 +137,14 @@ function applySettings(state: PrintSettings, action: SettingsAction): PrintSetti
           }
         }),
       }))
+
+    case 'setMedia':
+      return { ...state, media: action.media }
+
+    case 'patchMedia':
+      // A patch with no photo present is a no-op rather than a crash: the
+      // gesture layer can fire one as a drag ends just after a clear.
+      return state.media ? { ...state, media: { ...state.media, ...action.patch } } : state
 
     case 'reset':
       return action.settings

@@ -43,6 +43,11 @@ export function defaultSettings(): PrintSettings {
   return {
     aspect: '4:5',
 
+    media: null,
+    // Full stock character by default — with no photo this is what the paper
+    // has always done, and with one it is the sane starting point to dial back.
+    paperAmount: 1,
+
     paperId: 'natural',
     paperTexture: 0.4,
     paperBlotch: 0.5,

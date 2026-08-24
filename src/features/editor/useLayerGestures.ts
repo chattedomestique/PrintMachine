@@ -46,6 +46,9 @@ export function useLayerGestures(
   layer: TextLayer | null,
   patch: (p: Partial<TextLayer>) => void,
   onGestureStart?: () => void,
+  /** Pinch limits. Type and photos want very different ranges — a photo starts
+   *  at cover and is scaled around it, not as a fraction of sheet height. */
+  sizeRange: readonly [number, number] = [MIN_SIZE, MAX_SIZE],
 ): LayerGestureHandlers {
   const pointers = useRef(new Map<number, Pt>())
   const gesture = useRef<Gesture | null>(null)
@@ -132,7 +135,7 @@ export function useLayerGestures(
       if (pts.length >= 2 && g.startSpread > 8) {
         const [a, b] = pts
         const spread = Math.hypot(b.x - a.x, b.y - a.y)
-        next.size = clamp(g.origin.size * (spread / g.startSpread), MIN_SIZE, MAX_SIZE)
+        next.size = clamp(g.origin.size * (spread / g.startSpread), sizeRange[0], sizeRange[1])
         // Scaling by hand is an explicit statement about size, so fit-to-width
         // has to yield — otherwise the layout immediately overrides the pinch
         // and the type appears not to respond at all.
@@ -148,7 +151,7 @@ export function useLayerGestures(
 
       patch(next)
     },
-    [localPoint, patch, surfaceRef],
+    [localPoint, patch, surfaceRef, sizeRange],
   )
 
   const release = useCallback(

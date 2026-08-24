@@ -19,6 +19,31 @@ export type TextAlign = 'left' | 'center' | 'right' | 'justify'
  *  'words' keeps the words themselves tight and opens the spaces between them;
  *  'letters' spreads every gap equally for the solid rectangular block. A line
  *  with no spaces has nowhere to put word slack, so it falls back to letters. */
+/**
+ * An imported photo, sitting under every plate as the ground the ink prints on.
+ *
+ * The bytes are not here — they live in IndexedDB, keyed by `id`, because a
+ * photo cannot go in localStorage and a document that carried one would blow
+ * the quota on the first save. This is only the placement.
+ */
+export interface MediaLayer {
+  id: string
+  /** Intrinsic pixel size of the decoded image, for the cover fit. */
+  width: number
+  height: number
+  /** Multiplier on the cover fit; 1 exactly fills the sheet. */
+  scale: number
+  x: number
+  y: number
+  opacity: number
+  /** Run the photo through the press — separated, worn, screened, misregistered. */
+  printed: boolean
+  /** Ink for the separated plate. Only read when `printed`. */
+  inkId: string
+  contrast: number
+  lift: number
+}
+
 export type JustifyBy = 'words' | 'letters'
 
 /** Which edge a line with no spaces sits against inside a justified block.
@@ -104,6 +129,15 @@ export interface TextLayer {
 }
 
 export interface PrintSettings {
+  /** The photo behind everything, or null for bare paper. */
+  media: MediaLayer | null
+  /**
+   * How much of the paper's colour and tooth veils the photo. 0 prints
+   * straight onto it; 1 is full stock character. No effect without a photo,
+   * where the paper is the ground by definition.
+   */
+  paperAmount: number
+
   /** Output aspect. The render resolution is fixed in render.ts and does not
    *  depend on the display size (playbook §5.2). */
   aspect: '1:1' | '4:5' | '3:4' | '2:3'

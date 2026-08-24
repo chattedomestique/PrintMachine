@@ -1,12 +1,19 @@
-/* The sheet fills whatever the shell gives it, preserving its aspect. Height
-   drives, width follows from aspect-ratio, and max-width pulls both back when
-   the space is wider than it is tall. */
+/* The sheet fits the space it is given without ever distorting.
+
+   The obvious spelling — height: 100% plus aspect-ratio, with max-width
+   pulling it back — silently does not work: the fixed height wins, max-width
+   clamps the width, and aspect-ratio is dropped rather than honoured. On a
+   phone that squashed a 4:5 sheet to roughly 0.52:1 and the preview showed
+   type visibly stretched, while the export (which never touches this CSS) came
+   out correct.
+
+   Instead width is the smaller of the two fits — the container's width, or the
+   width that lets the full height fit — and the height follows from the aspect
+   ratio. Both constraints hold at once, so nothing is ever clamped on one axis
+   only. cqw/cqh come from the container-type: size on .app__canvas-wrap. */
 .sheet {
   position: relative;
-  height: 100%;
-  width: auto;
-  max-width: 100%;
-  max-height: 100%;
+  height: auto;
   box-shadow: var(--shadow-2);
   border-radius: 2px;
   overflow: hidden;
@@ -14,15 +21,19 @@
 
 .sheet[data-aspect='1:1'] {
   aspect-ratio: 1 / 1;
+  width: min(100cqw, 100cqh * 1 / 1);
 }
 .sheet[data-aspect='4:5'] {
   aspect-ratio: 4 / 5;
+  width: min(100cqw, 100cqh * 4 / 5);
 }
 .sheet[data-aspect='3:4'] {
   aspect-ratio: 3 / 4;
+  width: min(100cqw, 100cqh * 3 / 4);
 }
 .sheet[data-aspect='2:3'] {
   aspect-ratio: 2 / 3;
+  width: min(100cqw, 100cqh * 2 / 3);
 }
 
 /* The canvas fills the sheet and never receives input itself. */

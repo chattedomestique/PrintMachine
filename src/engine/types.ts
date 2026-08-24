@@ -21,6 +21,12 @@ export type TextAlign = 'left' | 'center' | 'right' | 'justify'
  *  with no spaces has nowhere to put word slack, so it falls back to letters. */
 export type JustifyBy = 'words' | 'letters'
 
+/** Which edge a line with no spaces sits against inside a justified block.
+ *  Such a line has no word gap to open, and pulling its letters apart to reach
+ *  the measure tears the word in half — so it keeps its natural spacing and
+ *  parks at one edge instead. */
+export type SoloAlign = 'left' | 'right'
+
 /** Screening method. A duplicator's RIP does one or the other, not both. */
 export type ScreenMethod = 'halftone' | 'dither'
 
@@ -78,6 +84,7 @@ export interface TextLayer {
   wordSpacing: number
   align: TextAlign
   justifyBy: JustifyBy
+  soloAlign: SoloAlign
   /** Anchor position, 0..1 of canvas width/height. */
   x: number
   y: number

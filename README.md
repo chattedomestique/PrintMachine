@@ -132,11 +132,18 @@ rarely what anyone wanted. The choice appears under Alignment only while
 justify is selected: it does nothing in any other mode, and putting it directly
 beneath the control that switches it on beats leaving it inert in the panel.
 
-A line with no spaces — one long word — has no word gap to open, so it falls
-back to spreading across the letters. The alternative is a line that quietly
-fails to reach the measure, which looks like a bug rather than a choice. Tested,
-along with both modes reaching the measure and words mode leaving intra-word
-letter gaps untouched.
+A line with no spaces — one word on its own line — has no word gap to open.
+Words mode leaves it at its natural width and parks it against a margin, left
+or right by the "Lines of one word" control.
+
+The first attempt spread its letters instead, reasoning that a line short of
+the measure reads as a bug. That was worse: `go` printed as `g` at one margin
+and `o` at the other, and `slow` came out as `s l o w` across the full column.
+Tearing a word in half to satisfy a rectangle is never the right trade. Letters
+mode still spreads a lone word, because there the spreading *is* the effect.
+
+Tested: a lone word keeps exactly its natural letter gaps and width, sits at
+whichever margin is chosen, and still spreads under letters mode.
 
 That is the whole model. An earlier version also had *per-word* tracking —
 select individual words from a row of chips, letterspace just those. It was
@@ -186,6 +193,28 @@ and then cut back to hard with a threshold that itself wanders across the
 image. Where the threshold noise runs high the edge bites inward; where it runs
 low the ink bulges out. The result is a *hard* edge in the *wrong place* by a
 varying amount, which is what a burned stencil actually produces.
+
+### The sheet is sized by whichever axis binds
+
+The preview stretched while the export came out correct — the same layout, one
+of them lying. The export re-renders offscreen and never touches the page CSS,
+so the distortion was purely in how the sheet element was sized.
+
+The obvious spelling looks right and is not:
+
+```css
+height: 100%; width: auto; aspect-ratio: 4 / 5; max-width: 100%;
+```
+
+A definite height wins, `max-width` clamps the width, and `aspect-ratio` is
+dropped rather than honoured — there is no error, the box is simply the wrong
+shape. On a phone that squashed a 4:5 sheet to roughly 0.52:1.
+
+The sheet now takes the *smaller* of the two fits — the container's width, or
+the width that lets its full height fit — with the height following from the
+aspect ratio, so both constraints hold at once and neither axis is ever clamped
+alone. `container-type: size` on the wrapper is what makes `cqw`/`cqh` resolve
+against the space the sheet is actually given.
 
 ### Touch
 

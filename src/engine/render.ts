@@ -43,6 +43,7 @@ import { roughenEdges } from './rough.ts'
 import { applyRollerBanding, paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
+import { coverRect, separateLuminance } from './media.ts'
 import { rasterizeBoxes, rasterizeText } from './text.ts'
 import { ASPECTS, type PrintSettings, type TextLayer } from './types.ts'
 
@@ -305,6 +306,9 @@ export function renderPrint(
   cacheRef: { current: RenderCache | null },
   overlay: OverlaySpec | null,
   height: number = REFERENCE_HEIGHT,
+  /** The decoded photo, or null. Drawn with drawImage rather than sampled in
+   *  JS: four million bilinear samples per frame is not a phone budget. */
+  media: CanvasImageSource | null = null,
 ): void {
   const { w, h } = outputSize(s.aspect, height)
 
@@ -347,8 +351,55 @@ export function renderPrint(
     plateIndex++
   }
 
+  // The photo goes down first, into the scratch buffer, at the rectangle
+  // coverRect computes — one scale factor on both axes, so it is cropped to
+  // fill rather than stretched to fit.
+  let ground: Uint8ClampedArray | undefined
+  if (media && s.media) {
+    const r = coverRect({ width: s.media.width, height: s.media.height }, w, h, s.media)
+    scratch.clearRect(0, 0, w, h)
+    scratch.imageSmoothingQuality = 'high'
+    // Fading the photo is fading how much of it reaches the sheet, so it rides
+    // on alpha and the compositor blends back toward paper. Printed mode keeps
+    // full alpha — there the opacity belongs to the ink plate, not the source.
+    scratch.globalAlpha = s.media.printed ? 1 : s.media.opacity
+    scratch.drawImage(media, r.dx, r.dy, r.dw, r.dh)
+    scratch.globalAlpha = 1
+    ground = scratch.getImageData(0, 0, w, h).data
+
+    if (s.media.printed) {
+      // Through the same press as everything else, so the photo wears, screens
+      // and misregisters exactly like the type sitting on it.
+      const tone = separateLuminance(ground, new Float32Array(w * h), {
+        contrast: s.media.contrast,
+        lift: s.media.lift,
+      })
+      plates.unshift({
+        // Its own plate index, not 0: sharing a seed with the first type plate
+        // would misregister the two identically, which reads as the photo and
+        // the type being in perfect register — the one thing a Riso never is.
+        // A photo is poster-sized by definition, so it takes the full press.
+        coverage: pressPlate({ field: tone, fontSize: h * 0.16 }, plateIndex, s, cache, w, h),
+        rgb: inkById(s.media.inkId).rgb,
+        opacity: s.media.opacity,
+      })
+      plateIndex++
+      // Printed means separated *onto* paper, so the photo is no longer the
+      // ground — its ink plate is the whole of its contribution.
+      ground = undefined
+    }
+  }
+
   const image = ctx.createImageData(w, h)
-  compositeLayers(image.data, w, h, cache.paper, plates)
+  compositeLayers(
+    image.data,
+    w,
+    h,
+    ground
+      ? { ...cache.paper, base: ground, paperAmount: s.paperAmount }
+      : cache.paper,
+    plates,
+  )
   ctx.putImageData(image, 0, 0)
 
   if (overlay) drawOverlay(ctx, s, overlay, w, h)

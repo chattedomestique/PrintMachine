@@ -26,6 +26,16 @@ export interface CompositeLayer {
 export interface PaperInput {
   shade: Float32Array
   rgb: readonly [number, number, number]
+  /**
+   * Optional per-pixel ground, RGBA, already blitted at sheet size — a photo
+   * standing in for the paper stock. When present the paper's colour and tooth
+   * become a *veil* over it rather than the base itself, at `paperAmount`
+   * strength, so 0 prints straight onto the photo and 1 lets the stock tint and
+   * texture it the way printing on toned paper actually does.
+   */
+  base?: Uint8ClampedArray
+  /** 0..1. Ignored without `base`, where the paper is the ground by definition. */
+  paperAmount?: number
 }
 
 /**
@@ -65,11 +75,36 @@ export function compositeLayers(
     alpha[l] = opacity < 0 ? 0 : opacity > 1 ? 1 : opacity
   }
 
+  const base = paper.base
+  // Without a photo the paper *is* the ground, so the veil is fully on and the
+  // arithmetic below collapses back to exactly `rgb × shade`.
+  const amount = base ? Math.max(0, Math.min(1, paper.paperAmount ?? 1)) : 1
+
   for (let i = 0; i < n; i++) {
-    const s = paper.shade[i]
-    let r = pr * s
-    let g = pg * s
-    let b = pb * s
+    let r: number
+    let g: number
+    let b: number
+
+    if (base) {
+      const o = i * 4
+      // Alpha, not just colour. A photo moved or scaled off the trim leaves
+      // bare sheet, and getImageData hands those pixels back as transparent
+      // *black* — reading the colour alone prints a black border round a photo
+      // that has simply been panned. Uncovered sheet is paper, so the ground is
+      // the photo composited over white and the veil is forced fully on there,
+      // which is exactly the paper this function draws without a photo at all.
+      const a = base[o + 3] / 255
+      const veil = amount * a + (1 - a)
+      const s = 1 - veil * (1 - paper.shade[i])
+      r = ((base[o] / 255) * a + (1 - a)) * (1 - veil * (1 - pr)) * s
+      g = ((base[o + 1] / 255) * a + (1 - a)) * (1 - veil * (1 - pg)) * s
+      b = ((base[o + 2] / 255) * a + (1 - a)) * (1 - veil * (1 - pb)) * s
+    } else {
+      const s = paper.shade[i]
+      r = pr * s
+      g = pg * s
+      b = pb * s
+    }
 
     for (let l = 0; l < count; l++) {
       const c = layers[l].coverage[i] * alpha[l]

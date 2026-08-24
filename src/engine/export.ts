@@ -65,6 +65,9 @@ export async function savePrint(
   settings: PrintSettings,
   format: ExportFormat = 'jpeg',
   name = 'print-machine',
+  /** The decoded photo, so the saved file is the same print as the preview.
+   *  Omitting it would silently export the type on bare paper. */
+  media: CanvasImageSource | null = null,
 ): Promise<SaveResult> {
   let blob: Blob
   try {
@@ -73,7 +76,7 @@ export async function savePrint(
     // other's noise fields on every save.
     const cacheRef: { current: RenderCache | null } = { current: null }
     // Synchronous CPU work — does not consume the user gesture.
-    renderPrint(exportCtx, scratchCtx, settings, cacheRef, null)
+    renderPrint(exportCtx, scratchCtx, settings, cacheRef, null, undefined, media)
     blob = await encode(exportCtx.canvas, format)
   } catch (err) {
     return { status: 'error', message: err instanceof Error ? err.message : 'Export failed.' }

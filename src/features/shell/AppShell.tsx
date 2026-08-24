@@ -7,10 +7,14 @@ import { savePrint, saveMessage } from '../../engine/export.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, subscribeSW } from '../../state/swStatus.ts'
+import { useMediaBitmap } from '../media/useMediaBitmap.ts'
 import './AppShell.css'
 
 export default function AppShell() {
   const { settings, undo, redo, canUndo, canRedo } = useSettings()
+  // One decode, shared by the preview and the save, so the file that lands in
+  // Photos is the print that was on screen.
+  const media = useMediaBitmap(settings.media?.id ?? null)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [showGuides, setShowGuides] = useState(false)
   const [tab, setTab] = useState<TabId | null>(null)
@@ -85,14 +89,14 @@ export default function AppShell() {
         announce('Could not open a canvas to export.')
         return
       }
-      const result = await savePrint(out, scratch, settings, 'jpeg')
+      const result = await savePrint(out, scratch, settings, 'jpeg', 'print-machine', media)
       announce(saveMessage(result))
     } catch (err) {
       announce(err instanceof Error ? err.message : 'Save failed.')
     } finally {
       setBusy(false)
     }
-  }, [busy, settings, announce])
+  }, [busy, settings, announce, media])
 
   return (
     <div className="app" ref={appRef}>
@@ -146,7 +150,7 @@ export default function AppShell() {
 
       <main className="app__main">
         <div className="app__canvas-wrap">
-          <Canvas showGuides={showGuides} />
+          <Canvas showGuides={showGuides} media={media} mediaMode={tab === 'media'} />
           {!hintDismissed && (
             <button type="button" className="hint" onClick={dismissHint}>
               Drag the sheet to move type · double-tap to centre

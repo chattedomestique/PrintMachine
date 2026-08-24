@@ -18,6 +18,7 @@ import { mulberry32, valueNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { alignOffset, justifyOffsets, layoutText, wordsOf } from './text.ts'
 import { detailFactor } from './render.ts'
+import { coverRect, separateLuminance } from './media.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
@@ -831,5 +832,195 @@ describe('detail scaling', () => {
   it('floors so small type still reads as printed, not as clean vector', () => {
     expect(detailFactor(1, 1000)).toBe(0.22)
     expect(detailFactor(0, 1000)).toBe(0.22)
+  })
+})
+
+describe('photo placement', () => {
+  const SHEET = { w: 800, h: 1000 }
+
+  it('never stretches, at any scale, position or source aspect', () => {
+    // The guarantee the whole feature rests on. Asserted as "the scale factor
+    // is identical on both axes" rather than by eyeballing a render, because
+    // a squash of a few percent is invisible in a thumbnail and obvious in a
+    // print.
+    const sources = [
+      { width: 4032, height: 3024 }, // landscape phone photo
+      { width: 3024, height: 4032 }, // portrait
+      { width: 1000, height: 1000 }, // square
+      { width: 6000, height: 1200 }, // panorama
+      { width: 40, height: 900 }, // absurdly tall
+    ]
+    for (const src of sources) {
+      for (const scale of [0.2, 1, 2.5, 4]) {
+        for (const [x, y] of [[0.5, 0.5], [0, 0], [1, 1], [0.2, 0.8]]) {
+          const r = coverRect(src, SHEET.w, SHEET.h, { scale, x, y })
+          expect(r.dw / r.dh).toBeCloseTo(src.width / src.height, 6)
+        }
+      }
+    }
+  })
+
+  it('covers the sheet at scale 1, leaving no bare paper', () => {
+    // Cover, not contain: a full-bleed print should not have letterbox bars.
+    for (const src of [
+      { width: 4032, height: 3024 },
+      { width: 3024, height: 4032 },
+      { width: 6000, height: 1200 },
+    ]) {
+      const r = coverRect(src, SHEET.w, SHEET.h, { scale: 1, x: 0.5, y: 0.5 })
+      expect(r.dw).toBeGreaterThanOrEqual(SHEET.w - 1e-6)
+      expect(r.dh).toBeGreaterThanOrEqual(SHEET.h - 1e-6)
+      expect(r.dx).toBeLessThanOrEqual(1e-6)
+      expect(r.dy).toBeLessThanOrEqual(1e-6)
+    }
+  })
+
+  it('centres on the given point and scales about it', () => {
+    const src = { width: 2000, height: 1000 }
+    const centred = coverRect(src, SHEET.w, SHEET.h, { scale: 1, x: 0.5, y: 0.5 })
+    expect(centred.dx + centred.dw / 2).toBeCloseTo(SHEET.w / 2, 6)
+    expect(centred.dy + centred.dh / 2).toBeCloseTo(SHEET.h / 2, 6)
+
+    const moved = coverRect(src, SHEET.w, SHEET.h, { scale: 1, x: 0.25, y: 0.75 })
+    expect(moved.dx + moved.dw / 2).toBeCloseTo(SHEET.w * 0.25, 6)
+    expect(moved.dy + moved.dh / 2).toBeCloseTo(SHEET.h * 0.75, 6)
+
+    // Scaling keeps the centre put rather than growing from a corner.
+    const bigger = coverRect(src, SHEET.w, SHEET.h, { scale: 2, x: 0.25, y: 0.75 })
+    expect(bigger.dx + bigger.dw / 2).toBeCloseTo(moved.dx + moved.dw / 2, 6)
+    expect(bigger.dw).toBeCloseTo(moved.dw * 2, 6)
+  })
+
+  it('separates a photo to ink coverage as darkness, not brightness', () => {
+    // Ink is what gets added to paper: black wants full coverage, white none.
+    // Inverting this is the classic separation bug and it produces a negative.
+    const px = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255, 128, 128, 128, 255])
+    const out = separateLuminance(px, new Float32Array(3), { contrast: 1, lift: 0 })
+    expect(out[0]).toBeCloseTo(1, 2)
+    expect(out[1]).toBeCloseTo(0, 2)
+    expect(out[2]).toBeGreaterThan(0.4)
+    expect(out[2]).toBeLessThan(0.6)
+  })
+
+  it('drops highlights out entirely as lift rises, and stays in range', () => {
+    const px = new Uint8ClampedArray([220, 220, 220, 255, 30, 30, 30, 255])
+    const none = separateLuminance(px, new Float32Array(2), { contrast: 1, lift: 0 })
+    const lifted = separateLuminance(px, new Float32Array(2), { contrast: 1, lift: 0.4 })
+
+    expect(none[0]).toBeGreaterThan(0)
+    expect(lifted[0]).toBe(0)
+    // The shadow survives — lift drops highlights, it does not fade the image.
+    expect(lifted[1]).toBeGreaterThan(0.5)
+    for (const v of [...none, ...lifted]) {
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+describe('photo as the printing ground', () => {
+  it('leaves the composite untouched when there is no photo', () => {
+    // The new code path must be exactly inert for every existing document.
+    const n = 4
+    const shade = new Float32Array(n).fill(0.9)
+    const paper = { shade, rgb: [250, 245, 235] as const }
+    const plates = [{ coverage: new Float32Array(n).fill(0.5), rgb: [255, 0, 128] as const, opacity: 1 }]
+
+    const a = new Uint8ClampedArray(n * 4)
+    const b = new Uint8ClampedArray(n * 4)
+    compositeLayers(a, 2, 2, paper, plates)
+    compositeLayers(b, 2, 2, { ...paper, paperAmount: 0 }, plates)
+    expect([...b]).toEqual([...a])
+  })
+
+  it('prints straight onto the photo when the paper is turned off', () => {
+    const n = 1
+    const shade = new Float32Array(n).fill(0.5)
+    // A strongly tinted, heavily textured stock that would be obvious if applied.
+    const paper = { shade, rgb: [200, 120, 40] as const }
+    const base = new Uint8ClampedArray([120, 180, 240, 255])
+
+    const out = new Uint8ClampedArray(4)
+    compositeLayers(out, 1, 1, { ...paper, base, paperAmount: 0 }, [])
+    expect(out[0]).toBeCloseTo(120, 0)
+    expect(out[1]).toBeCloseTo(180, 0)
+    expect(out[2]).toBeCloseTo(240, 0)
+  })
+
+  it('lets the stock tint and texture the photo as the veil comes up', () => {
+    const shade = new Float32Array(1).fill(0.5)
+    const paper = { shade, rgb: [200, 120, 40] as const }
+    const base = new Uint8ClampedArray([255, 255, 255, 255])
+
+    const off = new Uint8ClampedArray(4)
+    const on = new Uint8ClampedArray(4)
+    compositeLayers(off, 1, 1, { ...paper, base, paperAmount: 0 }, [])
+    compositeLayers(on, 1, 1, { ...paper, base, paperAmount: 1 }, [])
+
+    // Full veil over white is exactly the paper the app draws without a photo.
+    expect(on[0]).toBeCloseTo(200 * 0.5, 0)
+    expect(on[1]).toBeCloseTo(120 * 0.5, 0)
+    expect(off[0]).toBeGreaterThan(on[0])
+  })
+
+  it('overprints the photo rather than covering it', () => {
+    // Riso ink is transparent, so a plate over a photo must multiply down from
+    // the photo's own colour — not replace it, which is what a sticker does.
+    const base = new Uint8ClampedArray([200, 200, 200, 255])
+    const paper = { shade: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const }
+    const ink = [{ coverage: new Float32Array(1).fill(1), rgb: [0, 0, 255] as const, opacity: 1 }]
+
+    const out = new Uint8ClampedArray(4)
+    compositeLayers(out, 1, 1, { ...paper, base, paperAmount: 0 }, ink)
+    // Blue ink absorbs red and green fully, passes blue — so the photo's own
+    // blue level survives underneath.
+    expect(out[0]).toBeCloseTo(0, 0)
+    expect(out[2]).toBeCloseTo(200, 0)
+  })
+})
+
+describe('a photo that does not cover the sheet', () => {
+  const paper = { shade: new Float32Array(1).fill(1), rgb: [250, 240, 220] as const }
+
+  it('leaves bare paper where the photo has been panned away, not black', () => {
+    // getImageData hands back transparent *black* for untouched pixels, so
+    // reading colour without alpha prints a black border round a photo that
+    // has merely been moved. This is the bug that shipped in the first cut.
+    const uncovered = new Uint8ClampedArray([0, 0, 0, 0])
+    const out = new Uint8ClampedArray(4)
+    compositeLayers(out, 1, 1, { ...paper, base: uncovered, paperAmount: 0 }, [])
+
+    expect(out[0]).toBeCloseTo(250, 0)
+    expect(out[1]).toBeCloseTo(240, 0)
+    expect(out[2]).toBeCloseTo(220, 0)
+  })
+
+  it('matches the no-photo render exactly on uncovered pixels', () => {
+    // The strongest form of the same claim: bare sheet beside a photo must be
+    // indistinguishable from the same sheet with no photo imported at all.
+    const shade = new Float32Array(2)
+    shade[0] = 0.94
+    shade[1] = 1.02
+    const tex = { shade, rgb: [250, 240, 220] as const }
+    const base = new Uint8ClampedArray([0, 0, 0, 0, 0, 0, 0, 0])
+
+    const withPhoto = new Uint8ClampedArray(8)
+    const without = new Uint8ClampedArray(8)
+    compositeLayers(withPhoto, 2, 1, { ...tex, base, paperAmount: 0.3 }, [])
+    compositeLayers(without, 2, 1, tex, [])
+    expect([...withPhoto]).toEqual([...without])
+  })
+
+  it('fades a photo back toward paper through its alpha', () => {
+    const half = new Uint8ClampedArray([0, 0, 0, 128])
+    const full = new Uint8ClampedArray([0, 0, 0, 255])
+    const dim = new Uint8ClampedArray(4)
+    const solid = new Uint8ClampedArray(4)
+    compositeLayers(dim, 1, 1, { ...paper, base: half, paperAmount: 0 }, [])
+    compositeLayers(solid, 1, 1, { ...paper, base: full, paperAmount: 0 }, [])
+
+    expect(solid[0]).toBeCloseTo(0, 0)
+    expect(dim[0]).toBeGreaterThan(solid[0])
+    expect(dim[0]).toBeLessThan(250)
   })
 })

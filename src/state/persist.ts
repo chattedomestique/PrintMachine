@@ -34,6 +34,13 @@ export function loadSettings(): PrintSettings {
     // Merge over defaults so a document written by an older build still opens
     // when new fields are added.
     const merged = { ...fallback, ...(parsed as Partial<PrintSettings>) }
+    // A stored photo is only a reference; the bytes live in IndexedDB and may
+    // have been evicted independently. Anything not shaped like a placement is
+    // dropped rather than handed to the renderer to crash on.
+    const m = merged.media
+    if (m && !(typeof m.id === 'string' && Number.isFinite(m.width) && Number.isFinite(m.height))) {
+      merged.media = null
+    }
     if (!Array.isArray(merged.layers) || merged.layers.length === 0) {
       merged.layers = fallback.layers
     } else {

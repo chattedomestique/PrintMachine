@@ -82,6 +82,63 @@ before you are somewhere without signal rather than discovered there. It is only
 as honest as the manifest, though — a truncated one would still turn it green,
 which is what the CI check is for.
 
+### The photo is the paper
+
+A photo behind the type is not a sprite drawn onto the canvas. It replaces the
+**ground** — the base colour every transparent ink multiplies down from. That
+falls out of the compositor already reading paper as `rgb × shade`, and it is
+why type genuinely overprints a photo rather than sitting on top of it: pink
+over a white highlight goes bright, pink over a dark area goes deep.
+
+"Paper over the photo" is how much of the stock's colour and tooth veils the
+image. At 0 the print lands straight on the photo; at 1 the photo takes on the
+paper's tint and grain the way printing on toned stock actually does. With no
+photo the control is inert and the arithmetic collapses back to exactly what
+the app drew before.
+
+**Print the photo** runs it through the same press as the type — separated to
+one ink by luminance, then roughened, worn, screened and misregistered. It gets
+its own plate index rather than reusing the first: sharing a seed would
+misregister the photo and the type *identically*, which reads as perfect
+register, the one thing a Riso never has.
+
+Separation is darkness, not brightness — ink is what gets added to paper, so
+black wants full coverage and white none. Highlight dropout is a *rescale*
+rather than a subtraction, so lifting the highlights out leaves the shadows as
+black as they were; subtracting dims the whole image, which is the same "turned
+the opacity down" mistake the wear passes exist to avoid.
+
+#### Nothing is ever stretched
+
+The scale factor is the same on both axes, always. That is asserted directly —
+across five source aspects, four zoom levels and four positions, the drawn
+rectangle's aspect must equal the source's — rather than inferred from how a
+render looks, because a squash of a few percent is invisible in a thumbnail and
+obvious in a print.
+
+It is *cover*, not contain: at 1 the photo fills the sheet and the overflow is
+cropped, so a full-bleed print has no letterbox bars.
+
+#### Bare sheet is paper, not black
+
+Pan a photo off the trim and the uncovered strip has to print as paper. The
+first cut printed it **black**, because `getImageData` hands untouched pixels
+back as transparent *black* and reading the colour without the alpha takes the
+zeros at face value. The ground is now the photo composited over white with the
+veil forced fully on where there is no photo, which is bit-for-bit the paper
+the app draws with no photo at all — there is a test asserting exactly that
+equality.
+
+#### Why the bytes are not in localStorage
+
+Its quota is about 5 MB of *string*, and base64 inflates binary by a third; one
+phone photo blows it and the throw takes the whole save with it. Photos live in
+IndexedDB as Blobs, and the document keeps only the id and placement, so the two
+stores can be written independently and a torn write costs a photo rather than
+the print. Imports are downscaled to a 2048px long edge first — a 12-megapixel
+photo decoded at full size is ~48 MB of RGBA, and holding two of those is the
+iOS eviction path §4.2 exists to prevent.
+
 ### Boxes, and why they are plates
 
 A background box behind a word is not a rectangle drawn on top of the render.
@@ -274,10 +331,16 @@ same code the preview uses.
 ## Status
 
 Working: multi-plate type, the full press and wear model, forced paragraph
-justification, letter and word tracking, word-selectable background boxes, undo/redo,
-persistence, and save via the share sheet. Text is the first input; photo intake
-runs through the same separate → screen → misregister → overprint pipeline and
-lands next.
+justification, letter and word tracking, word-selectable background boxes, an
+imported photo as the printing ground (plain or run through the press),
+undo/redo, persistence, and save via the share sheet.
+
+Photos only — **video is not in yet**. A JPEG cannot hold one, so it needs a
+decision about what Save produces, and `MediaRecorder` on iOS Safari is limited
+enough that it would have to be proven on a device rather than assumed.
+
+Photo separation is currently to a **single ink**. Multi-ink colour separation —
+the two- and three-colour Riso photo — is the obvious next step.
 
 Lines break where you break them. There is no automatic wrapping yet, so a long
 paragraph typed as one line stays one line and runs off the sheet unless

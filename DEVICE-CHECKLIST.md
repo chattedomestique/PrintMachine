@@ -16,11 +16,30 @@ Run this before every meaningful release.
 
 ## Offline
 
-- [ ] Airplane mode → launch from the home screen → the app fully boots and is usable
-- [ ] Redeploy a visible change → relaunch → the new version appears
+**Order matters, and getting it wrong looks identical to a broken app.** An iOS
+home-screen PWA has to be launched at least once *while online* before it will
+ever open offline. Adding to the home screen from Safari is not enough — the
+standalone instance has to run once with a network to install its worker and
+finish precaching. Straight from "Add to Home Screen" into airplane mode gives
+you "No internet connection" every time, no matter how correct the build is.
 
-> Both of these are automatable only up to a point. CI proves the precache
-> manifest contains the real hashed assets; it cannot prove iOS honours it.
+So:
+
+- [ ] Add to Home Screen
+- [ ] **Launch from the home-screen icon while still online**
+- [ ] Wait for the dot beside the wordmark to turn green — that is the app
+      saying it has finished precaching and will open offline
+- [ ] *Now* airplane mode → launch from the home screen → it fully boots and is usable
+- [ ] Redeploy a visible change → relaunch online once → the new version appears
+
+> `npm run verify:offline` proves the build itself: it serves `dist/` at the
+> real Pages sub-path, installs the worker, cuts the network and cold-launches
+> in a fresh tab, and it runs in CI. What it cannot prove is that iOS honours
+> any of it, which is what this section is for.
+>
+> The green dot is only as honest as the precache manifest — it reports that
+> the worker finished caching whatever it was handed. A truncated manifest
+> would still turn it green. That case is what the CI check exists to catch.
 
 ## Edit
 

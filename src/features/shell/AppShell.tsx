@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import Canvas from '../editor/Canvas.tsx'
 import Controls, { TABS, type TabId } from '../controls/Controls.tsx'
 import { IconButton } from '../../ui/controls.tsx'
@@ -6,10 +6,12 @@ import { GridIcon, RedoIcon, UndoIcon } from '../../ui/icons.tsx'
 import { savePrint, saveMessage } from '../../engine/export.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
+import { getSWState, subscribeSW } from '../../state/swStatus.ts'
 import './AppShell.css'
 
 export default function AppShell() {
   const { settings, undo, redo, canUndo, canRedo } = useSettings()
+  const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [showGuides, setShowGuides] = useState(false)
   const [tab, setTab] = useState<TabId | null>(null)
   const [busy, setBusy] = useState(false)
@@ -99,6 +101,29 @@ export default function AppShell() {
           Print<span>Machine</span>
         </h1>
         <div className="header-actions">
+          {/* Offline readiness, stated rather than assumed. On iOS a
+              home-screen PWA has to be opened once online before it will ever
+              launch offline, and without this the only way to discover that is
+              to be somewhere with no signal. */}
+          <span
+            className="offline-dot"
+            data-state={swState}
+            title={
+              swState === 'ready'
+                ? 'Saved for offline — this will open in airplane mode'
+                : swState === 'unsupported'
+                  ? 'Offline unavailable in this browser'
+                  : 'Saving for offline…'
+            }
+          >
+            <span className="visually-hidden">
+              {swState === 'ready'
+                ? 'Saved for offline use'
+                : swState === 'unsupported'
+                  ? 'Offline use unavailable'
+                  : 'Saving for offline use'}
+            </span>
+          </span>
           <IconButton label="Undo" onClick={undo} disabled={!canUndo}>
             <UndoIcon />
           </IconButton>

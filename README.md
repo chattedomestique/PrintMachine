@@ -32,12 +32,15 @@ npm run dev        # http://localhost:5173
 ```
 
 ```sh
-npm run lint       # ESLint, must exit 0
-npm run typecheck  # tsc --noEmit
-npm test           # Vitest, engine only
-npm run build      # production build
-PAGES=1 npm run build   # production build for the GitHub Pages sub-path
+npm run verify         # the gate: lint + typecheck + test + build
+npm run verify:offline # proves the build boots with no network
+PAGES=1 npm run build  # production build for the GitHub Pages sub-path
 ```
+
+`verify` is one script rather than four commands so that "it's green" means the
+same thing locally as it does in CI. Running the steps by hand once let a
+typecheck failure through, because `npm test` transpiles without type-checking
+and a green test run looked like proof the whole chain passed.
 
 Icons are generated, not hand-drawn — `node scripts/gen-icons.mjs` redraws the
 whole set from the same overprint math the app uses.
@@ -53,6 +56,31 @@ src/
   features/  app-aware composition — the only layer that knows what the app is.
   styles/    tokens.css (the design system) + index.css.
 ```
+
+### Offline, and why it is checked rather than inspected
+
+N2 says "works offline" is a claim you must verify. It was previously verified
+by reading the precache manifest and concluding it looked right — which is
+inspection, and it is exactly how a broken offline story ships.
+
+`npm run verify:offline` serves the built `dist/` at the real Pages sub-path,
+waits for the service worker to install and claim, cuts the network, and cold
+launches in a fresh tab — a reload can pass on memory cache alone. It runs in
+CI. Serving at `/` instead would test a different app: the sub-path is exactly
+where `navigateFallback` and the precache URLs go wrong, and it survives every
+localhost test that skips it.
+
+It is checked against two deliberate breakages: a missing worker, and a worker
+that installs but precaches only the shell. The second is the failure the
+playbook records — installable, and blank offline.
+
+**On iOS the build being correct is not sufficient.** A home-screen PWA has to
+be launched once *while online* before it will ever open offline; going straight
+from "Add to Home Screen" into airplane mode fails regardless. The dot beside
+the wordmark reports when precaching has finished, so that state is visible
+before you are somewhere without signal rather than discovered there. It is only
+as honest as the manifest, though — a truncated one would still turn it green,
+which is what the CI check is for.
 
 ### Boxes, and why they are plates
 

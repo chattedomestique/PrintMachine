@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview",
-    "verify": "npm run lint && npm run typecheck && npm test && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm test && npm run build",
+    "verify:offline": "npm run build && node scripts/verify-offline.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -30,6 +31,7 @@
     "typescript-eslint": "^8.46.1",
     "vite": "^7.3.1",
     "vite-plugin-pwa": "^1.0.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "playwright-core": "^1.56.0"
   }
 }

@@ -100,6 +100,43 @@ apart, and drifts differently at every size — so there is one layout, and a
 test asserting the engine's word grouping matches the plain whitespace split
 the selection UI shows you.
 
+### Tracking, per word
+
+The layer's tracking slider letterspaces everything. Per-word tracking is a
+*delta* on top of it, stored against the word's index, so a word can be opened
+up without disturbing its neighbours or the block's own tracking.
+
+Two things it deliberately does not do. A word's tracking never reaches the
+space beside it — letterspacing is what happens *between a word's own letters*,
+and adding it after the final letter too would pad the following space and read
+as word spacing nobody asked for. And a line measures to its **ink**, not to the
+pen position after the last glyph's trailing advance: count that gap and a
+centred line sits left of centre while a right-aligned one stops short of the
+margin. Both are invisible at normal tracking and unmissable at +0.5em, which is
+exactly the kind of bug that ships. There are tests for each.
+
+Word indices come from the same whitespace split the selection chips show, so
+the word you tap is the word that moves.
+
+### Small type
+
+The wear defaults are tuned against poster type — roughly 16% of the sheet
+height. Applied unchanged to a paragraph they destroy it: a 9px screen pitch on
+an 1800px sheet is about a 24 lpi screen where real Riso is nearer 100, so small
+letterforms get eaten by their own halftone, and `bleed` fills the counters in
+a, e and o until the word is a row of blobs.
+
+So the press backs off with the rendered type size. `detailFactor` scales the
+screen pitch, dot softness, edge roughness, bleed and misregistration together —
+one factor, because moving them independently just trades which artefact
+dominates. It is floored at 0.22 so small type still reads as *printed* rather
+than resolving into clean vector, and it is `sqrt`-shaped so the fall-off is
+gentle near poster size and steep where it matters.
+
+A real press has one screen ruling per sheet regardless of point size, so
+`detailScaling` can be switched off in the Press panel for that behaviour. It is
+on by default because the honest version mostly looks like a mistake.
+
 ### Why fading is dots, not opacity
 
 The compositor reads coverage as ink transmittance, so anything that scales
@@ -181,9 +218,14 @@ same code the preview uses.
 ## Status
 
 Working: multi-plate type, the full press and wear model, forced paragraph
-justification, undo/redo, persistence, and save via the share sheet. Text is the
-first input; photo intake runs through the same separate → screen → misregister
-→ overprint pipeline and lands next.
+justification, per-word tracking, word-selectable background boxes, undo/redo,
+persistence, and save via the share sheet. Text is the first input; photo intake
+runs through the same separate → screen → misregister → overprint pipeline and
+lands next.
+
+Lines break where you break them. There is no automatic wrapping yet, so a long
+paragraph typed as one line stays one line and runs off the sheet unless
+fit-to-width is on.
 
 **Forced justification** stretches every line — including the last — to the
 width of the widest line in the block, spacing between *characters* rather than

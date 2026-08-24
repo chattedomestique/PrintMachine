@@ -93,7 +93,7 @@ export interface RenderCache {
   /** Rasterised tone per plate, keyed on the properties that affect it.
    *  Dragging a press slider must not re-run getImageData for every plate.
    *  Boxes are keyed separately from glyphs under the same layer id. */
-  tone: Map<string, { key: string; field: Float32Array }>
+  tone: Map<string, { key: string; field: Float32Array; fontSize: number }>
 }
 
 function cacheKey(s: PrintSettings, w: number, h: number): string {
@@ -112,6 +112,7 @@ function toneKey(l: TextLayer): string {
     l.lineHeight,
     l.tracking,
     l.wordSpacing,
+    JSON.stringify(l.wordTracking),
     l.align,
     l.x,
     l.y,
@@ -148,13 +149,14 @@ function cachedTone(
   cache: RenderCache,
   w: number,
   h: number,
-): Float32Array {
+): { field: Float32Array; fontSize: number } {
   const key = toneKey(layer)
   const hit = cache.tone.get(layer.id)
-  if (hit && hit.key === key) return hit.field
-  const field = rasterizeText(scratch, layer, w, h)
-  cache.tone.set(layer.id, { key, field })
-  return field
+  if (hit && hit.key === key) return hit
+  const { tone, fontSize } = rasterizeText(scratch, layer, w, h)
+  const entry = { key, field: tone, fontSize }
+  cache.tone.set(layer.id, entry)
+  return entry
 }
 
 /** Same, for one box group. Keyed on the layout *and* the chosen words, so
@@ -166,15 +168,18 @@ function cachedBoxTone(
   cache: RenderCache,
   w: number,
   h: number,
-): Float32Array {
+): { field: Float32Array; fontSize: number } {
   const box = layer.boxes[boxIndex]
   const id = `${layer.id}:box:${box.id}`
   const key = [toneKey(layer), layer.boxPadding, layer.boxRadius, box.words.join(',')].join('|')
   const hit = cache.tone.get(id)
-  if (hit && hit.key === key) return hit.field
+  if (hit && hit.key === key) return hit
   const field = rasterizeBoxes(scratch, layer, w, h, new Set(box.words))
-  cache.tone.set(id, { key, field })
-  return field
+  // A box inherits its type's rendered size, so it wears at the same scale as
+  // the words it sits behind rather than being treated as a poster-sized slab.
+  const fontSize = cachedTone(scratch, layer, cache, w, h).fontSize
+  cache.tone.set(id, { key, field, fontSize })
+  return { field, fontSize }
 }
 
 /** Get a valid cache for these settings, rebuilding only when the inputs move. */
@@ -190,6 +195,31 @@ export function ensureCache(
 }
 
 /**
+ * How finely to print, given how big the type actually came out.
+ *
+ * A real Riso screens the whole sheet at one ruling, so physically this should
+ * be a constant — but a real Riso's master is ~600dpi, which at this reference
+ * height is a screen finer than a pixel. The defaults here are deliberately
+ * coarse so the halftone is *visible* at poster size, and that same coarseness
+ * is wider than the strokes of small type: the dots stop describing the
+ * letterform and start replacing it.
+ *
+ * So detail scales with the rendered type size, floored so small type still
+ * reads as printed rather than as clean vector. Off by default it is not —
+ * `detailScaling` exists because at some point somebody will want the honest
+ * one-ruling-per-sheet behaviour.
+ */
+export function detailFactor(fontSize: number, canvasHeight: number): number {
+  // 0.16 of the sheet height is the poster size the wear defaults were tuned
+  // against; anything at or above it prints at full coarseness.
+  const relative = fontSize / (canvasHeight * 0.16)
+  if (relative >= 1) return 1
+  // Square root rather than linear: halving the type should not halve the
+  // texture, or small type loses its character entirely on the way to legible.
+  return Math.max(0.22, Math.sqrt(relative))
+}
+
+/**
  * Run the press over one tone field: everything from the stencil edge to the
  * screen. Shared by type and by background boxes — a box that skipped this
  * would be the one clean, undistressed rectangle on an otherwise convincingly
@@ -198,21 +228,25 @@ export function ensureCache(
  * Exported so tests can drive it without a canvas.
  */
 export function pressPlate(
-  tone: Float32Array,
+  plate: { field: Float32Array; fontSize: number },
   index: number,
   s: PrintSettings,
   cache: RenderCache,
   w: number,
   h: number,
 ): Float32Array {
+  const tone = plate.field
   const scale = h / REFERENCE_HEIGHT
+  const detail = s.detailScaling ? detailFactor(plate.fontSize, h) : 1
 
   // Ragged stencil edge + ink spread, before anything downstream sees the
   // outline. Seeded per plate so two plates don't tear identically.
   const rough = roughenEdges(tone, w, h, {
     roughness: s.roughness,
-    scale: Math.max(1, s.roughScale * scale),
-    bleed: s.bleed,
+    scale: Math.max(1, s.roughScale * scale * detail),
+    // Bleed is a threshold offset, so at small sizes it eats the counters —
+    // the holes in a, e, o fill and the word turns into a row of blobs.
+    bleed: s.bleed * detail,
     seed: s.seed ^ (index * 0x9e3779b9),
   })
 
@@ -236,7 +270,10 @@ export function pressPlate(
   tone2 = applySmear(tone2, w, h, s.smear)
   tone2 = applyRollerBanding(tone2, w, h, s.banding, s.seed ^ (index * 0x27d4eb2d))
 
-  const { dx, dy } = registrationOffset(s.seed, index, s.misregistration * scale)
+  // Misregistration is a paper-feed error, physically the same for the whole
+  // sheet — but at 5px it obliterates 20px type while barely showing on a
+  // poster. Scaled by sqrt so it stays visible on small type without eating it.
+  const { dx, dy } = registrationOffset(s.seed, index, s.misregistration * scale * Math.sqrt(detail))
   const shifted = shiftField(tone2, w, h, dx, dy)
 
   if (s.method === 'dither') {
@@ -244,10 +281,10 @@ export function pressPlate(
   }
   return screenField(shifted, w, h, {
     shape: s.screenShape,
-    pitch: s.screenPitch * scale,
+    pitch: Math.max(1.2, s.screenPitch * scale * detail),
     // Each plate gets its own angle; the beat between them is the rosette.
     angle: defaultAngle(index),
-    softness: s.screenSoftness * scale,
+    softness: s.screenSoftness * scale * detail,
     originX: dx,
     originY: dy,
   })

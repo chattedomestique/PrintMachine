@@ -237,3 +237,15 @@
 .word-chip:active {
   transform: scale(0.95);
 }
+
+/* A word carrying its own tracking shows the value, so the override is
+   visible without selecting the word to find out. */
+.word-chip[data-tracked] {
+  border-color: var(--accent);
+}
+.word-chip-badge {
+  margin-left: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}

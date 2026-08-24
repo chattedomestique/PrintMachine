@@ -1,4 +1,4 @@
-import { Field, Segmented, Slider } from '../../ui/controls.tsx'
+import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import type { DitherType } from '../../engine/dither.ts'
 import type { ScreenShape } from '../../engine/screen.ts'
 import type { PrintSettings, ScreenMethod } from '../../engine/types.ts'
@@ -114,6 +114,17 @@ export default function PressPanel() {
         format={(v) => v.toFixed(2)}
         onChange={(gamma) => patch({ gamma }, true)}
       />
+
+      <Toggle
+        label="Scale detail to type size"
+        checked={settings.detailScaling}
+        onChange={(detailScaling) => patch({ detailScaling })}
+      />
+      <p className="panel-note">
+        A screen coarse enough to read on a poster is wider than the strokes of small type. With
+        this on, small words get a proportionally finer screen, tear and bleed so they stay
+        legible. Off is the literal behaviour — one ruling for the whole sheet.
+      </p>
 
       <Slider
         label="Misregistration"

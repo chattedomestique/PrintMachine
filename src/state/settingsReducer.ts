@@ -24,6 +24,7 @@ export type SettingsAction =
   | { type: 'removeBox'; layerId: string; boxId: string }
   | { type: 'patchBox'; layerId: string; boxId: string; patch: Partial<WordBox>; coalesce?: boolean }
   | { type: 'toggleBoxWord'; layerId: string; boxId: string; word: number }
+  | { type: 'setWordTracking'; layerId: string; words: number[]; em: number; coalesce?: boolean }
   | { type: 'reset'; settings: PrintSettings }
 
 export type HistoryAction =
@@ -135,6 +136,18 @@ function applySettings(state: PrintSettings, action: SettingsAction): PrintSetti
           }
         }),
       }))
+
+    case 'setWordTracking':
+      return mapLayer(state, action.layerId, (l) => {
+        const next = { ...l.wordTracking }
+        for (const w of action.words) {
+          // Zero is the default, so store nothing rather than an explicit 0 —
+          // otherwise the map grows forever with entries that mean "normal".
+          if (action.em === 0) delete next[String(w)]
+          else next[String(w)] = action.em
+        }
+        return { ...l, wordTracking: next }
+      })
 
     case 'reset':
       return action.settings

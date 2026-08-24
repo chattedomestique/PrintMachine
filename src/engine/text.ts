@@ -65,56 +65,90 @@ export type MeasureFn = (text: string, fontSize: number) => number
 const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t'
 
 /**
- * Place every glyph in a line.
+ * Place every glyph in a line, and group them into words as it goes.
  *
- * Advances are per character, plus `tracking` after each one and `wordSpacing`
- * additionally after each space. Tracking lands after the final character too,
- * matching CSS letter-spacing — which matters because the line width feeds
- * alignment, and a width that ignores the last gap centres slightly off.
+ * One pass rather than place-then-group, because per-word tracking makes the
+ * two inseparable: the advance after a character depends on which word that
+ * character belongs to. Grouping afterwards would mean deciding word
+ * boundaries twice, and any disagreement between the two puts a word's box in
+ * a different place from the word.
+ *
+ * Advances are the character's own width, plus `tracking` (global) plus that
+ * word's own tracking delta, plus `wordSpacing` additionally after a space.
+ * Tracking lands after the final character too, matching CSS letter-spacing —
+ * the line width feeds alignment, and a width that ignores the last gap
+ * centres slightly off.
  */
-function placeGlyphs(
+function placeLine(
   text: string,
+  line: number,
+  startWordIndex: number,
   fontSize: number,
   tracking: number,
   wordSpacing: number,
+  perWord: Readonly<Record<string, number>>,
   measure: MeasureFn,
-): { glyphs: PlacedGlyph[]; width: number } {
+): { glyphs: PlacedGlyph[]; words: PlacedWord[]; width: number; nextWordIndex: number } {
   const glyphs: PlacedGlyph[] = []
-  let pen = 0
-  for (const ch of text) {
-    const width = measure(ch, fontSize)
-    glyphs.push({ ch, x: pen, width })
-    pen += width + tracking + (isSpace(ch) ? wordSpacing : 0)
-  }
-  return { glyphs, width: pen }
-}
-
-/** Group placed glyphs into words, skipping the whitespace between them. */
-function groupWords(glyphs: readonly PlacedGlyph[], line: number, startIndex: number): PlacedWord[] {
   const words: PlacedWord[] = []
-  let current: PlacedGlyph[] = []
 
-  const flush = () => {
-    if (current.length === 0) return
-    const first = current[0]
-    const last = current[current.length - 1]
+  let pen = 0
+  // Right edge of the last inked glyph. The line's width is this, not `pen`:
+  // every glyph advances by its own trailing tracking, so `pen` ends one gap
+  // past the ink. Counting that gap makes a centred line sit left of centre
+  // and a right-aligned one stop short — invisible at normal tracking, plainly
+  // wrong at +0.5em.
+  let ink = 0
+  let wordIndex = startWordIndex
+  let run: PlacedGlyph[] = []
+  // A word's index is fixed the moment its first glyph lands, so its tracking
+  // has to be resolved before that glyph advances — not when the word closes.
+  let runTracking = tracking + (perWord[String(wordIndex)] ?? 0) * fontSize
+
+  const closeWord = () => {
+    if (run.length === 0) return
+    const first = run[0]
+    const last = run[run.length - 1]
     words.push({
-      text: current.map((g) => g.ch).join(''),
-      index: startIndex + words.length,
+      text: run.map((g) => g.ch).join(''),
+      index: wordIndex,
       x: first.x,
       // To the right edge of the last glyph, not to its advance origin.
       width: last.x + last.width - first.x,
       line,
     })
-    current = []
+    run = []
+    wordIndex += 1
+    runTracking = tracking + (perWord[String(wordIndex)] ?? 0) * fontSize
   }
 
-  for (const g of glyphs) {
-    if (isSpace(g.ch)) flush()
-    else current.push(g)
+  const chars = [...text]
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]
+    const width = measure(ch, fontSize)
+    const glyph = { ch, x: pen, width }
+    glyphs.push(glyph)
+
+    if (isSpace(ch)) {
+      closeWord()
+      // The gap itself takes the layer's base tracking, never a word's — a
+      // word's tracking belongs inside that word, not on the space beside it.
+      pen += width + tracking + wordSpacing
+    } else {
+      run.push(glyph)
+      ink = pen + width
+      // A word's tracking applies *between its own letters*, so the advance
+      // depends on whether the next glyph is still inside this word. Adding it
+      // after the final letter too would pad the space beside the word and
+      // read as word spacing nobody asked for.
+      const next = chars[i + 1]
+      const inside = next !== undefined && !isSpace(next)
+      pen += width + (inside ? runTracking : tracking)
+    }
   }
-  flush()
-  return words
+  closeWord()
+
+  return { glyphs, words, width: ink, nextWordIndex: wordIndex }
 }
 
 /**
@@ -132,12 +166,22 @@ export function layoutText(
 ): TextLayout {
   const raw = layer.caps ? layer.text.toUpperCase() : layer.text
   const source = raw.split('\n')
+  const perWord = layer.wordTracking ?? {}
 
   let fontSize = Math.max(1, layer.size * canvasHeight)
   let tracking = layer.tracking * fontSize
   let wordSpacing = layer.wordSpacing * fontSize
 
-  let placed = source.map((t) => placeGlyphs(t, fontSize, tracking, wordSpacing, measure))
+  const placeAll = () => {
+    let next = 0
+    return source.map((text, i) => {
+      const out = placeLine(text, i, next, fontSize, tracking, wordSpacing, perWord, measure)
+      next = out.nextWordIndex
+      return out
+    })
+  }
+
+  let placed = placeAll()
   let widest = placed.reduce((m, p) => Math.max(m, p.width), 0)
 
   if (layer.fitWidth && widest > 0 && maxWidth > 0) {
@@ -148,7 +192,7 @@ export function layoutText(
     // Re-place rather than scaling the offsets: glyph advances are not exactly
     // linear in font size once hinting is involved, and a box positioned from
     // scaled offsets would sit slightly off the re-measured glyphs.
-    placed = source.map((t) => placeGlyphs(t, fontSize, tracking, wordSpacing, measure))
+    placed = placeAll()
     widest = placed.reduce((m, p) => Math.max(m, p.width), 0)
   }
 
@@ -156,23 +200,44 @@ export function layoutText(
   // block width for alignment purposes too.
   const target = widest
 
-  let wordIndex = 0
-  const lines: LaidOutLine[] = source.map((text, i) => {
-    let glyphs = placed[i].glyphs
-    let width = placed[i].width
-
-    if (layer.align === 'justify' && glyphs.length > 1) {
-      const xs = justifyOffsets(
-        glyphs.map((g) => g.width),
-        target,
-      )
-      glyphs = glyphs.map((g, k) => ({ ...g, x: xs[k] }))
-      width = target
+  const lines: LaidOutLine[] = placed.map((p, i) => {
+    if (layer.align !== 'justify' || p.glyphs.length <= 1) {
+      return { text: source[i], width: p.width, glyphs: p.glyphs, words: p.words }
     }
 
-    const words = groupWords(glyphs, i, wordIndex)
-    wordIndex += words.length
-    return { text, width, glyphs, words }
+    // Justification moves glyphs, so the words have to be re-derived from the
+    // moved glyphs rather than kept from the natural placement — otherwise a
+    // box would sit where the word *would* have been.
+    const xs = justifyOffsets(
+      p.glyphs.map((g) => g.width),
+      target,
+    )
+    const glyphs = p.glyphs.map((g, k) => ({ ...g, x: xs[k] }))
+
+    const words: PlacedWord[] = []
+    let run: PlacedGlyph[] = []
+    let w = 0
+    const close = () => {
+      if (run.length === 0) return
+      const first = run[0]
+      const last = run[run.length - 1]
+      words.push({
+        text: run.map((g) => g.ch).join(''),
+        index: p.words[w]?.index ?? w,
+        x: first.x,
+        width: last.x + last.width - first.x,
+        line: i,
+      })
+      run = []
+      w += 1
+    }
+    for (const g of glyphs) {
+      if (isSpace(g.ch)) close()
+      else run.push(g)
+    }
+    close()
+
+    return { text: source[i], width: target, glyphs, words }
   })
 
   const lineHeight = fontSize * layer.lineHeight
@@ -305,7 +370,7 @@ export function rasterizeText(
   layer: TextLayer,
   w: number,
   h: number,
-): Float32Array {
+): { tone: Float32Array; fontSize: number } {
   ctx.clearRect(0, 0, w, h)
   const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, w, h)
 
@@ -332,7 +397,10 @@ export function rasterizeText(
   })
 
   ctx.restore()
-  return alphaToTone(ctx, w, h)
+  // The rendered size is reported back because fit-to-width means the layer's
+  // requested `size` is not what actually landed on the sheet, and the press
+  // scales its detail to the real thing.
+  return { tone: alphaToTone(ctx, w, h), fontSize: layout.fontSize }
 }
 
 /**

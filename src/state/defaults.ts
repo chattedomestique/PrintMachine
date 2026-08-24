@@ -21,7 +21,6 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     lineHeight: 0.94,
     tracking: -0.02,
     wordSpacing: 0,
-    wordTracking: {},
     align: 'center',
     x: 0.5,
     y: 0.5,

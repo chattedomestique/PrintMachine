@@ -112,7 +112,6 @@ function toneKey(l: TextLayer): string {
     l.lineHeight,
     l.tracking,
     l.wordSpacing,
-    JSON.stringify(l.wordTracking),
     l.align,
     l.x,
     l.y,

@@ -75,9 +75,8 @@ const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t'
  *
  * Advances are the character's own width, plus `tracking` (global) plus that
  * word's own tracking delta, plus `wordSpacing` additionally after a space.
- * Tracking lands after the final character too, matching CSS letter-spacing —
- * the line width feeds alignment, and a width that ignores the last gap
- * centres slightly off.
+ * Tracking lands on spaces as well as letters, matching native letter-spacing,
+ * so opening the type up widens the gaps between words along with it.
  */
 function placeLine(
   text: string,
@@ -86,7 +85,6 @@ function placeLine(
   fontSize: number,
   tracking: number,
   wordSpacing: number,
-  perWord: Readonly<Record<string, number>>,
   measure: MeasureFn,
 ): { glyphs: PlacedGlyph[]; words: PlacedWord[]; width: number; nextWordIndex: number } {
   const glyphs: PlacedGlyph[] = []
@@ -101,9 +99,6 @@ function placeLine(
   let ink = 0
   let wordIndex = startWordIndex
   let run: PlacedGlyph[] = []
-  // A word's index is fixed the moment its first glyph lands, so its tracking
-  // has to be resolved before that glyph advances — not when the word closes.
-  let runTracking = tracking + (perWord[String(wordIndex)] ?? 0) * fontSize
 
   const closeWord = () => {
     if (run.length === 0) return
@@ -119,31 +114,23 @@ function placeLine(
     })
     run = []
     wordIndex += 1
-    runTracking = tracking + (perWord[String(wordIndex)] ?? 0) * fontSize
   }
 
-  const chars = [...text]
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i]
+  for (const ch of text) {
     const width = measure(ch, fontSize)
     const glyph = { ch, x: pen, width }
     glyphs.push(glyph)
 
     if (isSpace(ch)) {
       closeWord()
-      // The gap itself takes the layer's base tracking, never a word's — a
-      // word's tracking belongs inside that word, not on the space beside it.
+      // Tracking lands on the space too, the way native letter-spacing does, so
+      // opening the type up widens the word gaps with it. Word tracking is the
+      // extra on top, for when the gaps should move independently.
       pen += width + tracking + wordSpacing
     } else {
       run.push(glyph)
       ink = pen + width
-      // A word's tracking applies *between its own letters*, so the advance
-      // depends on whether the next glyph is still inside this word. Adding it
-      // after the final letter too would pad the space beside the word and
-      // read as word spacing nobody asked for.
-      const next = chars[i + 1]
-      const inside = next !== undefined && !isSpace(next)
-      pen += width + (inside ? runTracking : tracking)
+      pen += width + tracking
     }
   }
   closeWord()
@@ -166,7 +153,6 @@ export function layoutText(
 ): TextLayout {
   const raw = layer.caps ? layer.text.toUpperCase() : layer.text
   const source = raw.split('\n')
-  const perWord = layer.wordTracking ?? {}
 
   let fontSize = Math.max(1, layer.size * canvasHeight)
   let tracking = layer.tracking * fontSize
@@ -175,7 +161,7 @@ export function layoutText(
   const placeAll = () => {
     let next = 0
     return source.map((text, i) => {
-      const out = placeLine(text, i, next, fontSize, tracking, wordSpacing, perWord, measure)
+      const out = placeLine(text, i, next, fontSize, tracking, wordSpacing, measure)
       next = out.nextWordIndex
       return out
     })

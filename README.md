@@ -100,23 +100,22 @@ apart, and drifts differently at every size — so there is one layout, and a
 test asserting the engine's word grouping matches the plain whitespace split
 the selection UI shows you.
 
-### Tracking, per word
+### Two spacing controls, both global
 
-The layer's tracking slider letterspaces everything. Per-word tracking is a
-*delta* on top of it, stored against the word's index, so a word can be opened
-up without disturbing its neighbours or the block's own tracking.
+**Letter tracking** letterspaces the layer. It lands on spaces as well as
+letters, the way native `letter-spacing` does, so opening the type up widens
+the gaps between words along with it rather than jamming the words together.
 
-Two things it deliberately does not do. A word's tracking never reaches the
-space beside it — letterspacing is what happens *between a word's own letters*,
-and adding it after the final letter too would pad the following space and read
-as word spacing nobody asked for. And a line measures to its **ink**, not to the
-pen position after the last glyph's trailing advance: count that gap and a
-centred line sits left of centre while a right-aligned one stops short of the
-margin. Both are invisible at normal tracking and unmissable at +0.5em, which is
-exactly the kind of bug that ships. There are tests for each.
+**Word tracking** is the extra on the gaps only, for when they should move
+independently of the letters. Words keep their own widths; only the space
+between them changes.
 
-Word indices come from the same whitespace split the selection chips show, so
-the word you tap is the word that moves.
+That is the whole model. An earlier version also had *per-word* tracking —
+select individual words from a row of chips, letterspace just those. It was
+removed: it answered a question nobody asked, and the selection UI was clutter
+in a panel that should be sliders. Word-level selection still exists in exactly
+one place, where it earns itself: choosing which words a background box sits
+behind.
 
 ### Small type
 
@@ -218,7 +217,7 @@ same code the preview uses.
 ## Status
 
 Working: multi-plate type, the full press and wear model, forced paragraph
-justification, per-word tracking, word-selectable background boxes, undo/redo,
+justification, letter and word tracking, word-selectable background boxes, undo/redo,
 persistence, and save via the share sheet. Text is the first input; photo intake
 runs through the same separate → screen → misregister → overprint pipeline and
 lands next.

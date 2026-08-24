@@ -274,7 +274,6 @@ describe('text layout', () => {
     lineHeight: 1,
     tracking: 0,
     wordSpacing: 0,
-    wordTracking: {},
     align: 'left',
     x: 0.5,
     y: 0.5,
@@ -564,7 +563,6 @@ describe('word layout', () => {
     lineHeight: 1,
     tracking: 0,
     wordSpacing: 0,
-    wordTracking: {},
     align: 'left',
     x: 0.5,
     y: 0.5,
@@ -638,7 +636,7 @@ describe('word layout', () => {
   })
 })
 
-describe('per-word tracking', () => {
+describe('word tracking', () => {
   const measure = (text: string, size: number) => text.length * size * 0.5
 
   const layer = (over: Partial<TextLayer> = {}): TextLayer => ({
@@ -651,7 +649,6 @@ describe('per-word tracking', () => {
     lineHeight: 1,
     tracking: 0,
     wordSpacing: 0,
-    wordTracking: {},
     align: 'left',
     x: 0.5,
     y: 0.5,
@@ -665,40 +662,24 @@ describe('per-word tracking', () => {
     ...over,
   })
 
-  const widths = (l: TextLayer) =>
-    Object.fromEntries(wordsOf(layoutText(l, 1000, 600, measure)).map((w) => [w.text, w.width]))
-
-  it('widens only the targeted word', () => {
-    const base = widths(layer())
-    const out = widths(layer({ wordTracking: { '1': 0.4 } }))
-
-    expect(out.BB).toBeGreaterThan(base.BB)
-    // The point of per-word tracking is that its neighbours do not move with
-    // it — otherwise it is just the layer's tracking slider again.
-    expect(out.AA).toBeCloseTo(base.AA, 6)
-    expect(out.CC).toBeCloseTo(base.CC, 6)
-  })
-
-  it('adds to the layer tracking rather than replacing it', () => {
-    const fontSize = layoutText(layer(), 1000, 600, measure).fontSize
-    const both = widths(layer({ tracking: 0.1, wordTracking: { '1': 0.3 } }))
-    const trackedOnly = widths(layer({ tracking: 0.1 }))
-
-    // One inter-glyph gap in a two-letter word, so the delta is exactly one
-    // step of 0.3em on top of whatever the base tracking already contributed.
-    expect(both.BB - trackedOnly.BB).toBeCloseTo(0.3 * fontSize, 6)
-  })
-
-  it('does not leak onto the space beside the word', () => {
-    // If a word's tracking were applied to the following space, the *next*
-    // word would slide right. Its start is the assertion.
+  it('widens the gaps between words without touching the words', () => {
     const base = wordsOf(layoutText(layer(), 1000, 600, measure))
-    const out = wordsOf(layoutText(layer({ wordTracking: { '0': 0.4 } }), 1000, 600, measure))
-    const fontSize = layoutText(layer(), 1000, 600, measure).fontSize
+    const out = wordsOf(layoutText(layer({ wordSpacing: 0.5 }), 1000, 600, measure))
 
-    // 'AA' has one interior gap, so everything after it shifts by exactly one
-    // step — not two, which is what including the trailing space would give.
-    expect(out[1].x - base[1].x).toBeCloseTo(0.4 * fontSize, 6)
+    // Every word keeps its own width — word tracking is the gap, not the word.
+    for (let i = 0; i < base.length; i++) expect(out[i].width).toBeCloseTo(base[i].width, 6)
+    // ...and each successive gap has opened up by the same amount.
+    expect(out[1].x - out[0].x).toBeGreaterThan(base[1].x - base[0].x)
+    expect(out[2].x - out[1].x).toBeCloseTo(out[1].x - out[0].x, 6)
+  })
+
+  it('lets letter tracking widen the word gaps too, like native letter-spacing', () => {
+    const base = wordsOf(layoutText(layer(), 1000, 600, measure))
+    const out = wordsOf(layoutText(layer({ tracking: 0.2 }), 1000, 600, measure))
+
+    // Native letter-spacing lands on the space as well, so opening the type up
+    // opens the word gaps with it rather than jamming the words together.
+    expect(out[1].x - out[0].x).toBeGreaterThan(base[1].x - base[0].x)
   })
 
   it('measures a line to its ink, not to the trailing tracking gap', () => {
@@ -706,9 +687,8 @@ describe('per-word tracking', () => {
     // and stops a right-aligned one short of the margin.
     const tight = layoutText(layer({ text: 'AA', tracking: 0 }), 1000, 600, measure)
     const loose = layoutText(layer({ text: 'AA', tracking: 0.5 }), 1000, 600, measure)
-    const fontSize = tight.fontSize
 
-    expect(loose.lines[0].width - tight.lines[0].width).toBeCloseTo(0.5 * fontSize, 6)
+    expect(loose.lines[0].width - tight.lines[0].width).toBeCloseTo(0.5 * tight.fontSize, 6)
   })
 })
 

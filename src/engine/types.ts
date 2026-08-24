@@ -70,16 +70,6 @@ export interface TextLayer {
   tracking: number
   /** Word spacing in em — extra at each space, on top of tracking. */
   wordSpacing: number
-  /**
-   * Per-word letter tracking, in em, keyed by word index as a string.
-   *
-   * A *delta* on top of `tracking`, not a replacement, so changing the layer's
-   * tracking still moves every word — a word with an override stays
-   * relatively looser or tighter rather than pinning to an absolute value.
-   * Keys are strings because this is JSON that round-trips through
-   * localStorage, where numeric object keys come back as strings anyway.
-   */
-  wordTracking: Record<string, number>
   align: TextAlign
   /** Anchor position, 0..1 of canvas width/height. */
   x: number

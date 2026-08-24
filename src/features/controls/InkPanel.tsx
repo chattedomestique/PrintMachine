@@ -68,6 +68,19 @@ export default function InkPanel() {
             />
           </Field>
 
+          <Toggle
+            label="Print over the photo"
+            checked={layer.opaque}
+            onChange={(opaque: boolean) =>
+              dispatch({ type: 'patchLayer', id: layer.id, patch: { opaque } })
+            }
+          />
+          <p className="panel-note">
+            Riso ink is transparent, so by default this plate and its boxes multiply down from
+            whatever they land on — which is what makes type genuinely overprint a photograph.
+            On, they sit on the image at full strength regardless of what it is doing underneath.
+          </p>
+
           {/* The second ink only means anything with a photo under the type. */}
           {settings.media && (
             <>

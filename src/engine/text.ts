@@ -75,9 +75,8 @@ const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t'
  *
  * Advances are the character's own width, plus `tracking` (global) plus that
  * word's own tracking delta, plus `wordSpacing` additionally after a space.
- * Tracking lands after the final character too, matching CSS letter-spacing —
- * the line width feeds alignment, and a width that ignores the last gap
- * centres slightly off.
+ * Tracking lands on spaces as well as letters, matching native letter-spacing,
+ * so opening the type up widens the gaps between words along with it.
  */
 function placeLine(
   text: string,
@@ -86,7 +85,6 @@ function placeLine(
   fontSize: number,
   tracking: number,
   wordSpacing: number,
-  perWord: Readonly<Record<string, number>>,
   measure: MeasureFn,
 ): { glyphs: PlacedGlyph[]; words: PlacedWord[]; width: number; nextWordIndex: number } {
   const glyphs: PlacedGlyph[] = []
@@ -101,9 +99,6 @@ function placeLine(
   let ink = 0
   let wordIndex = startWordIndex
   let run: PlacedGlyph[] = []
-  // A word's index is fixed the moment its first glyph lands, so its tracking
-  // has to be resolved before that glyph advances — not when the word closes.
-  let runTracking = tracking + (perWord[String(wordIndex)] ?? 0) * fontSize
 
   const closeWord = () => {
     if (run.length === 0) return
@@ -119,31 +114,23 @@ function placeLine(
     })
     run = []
     wordIndex += 1
-    runTracking = tracking + (perWord[String(wordIndex)] ?? 0) * fontSize
   }
 
-  const chars = [...text]
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i]
+  for (const ch of text) {
     const width = measure(ch, fontSize)
     const glyph = { ch, x: pen, width }
     glyphs.push(glyph)
 
     if (isSpace(ch)) {
       closeWord()
-      // The gap itself takes the layer's base tracking, never a word's — a
-      // word's tracking belongs inside that word, not on the space beside it.
+      // Tracking lands on the space too, the way native letter-spacing does, so
+      // opening the type up widens the word gaps with it. Word tracking is the
+      // extra on top, for when the gaps should move independently.
       pen += width + tracking + wordSpacing
     } else {
       run.push(glyph)
       ink = pen + width
-      // A word's tracking applies *between its own letters*, so the advance
-      // depends on whether the next glyph is still inside this word. Adding it
-      // after the final letter too would pad the space beside the word and
-      // read as word spacing nobody asked for.
-      const next = chars[i + 1]
-      const inside = next !== undefined && !isSpace(next)
-      pen += width + (inside ? runTracking : tracking)
+      pen += width + tracking
     }
   }
   closeWord()
@@ -166,7 +153,6 @@ export function layoutText(
 ): TextLayout {
   const raw = layer.caps ? layer.text.toUpperCase() : layer.text
   const source = raw.split('\n')
-  const perWord = layer.wordTracking ?? {}
 
   let fontSize = Math.max(1, layer.size * canvasHeight)
   let tracking = layer.tracking * fontSize
@@ -175,7 +161,7 @@ export function layoutText(
   const placeAll = () => {
     let next = 0
     return source.map((text, i) => {
-      const out = placeLine(text, i, next, fontSize, tracking, wordSpacing, perWord, measure)
+      const out = placeLine(text, i, next, fontSize, tracking, wordSpacing, measure)
       next = out.nextWordIndex
       return out
     })
@@ -208,9 +194,24 @@ export function layoutText(
     // Justification moves glyphs, so the words have to be re-derived from the
     // moved glyphs rather than kept from the natural placement — otherwise a
     // box would sit where the word *would* have been.
+    // Feed the natural gaps through so justification adds to them rather than
+    // replacing them: a word gap stays wider than a letter gap by exactly the
+    // word tracking, and only the leftover slack is shared out.
+    const naturalGaps = p.glyphs
+      .slice(0, -1)
+      .map((g, k) => p.glyphs[k + 1].x - g.x - g.width)
+    // Justifying by words means the slack lands beside the spaces: a gap counts
+    // if either glyph touching it is one, so the space itself grows on both
+    // sides and the words stay as tight as they were set.
+    const absorb =
+      layer.justifyBy === 'words'
+        ? p.glyphs.slice(0, -1).map((g, k) => isSpace(g.ch) || isSpace(p.glyphs[k + 1].ch))
+        : []
     const xs = justifyOffsets(
       p.glyphs.map((g) => g.width),
       target,
+      naturalGaps,
+      absorb,
     )
     const glyphs = p.glyphs.map((g, k) => ({ ...g, x: xs[k] }))
 
@@ -288,19 +289,40 @@ export function alignOffset(lineWidth: number, blockWidth: number, align: TextAl
  * A single-character line has no gaps to absorb the slack, so it is left where
  * it is instead of being scaled.
  *
- * @param widths per-character advance widths, in order.
+ * @param widths per-character glyph widths, in order.
+ * @param targetWidth width every line is stretched to — the widest natural line.
+ * @param gaps the gap already sitting before each following character (tracking,
+ *   and word tracking at spaces). Omitted, every gap starts at zero.
  * @returns the x offset for each character, relative to the line start.
  */
-export function justifyOffsets(widths: readonly number[], targetWidth: number): number[] {
-  const gaps = widths.length - 1
-  const natural = widths.reduce((a, b) => a + b, 0)
-  const extra = gaps > 0 ? (targetWidth - natural) / gaps : 0
+export function justifyOffsets(
+  widths: readonly number[],
+  targetWidth: number,
+  gaps: readonly number[] = [],
+  absorb: readonly boolean[] = [],
+): number[] {
+  const count = widths.length - 1
+  // The slack is measured against the *placed* line, gaps included. Measuring
+  // it against bare glyph widths instead throws the existing gaps away and
+  // re-spreads them evenly, which silently converts word tracking into letter
+  // tracking — the words end up no further apart than the letters.
+  const natural =
+    widths.reduce((a, b) => a + b, 0) + gaps.slice(0, count).reduce((a, b) => a + b, 0)
+  // Only some gaps may be allowed to grow — the ones beside a space, when
+  // justifying by words. A line with no such gap (one long word) would have
+  // nowhere to put the slack and would not reach the measure, so it falls back
+  // to spreading across everything.
+  const eligible: number[] = []
+  for (let i = 0; i < count; i++) if (absorb.length === 0 || absorb[i]) eligible.push(i)
+  const takers = eligible.length > 0 ? eligible : Array.from({ length: count }, (_, i) => i)
+  const share = new Set(takers)
+  const extra = takers.length > 0 ? (targetWidth - natural) / takers.length : 0
 
   const xs: number[] = []
   let pen = 0
   for (let i = 0; i < widths.length; i++) {
     xs.push(pen)
-    pen += widths[i] + extra
+    pen += widths[i] + (gaps[i] ?? 0) + (share.has(i) ? extra : 0)
   }
   return xs
 }

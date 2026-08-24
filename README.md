@@ -100,23 +100,50 @@ apart, and drifts differently at every size — so there is one layout, and a
 test asserting the engine's word grouping matches the plain whitespace split
 the selection UI shows you.
 
-### Tracking, per word
+### Two spacing controls, both global
 
-The layer's tracking slider letterspaces everything. Per-word tracking is a
-*delta* on top of it, stored against the word's index, so a word can be opened
-up without disturbing its neighbours or the block's own tracking.
+**Letter tracking** letterspaces the layer. It lands on spaces as well as
+letters, the way native `letter-spacing` does, so opening the type up widens
+the gaps between words along with it rather than jamming the words together.
 
-Two things it deliberately does not do. A word's tracking never reaches the
-space beside it — letterspacing is what happens *between a word's own letters*,
-and adding it after the final letter too would pad the following space and read
-as word spacing nobody asked for. And a line measures to its **ink**, not to the
-pen position after the last glyph's trailing advance: count that gap and a
-centred line sits left of centre while a right-aligned one stops short of the
-margin. Both are invisible at normal tracking and unmissable at +0.5em, which is
-exactly the kind of bug that ships. There are tests for each.
+**Word tracking** is the extra on the gaps only, for when they should move
+independently of the letters. Words keep their own widths; only the space
+between them changes.
 
-Word indices come from the same whitespace split the selection chips show, so
-the word you tap is the word that moves.
+Justification has to respect that. It stretches lines by sharing slack across
+the gaps, and measuring that slack from bare glyph widths throws the placed
+gaps away and re-spreads them evenly — which silently converts word tracking
+into letter tracking, leaving words no further apart than letters. So the
+natural gaps are fed through and justification adds to them, keeping a word gap
+wider than a letter gap by exactly the word tracking. There is a test, plus one
+asserting lines still reach the measure, since "preserve the gaps" is also
+satisfied by refusing to justify at all.
+
+### Justify by words, or by letters
+
+Filling the measure means putting slack somewhere, and there are two honest
+answers. **Justify by words** puts it beside the spaces: the words themselves
+stay exactly as set and the gaps between them open up. **Justify by letters**
+shares it across every gap, which is the solid rectangular block of type — and
+which necessarily letterspaces a short line.
+
+Words is the default, because a short line rendered as `S L O W  D O W N` is
+rarely what anyone wanted. The choice appears under Alignment only while
+justify is selected: it does nothing in any other mode, and putting it directly
+beneath the control that switches it on beats leaving it inert in the panel.
+
+A line with no spaces — one long word — has no word gap to open, so it falls
+back to spreading across the letters. The alternative is a line that quietly
+fails to reach the measure, which looks like a bug rather than a choice. Tested,
+along with both modes reaching the measure and words mode leaving intra-word
+letter gaps untouched.
+
+That is the whole model. An earlier version also had *per-word* tracking —
+select individual words from a row of chips, letterspace just those. It was
+removed: it answered a question nobody asked, and the selection UI was clutter
+in a panel that should be sliders. Word-level selection still exists in exactly
+one place, where it earns itself: choosing which words a background box sits
+behind.
 
 ### Small type
 
@@ -218,7 +245,7 @@ same code the preview uses.
 ## Status
 
 Working: multi-plate type, the full press and wear model, forced paragraph
-justification, per-word tracking, word-selectable background boxes, undo/redo,
+justification, letter and word tracking, word-selectable background boxes, undo/redo,
 persistence, and save via the share sheet. Text is the first input; photo intake
 runs through the same separate → screen → misregister → overprint pipeline and
 lands next.

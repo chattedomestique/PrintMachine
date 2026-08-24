@@ -194,9 +194,16 @@ export function layoutText(
     // Justification moves glyphs, so the words have to be re-derived from the
     // moved glyphs rather than kept from the natural placement — otherwise a
     // box would sit where the word *would* have been.
+    // Feed the natural gaps through so justification adds to them rather than
+    // replacing them: a word gap stays wider than a letter gap by exactly the
+    // word tracking, and only the leftover slack is shared out.
+    const naturalGaps = p.glyphs
+      .slice(0, -1)
+      .map((g, k) => p.glyphs[k + 1].x - g.x - g.width)
     const xs = justifyOffsets(
       p.glyphs.map((g) => g.width),
       target,
+      naturalGaps,
     )
     const glyphs = p.glyphs.map((g, k) => ({ ...g, x: xs[k] }))
 
@@ -274,19 +281,31 @@ export function alignOffset(lineWidth: number, blockWidth: number, align: TextAl
  * A single-character line has no gaps to absorb the slack, so it is left where
  * it is instead of being scaled.
  *
- * @param widths per-character advance widths, in order.
+ * @param widths per-character glyph widths, in order.
+ * @param targetWidth width every line is stretched to — the widest natural line.
+ * @param gaps the gap already sitting before each following character (tracking,
+ *   and word tracking at spaces). Omitted, every gap starts at zero.
  * @returns the x offset for each character, relative to the line start.
  */
-export function justifyOffsets(widths: readonly number[], targetWidth: number): number[] {
-  const gaps = widths.length - 1
-  const natural = widths.reduce((a, b) => a + b, 0)
-  const extra = gaps > 0 ? (targetWidth - natural) / gaps : 0
+export function justifyOffsets(
+  widths: readonly number[],
+  targetWidth: number,
+  gaps: readonly number[] = [],
+): number[] {
+  const count = widths.length - 1
+  // The slack is measured against the *placed* line, gaps included. Measuring
+  // it against bare glyph widths instead throws the existing gaps away and
+  // re-spreads them evenly, which silently converts word tracking into letter
+  // tracking — the words end up no further apart than the letters.
+  const natural =
+    widths.reduce((a, b) => a + b, 0) + gaps.slice(0, count).reduce((a, b) => a + b, 0)
+  const extra = count > 0 ? (targetWidth - natural) / count : 0
 
   const xs: number[] = []
   let pen = 0
   for (let i = 0; i < widths.length; i++) {
     xs.push(pen)
-    pen += widths[i] + extra
+    pen += widths[i] + (gaps[i] ?? 0) + extra
   }
   return xs
 }

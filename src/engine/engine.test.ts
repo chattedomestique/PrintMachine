@@ -682,6 +682,38 @@ describe('word tracking', () => {
     expect(out[1].x - out[0].x).toBeGreaterThan(base[1].x - base[0].x)
   })
 
+  it('keeps word tracking out of the letters under forced justification', () => {
+    // Justification spreads slack across every gap. Measuring that slack from
+    // bare glyph widths throws the placed gaps away and re-spreads them, which
+    // turns word tracking into letter tracking — the words end up no further
+    // apart than the letters, which is the whole point of the control gone.
+    const intra = (l: TextLayer) => {
+      const g = layoutText(l, 1000, 600, measure).lines[0].glyphs
+      return g[1].x - g[0].x - g[0].width
+    }
+    for (const fitWidth of [false, true]) {
+      const base = intra(layer({ text: 'AA BB', align: 'justify', fitWidth }))
+      const wide = intra(layer({ text: 'AA BB', align: 'justify', fitWidth, wordSpacing: 0.8 }))
+      expect(wide).toBeCloseTo(base, 6)
+    }
+  })
+
+  it('still fills the measure when justified with word tracking on', () => {
+    // The gaps must not be preserved by simply refusing to justify.
+    const out = layoutText(
+      layer({ text: 'AA BB\nCCCCCCCC', align: 'justify', wordSpacing: 0.8 }),
+      1000,
+      600,
+      measure,
+    )
+    const [short, long] = out.lines
+    const end = (l: typeof short) => {
+      const g = l.glyphs[l.glyphs.length - 1]
+      return g.x + g.width
+    }
+    expect(end(short)).toBeCloseTo(end(long), 6)
+  })
+
   it('measures a line to its ink, not to the trailing tracking gap', () => {
     // A trailing gap counted in the width pushes a centred line left of centre
     // and stops a right-aligned one short of the margin.

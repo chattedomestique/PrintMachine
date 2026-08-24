@@ -110,6 +110,15 @@ the gaps between words along with it rather than jamming the words together.
 independently of the letters. Words keep their own widths; only the space
 between them changes.
 
+Justification has to respect that. It stretches lines by sharing slack across
+the gaps, and measuring that slack from bare glyph widths throws the placed
+gaps away and re-spreads them evenly — which silently converts word tracking
+into letter tracking, leaving words no further apart than letters. So the
+natural gaps are fed through and justification adds to them, keeping a word gap
+wider than a letter gap by exactly the word tracking. There is a test, plus one
+asserting lines still reach the measure, since "preserve the gaps" is also
+satisfied by refusing to justify at all.
+
 That is the whole model. An earlier version also had *per-word* tracking —
 select individual words from a row of chips, letterspace just those. It was
 removed: it answered a question nobody asked, and the selection UI was clutter

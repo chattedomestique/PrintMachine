@@ -20,6 +20,8 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     size: 0.16,
     lineHeight: 0.94,
     tracking: -0.02,
+    wordSpacing: 0,
+    wordTracking: {},
     align: 'center',
     x: 0.5,
     y: 0.5,
@@ -27,6 +29,9 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     caps: true,
     opacity: 1,
     fitWidth: true,
+    boxes: [],
+    boxPadding: 0.12,
+    boxRadius: 0,
     ...overrides,
   }
 }
@@ -68,6 +73,7 @@ export function defaultSettings(): PrintSettings {
     patches: 0.22,
     // ~5px at the 1800px reference — clearly visible without looking broken.
     misregistration: 5,
+    detailScaling: true,
 
     seed: 12345,
     layers: [

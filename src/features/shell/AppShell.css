@@ -132,3 +132,34 @@
   min-height: 40px;
   padding: 0 var(--space-6);
 }
+
+/* ── Offline readiness ───────────────────────────────────────────────── */
+.offline-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: var(--space-1);
+  border-radius: 50%;
+  background: var(--ink-3);
+  opacity: 0.4;
+  transition: background var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+/* Green rather than the accent: this is a status, not an action, and the
+   accent is spoken for by the active tab and the save button. */
+.offline-dot[data-state='ready'] {
+  background: #19975d;
+  opacity: 1;
+}
+.offline-dot[data-state='pending'] {
+  animation: offline-pulse 1.4s ease-in-out infinite;
+}
+.offline-dot[data-state='unsupported'] {
+  opacity: 0.25;
+}
+@keyframes offline-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.7; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .offline-dot[data-state='pending'] { animation: none; }
+}

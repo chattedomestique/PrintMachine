@@ -16,7 +16,8 @@ import { inkById, overprint, paperById, RISO_INKS } from './inks.ts'
 import { paperField } from './paper.ts'
 import { mulberry32, valueNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
-import { alignOffset, justifyOffsets, layoutText } from './text.ts'
+import { alignOffset, justifyOffsets, layoutText, wordsOf } from './text.ts'
+import { detailFactor } from './render.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
@@ -272,6 +273,8 @@ describe('text layout', () => {
     size: 0.1,
     lineHeight: 1,
     tracking: 0,
+    wordSpacing: 0,
+    wordTracking: {},
     align: 'left',
     x: 0.5,
     y: 0.5,
@@ -279,6 +282,9 @@ describe('text layout', () => {
     caps: false,
     opacity: 1,
     fitWidth: false,
+    boxes: [],
+    boxPadding: 0.12,
+    boxRadius: 0,
     ...over,
   })
 
@@ -540,5 +546,190 @@ describe('fading is dots, not opacity', () => {
     const tone = new Float32Array(N * N).fill(0.7)
     const afterScreen = applyDropoutPatches(screenField(tone, N, N, opts), N, N, 0.9, 3)
     expect([...afterScreen].some((v) => v > 0.02 && v < 0.98)).toBe(true)
+  })
+})
+
+describe('word layout', () => {
+  // Every glyph is half the font size wide, so positions are exactly
+  // predictable and the assertions can be about arithmetic, not fonts.
+  const measure = (text: string, size: number) => text.length * size * 0.5
+
+  const layer = (over: Partial<TextLayer> = {}): TextLayer => ({
+    id: 't',
+    text: 'AA BB\nCC',
+    inkId: 'black',
+    fontId: 'grotesk',
+    weight: 700,
+    size: 0.1,
+    lineHeight: 1,
+    tracking: 0,
+    wordSpacing: 0,
+    wordTracking: {},
+    align: 'left',
+    x: 0.5,
+    y: 0.5,
+    rotation: 0,
+    caps: false,
+    opacity: 1,
+    fitWidth: false,
+    boxes: [],
+    boxPadding: 0.12,
+    boxRadius: 0,
+    ...over,
+  })
+
+  it('numbers words continuously across lines', () => {
+    const words = wordsOf(layoutText(layer(), 1000, 600, measure))
+    expect(words.map((w) => w.text)).toEqual(['AA', 'BB', 'CC'])
+    expect(words.map((w) => w.index)).toEqual([0, 1, 2])
+    expect(words.map((w) => w.line)).toEqual([0, 0, 1])
+  })
+
+  it('gives each word the span its glyphs actually occupy', () => {
+    const out = layoutText(layer(), 1000, 600, measure)
+    const [aa, bb] = out.lines[0].words
+    const glyph = out.fontSize * 0.5
+    expect(aa.x).toBeCloseTo(0, 6)
+    expect(aa.width).toBeCloseTo(glyph * 2, 6)
+    // "AA" + space = 3 advances before "BB" starts.
+    expect(bb.x).toBeCloseTo(glyph * 3, 6)
+  })
+
+  it('word spacing widens the gap without touching the words', () => {
+    const glyph = layoutText(layer(), 1000, 600, measure).fontSize * 0.5
+    const wide = layoutText(layer({ wordSpacing: 1 }), 1000, 600, measure)
+    const [aa, bb] = wide.lines[0].words
+    expect(aa.width).toBeCloseTo(glyph * 2, 6)
+    // One em of extra space lands between the words, and nowhere else.
+    expect(bb.x - (aa.x + aa.width)).toBeCloseTo(glyph + wide.fontSize, 6)
+  })
+
+  it('keeps letter tracking and word spacing independent', () => {
+    const base = layoutText(layer(), 1000, 600, measure)
+    const tracked = layoutText(layer({ tracking: 0.1 }), 1000, 600, measure)
+    const spaced = layoutText(layer({ wordSpacing: 0.5 }), 1000, 600, measure)
+
+    // Tracking stretches the word itself; word spacing does not.
+    expect(tracked.lines[0].words[0].width).toBeGreaterThan(base.lines[0].words[0].width)
+    expect(spaced.lines[0].words[0].width).toBeCloseTo(base.lines[0].words[0].width, 6)
+  })
+
+  it('collapses runs of whitespace rather than inventing empty words', () => {
+    const words = wordsOf(layoutText(layer({ text: 'A   B' }), 1000, 600, measure))
+    expect(words.map((w) => w.text)).toEqual(['A', 'B'])
+  })
+
+  it('agrees with a plain whitespace split — the index a box stores', () => {
+    // The selection UI derives its word list by splitting the raw text. If the
+    // engine grouped words differently, a box would highlight one word in the
+    // panel and print behind another.
+    const text = 'ONE TWO\nTHREE  FOUR'
+    const fromEngine = wordsOf(layoutText(layer({ text }), 1000, 600, measure)).map((w) => w.text)
+    const fromSplit = text.split(/\s+/).filter(Boolean)
+    expect(fromEngine).toEqual(fromSplit)
+  })
+
+  it('still numbers words correctly when justified', () => {
+    const words = wordsOf(layoutText(layer({ align: 'justify' }), 1000, 600, measure))
+    expect(words.map((w) => w.index)).toEqual([0, 1, 2])
+    // Justification moved them, but they are still ordered left to right.
+    const line0 = words.filter((w) => w.line === 0)
+    expect(line0[1].x).toBeGreaterThan(line0[0].x)
+  })
+})
+
+describe('per-word tracking', () => {
+  const measure = (text: string, size: number) => text.length * size * 0.5
+
+  const layer = (over: Partial<TextLayer> = {}): TextLayer => ({
+    id: 't',
+    text: 'AA BB CC',
+    inkId: 'black',
+    fontId: 'grotesk',
+    weight: 400,
+    size: 0.1,
+    lineHeight: 1,
+    tracking: 0,
+    wordSpacing: 0,
+    wordTracking: {},
+    align: 'left',
+    x: 0.5,
+    y: 0.5,
+    rotation: 0,
+    caps: false,
+    opacity: 1,
+    fitWidth: false,
+    boxes: [],
+    boxPadding: 0.1,
+    boxRadius: 0,
+    ...over,
+  })
+
+  const widths = (l: TextLayer) =>
+    Object.fromEntries(wordsOf(layoutText(l, 1000, 600, measure)).map((w) => [w.text, w.width]))
+
+  it('widens only the targeted word', () => {
+    const base = widths(layer())
+    const out = widths(layer({ wordTracking: { '1': 0.4 } }))
+
+    expect(out.BB).toBeGreaterThan(base.BB)
+    // The point of per-word tracking is that its neighbours do not move with
+    // it — otherwise it is just the layer's tracking slider again.
+    expect(out.AA).toBeCloseTo(base.AA, 6)
+    expect(out.CC).toBeCloseTo(base.CC, 6)
+  })
+
+  it('adds to the layer tracking rather than replacing it', () => {
+    const fontSize = layoutText(layer(), 1000, 600, measure).fontSize
+    const both = widths(layer({ tracking: 0.1, wordTracking: { '1': 0.3 } }))
+    const trackedOnly = widths(layer({ tracking: 0.1 }))
+
+    // One inter-glyph gap in a two-letter word, so the delta is exactly one
+    // step of 0.3em on top of whatever the base tracking already contributed.
+    expect(both.BB - trackedOnly.BB).toBeCloseTo(0.3 * fontSize, 6)
+  })
+
+  it('does not leak onto the space beside the word', () => {
+    // If a word's tracking were applied to the following space, the *next*
+    // word would slide right. Its start is the assertion.
+    const base = wordsOf(layoutText(layer(), 1000, 600, measure))
+    const out = wordsOf(layoutText(layer({ wordTracking: { '0': 0.4 } }), 1000, 600, measure))
+    const fontSize = layoutText(layer(), 1000, 600, measure).fontSize
+
+    // 'AA' has one interior gap, so everything after it shifts by exactly one
+    // step — not two, which is what including the trailing space would give.
+    expect(out[1].x - base[1].x).toBeCloseTo(0.4 * fontSize, 6)
+  })
+
+  it('measures a line to its ink, not to the trailing tracking gap', () => {
+    // A trailing gap counted in the width pushes a centred line left of centre
+    // and stops a right-aligned one short of the margin.
+    const tight = layoutText(layer({ text: 'AA', tracking: 0 }), 1000, 600, measure)
+    const loose = layoutText(layer({ text: 'AA', tracking: 0.5 }), 1000, 600, measure)
+    const fontSize = tight.fontSize
+
+    expect(loose.lines[0].width - tight.lines[0].width).toBeCloseTo(0.5 * fontSize, 6)
+  })
+})
+
+describe('detail scaling', () => {
+  it('leaves poster type at full coarseness', () => {
+    expect(detailFactor(1000 * 0.16, 1000)).toBeCloseTo(1, 6)
+    expect(detailFactor(1000 * 0.5, 1000)).toBe(1)
+  })
+
+  it('backs the press off as type gets smaller', () => {
+    const big = detailFactor(1000 * 0.12, 1000)
+    const mid = detailFactor(1000 * 0.06, 1000)
+    const small = detailFactor(1000 * 0.02, 1000)
+
+    expect(big).toBeLessThan(1)
+    expect(mid).toBeLessThan(big)
+    expect(small).toBeLessThan(mid)
+  })
+
+  it('floors so small type still reads as printed, not as clean vector', () => {
+    expect(detailFactor(1, 1000)).toBe(0.22)
+    expect(detailFactor(0, 1000)).toBe(0.22)
   })
 })

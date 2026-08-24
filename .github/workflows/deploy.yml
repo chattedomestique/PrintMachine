@@ -39,6 +39,16 @@ jobs:
           PAGES: '1' # base = /PrintMachine/ for the Pages sub-path
       - run: test -s dist/index.html # smoke: the bundle isn't empty
 
+      # N2 says "works offline" is a claim you must verify. It was previously
+      # verified by reading the precache manifest and deciding it looked right,
+      # which is inspection, not verification. This serves the build at the real
+      # Pages sub-path, installs the worker, cuts the network and cold-launches.
+      # Runners ship Chrome, which playwright-core drives without downloading
+      # a browser.
+      - run: node scripts/verify-offline.mjs
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+
       # Hand the *verified* build to the deploy job rather than rebuilding it
       # there. Whatever ships is then byte-for-byte what the gate checked.
       - name: Upload built site

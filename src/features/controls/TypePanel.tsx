@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import { FONTS, type TextAlign, type TextLayer } from '../../engine/types.ts'
 import { MAX_SIZE, MIN_SIZE } from '../editor/useLayerGestures.ts'
@@ -15,14 +15,28 @@ const ALIGNS: readonly { value: TextAlign; label: string }[] = [
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
+/** Whitespace split — the same rule the engine groups words by, so an index
+ *  here means the same word it means in the layout. */
+function wordsOf(layer: TextLayer): string[] {
+  const raw = layer.caps ? layer.text.toUpperCase() : layer.text
+  return raw.split(/\s+/).filter((t) => t.length > 0)
+}
+
 export default function TypePanel() {
   const { settings, dispatch, selectedLayer } = useSettings()
   const textId = useId()
+  const [selected, setSelected] = useState<number[]>([])
   const layer = selectedLayer ?? settings.layers[0]
   if (!layer) return null
 
   const patch = (p: Partial<TextLayer>, coalesce = false) =>
     dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce })
+
+  const words = wordsOf(layer)
+  // Selecting nothing means "the words with an override already", so the
+  // slider always has something meaningful to move.
+  const targets = selected.length > 0 ? selected : words.map((_, i) => i).filter((i) => layer.wordTracking[String(i)])
+  const shown = targets.length > 0 ? (layer.wordTracking[String(targets[0])] ?? 0) : 0
 
   return (
     <div className="control-stack">
@@ -87,13 +101,69 @@ export default function TypePanel() {
       />
 
       <Slider
-        label="Tracking"
+        label="Letter tracking"
         value={layer.tracking}
         min={-0.1}
         max={0.4}
         step={0.005}
         format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(3)}em`}
         onChange={(tracking) => patch({ tracking }, true)}
+      />
+
+      <Field label={selected.length ? `Per-word tracking · ${selected.length} selected` : 'Per-word tracking'}>
+        {words.length === 0 ? (
+          <p className="plate-hint">This plate has no text yet.</p>
+        ) : (
+          <>
+            <div className="word-chips" role="group" aria-label="Words to track">
+              {words.map((word, i) => {
+                const em = layer.wordTracking[String(i)]
+                const isSelected = selected.includes(i)
+                return (
+                  <button
+                    key={`${word}-${i}`}
+                    type="button"
+                    className="word-chip"
+                    aria-pressed={isSelected}
+                    data-tracked={em !== undefined || undefined}
+                    onClick={() =>
+                      setSelected((prev) =>
+                        prev.includes(i) ? prev.filter((n) => n !== i) : [...prev, i],
+                      )
+                    }
+                  >
+                    {word}
+                    {em !== undefined && (
+                      <span className="word-chip-badge">{em > 0 ? '+' : ''}{em.toFixed(2)}</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            <Slider
+              label={targets.length ? 'Tracking for these words' : 'Tap words to track them'}
+              value={shown}
+              min={-0.1}
+              max={0.6}
+              step={0.005}
+              format={(v) => (v === 0 ? 'normal' : `${v > 0 ? '+' : ''}${v.toFixed(3)}em`)}
+              onChange={(em) => {
+                if (targets.length === 0) return
+                dispatch({ type: 'setWordTracking', layerId: layer.id, words: targets, em, coalesce: true })
+              }}
+            />
+          </>
+        )}
+      </Field>
+
+      <Slider
+        label="Word spacing"
+        value={layer.wordSpacing}
+        min={-0.2}
+        max={2}
+        step={0.01}
+        format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}em`}
+        onChange={(wordSpacing) => patch({ wordSpacing }, true)}
       />
 
       <Slider

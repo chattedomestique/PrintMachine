@@ -207,3 +207,45 @@
   align-items: center;
   gap: var(--space-3);
 }
+
+/* ── Word chips: tap a word to put it in the selected box ─────────────── */
+.word-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.word-chip {
+  touch-action: manipulation;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--ink-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+/* The chip carrying the ink of whichever box owns it already reads as
+   selected; the ring marks membership of the box being edited. */
+.word-chip[aria-pressed='true'] {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+.word-chip:active {
+  transform: scale(0.95);
+}
+
+/* A word carrying its own tracking shows the value, so the override is
+   visible without selecting the word to find out. */
+.word-chip[data-tracked] {
+  border-color: var(--accent);
+}
+.word-chip-badge {
+  margin-left: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}

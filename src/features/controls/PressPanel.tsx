@@ -1,5 +1,5 @@
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
-import type { DitherType } from '../../engine/dither.ts'
+import { DITHER_TYPES } from '../../engine/dither.ts'
 import type { ScreenShape } from '../../engine/screen.ts'
 import type { PressProfile, ScreenMethod } from '../../engine/types.ts'
 import type { PressTarget } from '../../state/settingsReducer.ts'
@@ -19,12 +19,7 @@ const SHAPES: readonly { value: ScreenShape; label: string }[] = [
   { value: 'cross', label: 'Cross' },
 ]
 
-const DITHERS: readonly { value: DitherType; label: string }[] = [
-  { value: 'atkinson', label: 'Atkinson' },
-  { value: 'floydsteinberg', label: 'Floyd' },
-  { value: 'bayer', label: 'Bayer' },
-  { value: 'threshold', label: 'Hard' },
-]
+
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 const px = (v: number) => `${v.toFixed(1)}px`
@@ -78,14 +73,28 @@ export default function PressPanel({ target }: { target: PressTarget }) {
         </>
       ) : (
         <>
-          <Field label="Dither">
+          <Field label="Dither" value={DITHER_TYPES.find((d) => d.id === press.ditherType)?.name}>
             <Segmented
               label="Dither algorithm"
               value={press.ditherType === 'none' ? 'atkinson' : press.ditherType}
-              options={DITHERS}
+              options={DITHER_TYPES.map((d) => ({ value: d.id, label: d.name }))}
               onChange={(ditherType) => patch({ ditherType })}
             />
           </Field>
+          <p className="panel-note">
+            These are genuinely different textures, not one slider: Jarvis is smooth and slow,
+            Burkes fast and contrasty, clustered the only one that still reads as a printing
+            screen rather than a computer effect.
+          </p>
+          <Slider
+            label="Dot size"
+            value={press.ditherScale}
+            min={1}
+            max={12}
+            step={1}
+            format={(v) => `${v}px`}
+            onChange={(ditherScale) => patch({ ditherScale }, true)}
+          />
           <Slider
             label="Threshold"
             value={press.ditherThreshold}

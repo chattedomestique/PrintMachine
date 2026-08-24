@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { compositeLayers } from './composite.ts'
-import { ditherField } from './dither.ts'
+import { DITHER_TYPES, ditherField } from './dither.ts'
 import { applyDensity, applyMottle, registrationOffset, shiftField } from './ink.ts'
 import { inkById, overprint, paperById, RISO_INKS } from './inks.ts'
 import { paperField } from './paper.ts'
@@ -129,8 +129,8 @@ describe('screen', () => {
 
 describe('dither', () => {
   it('produces a strictly binary field for every diffusing algorithm', () => {
-    for (const type of ['atkinson', 'floydsteinberg', 'bayer', 'threshold'] as const) {
-      const out = ditherField(ramp(), W, H, type, 0.5)
+    for (const type of DITHER_TYPES.map((d) => d.id).filter((d) => d !== 'none')) {
+      const out = ditherField(ramp(), W, H, type, { threshold: 0.5 })
       for (const v of out) expect(v === 0 || v === 1).toBe(true)
     }
   })
@@ -138,14 +138,14 @@ describe('dither', () => {
   it('does not mutate the tone field it was given', () => {
     const tone = ramp()
     const before = Float32Array.from(tone)
-    ditherField(tone, W, H, 'floydsteinberg', 0.5)
+    ditherField(tone, W, H, 'floydsteinberg', { threshold: 0.5 })
     expect(Array.from(tone)).toEqual(Array.from(before))
   })
 
   it('tracks the input tone on average', () => {
     const mean = (f: Float32Array) => f.reduce((a, b) => a + b, 0) / f.length
     const tone = new Float32Array(64 * 64).fill(0.3)
-    const out = ditherField(tone, 64, 64, 'floydsteinberg', 0.5)
+    const out = ditherField(tone, 64, 64, 'floydsteinberg', { threshold: 0.5 })
     expect(mean(out)).toBeGreaterThan(0.2)
     expect(mean(out)).toBeLessThan(0.4)
   })
@@ -277,6 +277,7 @@ describe('text layout', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    wordPress: {},
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -570,6 +571,7 @@ describe('word layout', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    wordPress: {},
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -660,6 +662,7 @@ describe('word tracking', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    wordPress: {},
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -1119,5 +1122,60 @@ describe('two presses', () => {
     expect(b.density).toBe(a.density)
     // And changing one cannot reach the other.
     expect(a.screenPitch).not.toBe(3)
+  })
+})
+
+describe('the two-ink switch is a pattern, not a fade', () => {
+  it('binarises the mask so each ink lands at full strength', () => {
+    // A soft mask makes both inks print at partial coverage through the
+    // transition, which is an opacity crossfade wearing a print's clothes —
+    // and is exactly what made the switch point read as a fade. Screening the
+    // mask is what turns it back into a switch.
+    const n = 64
+    const ramp = new Float32Array(n)
+    for (let i = 0; i < n; i++) ramp[i] = i / (n - 1)
+
+    const screened = ditherField(ramp, 8, 8, 'bayer4', { threshold: 0.5 })
+    for (const v of screened) expect(v === 0 || v === 1).toBe(true)
+
+    // Split by a binary mask, every pixel gets all of one ink or all of the
+    // other — never a half-strength blend of both.
+    const coverage = new Float32Array(n).fill(1)
+    for (let i = 0; i < n; i++) {
+      const onLight = coverage[i] * screened[i]
+      const onDark = coverage[i] * (1 - screened[i])
+      expect(Math.max(onLight, onDark)).toBe(1)
+      expect(Math.min(onLight, onDark)).toBe(0)
+    }
+  })
+})
+
+describe('per-word press overrides', () => {
+  const measure = (t: string, s: number) => t.length * s * 0.5
+  const base = (over: Partial<TextLayer> = {}): TextLayer => ({
+    id: 't', text: 'one two three', inkId: 'black', fontId: 'grotesk', weight: 400,
+    size: 0.1, lineHeight: 1, tracking: 0, wordSpacing: 0, wordPress: {},
+    contrastInkId: null, contrastThreshold: 0.5, align: 'left', justifyBy: 'letters',
+    soloAlign: 'left', x: 0.5, y: 0.5, rotation: 0, caps: false, opacity: 1,
+    fitWidth: false, boxes: [], boxPadding: 0.1, boxRadius: 0, ...over,
+  })
+
+  it('groups words by their setting, not one plate each', () => {
+    // Three words given the same extra bleed went through the press together
+    // on a real job, so they should tear and land together here.
+    const layer = base({
+      wordPress: { '0': { bleed: 0.2 }, '1': { bleed: 0.2 }, '2': { offset: 5 } },
+    })
+    const keys = new Set(
+      Object.values(layer.wordPress).map((o) => `${o.bleed ?? 0}:${o.offset ?? 0}`),
+    )
+    expect(keys.size).toBe(2)
+  })
+
+  it('word indices match the whitespace split the panel shows', () => {
+    // A word overridden by index must be the word tapped, or the wrong word
+    // misprints — the same contract the box selection relies on.
+    const words = wordsOf(layoutText(base(), 1000, 600, measure)).map((w) => w.text)
+    expect(words).toEqual(['one', 'two', 'three'])
   })
 })

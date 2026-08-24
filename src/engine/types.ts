@@ -119,6 +119,17 @@ export interface TextLayer {
    *
    * null is off, and the type prints in one ink everywhere.
    */
+  /**
+   * Per-word press overrides, keyed by word index.
+   *
+   * Bleed and offset are properties *of a plate*, not of a pixel — bleed is
+   * where the stencil's threshold sits, offset is where the paper landed. So a
+   * word given either becomes its own plate and goes through the press
+   * separately, which is also exactly how a real second hit would behave.
+   * Deltas on the layer's press, so the global controls still move everything.
+   */
+  wordPress: Record<string, { bleed?: number; offset?: number }>
+
   contrastInkId: string | null
   /** Luminance below which the photo counts as dark, 0..1. */
   contrastThreshold: number
@@ -165,6 +176,8 @@ export interface PressProfile {
   screenSoftness: number
   ditherType: DitherType
   ditherThreshold: number
+  /** Dither cell size in pixels at the reference render size. */
+  ditherScale: number
 
   /** Ink density ceiling in [0,1]. */
   density: number

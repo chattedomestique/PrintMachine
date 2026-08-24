@@ -12,6 +12,8 @@
  * and the part worth testing.
  */
 
+import { blurField } from './blur.ts'
+
 export interface MediaSize {
   width: number
   height: number
@@ -100,4 +102,52 @@ export function separateLuminance(
     out[i] = v
   }
   return out
+}
+
+/**
+ * A mask of where the photo is light enough for dark ink to read on it.
+ *
+ * Thresholded on a *blurred* luminance, not the raw pixels. A photograph is
+ * full of local contrast — a bright speck inside a shadow, a dark seam across
+ * a highlight — and thresholding that directly makes the ink flicker between
+ * the two colours letter by letter, which is far harder to read than either
+ * colour alone. Blurring first lets the mask follow the picture's large shapes,
+ * which is what the eye is actually judging legibility against.
+ *
+ * The edge is deliberately soft over a narrow band so a glyph crossing the
+ * boundary cross-fades rather than snapping mid-stroke.
+ */
+export function lightMask(
+  rgba: Uint8ClampedArray,
+  w: number,
+  h: number,
+  threshold: number,
+  blurRadius: number,
+): Float32Array {
+  const n = w * h
+  const lum = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const o = i * 4
+    // Transparent ground is bare paper, which is the lightest thing there is.
+    const a = rgba[o + 3] / 255
+    lum[i] = luma(rgba[o], rgba[o + 1], rgba[o + 2]) * a + (1 - a)
+  }
+
+  const soft = blurRadius > 0 ? blurField(lum, w, h, blurRadius) : lum
+
+  // The band has to be wide enough that the blurred gradient actually lands
+  // inside it, or the mapping squeezes the blur back into a hard edge and the
+  // ink still snaps mid-stroke. Wider than this and the two inks overlap over
+  // a large area, which prints as a muddy third colour rather than a switch.
+  const band = 0.2
+  const lo = threshold - band
+  const span = band * 2
+  for (let i = 0; i < n; i++) {
+    const t = (soft[i] - lo) / span
+    const c = t <= 0 ? 0 : t >= 1 ? 1 : t
+    // Smoothstep: eases in and out of the switch instead of ramping linearly
+    // into it, so neither end of the blend shows a visible seam.
+    soft[i] = c * c * (3 - 2 * c)
+  }
+  return soft
 }

@@ -107,6 +107,22 @@ export interface TextLayer {
   tracking: number
   /** Word spacing in em — extra at each space, on top of tracking. */
   wordSpacing: number
+  /**
+   * A second ink for wherever the photo behind the type is dark.
+   *
+   * Type in one ink over a photograph is unreadable by definition: the photo
+   * runs from paper-white to solid, and no single transparent ink reads
+   * against both ends. So the pass switches ink by what is underneath — a
+   * split fountain driven by the image rather than by position on the sheet —
+   * and knocks the photo back to paper under the second ink, because a
+   * transparent light ink over solid black is still solid black.
+   *
+   * null is off, and the type prints in one ink everywhere.
+   */
+  contrastInkId: string | null
+  /** Luminance below which the photo counts as dark, 0..1. */
+  contrastThreshold: number
+
   align: TextAlign
   justifyBy: JustifyBy
   soloAlign: SoloAlign
@@ -128,24 +144,20 @@ export interface TextLayer {
   boxRadius: number
 }
 
-export interface PrintSettings {
-  /** The photo behind everything, or null for bare paper. */
-  media: MediaLayer | null
-  /**
-   * How much of the paper's colour and tooth veils the photo. 0 prints
-   * straight onto it; 1 is full stock character. No effect without a photo,
-   * where the paper is the ground by definition.
-   */
-  paperAmount: number
-
-  /** Output aspect. The render resolution is fixed in render.ts and does not
-   *  depend on the display size (playbook §5.2). */
-  aspect: '1:1' | '4:5' | '3:4' | '2:3'
-
-  paperId: string
-  paperTexture: number
-  paperBlotch: number
-
+/**
+ * Everything about how one pass is pulled.
+ *
+ * Two of these exist per document — one for the type, one for the photo —
+ * because a photo and a headline want genuinely different presses. A screen
+ * coarse enough to read as print on a poster word turns a photograph into
+ * mud, and wear tuned to tear a letterform pleasantly just reads as damage
+ * across a face. Sharing one profile means every change to one ruins the
+ * other, which is what the first cut of the photo layer did.
+ *
+ * The seed is deliberately *not* here: it is one sheet of paper going through
+ * one machine, so both passes vary together.
+ */
+export interface PressProfile {
   method: ScreenMethod
   screenShape: ScreenShape
   /** Lattice pitch in pixels at the reference render size. */
@@ -185,6 +197,31 @@ export interface PrintSettings {
    * what a Riso does and what destroys small words.
    */
   detailScaling: boolean
+
+}
+
+export interface PrintSettings {
+  /** The photo behind everything, or null for bare paper. */
+  media: MediaLayer | null
+  /**
+   * How much of the paper's colour and tooth veils the photo. 0 prints
+   * straight onto it; 1 is full stock character. No effect without a photo,
+   * where the paper is the ground by definition.
+   */
+  paperAmount: number
+
+  /** Output aspect. The render resolution is fixed in render.ts and does not
+   *  depend on the display size (playbook §5.2). */
+  aspect: '1:1' | '4:5' | '3:4' | '2:3'
+
+  paperId: string
+  paperTexture: number
+  paperBlotch: number
+
+  /** How the type is pulled. */
+  press: PressProfile
+  /** How the photo is pulled, when it is printed rather than shown as shot. */
+  photoPress: PressProfile
 
   seed: number
   layers: TextLayer[]

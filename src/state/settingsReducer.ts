@@ -1,4 +1,13 @@
-import type { PrintSettings, TextLayer, WordBox, MediaLayer } from '../engine/types.ts'
+import type {
+  MediaLayer,
+  PressProfile,
+  PrintSettings,
+  TextLayer,
+  WordBox,
+} from '../engine/types.ts'
+
+/** Which of the two presses a control is editing. */
+export type PressTarget = 'press' | 'photoPress'
 import { makeLayer } from './defaults.ts'
 
 /**
@@ -24,6 +33,7 @@ export type SettingsAction =
   | { type: 'removeBox'; layerId: string; boxId: string }
   | { type: 'patchBox'; layerId: string; boxId: string; patch: Partial<WordBox>; coalesce?: boolean }
   | { type: 'toggleBoxWord'; layerId: string; boxId: string; word: number }
+  | { type: 'patchPress'; target: PressTarget; patch: Partial<PressProfile>; coalesce?: boolean }
   | { type: 'setMedia'; media: MediaLayer | null }
   | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean }
   | { type: 'reset'; settings: PrintSettings }
@@ -137,6 +147,9 @@ function applySettings(state: PrintSettings, action: SettingsAction): PrintSetti
           }
         }),
       }))
+
+    case 'patchPress':
+      return { ...state, [action.target]: { ...state[action.target], ...action.patch } }
 
     case 'setMedia':
       return { ...state, media: action.media }

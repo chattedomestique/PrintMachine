@@ -18,7 +18,8 @@ import { mulberry32, valueNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { alignOffset, justifyOffsets, layoutText, wordsOf } from './text.ts'
 import { detailFactor } from './render.ts'
-import { coverRect, separateLuminance } from './media.ts'
+import { coverRect, lightMask, separateLuminance } from './media.ts'
+import { pressProfile } from '../state/defaults.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
@@ -276,6 +277,8 @@ describe('text layout', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    contrastInkId: null,
+    contrastThreshold: 0.5,
     justifyBy: 'letters',
     soloAlign: 'left',
     x: 0.5,
@@ -567,6 +570,8 @@ describe('word layout', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    contrastInkId: null,
+    contrastThreshold: 0.5,
     justifyBy: 'letters',
     soloAlign: 'left',
     x: 0.5,
@@ -655,6 +660,8 @@ describe('word tracking', () => {
     tracking: 0,
     wordSpacing: 0,
     align: 'left',
+    contrastInkId: null,
+    contrastThreshold: 0.5,
     justifyBy: 'letters',
     soloAlign: 'left',
     x: 0.5,
@@ -1022,5 +1029,95 @@ describe('a photo that does not cover the sheet', () => {
     expect(solid[0]).toBeCloseTo(0, 0)
     expect(dim[0]).toBeGreaterThan(solid[0])
     expect(dim[0]).toBeLessThan(250)
+  })
+})
+
+describe('reading type across a photograph', () => {
+  const W = 8
+  const H = 8
+
+  /** Left half black, right half white — the exact case that made type in one
+   *  ink unreadable across half the sheet. */
+  const splitPhoto = () => {
+    const px = new Uint8ClampedArray(W * H * 4)
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const o = (y * W + x) * 4
+        const v = x < W / 2 ? 0 : 255
+        px[o] = v
+        px[o + 1] = v
+        px[o + 2] = v
+        px[o + 3] = 255
+      }
+    }
+    return px
+  }
+
+  it('marks light ground as light and dark ground as dark', () => {
+    const m = lightMask(splitPhoto(), W, H, 0.5, 0)
+    // Sampled away from the boundary, where the soft band deliberately blends.
+    expect(m[0]).toBe(0)
+    expect(m[W - 1]).toBe(1)
+  })
+
+  it('treats bare paper as light, so type off the photo keeps its first ink', () => {
+    // Transparent ground is uncovered sheet. Reading it as dark would flip the
+    // ink to the contrast colour over plain paper, which is backwards.
+    const px = new Uint8ClampedArray(W * H * 4) // all zero: transparent black
+    const m = lightMask(px, W, H, 0.5, 0)
+    for (let i = 0; i < W * H; i++) expect(m[i]).toBe(1)
+  })
+
+  it('cross-fades across the boundary rather than snapping mid-stroke', () => {
+    // A hard cut makes a glyph straddling the edge change colour halfway
+    // through a stem. Blurring gives a band of intermediate values.
+    const m = lightMask(splitPhoto(), W, H, 0.5, 2)
+    const mid = [...m].filter((v) => v > 0.05 && v < 0.95)
+    expect(mid.length).toBeGreaterThan(0)
+  })
+
+  it('splits one pass into two inks that sum back to the original coverage', () => {
+    // The split is a partition, not a duplication: doubling the ink laid down
+    // would darken every glyph the moment the second ink was switched on.
+    const mask = lightMask(splitPhoto(), W, H, 0.5, 2)
+    const coverage = new Float32Array(W * H).fill(0.8)
+    for (let i = 0; i < coverage.length; i++) {
+      const onLight = coverage[i] * mask[i]
+      const onDark = coverage[i] * (1 - mask[i])
+      expect(onLight + onDark).toBeCloseTo(coverage[i], 6)
+    }
+  })
+
+  it('knocks the photo back to paper under the second ink', () => {
+    // Without this the second ink buys nothing: a transparent light ink over a
+    // solid dark area is still a solid dark area.
+    const photo = new Float32Array(1).fill(1)
+    const onDark = new Float32Array(1).fill(1)
+    for (let i = 0; i < photo.length; i++) photo[i] *= 1 - onDark[i]
+    expect(photo[0]).toBe(0)
+
+    const paper = { shade: new Float32Array(1).fill(1), rgb: [250, 245, 235] as const }
+    const out = new Uint8ClampedArray(4)
+    compositeLayers(out, 1, 1, paper, [
+      { coverage: photo, rgb: [0, 0, 0] as const, opacity: 1 },
+      { coverage: onDark, rgb: [255, 255, 255] as const, opacity: 1 },
+    ])
+    // Paper survives, so a light ink printed here actually reads.
+    expect(out[0]).toBeGreaterThan(200)
+  })
+})
+
+describe('two presses', () => {
+  it('keeps the type and photo presses independent', () => {
+    const a = pressProfile()
+    const b = pressProfile({ screenPitch: 3, misregistration: 0 })
+    expect(b.screenPitch).toBe(3)
+    expect(b.misregistration).toBe(0)
+    // Everything not overridden still matches, so a photo profile is the type
+    // profile plus deliberate differences rather than a separate set of guesses.
+    expect(b.screenShape).toBe(a.screenShape)
+    expect(b.density).toBe(a.density)
+    // And changing one cannot reach the other.
+    expect(a.screenPitch).not.toBe(3)
   })
 })

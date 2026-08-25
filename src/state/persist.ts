@@ -1,4 +1,5 @@
 import type { PressProfile, PrintSettings } from '../engine/types.ts'
+import { contrastPartner } from '../engine/inks.ts'
 import { defaultSettings, pressProfile } from './defaults.ts'
 
 /**
@@ -14,6 +15,46 @@ import { defaultSettings, pressProfile } from './defaults.ts'
  */
 
 const KEY = 'printmachine:settings:v1'
+
+/** One-time repairs to documents written by older builds, by name. Kept out of
+ *  the document so a repair is not itself a change to the user's print. */
+const MIGRATED_KEY = 'printmachine:migrated:v1'
+
+/** True the first time it is asked about a given repair, false ever after —
+ *  including when the repair turns out to have nothing to do. A repair that
+ *  re-runs is not a repair, it is the app overruling a deliberate choice on
+ *  every launch. */
+function firstTime(name: string): boolean {
+  try {
+    const done = new Set(JSON.parse(localStorage.getItem(MIGRATED_KEY) ?? '[]') as string[])
+    if (done.has(name)) return false
+    done.add(name)
+    localStorage.setItem(MIGRATED_KEY, JSON.stringify([...done]))
+    return true
+  } catch {
+    // No storage means no way to remember having done it, so don't.
+    return false
+  }
+}
+
+/**
+ * Give a photo-bearing document the second ink it would get today.
+ *
+ * A print saved before the pass could split has a single ink across a whole
+ * photograph, and a single ink cannot read across one — which is how half the
+ * lines end up invisible against a bright sky. Applied once on load, because
+ * the alternative is a saved print that stays unreadable until its owner finds
+ * a toggle they had no reason to look for.
+ */
+export function seedSecondInk(settings: PrintSettings): PrintSettings {
+  if (!settings.media) return settings
+  return {
+    ...settings,
+    layers: settings.layers.map((l) =>
+      l.contrastInkId ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },
+    ),
+  }
+}
 
 export function saveSettings(settings: PrintSettings): void {
   try {
@@ -59,7 +100,7 @@ export function loadSettings(): PrintSettings {
     } else {
       merged.layers = merged.layers.map((l, i) => ({ ...fallback.layers[0], ...l, id: l.id ?? `restored-${i}` }))
     }
-    return merged
+    return firstTime('second-ink') ? seedSecondInk(merged) : merged
   } catch {
     return fallback
   }

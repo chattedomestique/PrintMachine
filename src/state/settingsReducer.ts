@@ -9,6 +9,7 @@ import type {
 /** Which of the two presses a control is editing. */
 export type PressTarget = 'press' | 'photoPress'
 import { makeLayer } from './defaults.ts'
+import { contrastPartner } from '../engine/inks.ts'
 
 /**
  * The document reducer plus an undo/redo history around it.
@@ -191,8 +192,23 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
         return { ...l, wordPress: next }
       })
 
-    case 'setMedia':
-      return { ...state, media: action.media }
+    case 'setMedia': {
+      if (!action.media || state.media) return { ...state, media: action.media }
+      // The first photo is the moment a single ink stops being enough. Type
+      // that was perfectly readable on paper goes invisible over half of any
+      // photograph, and the control that fixes it does not even exist in the
+      // panel until there is a photo to fix it against — so leaving it off by
+      // default means the app's first answer to "put a picture behind this" is
+      // an unreadable one. Seeded, not forced: the toggle shows on, it undoes,
+      // and turning it off leaves a single ink.
+      return {
+        ...state,
+        media: action.media,
+        layers: state.layers.map((l) =>
+          l.contrastInkId ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },
+        ),
+      }
+    }
 
     case 'patchMedia':
       // A patch with no photo present is a no-op rather than a crash: the

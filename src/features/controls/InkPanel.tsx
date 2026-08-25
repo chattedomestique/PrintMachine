@@ -1,6 +1,6 @@
 import { Field, IconButton, Slider, Swatches, Toggle } from '../../ui/controls.tsx'
 import { PlusIcon, TrashIcon } from '../../ui/icons.tsx'
-import { cssRgb, inkById, overprint, RISO_INKS } from '../../engine/inks.ts'
+import { contrastPartner, cssRgb, inkById, overprint, RISO_INKS } from '../../engine/inks.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -85,27 +85,30 @@ export default function InkPanel() {
           {settings.media && (
             <>
               <Toggle
-                label="Second ink over dark areas"
+                label="Second ink so it reads throughout"
                 checked={layer.contrastInkId !== null}
                 onChange={(on: boolean) =>
                   dispatch({
                     type: 'patchLayer',
                     id: layer.id,
-                    patch: { contrastInkId: on ? 'white' : null },
+                    patch: { contrastInkId: on ? contrastPartner(layer.inkId) : null },
                   })
                 }
               />
               <p className="panel-note">
-                Type in one ink cannot read across a whole photograph. With this on the pass
-                switches ink wherever the image goes dark, and knocks the photo back to paper
-                underneath — a transparent light ink over solid black is still solid black.
+                Type in one ink cannot read across a whole photograph. With this on the pass is
+                pressed once and split between two inks by what is behind it, and the photo is
+                knocked back to paper wherever the ink is lighter than what it lands on — a
+                transparent light ink over solid black is still solid black. Which ink goes on
+                the bright areas and which on the dark is decided by the two colours, so it does
+                not matter which way round they are chosen.
               </p>
 
               {layer.contrastInkId && (
                 <>
-                  <Field label="Dark-area ink" value={inkById(layer.contrastInkId).name}>
+                  <Field label="Second ink" value={inkById(layer.contrastInkId).name}>
                     <Swatches
-                      label="Dark-area ink"
+                      label="Second ink"
                       value={layer.contrastInkId}
                       options={RISO_INKS}
                       onChange={(contrastInkId) =>

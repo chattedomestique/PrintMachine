@@ -45,7 +45,7 @@ import { applyRollerBanding, paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { scribbleField, woodcutField } from './carve.ts'
-import { coverRect, lightMask, separateLuminance } from './media.ts'
+import { bandMask, coverRect, groundLuma, separateLuminance, splitInks } from './media.ts'
 import { rasterizeBoxes, rasterizeText } from './text.ts'
 import { ribbonInk } from './typewriter.ts'
 import { ASPECTS, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
@@ -430,7 +430,7 @@ function binarise(
  * a small misregistration still lands inside the hole. Same trick here.
  */
 function spread(field: Float32Array, w: number, h: number, radius: number): Float32Array {
-  const soft = blurField(field, w, h, radius)
+  const soft = radius > 0 ? blurField(field, w, h, radius) : field
   const out = new Float32Array(field.length)
   for (let i = 0; i < out.length; i++) {
     // Cut back to *hard* rather than keeping the blurred skirt. Leaving the
@@ -479,6 +479,7 @@ export function renderPrint(
   // immediately after.
   let ground: Uint8ClampedArray | undefined
   let light: Float32Array | undefined
+  let groundLum: Float32Array | undefined
   if (media && s.media) {
     const r = coverRect({ width: s.media.width, height: s.media.height }, w, h, s.media)
     scratch.clearRect(0, 0, w, h)
@@ -547,6 +548,7 @@ export function renderPrint(
         }
       : tone
 
+    const basePlateIndex = plateIndex
     const coverage = pressPlate(struck, plateIndex, s.press, s.seed, cache, w, h)
     plateIndex++
 
@@ -592,8 +594,26 @@ export function renderPrint(
       // once and then split, so the letterforms stay coherent; pressing twice
       // would misregister the two halves against each other and tear every
       // glyph that happens to straddle the boundary.
+      //
+      // Which ink goes where is decided by what the inks *are*, not by which
+      // field they were typed into. Keying it to the slot assumes the first
+      // ink is the dark one, and the moment it isn't — white type over a
+      // photograph, which is the ordinary case — the switch runs and puts
+      // white on the sky and black on the water: both invisible, and worse
+      // than not switching at all. The darker of the pair belongs on light
+      // ground and the lighter on dark ground, whichever way round they were
+      // chosen.
+      const split = splitInks(inkById(layer.inkId).rgb, inkById(layer.contrastInkId).rgb)
+
+      if (!groundLum) {
+        // Blurred across roughly a word. Anything finer and the mask reads the
+        // photograph's own grain — the glitter on water is the same value as
+        // white ink and about the size of a letter, so a tighter blur decides
+        // light-or-dark differently inside a single word. A word is the unit
+        // legibility is actually judged in, so it is the unit that commits.
+        groundLum = groundLuma(ground, w, h, Math.max(2, tone.fontSize * 1.5))
+      }
       if (!light) {
-        const soft = lightMask(ground, w, h, layer.contrastThreshold, Math.max(2, h * 0.012))
         // Screened, not left soft. A soft mask makes *both* inks print at
         // partial coverage through the transition, which is an opacity
         // crossfade wearing a print's clothes — and it is why the switch point
@@ -601,7 +621,14 @@ export function renderPrint(
         // same screen or dither the press is already using makes the changeover
         // a real pattern: each ink lands at full strength, and the boundary
         // breaks up into dots the way a two-colour job actually does.
-        light = binarise(soft, plateIndex, s.press, s.seed, w, h)
+        light = binarise(
+          bandMask(groundLum, layer.contrastThreshold),
+          plateIndex,
+          s.press,
+          s.seed,
+          w,
+          h,
+        )
       }
       const onLight = new Float32Array(w * h)
       const onDark = new Float32Array(w * h)
@@ -611,28 +638,63 @@ export function renderPrint(
       }
       plates.push({
         coverage: onLight,
-        rgb: inkById(layer.inkId).rgb,
+        rgb: split.onLight,
         opacity: layer.opacity,
         opaque: layer.opaque,
       })
       plates.push({
         coverage: onDark,
-        rgb: inkById(layer.contrastInkId).rgb,
+        rgb: split.onDark,
         opacity: layer.opacity,
         opaque: layer.opaque,
       })
 
-      // The knockout is cut from the *unpressed* tone, not from the screened
-      // coverage. Knocking out with the halftone leaves the photo standing in
-      // every gap between the type's own dots, which is what turned the
-      // reversed lines to mush — the light ink was printing onto a still-black
-      // ground. A stencil has a solid hole in it.
+      // The knockout is cut from the tone, not from the screened coverage.
+      // Knocking out with the halftone leaves the photo standing in every gap
+      // between the type's own dots, which is what turned the reversed lines
+      // to mush — the light ink was printing onto a still-black ground. A
+      // stencil has a solid hole in it.
       if (!knockout) knockout = new Float32Array(w * h)
-      // Two pixels or so at export size: enough that a small misregistration
-      // still lands inside the hole, not so much that it reads as a halo.
-      const solid = spread(tone.field, w, h, Math.max(1, h * 0.0012))
+      // Cut from the *same artwork the plate is*, torn by the same stencil and
+      // moved by the same paper feed. Cutting it from the raw tone instead
+      // leaves the hole a couple of pixels from where the ink actually lands,
+      // and the only way to cover that gap is to spread the hole — which on a
+      // poster is a trap and at text size is a flood: a two-pixel skirt on a
+      // four-pixel stroke swells every counter shut and turns a line of type
+      // into a row of blobs. Matching the two outlines means the trap only has
+      // to cover the ink's own spread, which is well under a pixel.
+      const detail = s.press.detailScaling ? detailFactor(tone.fontSize, h) : 1
+      const sheetScale = h / REFERENCE_HEIGHT
+      const cut = roughenEdges(struck.field, w, h, {
+        roughness: s.press.roughness,
+        scale: Math.max(1, s.press.roughScale * sheetScale * detail),
+        bleed: s.press.bleed * detail,
+        seed: s.seed ^ (basePlateIndex * 0x9e3779b9),
+      })
+      const reg = registrationOffset(
+        s.seed,
+        basePlateIndex,
+        s.press.misregistration * sheetScale * Math.sqrt(detail),
+      )
+      // No trap. The hole travels with the plate, so there is nothing to trap
+      // against — and what the eye reads as a reversed word is the *hole*, not
+      // the ink: bare paper and a light ink are nearly the same colour, so the
+      // letterform you see is the shape of the cut. Spreading it does not
+      // protect the letter, it fattens it, and at text size that closes every
+      // counter and prints a row of blobs.
+      const solid = spread(shiftField(cut, w, h, reg.dx, reg.dy), w, h, 0)
       for (let i = 0; i < solid.length; i++) {
-        const k = solid[i] * (1 - light[i])
+        // Cut the photo away only where the ink chosen here is lighter than
+        // what it is landing on, because that is the case a transparent ink
+        // physically cannot print: ink multiplies down, so it can darken its
+        // ground and never lighten it. Tying the hole to the dark half of the
+        // mask instead only happens to be right when the second ink is the
+        // light one, and leaves the type printing into a still-bright photo
+        // whenever it isn't.
+        const need =
+          (split.onLightLuma > groundLum[i] ? light[i] : 0) +
+          (split.onDarkLuma > groundLum[i] ? 1 - light[i] : 0)
+        const k = solid[i] * need
         if (k > knockout[i]) knockout[i] = k
       }
     } else {

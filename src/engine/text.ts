@@ -19,6 +19,7 @@
  * alternative is boxes that don't line up with the words they sit behind.
  */
 
+import { strikeFor } from './typewriter.ts'
 import { fontById, type TextAlign, type TextLayer } from './types.ts'
 
 export interface PlacedGlyph {
@@ -86,6 +87,8 @@ function placeLine(
   tracking: number,
   wordSpacing: number,
   measure: MeasureFn,
+  /** Fixed escapement, in px. 0 for proportional. */
+  pitch = 0,
 ): { glyphs: PlacedGlyph[]; words: PlacedWord[]; width: number; nextWordIndex: number } {
   const glyphs: PlacedGlyph[] = []
   const words: PlacedWord[] = []
@@ -117,7 +120,10 @@ function placeLine(
   }
 
   for (const ch of text) {
-    const width = measure(ch, fontSize)
+    // A typewriter has one escapement: every character advances the carriage
+    // by the same amount whatever its shape, which is why an `i` sits alone in
+    // its cell. Measured from a wide glyph so nothing collides.
+    const width = pitch > 0 ? pitch : measure(ch, fontSize)
     const glyph = { ch, x: pen, width }
     glyphs.push(glyph)
 
@@ -155,13 +161,16 @@ export function layoutText(
   const source = raw.split('\n')
 
   let fontSize = Math.max(1, layer.size * canvasHeight)
+  // 10 characters to the inch against a 6-line inch is close to pica, and
+  // measuring from `M` keeps the cell wide enough for every glyph in the face.
+  let pitch = layer.typewriter ? measure('M', fontSize) * 1.02 : 0
   let tracking = layer.tracking * fontSize
   let wordSpacing = layer.wordSpacing * fontSize
 
   const placeAll = () => {
     let next = 0
     return source.map((text, i) => {
-      const out = placeLine(text, i, next, fontSize, tracking, wordSpacing, measure)
+      const out = placeLine(text, i, next, fontSize, tracking, wordSpacing, measure, pitch)
       next = out.nextWordIndex
       return out
     })
@@ -175,6 +184,7 @@ export function layoutText(
     fontSize *= scale
     tracking *= scale
     wordSpacing *= scale
+    pitch *= scale
     // Re-place rather than scaling the offsets: glyph advances are not exactly
     // linear in font size once hinting is involved, and a box positioned from
     // scaled offsets would sit slightly off the re-measured glyphs.
@@ -444,18 +454,74 @@ export function rasterizeText(
     return 'only' in words ? words.only.has(index) : !words.except.has(index)
   }
 
+  const tw = layer.typewriter
+  const em = layout.fontSize
+  let struck = 0
+
   layout.lines.forEach((line, i) => {
     const ox = blockLeft + alignOffset(line.width, layout.widest, layer.align)
     const oy = firstBaseline + i * layout.lineHeight
     for (const g of line.glyphs) {
-      if (isSpace(g.ch)) continue
+      if (isSpace(g.ch)) {
+        // Spaces still advance the carriage, so they still count toward where
+        // in the text a strike falls.
+        struck++
+        continue
+      }
       if (words) {
         const word = line.words.find((word) => g.x >= word.x && g.x < word.x + word.width)
-        if (!wanted(word?.index ?? -1)) continue
+        if (!wanted(word?.index ?? -1)) {
+          struck++
+          continue
+        }
       }
-      ctx.fillText(g.ch, ox + g.x, oy)
+
+      if (!tw) {
+        ctx.fillText(g.ch, ox + g.x, oy)
+        struck++
+        continue
+      }
+
+      // The slug's own offset, plus this keystroke's force. Centred on the
+      // glyph so a rotation pivots about the character rather than swinging it
+      // out of its cell.
+      const s = strikeFor(g.ch.codePointAt(0) ?? 0, struck, {
+        wear: tw.wear,
+        strike: tw.strike,
+        seed: 0x5bf03635,
+      })
+      const cx = ox + g.x + g.width / 2
+      ctx.save()
+      ctx.translate(cx + s.dx * em, oy + s.dy * em)
+      if (s.rot !== 0) ctx.rotate(s.rot)
+
+      // A weak strike does not simply deposit less ink — less of the slug face
+      // reaches the paper at all, so the raised rim prints and the middle does
+      // not. That hollow letter is the signature typewriter artifact, and it is
+      // the only part of an uneven strike that survives being screened: at text
+      // size a stroke is about one halftone cell across, so the screen cannot
+      // resolve a difference in *darkness* within it. A difference in *shape*
+      // it can.
+      const d = Math.max(0, Math.min(1, s.density))
+      const hollow = d < 0.86 ? Math.min(1, (0.86 - d) / 0.4) : 0
+
+      ctx.globalAlpha = d * (1 - hollow * 0.8)
+      ctx.fillText(g.ch, -g.width / 2, 0)
+
+      if (hollow > 0) {
+        // The rim, drawn back over the faded centre.
+        ctx.globalAlpha = d
+        ctx.lineWidth = Math.max(0.6, em * 0.022)
+        ctx.lineJoin = 'round'
+        ctx.strokeStyle = ctx.fillStyle
+        ctx.strokeText(g.ch, -g.width / 2, 0)
+      }
+
+      ctx.restore()
+      struck++
     }
   })
+  ctx.globalAlpha = 1
 
   ctx.restore()
   // The rendered size is reported back because fit-to-width means the layer's

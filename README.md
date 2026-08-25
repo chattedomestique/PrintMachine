@@ -301,6 +301,52 @@ apart, and drifts differently at every size — so there is one layout, and a
 test asserting the engine's word grouping matches the plain whitespace split
 the selection UI shows you.
 
+### Typewriter
+
+Not a font and not a filter. Two facts about the machine do almost all the work,
+and they pull in opposite directions:
+
+**The misalignment belongs to the slug, not the keystroke.** Every `e` is struck
+by the same little piece of metal on the same worn arm, so if that arm sits a
+hair low, *every* `e` on the page sits a hair low. Randomising per keypress —
+which is what most typewriter effects do — reads as noise, because noise is what
+it is. Here the offset, the rotation and the horizontal drift are keyed on the
+character code alone, so they repeat everywhere that letter appears. There is a
+test asserting the same letter gets the same slug at position 0 and position 37.
+
+**The force belongs to the keystroke.** How hard a key was hit is the typist, not
+the machine, so ink density is keyed on position in the text. Same letter, darker
+in one word than the next.
+
+Plus a fixed escapement: every character advances the carriage by the same
+amount whatever its shape, which is why an `i` sits alone in the middle of its
+cell. That even rhythm is half of what reads as typed.
+
+#### Why a weak strike prints hollow
+
+A light strike does not simply lay down less ink. Less of the slug face reaches
+the paper at all, so the raised rim prints and the middle does not — the letter
+comes out as an outline.
+
+That turned out to be the only part of an uneven strike that *survives being
+screened*. At text size a stroke is about one halftone cell across, so the
+screen cannot resolve a difference in darkness within it: two renders at 0.67
+and 1.0 density came out indistinguishable. A difference in **shape** it can
+resolve. So a weak strike fades its fill and draws its own rim back over the
+top, and the variation is visible at any size.
+
+Two numbers needed care, both found by rendering rather than reasoning. Squaring
+the strike draw put nearly every character at full ink and the effect vanished
+entirely. Leaving the density unfloored let the light ones fall through the
+screen and words came out with holes in them — a ribbon that touched the paper
+at all left *something*.
+
+The slug's impression and the ribbon's weave run on the tone, before the press,
+so a typed sheet still tears, wears and misregisters like everything else. The
+impression moves ink to the edge of each stroke rather than adding any; the
+weave is centred on zero so it modulates the fill instead of only subtracting
+from it, which is what quietly erased the lightest strikes on the first attempt.
+
 ### Two spacing controls, both global
 
 **Letter tracking** letterspaces the layer. It lands on spaces as well as

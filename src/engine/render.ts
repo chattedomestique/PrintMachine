@@ -47,6 +47,7 @@ import { defaultAngle, screenField } from './screen.ts'
 import { scribbleField, woodcutField } from './carve.ts'
 import { coverRect, lightMask, separateLuminance } from './media.ts'
 import { rasterizeBoxes, rasterizeText } from './text.ts'
+import { ribbonInk } from './typewriter.ts'
 import { ASPECTS, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
@@ -531,7 +532,22 @@ export function renderPrint(
       special.size > 0
         ? cachedTone(scratch, layer, cache, w, h, { except: special }, `${layer.id}:base`)
         : cachedTone(scratch, layer, cache, w, h)
-    const coverage = pressPlate(tone, plateIndex, s.press, s.seed, cache, w, h)
+    // The slug's impression and the ribbon's weave happen at the moment of
+    // striking, so they belong to the tone — before the press tears, wears and
+    // screens it, exactly like every other thing that shapes the ink.
+    const struck = layer.typewriter
+      ? {
+          field: ribbonInk(tone.field, w, h, {
+            impression: layer.typewriter.impression,
+            ribbon: layer.typewriter.ribbon,
+            seed: s.seed,
+            scale: h / REFERENCE_HEIGHT,
+          }),
+          fontSize: tone.fontSize,
+        }
+      : tone
+
+    const coverage = pressPlate(struck, plateIndex, s.press, s.seed, cache, w, h)
     plateIndex++
 
     let gi = 0

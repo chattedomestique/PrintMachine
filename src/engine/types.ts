@@ -140,6 +140,25 @@ export interface TextLayer {
    */
   opaque: boolean
 
+  /**
+   * Strike this layer like a typewriter.
+   *
+   * Not a font and not a filter: the glyphs are placed on a fixed pitch and
+   * each one is struck with the offset belonging to *its own type slug*, so
+   * every `e` on the sheet leans the same way while the force behind each
+   * keystroke varies. null is off.
+   */
+  typewriter: {
+    /** 0..1. How far out of true the type bars have worn. */
+    wear: number
+    /** 0..1. How unevenly the keys are hit. */
+    strike: number
+    /** 0..1. Ink squeezed to the edge of the stroke by the slug. */
+    impression: number
+    /** 0..1. The fabric ribbon's weave showing in the fill. */
+    ribbon: number
+  } | null
+
   contrastInkId: string | null
   /** Luminance below which the photo counts as dark, 0..1. */
   contrastThreshold: number

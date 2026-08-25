@@ -53,15 +53,38 @@ export function applyMottle(
   speckle: Float32Array,
   amount: number,
   dropout: number,
+  w: number,
+  h: number,
+  /**
+   * How fine the blotch should be relative to the sheet, 0..1.
+   *
+   * The mottle field is generated once per sheet at a fixed cell size, which is
+   * right for poster type and catastrophic for body copy: at export size the
+   * cell is about the height of a small letter, so the blotch stops texturing
+   * the ink and starts deleting chunks of the letterform.
+   *
+   * Rather than regenerate the field per plate, it is *strided* — read with a
+   * step larger than one, which walks through the same noise faster and so
+   * yields proportionally finer blotch. Wrapped, because striding runs off the
+   * end of a field that was only ever w by h.
+   */
+  detail = 1,
 ): Float32Array {
   const out = new Float32Array(coverage.length)
-  for (let i = 0; i < coverage.length; i++) {
-    const c = coverage[i]
-    if (c <= 0) continue
-    const m = 1 + amount * (mottle[i] * 2 - 1)
-    let v = c * m
-    if (dropout > 0 && speckle[i] < dropout) v *= 0.15
-    out[i] = clamp01(v)
+  const step = detail >= 1 ? 1 : Math.max(1, Math.round(1 / detail))
+
+  for (let y = 0; y < h; y++) {
+    const sy = step === 1 ? y : (y * step) % h
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      const c = coverage[i]
+      if (c <= 0) continue
+      const j = step === 1 ? i : sy * w + ((x * step) % w)
+      const m = 1 + amount * (mottle[j] * 2 - 1)
+      let v = c * m
+      if (dropout > 0 && speckle[j] < dropout) v *= 0.15
+      out[i] = clamp01(v)
+    }
   }
   return out
 }

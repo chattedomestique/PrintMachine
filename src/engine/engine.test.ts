@@ -169,7 +169,7 @@ describe('ink', () => {
     const cov = new Float32Array(W * H).fill(0.9)
     const noise = valueNoise2D(W, H, 4, 99)
     const speckle = valueNoise2D(W, H, 1, 7)
-    const out = applyMottle(cov, noise, speckle, 0.8, 0.5)
+    const out = applyMottle(cov, noise, speckle, 0.8, 0.5, W, H)
     for (const v of out) expect(v).toBeGreaterThanOrEqual(0)
     for (const v of out) expect(v).toBeLessThanOrEqual(1)
   })
@@ -181,6 +181,8 @@ describe('ink', () => {
       valueNoise2D(W, H, 1, 2),
       0.8,
       0.1,
+      W,
+      H,
     )
     expect(out.every((v) => v === 0)).toBe(true)
   })
@@ -1376,5 +1378,74 @@ describe('woodcut and scribble', () => {
     expect([...a]).toEqual([...b])
     const c = woodcutField(ramp(), W, H, { ...opts, seed: 8 })
     expect([...a]).not.toEqual([...c])
+  })
+})
+
+describe('detail scaling reaches the wear, not just the screen', () => {
+  const W = 64
+  const H = 64
+
+  it('makes the blotch finer for small type instead of leaving it sheet-sized', () => {
+    // The gap that made "edge tear at 1%" look like it did nothing: the tear,
+    // the screen and the registration all scaled to the type while the wear
+    // stayed sized for the sheet. At export size the blotch cell is about the
+    // height of a small letter, so it stops texturing the ink and starts
+    // deleting chunks of the letterform — and no amount of turning the tear
+    // down touches it.
+    const cov = new Float32Array(W * H).fill(0.9)
+    const noise = valueNoise2D(W, H, 16, 5)
+    const speckle = new Float32Array(W * H).fill(1)
+
+    const coarse = applyMottle(cov, noise, speckle, 0.8, 0, W, H, 1)
+    const fine = applyMottle(cov, noise, speckle, 0.8, 0, W, H, 0.25)
+
+    // Finer means the value changes more often from pixel to pixel along a row.
+    const flips = (f: Float32Array) => {
+      let n = 0
+      for (let x = 1; x < W; x++) if (Math.abs(f[x] - f[x - 1]) > 0.01) n++
+      return n
+    }
+    expect(flips(fine)).toBeGreaterThan(flips(coarse))
+  })
+
+  it('is exactly the old behaviour at full detail', () => {
+    // Poster type must be untouched by this — the whole point is that the wear
+    // was right for big type all along.
+    const cov = new Float32Array(W * H).fill(0.7)
+    const noise = valueNoise2D(W, H, 8, 3)
+    const speckle = valueNoise2D(W, H, 1, 4)
+    const a = applyMottle(cov, noise, speckle, 0.5, 0.2, W, H, 1)
+    const b = applyMottle(cov, noise, speckle, 0.5, 0.2, W, H)
+    expect([...a]).toEqual([...b])
+  })
+
+  it('shrinks dropout patches with the type as well', () => {
+    // A patch sized for a poster is wider than a whole word of body copy, so
+    // it swallows the line rather than reading as ink that failed.
+    const cov = new Float32Array(W * H).fill(1)
+    const coarse = applyDropoutPatches(cov, W, H, 0.8, 11, 1)
+    const fine = applyDropoutPatches(cov, W, H, 0.8, 11, 0.25)
+    const flips = (f: Float32Array) => {
+      let n = 0
+      for (let x = 1; x < W; x++) if (Math.abs(f[x] - f[x - 1]) > 0.01) n++
+      return n
+    }
+    expect(flips(fine)).toBeGreaterThanOrEqual(flips(coarse))
+  })
+
+  it('still leaves bare paper bare at any detail', () => {
+    for (const d of [1, 0.5, 0.22]) {
+      const out = applyMottle(
+        new Float32Array(W * H),
+        valueNoise2D(W, H, 4, 1),
+        valueNoise2D(W, H, 1, 2),
+        0.8,
+        0.1,
+        W,
+        H,
+        d,
+      )
+      expect(out.every((v) => v === 0)).toBe(true)
+    }
   })
 })

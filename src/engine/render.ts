@@ -310,11 +310,28 @@ export function pressPlate(
   // still full-strength pigment; there are simply fewer and smaller of them.
   // Modulating tone lets the screen convert a fade into *sparser dots*, so a
   // failing area visibly breaks up into halftone instead of dimming.
-  tone2 = applyMottle(tone2, cache.mottle, cache.speckle, s.mottle, s.dropout)
-  tone2 = applyDropoutPatches(tone2, w, h, s.patches, seed ^ (index * 0x165667b1))
-  tone2 = applyStreaks(tone2, w, h, s.streaks, seed ^ (index * 0x27d4eb2d))
-  tone2 = applySmear(tone2, w, h, s.smear)
-  tone2 = applyRollerBanding(tone2, w, h, s.banding, seed ^ (index * 0x27d4eb2d))
+  // Detail scaling has to reach the wear as well as the screen, and this was
+  // the gap: tear, bleed, screen and registration all scaled to the type while
+  // mottle, dropout, patches, streaks, smear and banding stayed sized for the
+  // sheet. On a poster that is fine. On body copy the blotch cell is about the
+  // height of a letter and a dropout patch is wider than a word, so the wear
+  // stops texturing the ink and starts eating the letterform — which looks
+  // exactly like a tear that will not turn down, because turning the tear down
+  // was never going to touch it.
+  tone2 = applyMottle(
+    tone2,
+    cache.mottle,
+    cache.speckle,
+    s.mottle * detail,
+    s.dropout * detail,
+    w,
+    h,
+    detail,
+  )
+  tone2 = applyDropoutPatches(tone2, w, h, s.patches * detail, seed ^ (index * 0x165667b1), detail)
+  tone2 = applyStreaks(tone2, w, h, s.streaks * detail, seed ^ (index * 0x27d4eb2d))
+  tone2 = applySmear(tone2, w, h, s.smear * detail)
+  tone2 = applyRollerBanding(tone2, w, h, s.banding * detail, seed ^ (index * 0x27d4eb2d))
 
   // Misregistration is a paper-feed error, physically the same for the whole
   // sheet — but at 5px it obliterates 20px type while barely showing on a

@@ -368,6 +368,24 @@ dominates. It is floored at 0.22 so small type still reads as *printed* rather
 than resolving into clean vector, and it is `sqrt`-shaped so the fall-off is
 gentle near poster size and steep where it matters.
 
+It has to reach the **wear** as well as the screen, and for a long time it did
+not. Tear, bleed, screen pitch and registration all scaled to the type while
+mottle, dropout, patches, streaks, smear and banding stayed sized for the sheet.
+On a poster that is fine. On body copy the blotch cell is about the height of a
+letter and a dropout patch is wider than a whole word, so the wear stops
+texturing the ink and starts eating the letterform.
+
+That failure is particularly confusing because it looks exactly like a tear that
+will not turn down — and turning the tear down was never going to touch it. It
+shows up worst on reversed type, where every dropout speck is a hole punched
+through a white letter on a dark ground rather than a bit of texture on paper.
+
+The mottle field is generated once per sheet, so rather than regenerate it per
+plate it is **strided** — read with a step larger than one, walking through the
+same noise faster and so yielding proportionally finer blotch. There are tests
+that finer detail really does raise the spatial frequency, and that full detail
+is byte-identical to the old behaviour, because poster type was right all along.
+
 A real press has one screen ruling per sheet regardless of point size, so
 `detailScaling` can be switched off in the Press panel for that behaviour. It is
 on by default because the honest version mostly looks like a mistake.

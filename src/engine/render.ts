@@ -290,7 +290,9 @@ export function pressPlate(
   // outline. Seeded per plate so two plates don't tear identically.
   const rough = roughenEdges(tone, w, h, {
     roughness: s.roughness,
-    scale: Math.max(1, s.roughScale * scale * detail),
+    // Unfloored: roughenEdges needs the size that was actually asked for,
+    // not a whole number, or it cannot tell a fine tear from a clamped one.
+    scale: s.roughScale * scale * detail,
     // Bleed is a threshold offset, so at small sizes it eats the counters —
     // the holes in a, e, o fill and the word turns into a row of blobs.
     bleed: s.bleed * detail,
@@ -667,7 +669,7 @@ export function renderPrint(
       const sheetScale = h / REFERENCE_HEIGHT
       const cut = roughenEdges(struck.field, w, h, {
         roughness: s.press.roughness,
-        scale: Math.max(1, s.press.roughScale * sheetScale * detail),
+        scale: s.press.roughScale * sheetScale * detail,
         bleed: s.press.bleed * detail,
         seed: s.seed ^ (basePlateIndex * 0x9e3779b9),
       })

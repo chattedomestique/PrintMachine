@@ -393,6 +393,43 @@ describe('blur', () => {
     expect(out).not.toBe(f)
     expect(Array.from(out)).toEqual(Array.from(f))
   })
+
+  it('preserves a constant field at fractional radii too', () => {
+    // The fractional window adds two partial end samples and divides by a
+    // fractional count. Get either wrong and a flat field stops being flat —
+    // the same rim as the classic seeding bug, just harder to spot.
+    const flat = new Float32Array(W * H).fill(0.4)
+    for (const r of [0.35, 0.5, 1.2, 1.75, 2.5, 3.9]) {
+      for (const v of blurField(flat, W, H, r)) expect(v).toBeCloseTo(0.4, 5)
+    }
+  })
+
+  it('blurs by more the larger the radius, all the way through the fractions', () => {
+    // The whole point of a fractional radius: a tear asked for at two-thirds of
+    // a pixel has to land between no tear and a whole one, not on one of them.
+    // Measured as how far a step edge has spread, which is what the threshold
+    // downstream is cutting.
+    const step = new Float32Array(W * H)
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) step[y * W + x] = x < W / 2 ? 0 : 1
+    const spread = (r: number) => {
+      const b = blurField(step, W, H, r)
+      let n = 0
+      for (let x = 0; x < W; x++) if (b[(H >> 1) * W + x] > 0.02 && b[(H >> 1) * W + x] < 0.98) n++
+      return n
+    }
+    const widths = [0, 0.5, 1, 1.5, 2, 3].map(spread)
+    for (let i = 1; i < widths.length; i++) expect(widths[i]).toBeGreaterThanOrEqual(widths[i - 1])
+    expect(widths[widths.length - 1]).toBeGreaterThan(widths[0])
+  })
+
+  it('matches the whole-number blur when the fraction is zero', () => {
+    // The fractional path must be a generalisation, not a replacement — an
+    // integer radius has to come out exactly as it always did.
+    const f = ramp()
+    const a = blurField(f, W, H, 2)
+    const b = blurField(f, W, H, 2.0)
+    expect(Array.from(a)).toEqual(Array.from(b))
+  })
 })
 
 describe('rough edges', () => {

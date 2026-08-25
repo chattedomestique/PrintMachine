@@ -51,13 +51,21 @@ export function roughenEdges(
   // The blur radius sets how far the edge can travel. Tie it to the requested
   // feature scale so raggedness and its wavelength stay proportional — a wide
   // wander at a fine scale reads as fuzz, not as a torn stencil.
-  const radius = Math.max(1, Math.round(opts.scale))
+  //
+  // Taken as given, fraction and all. Rounding it up to a whole pixel is what
+  // made the preview and the saved file different pictures: the tear stayed one
+  // pixel wide at every render height, so on the smaller raster it was half
+  // again as large against type half again as thin, and cut clean through
+  // letterforms the print kept whole.
+  const radius = Math.max(0, opts.scale)
 
   const soft = blurField(tone, w, h, radius)
 
   // Two octaves is enough: a coarse wander plus a fine nibble. More just
-  // averages back toward a smooth edge.
-  const wander = roughness > 0 ? fbm2D(w, h, Math.max(2, opts.scale * 1.6), 2, seed ^ 0x1b873593) : null
+  // averages back toward a smooth edge. Unfloored for the same reason as the
+  // radius — a wavelength pinned to a pixel is a different wavelength on every
+  // size of sheet.
+  const wander = roughness > 0 ? fbm2D(w, h, opts.scale * 1.6, 2, seed ^ 0x1b873593) : null
 
   // Cutting at 0.5 reproduces the original outline. Lowering it keeps more of
   // the blurred skirt, which is precisely ink spread.

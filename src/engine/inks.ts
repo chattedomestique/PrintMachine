@@ -159,3 +159,28 @@ const PAPER_BY_ID = new Map(PAPERS.map((p) => [p.id, p]))
 export function paperById(id: string): Paper {
   return PAPER_BY_ID.get(id) ?? PAPERS[0]
 }
+
+/**
+ * The ink in the set that reads furthest from this one.
+ *
+ * Used to seed the second ink of a pass that has to cross a photograph. The
+ * pair is what makes the switch work — two inks of similar weight give a pass
+ * that changes colour and stays just as hard to read — so the sensible default
+ * is the far end of the range from whatever is already chosen, rather than a
+ * fixed colour that happens to be right half the time.
+ */
+export function contrastPartner(inkId: string): string {
+  const rgb = inkById(inkId).rgb
+  const weight = (c: Ink) => 0.2126 * c.rgb[0] + 0.7152 * c.rgb[1] + 0.0722 * c.rgb[2]
+  const mine = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+  let best = RISO_INKS[0]
+  let far = -1
+  for (const c of RISO_INKS) {
+    const d = Math.abs(weight(c) - mine)
+    if (d > far) {
+      far = d
+      best = c
+    }
+  }
+  return best.id
+}

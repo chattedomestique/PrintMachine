@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { compositeLayers } from './composite.ts'
 import { DITHER_TYPES, ditherField } from './dither.ts'
 import { applyDensity, applyMottle, registrationOffset, shiftField } from './ink.ts'
-import { inkById, overprint, paperById, RISO_INKS } from './inks.ts'
+import { contrastPartner, inkById, overprint, paperById, RISO_INKS } from './inks.ts'
 import { paperField } from './paper.ts'
 import { mulberry32, valueNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
@@ -24,15 +24,23 @@ import {
   detailFactor,
   outputSize,
 } from './render.ts'
-import { coverRect, lightMask, separateLuminance } from './media.ts'
+import {
+  coverRect,
+  groundLuma,
+  type InkRgb,
+  lightMask,
+  separateLuminance,
+  splitInks,
+} from './media.ts'
 import { scribbleField, woodcutField } from './carve.ts'
 import { ribbonInk, strikeFor } from './typewriter.ts'
 import { defaultSettings, makeLayer, pressProfile } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
+import { seedSecondInk } from '../state/persist.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
-import type { TextLayer } from './types.ts'
+import type { MediaLayer, TextLayer } from './types.ts'
 
 const W = 24
 const H = 24
@@ -1088,12 +1096,86 @@ describe('reading type across a photograph', () => {
     for (let i = 0; i < W * H; i++) expect(m[i]).toBe(1)
   })
 
-  it('cross-fades across the boundary rather than snapping mid-stroke', () => {
-    // A hard cut makes a glyph straddling the edge change colour halfway
-    // through a stem. Blurring gives a band of intermediate values.
-    const m = lightMask(splitPhoto(), W, H, 0.5, 2)
-    const mid = [...m].filter((v) => v > 0.05 && v < 0.95)
-    expect(mid.length).toBeGreaterThan(0)
+  it('spreads the changeover over the blur, not over a value band', () => {
+    // A glyph straddling the edge must not change colour halfway through a
+    // stem, so the transition has to occupy real distance. That distance comes
+    // from the blur — the width of the *value* band only decides how much of
+    // the blur's ramp is spent in between, and widening that instead is what
+    // put every line of type over water in the mixed zone at once. So the
+    // property is that a wider blur buys a wider transition.
+    const width = (radius: number) =>
+      [...lightMask(splitPhoto(), W, H, 0.5, radius)].slice(0, W).filter((v) => v > 0.02 && v < 0.98)
+        .length
+    expect(width(0)).toBe(0)
+    expect(width(3)).toBeGreaterThan(width(0))
+  })
+
+  it('picks the ink that reads, whichever field it was typed into', () => {
+    // The bug this exists to catch: assigning by slot rather than by weight.
+    // White type with black as its second ink printed white on the sky and
+    // black on the water — the switch ran and every line stayed unreadable.
+    const white: InkRgb = [255, 255, 255]
+    const black: InkRgb = [12, 12, 12]
+
+    for (const [a, b] of [
+      [white, black],
+      [black, white],
+    ] as const) {
+      const s = splitInks(a, b)
+      expect(s.onLight).toEqual(black)
+      expect(s.onDark).toEqual(white)
+      expect(s.onLightLuma).toBeLessThan(s.onDarkLuma)
+    }
+  })
+
+  it('keeps the given order when two inks weigh the same', () => {
+    const a: InkRgb = [200, 0, 0]
+    const s = splitInks(a, [200, 0, 0])
+    expect(s.onLight).toEqual(a)
+    expect(s.onDark).toEqual(a)
+  })
+
+  it('reads the photo blurred, so a sparkle does not flip one letter', () => {
+    // Glitter on water is the same value as white ink and about the size of a
+    // letter. Read raw it decides light-or-dark differently inside a single
+    // word; the eye judges a word against the shape behind it, not a speck.
+    const N = 32 // large enough that the blur's edge handling is not the result
+    const px = new Uint8ClampedArray(N * N * 4)
+    for (let i = 0; i < N * N; i++) {
+      const v = i % 2 === 0 ? 0 : 255 // alternating: mean 0.5, no large shape
+      px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = v
+      px[i * 4 + 3] = 255
+    }
+    const raw = groundLuma(px, N, N, 0)
+    const soft = groundLuma(px, N, N, 4)
+    // Sampled inside the border: a clamped-edge blur sees a truncated window
+    // there, which is a property of the sheet edge and not of the sparkle.
+    const spread = (f: Float32Array) => {
+      let lo = 1
+      let hi = 0
+      for (let y = 12; y < N - 12; y++) {
+        for (let x = 12; x < N - 12; x++) {
+          const v = f[y * N + x]
+          if (v < lo) lo = v
+          if (v > hi) hi = v
+        }
+      }
+      return hi - lo
+    }
+    expect(spread(raw)).toBeGreaterThan(0.9)
+    expect(spread(soft)).toBeLessThan(0.1)
+  })
+
+  it('cuts the photo away only where the ink is lighter than the ground', () => {
+    // Ink multiplies down: it can darken what it lands on and never lighten
+    // it. So the stencil hole belongs under the ink that cannot print, and
+    // tying it to the dark half of the mask instead only happens to be right
+    // when the second ink is the light one.
+    const need = (inkLuma: number, groundLuma: number) => (inkLuma > groundLuma ? 1 : 0)
+    expect(need(1, 0.2)).toBe(1) // white on a shadow: must be cut
+    expect(need(0.05, 0.2)).toBe(0) // black on a shadow: overprints fine
+    expect(need(0.05, 0.9)).toBe(0) // black on a highlight: overprints fine
+    expect(need(0.8, 0.7)).toBe(1) // pale ink on a slightly darker highlight
   })
 
   it('splits one pass into two inks that sum back to the original coverage', () => {
@@ -1124,6 +1206,64 @@ describe('reading type across a photograph', () => {
     ])
     // Paper survives, so a light ink printed here actually reads.
     expect(out[0]).toBeGreaterThan(200)
+  })
+})
+
+describe('the first photo', () => {
+  const photoLayer = (): MediaLayer => ({
+    id: 'photo',
+    width: 100,
+    height: 100,
+    scale: 1,
+    x: 0.5,
+    y: 0.5,
+    opacity: 1,
+    printed: false,
+    inkId: 'black',
+    contrast: 1,
+    lift: 0,
+  })
+
+  it('gives every pass a second ink, because one ink cannot cross a photograph', () => {
+    const before = applySettings(defaultSettings(), { type: 'setMedia', media: photoLayer() })
+    for (const l of before.layers) expect(l.contrastInkId).not.toBeNull()
+  })
+
+  it('leaves a second ink already chosen alone', () => {
+    const start = defaultSettings()
+    start.layers = start.layers.map((l) => ({ ...l, contrastInkId: 'yellow' }))
+    const after = applySettings(start, { type: 'setMedia', media: photoLayer() })
+    for (const l of after.layers) expect(l.contrastInkId).toBe('yellow')
+  })
+
+  it('does not re-seed when the photo is swapped', () => {
+    // Only the *first* photo is a default. Clearing the second ink deliberately
+    // and then changing pictures must not put it back.
+    const one = applySettings(defaultSettings(), { type: 'setMedia', media: photoLayer() })
+    const off = { ...one, layers: one.layers.map((l) => ({ ...l, contrastInkId: null })) }
+    const two = applySettings(off, { type: 'setMedia', media: photoLayer() })
+    for (const l of two.layers) expect(l.contrastInkId).toBeNull()
+  })
+
+  it('repairs a print that was saved with a photo and one ink', () => {
+    const saved = { ...defaultSettings(), media: photoLayer() }
+    const fixed = seedSecondInk(saved)
+    for (const l of fixed.layers) expect(l.contrastInkId).not.toBeNull()
+  })
+
+  it('leaves a print with no photo exactly as it was', () => {
+    const saved = defaultSettings()
+    expect(seedSecondInk(saved)).toBe(saved)
+  })
+
+  it('picks a partner that actually differs in weight from the ink', () => {
+    const weight = (id: string) => {
+      const [r, g, b] = inkById(id).rgb
+      return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+    }
+    for (const id of ['white', 'black', 'fluorescentpink', 'yellow', 'midnight']) {
+      expect(Math.abs(weight(contrastPartner(id)) - weight(id))).toBeGreaterThan(0.4)
+    }
   })
 })
 

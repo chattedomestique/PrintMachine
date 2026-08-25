@@ -132,6 +132,65 @@ export default function TypePanel() {
         onChange={(rotation) => patch({ rotation }, true)}
       />
 
+      <Toggle
+        label="Typewriter"
+        checked={layer.typewriter !== null}
+        onChange={(on) =>
+          patch({
+            typewriter: on ? { wear: 0.5, strike: 0.55, impression: 0.4, ribbon: 0.35 } : null,
+          })
+        }
+      />
+      <p className="panel-note">
+        Fixed escapement, and every character struck by its own type slug — so the same
+        letter leans the same way everywhere on the sheet while the force behind each
+        keystroke varies. Randomising per keystroke instead is what makes most typewriter
+        effects read as noise.
+      </p>
+
+      {layer.typewriter && (
+        <>
+          <Slider
+            label="Type bar wear"
+            value={layer.typewriter.wear}
+            min={0}
+            max={1}
+            step={0.01}
+            format={pct}
+            onChange={(wear) => patch({ typewriter: { ...layer.typewriter!, wear } }, true)}
+          />
+          <Slider
+            label="Uneven strike"
+            value={layer.typewriter.strike}
+            min={0}
+            max={1}
+            step={0.01}
+            format={pct}
+            onChange={(strike) => patch({ typewriter: { ...layer.typewriter!, strike } }, true)}
+          />
+          <Slider
+            label="Slug impression"
+            value={layer.typewriter.impression}
+            min={0}
+            max={1}
+            step={0.01}
+            format={pct}
+            onChange={(impression) =>
+              patch({ typewriter: { ...layer.typewriter!, impression } }, true)
+            }
+          />
+          <Slider
+            label="Ribbon weave"
+            value={layer.typewriter.ribbon}
+            min={0}
+            max={1}
+            step={0.01}
+            format={pct}
+            onChange={(ribbon) => patch({ typewriter: { ...layer.typewriter!, ribbon } }, true)}
+          />
+        </>
+      )}
+
       <Field label="Alignment">
         <Segmented
           label="Alignment"

@@ -26,6 +26,7 @@ import {
 } from './render.ts'
 import { coverRect, lightMask, separateLuminance } from './media.ts'
 import { scribbleField, woodcutField } from './carve.ts'
+import { ribbonInk, strikeFor } from './typewriter.ts'
 import { defaultSettings, makeLayer, pressProfile } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
 import { blurField } from './blur.ts'
@@ -289,6 +290,7 @@ describe('text layout', () => {
     align: 'left',
     wordPress: {},
     opaque: false,
+    typewriter: null,
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -584,6 +586,7 @@ describe('word layout', () => {
     align: 'left',
     wordPress: {},
     opaque: false,
+    typewriter: null,
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -676,6 +679,7 @@ describe('word tracking', () => {
     align: 'left',
     wordPress: {},
     opaque: false,
+    typewriter: null,
     contrastInkId: null,
     contrastThreshold: 0.5,
     justifyBy: 'letters',
@@ -1167,7 +1171,7 @@ describe('per-word press overrides', () => {
   const measure = (t: string, s: number) => t.length * s * 0.5
   const base = (over: Partial<TextLayer> = {}): TextLayer => ({
     id: 't', text: 'one two three', inkId: 'black', fontId: 'grotesk', weight: 400,
-    size: 0.1, lineHeight: 1, tracking: 0, wordSpacing: 0, wordPress: {},
+    size: 0.1, lineHeight: 1, tracking: 0, wordSpacing: 0, wordPress: {}, typewriter: null,
     opaque: false,     contrastInkId: null, contrastThreshold: 0.5, align: 'left', justifyBy: 'letters',
     soloAlign: 'left', x: 0.5, y: 0.5, rotation: 0, caps: false, opacity: 1,
     fitWidth: false, boxes: [], boxPadding: 0.1, boxRadius: 0, ...over,
@@ -1446,6 +1450,96 @@ describe('detail scaling reaches the wear, not just the screen', () => {
         d,
       )
       expect(out.every((v) => v === 0)).toBe(true)
+    }
+  })
+})
+
+describe('typewriter', () => {
+  const opts = { wear: 0.7, strike: 0.6, seed: 42 }
+
+  it('gives the same letter the same slug everywhere it appears', () => {
+    // The load-bearing claim. A typewriter's misalignment belongs to the type
+    // slug, not the keystroke: every `e` is struck by the same worn piece of
+    // metal, so every `e` on the page leans the same way. Randomising this per
+    // keystroke is what makes most typewriter effects read as noise.
+    const first = strikeFor(101, 0, opts)
+    const later = strikeFor(101, 37, opts)
+    expect(later.dx).toBe(first.dx)
+    expect(later.dy).toBe(first.dy)
+    expect(later.rot).toBe(first.rot)
+  })
+
+  it('gives different letters different slugs', () => {
+    const e = strikeFor(101, 0, opts)
+    const o = strikeFor(111, 0, opts)
+    expect([e.dx, e.dy, e.rot]).not.toEqual([o.dx, o.dy, o.rot])
+  })
+
+  it('varies the force per keystroke, not per letter', () => {
+    // The other half: how hard a key was hit belongs to the instance, so the
+    // same letter is darker in one word than the next.
+    const a = strikeFor(101, 0, opts)
+    const b = strikeFor(101, 1, opts)
+    expect(a.density).not.toBe(b.density)
+  })
+
+  it('never strikes harder than the ribbon can give', () => {
+    for (let c = 32; c < 126; c++) {
+      for (let i = 0; i < 40; i++) {
+        const s = strikeFor(c, i, opts)
+        expect(s.density).toBeGreaterThan(0)
+        expect(s.density).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  it('lines up perfectly with no wear, and never with some', () => {
+    const clean = strikeFor(101, 0, { wear: 0, strike: 0, seed: 1 })
+    // `=== 0` rather than toBe(0): scaling a negative offset by zero yields -0,
+    // which is numerically zero but fails Object.is against 0.
+    expect(clean.dx === 0).toBe(true)
+    expect(clean.dy === 0).toBe(true)
+    expect(clean.rot === 0).toBe(true)
+    expect(clean.density).toBe(1)
+
+    const worn = strikeFor(101, 0, { wear: 1, strike: 0, seed: 1 })
+    expect(Math.abs(worn.dx) + Math.abs(worn.dy) + Math.abs(worn.rot)).toBeGreaterThan(0)
+  })
+
+  it('moves ink to the edge of a stroke rather than adding any', () => {
+    // The slug squeezes ink outward, so a struck character is darker round its
+    // edge than through its middle. Adding ink instead would just embolden it.
+    const W = 9
+    const H = 9
+    const tone = new Float32Array(W * H)
+    for (let y = 2; y < 7; y++) for (let x = 2; x < 7; x++) tone[y * W + x] = 1
+
+    const out = ribbonInk(tone, W, H, { impression: 1, ribbon: 0, seed: 1, scale: 1 })
+    const centre = out[4 * W + 4]
+    const edge = out[2 * W + 4]
+    expect(edge).toBeGreaterThan(centre)
+    // And it stays inside the shape — no ink outside what was struck.
+    expect(out[0]).toBe(0)
+  })
+
+  it('leaves the tone alone when every effect is off', () => {
+    const tone = new Float32Array(16).fill(0.6)
+    const out = ribbonInk(tone, 4, 4, { impression: 0, ribbon: 0, seed: 1, scale: 1 })
+    expect([...out]).toEqual([...tone])
+  })
+
+  it('types on a fixed escapement, so an i takes a whole cell', () => {
+    // Every character advances the carriage by the same amount whatever its
+    // shape — that even rhythm is half of what reads as typed.
+    const measure = (t: string, s: number) => t.length * s * 0.5
+    const layer = (over: Partial<TextLayer>): TextLayer => ({
+      ...makeLayer({ text: 'illi', fitWidth: false, size: 0.1, tracking: 0, ...over }),
+    })
+    const typed = layoutText(layer({ typewriter: { wear: 0, strike: 0, impression: 0, ribbon: 0 } }), 1000, 600, measure)
+    const g = typed.lines[0].glyphs
+    const step = g[1].x - g[0].x
+    for (let i = 2; i < g.length; i++) {
+      expect(g[i].x - g[i - 1].x).toBeCloseTo(step, 6)
     }
   })
 })

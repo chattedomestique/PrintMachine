@@ -23,6 +23,7 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     wordSpacing: 0,
     wordPress: {},
     opaque: false,
+    typewriter: null,
     contrastInkId: null,
     contrastThreshold: 0.5,
     align: 'center',

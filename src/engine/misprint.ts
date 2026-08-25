@@ -128,12 +128,16 @@ export function applyDropoutPatches(
   h: number,
   amount: number,
   seed: number,
+  /** How fine the patches should be relative to the sheet, 0..1. A patch sized
+   *  for a poster is wider than a whole word of body copy, so it swallows the
+   *  line rather than reading as ink that failed to transfer. */
+  detail = 1,
 ): Float32Array {
   if (amount <= 0) return coverage
 
   // Two octaves so the patch borders are irregular rather than smooth blobs —
   // a single frequency reads as a soft light leak, not as ink that failed.
-  const field = fbm2D(w, h, Math.max(14, Math.min(w, h) / 11), 2, seed ^ 0x94d049bb)
+  const field = fbm2D(w, h, Math.max(8, (Math.min(w, h) / 11) * detail), 2, seed ^ 0x94d049bb)
   const cut = 0.3 * amount
   // A narrow ramp keeps the border of a patch abrupt. Ink either transferred
   // or it did not; the gradient version looks like a lighting effect.

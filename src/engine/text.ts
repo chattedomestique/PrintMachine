@@ -495,28 +495,9 @@ export function rasterizeText(
       ctx.translate(cx + s.dx * em, oy + s.dy * em)
       if (s.rot !== 0) ctx.rotate(s.rot)
 
-      // A weak strike does not simply deposit less ink — less of the slug face
-      // reaches the paper at all, so the raised rim prints and the middle does
-      // not. That hollow letter is the signature typewriter artifact, and it is
-      // the only part of an uneven strike that survives being screened: at text
-      // size a stroke is about one halftone cell across, so the screen cannot
-      // resolve a difference in *darkness* within it. A difference in *shape*
-      // it can.
       const d = Math.max(0, Math.min(1, s.density))
-      const hollow = d < 0.86 ? Math.min(1, (0.86 - d) / 0.4) : 0
-
-      ctx.globalAlpha = d * (1 - hollow * 0.8)
+      ctx.globalAlpha = d
       ctx.fillText(g.ch, -g.width / 2, 0)
-
-      if (hollow > 0) {
-        // The rim, drawn back over the faded centre.
-        ctx.globalAlpha = d
-        ctx.lineWidth = Math.max(0.6, em * 0.022)
-        ctx.lineJoin = 'round'
-        ctx.strokeStyle = ctx.fillStyle
-        ctx.strokeText(g.ch, -g.width / 2, 0)
-      }
-
       ctx.restore()
       struck++
     }

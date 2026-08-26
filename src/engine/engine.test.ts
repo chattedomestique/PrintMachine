@@ -1670,6 +1670,22 @@ describe('typewriter', () => {
     }
   })
 
+  it('always leaves a letter, however light the strike', () => {
+    // The stencil is cut by a threshold, so a tone under it is not a faint
+    // letter — it is no letter, and whole characters drop out of a word. The
+    // ribbon decides how much ink comes through the hole, never whether the
+    // hole is there, so the faintest possible strike still has to clear where
+    // the tear cuts: 0.5 with no bleed, which is the highest that cut goes.
+    const hardest = { wear: 1, strike: 1, seed: 7 }
+    let faintest = 1
+    for (let c = 32; c < 126; c++) {
+      for (let i = 0; i < 200; i++) faintest = Math.min(faintest, strikeFor(c, i, hardest).density)
+    }
+    expect(faintest).toBeGreaterThan(0.5)
+    // ...and still visibly lighter than a full one, or the control does nothing.
+    expect(faintest).toBeLessThan(0.8)
+  })
+
   it('lines up perfectly with no wear, and never with some', () => {
     const clean = strikeFor(101, 0, { wear: 0, strike: 0, seed: 1 })
     // `=== 0` rather than toBe(0): scaling a negative offset by zero yields -0,

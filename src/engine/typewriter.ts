@@ -72,11 +72,13 @@ export function strikeFor(code: number, index: number, opts: SlugOptions): Strik
   //
   // Two numbers here are the difference between this reading as a machine and
   // reading as either nothing or noise. Squaring the draw put nearly every
-  // strike at full ink and the effect vanished; leaving it unfloored let the
-  // light ones fall through the screen entirely and words came out with holes.
-  // A ribbon that touched the paper at all left *something*, and 0.4 is about
-  // where a strike is plainly faint but still a letter.
-  const density = 1 - opts.strike * 0.6 * Math.pow(hit, 1.5)
+  // strike at full ink and the effect vanished; leaving it unfloored dropped
+  // whole letters, because the stencil is cut by a threshold and a tone under
+  // that threshold is not a faint letter, it is no letter. The floor sits above
+  // where the tear cuts, so a light strike always leaves a mark and the wear is
+  // what breaks it up — which is the right way round: the ribbon decides how
+  // much ink comes through the hole, never whether the hole is there.
+  const density = 1 - opts.strike * 0.38 * Math.pow(hit, 1.5)
 
   return { dx, dy, rot, density }
 }

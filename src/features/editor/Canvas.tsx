@@ -1,7 +1,8 @@
 import { useCallback, useRef } from 'react'
 import { useSettings } from '../../state/settingsStore.ts'
 import { useRenderer } from './useRenderer.ts'
-import { MAX_SIZE, MIN_SIZE, useLayerGestures } from './useLayerGestures.ts'
+import { useLayerGestures } from './useLayerGestures.ts'
+import { stepSize } from '../controls/sizeScale.ts'
 import { ASPECTS, type MediaLayer, type TextLayer } from '../../engine/types.ts'
 import { clampPan } from '../../engine/media.ts'
 import './Canvas.css'
@@ -109,7 +110,8 @@ export default function Canvas({
    * primary editing interaction is a drag, there has to be a focusable,
    * arrow-adjustable equivalent — this is that.
    *
-   * Arrows move, +/- size, [/] rotate; Shift coarsens every step.
+   * Arrows move, +/- size (5% of it, at least one step; sizeScale.ts),
+   * [/] rotate; Shift coarsens every step.
    */
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -123,9 +125,9 @@ export default function Canvas({
         ArrowRight: () => ({ x: clamp(layer.x + move, -0.3, 1.3) }),
         ArrowUp: () => ({ y: clamp(layer.y - move, -0.3, 1.3) }),
         ArrowDown: () => ({ y: clamp(layer.y + move, -0.3, 1.3) }),
-        '+': () => ({ size: clamp(layer.size * (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE) }),
-        '=': () => ({ size: clamp(layer.size * (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE) }),
-        '-': () => ({ size: clamp(layer.size / (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE) }),
+        '+': () => ({ size: stepSize(layer.size, 1, big) }),
+        '=': () => ({ size: stepSize(layer.size, 1, big) }),
+        '-': () => ({ size: stepSize(layer.size, -1, big) }),
         '[': () => ({ rotation: clamp(layer.rotation - (big ? 15 : 1), -180, 180) }),
         ']': () => ({ rotation: clamp(layer.rotation + (big ? 15 : 1), -180, 180) }),
       }

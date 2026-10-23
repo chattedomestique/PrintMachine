@@ -51,6 +51,10 @@ So:
 - [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac)
 - [ ] Type a long string → tap Fit → it sits on the sheet, and the next pinch
       or slider touch starts from that size (no jump)
+- [ ] Size slider: drag it end to end with a thumb — 10% to 100%, and a small
+      drag makes a small change at the 10% end (not half the size per pixel);
+      pinch past 100% → the thumb stays at the end and the readout says the
+      real value (e.g. 240%)
 - [ ] Drag a press slider → the preview keeps up, and the grain does **not**
       visibly re-randomise
 - [ ] One slider drag is one undo step; adding a plate is its own step

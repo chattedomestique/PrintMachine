@@ -25,7 +25,7 @@ import {
 } from './fields.ts'
 import { normalizeSettings } from './normalize.ts'
 import { fitSize, layoutText, type FontMeasure } from '../engine/text.ts'
-import { SIZE_MAX } from '../engine/limits.ts'
+import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from '../engine/limits.ts'
 import { ASPECTS, type PrintSettings } from '../engine/types.ts'
 
 type Doc = Record<string, unknown>
@@ -205,7 +205,9 @@ describe('every schema row', () => {
         it(`${name}: is clamped into [${row.min}, ${row.max}], and non-finite is the default`, () => {
           const lo = row.min ?? -Infinity
           const hi = row.max ?? Infinity
-          const below = isMediaIdentity ? lo / 2 : lo - 1
+          // Below the floor but still a value: a photo's size and a type size
+          // refuse zero and less outright (tested on their own rows).
+          const below = isMediaIdentity || row.positive ? lo / 2 : lo - 1
           for (const [raw, want] of [
             [below, lo],
             [hi + 1, hi],
@@ -566,6 +568,21 @@ describe('verdict §4.1: what each removed field becomes', () => {
     expect(max().layers[0].size).toBe(rawLayers[0].size)
   })
 
+  it('layer.fitWidth: a short word fits past the slider and keeps that size — no shrink', () => {
+    // "GO" on 4:5 fits at about 0.68 ("680%"): above the Size slider's 100%,
+    // below SIZE_MAX, so it converts to exactly the unclamped fit, as it did
+    // before the slider was remapped (the ceiling did not move).
+    const doc = copy(defaultDoc) as unknown as Doc
+    const raw = (doc.layers as Doc[])[0]
+    Object.assign(raw, { text: 'GO', fitWidth: true })
+    expect([doc.aspect, raw.tracking]).toEqual(['4:5', -0.02])
+    const size = normalizeSettings(doc, { measure: stub }).layers[0].size
+    // Stub: 0.55 em a glyph, and one tracking gap between the two.
+    expect(size).toBeCloseTo((0.92 * 0.8) / (2 * 0.55 - 0.02), 12)
+    expect(size).toBeGreaterThan(SIZE_SLIDER_MAX)
+    expect(size).toBeLessThan(SIZE_MAX)
+  })
+
   it('layer.fitWidth: a fit above SIZE_MAX is stored at SIZE_MAX (the one size that shrinks)', () => {
     // The old fit was unclamped. One glyph on a square sheet fits at about
     // 1.67; it is stored at the ceiling and prints smaller than it did.
@@ -573,6 +590,25 @@ describe('verdict §4.1: what each removed field becomes', () => {
     doc.aspect = '1:1'
     ;(doc.layers as Doc[])[0] = { ...(doc.layers as Doc[])[0], text: 'A', fitWidth: true }
     expect(normalizeSettings(doc, { measure: stub }).layers[0].size).toBe(SIZE_MAX)
+  })
+
+  it('layer.size: every valid saved size stays; only corrupt ones are repaired', () => {
+    // The stored unit and the ceiling did not move with the Size slider's new
+    // display, so a saved 0.8 still prints at 0.8 (it reads "800%" and pins
+    // the thumb). Only what no build could store is repaired: past the
+    // ceiling is clamped, below the floor is lifted, and zero, negative, NaN
+    // or not a number is the default.
+    const sized = (size: unknown) => {
+      const d = copy(defaultDoc) as unknown as Doc
+      Object.assign((d.layers as Doc[])[1], { size })
+      return normalizeSettings(d).layers[1].size
+    }
+    expect(sized(0.8)).toBe(0.8)
+    expect(sized(0.2)).toBe(0.2)
+    expect(sized(1.5)).toBe(SIZE_MAX)
+    expect(sized(0.005)).toBe(SIZE_MIN)
+    for (const bad of [NaN, 0, -1, 'x', Infinity, null]) expect(sized(bad)).toBe(makeLayer().size)
+    expect(makeLayer().size).toBe(0.04)
   })
 
   it('layer.typewriter, wordSpacing, justifyBy, soloAlign: dropped', () => {

@@ -17,7 +17,10 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     inkId: 'fluorescentpink',
     fontId: 'poster',
     bold: true,
-    size: 0.2,
+    // 40% on the Size slider (a third of its travel): inside the band people
+    // set captions and short lines over a photo in, so a new plate never opens
+    // with the thumb pinned at the end and the first drag jumping.
+    size: 0.04,
     lineHeight: 0.94,
     tracking: -0.02,
     contrastInkId: null,
@@ -91,12 +94,14 @@ export function defaultSettings(): PrintSettings {
     press: pressProfile(),
 
     seed: 12345,
+    // The headline at 90% and the stamp at 60%: both inside the Size slider's
+    // travel, so neither thumb is pinned on first launch.
     layers: [
-      makeLayer(),
+      makeLayer({ size: 0.09 }),
       makeLayer({
         text: 'RISO',
         inkId: 'blue',
-        size: 0.3,
+        size: 0.06,
         y: 0.76,
         rotation: -4,
         tracking: 0.04,

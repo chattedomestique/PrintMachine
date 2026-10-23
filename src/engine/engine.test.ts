@@ -44,7 +44,7 @@ import {
 } from './media.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
-import { SIZE_MAX, SIZE_MIN } from './limits.ts'
+import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from './limits.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'
@@ -418,6 +418,22 @@ describe('fitSize — the one-shot Fit action', () => {
   it('clamps at both ends of the size range', () => {
     expect(fitSize(layer({ text: 'A' }), 1, stub)).toBe(SIZE_MAX)
     expect(fitSize(layer({ text: 'A'.repeat(400) }), 0.5, stub)).toBe(SIZE_MIN)
+  })
+
+  it('may fit a short word past the Size slider, up to SIZE_MAX: Fit has to be able to fill the sheet', () => {
+    // A one- to three-letter word is exactly what Fit is for, and on 4:5 it
+    // fits far past the slider's 100%: "GO" at 0.92 x 0.8 / (2 x 0.55), about
+    // 0.67; "A" at about 1.34, which clamps to the ceiling.
+    const go = fitSize(layer({ text: 'GO' }), 0.8, stub)
+    expect(go).toBeCloseTo((0.92 * 0.8) / (2 * 0.55), 12)
+    expect(go).toBeGreaterThan(SIZE_SLIDER_MAX)
+    expect(go).toBeLessThan(SIZE_MAX)
+    expect(fitSize(layer({ text: 'A' }), 0.8, stub)).toBe(SIZE_MAX)
+    // A 40-letter line fits small but inside the range.
+    const long = fitSize(layer({ text: 'A'.repeat(40) }), 0.8, stub)
+    expect(long).toBeGreaterThanOrEqual(SIZE_MIN)
+    expect(long).toBeLessThanOrEqual(SIZE_MAX)
+    expect(long).toBeCloseTo((0.92 * 0.8) / (40 * 0.55), 12)
   })
 
   it('keeps the size when there is nothing to measure', () => {

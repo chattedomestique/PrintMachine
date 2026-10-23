@@ -16,16 +16,17 @@ import type { TextLayer } from '../../engine/types.ts'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
-/** The size range, from engine/limits.ts — re-exported under the names the
- *  controls already use. */
-export const MIN_SIZE = SIZE_MIN
-export const MAX_SIZE = SIZE_MAX
-
-/** Type's limits: its size range, and a little past the trim so it can bleed
+/** Type's limits: its size range (engine/limits.ts — a pinch reaches past the
+ *  slider's end, up to SIZE_MAX), and a little past the trim so it can bleed
  *  off deliberately without being lost off-screen. Module constants, so the
  *  handlers below are not rebuilt on every render. */
-const TYPE_SIZE: readonly [number, number] = [MIN_SIZE, MAX_SIZE]
+const TYPE_SIZE: readonly [number, number] = [SIZE_MIN, SIZE_MAX]
 const TYPE_POSITION: readonly [number, number] = [-0.3, 1.3]
+
+/** A pinch is continuous, but what it stores is rounded to this, so a saved
+ *  size is never a float tail (0.0412345678...). A tenth of a display percent:
+ *  far below anything visible, and the bounds of every range are on it. */
+const PINCH_GRID = 1e4
 
 interface Pt {
   x: number
@@ -147,7 +148,8 @@ export function useLayerGestures(
       if (pts.length >= 2 && g.startSpread > 8) {
         const [a, b] = pts
         const spread = Math.hypot(b.x - a.x, b.y - a.y)
-        next.size = clamp(g.origin.size * (spread / g.startSpread), sizeRange[0], sizeRange[1])
+        const size = clamp(g.origin.size * (spread / g.startSpread), sizeRange[0], sizeRange[1])
+        next.size = Math.round(size * PINCH_GRID) / PINCH_GRID
 
         const angle = Math.atan2(b.y - a.y, b.x - a.x)
         let delta = ((angle - g.startAngle) * 180) / Math.PI

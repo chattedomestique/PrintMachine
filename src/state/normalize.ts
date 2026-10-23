@@ -250,6 +250,7 @@ function field(row: Row, raw: unknown, fallback: unknown): unknown {
 
     case 'number': {
       if (typeof raw !== 'number' || !Number.isFinite(raw)) return invalid
+      if (row.positive && raw <= 0) return invalid
       const lo = row.min ?? -Infinity
       const hi = row.max ?? Infinity
       const v = raw < lo ? lo : raw > hi ? hi : raw

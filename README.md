@@ -320,6 +320,18 @@ a plate would destroy work, and a slow save is recoverable.
 
 ### Type: one size, set as typed
 
+**Size** is the em as a fraction of the sheet's height, and it is shown so that
+a tenth of the sheet reads **100%** (`size x 1000`). The slider runs 10% to
+100% in 1% steps — 90 positions, with captions and short lines (the old
+readout's 1-4%, now 10-40%) on the first third of the travel instead of its
+first two percent. A step changes the size by at most 10% of itself at the
+small end, about 3 px of travel on a 320 px phone. Bigger type is still there:
+a pinch, the `+`/`-` keys (5% a press, never less than one step) and Fit reach
+1200%; past 100% the thumb pins at the end and the readout shows the true
+value. A new plate opens at 40%; the default print's headline is 90% and its
+stamp 60%, both inside the travel. The stored unit did not change, so a saved
+print opens at exactly the size it was (a saved 0.8 reads 800%).
+
 The text prints exactly as typed — there is no case switch (the keyboard asks
 iOS for capitals already) and no hidden transform. The size is the size: **Fit**
 is a one-shot action that measures the widest line and stores the size at which
@@ -376,11 +388,12 @@ you break them, so the way to avoid that is to break the line differently.
 
 ### Small type
 
-The wear defaults are tuned against poster type — roughly 16% of the sheet
-height. Applied unchanged to a paragraph they destroy it: a 9px screen pitch on
-an 1800px sheet is about a 24 lpi screen where real Riso is nearer 100, so small
-letterforms get eaten by their own halftone, and `bleed` fills the counters in
-a, e and o until the word is a row of blobs.
+The wear defaults are tuned against poster type — an em of roughly 16% of the
+sheet height (what the Size control shows as 160%). Applied unchanged to a
+paragraph they destroy it: a 9px screen pitch on an 1800px sheet is about a
+24 lpi screen where real Riso is nearer 100, so small letterforms get eaten by
+their own halftone, and `bleed` fills the counters in a, e and o until the word
+is a row of blobs.
 
 So the press backs off with the rendered type size. `detailFactor` scales the
 screen pitch, dot softness, edge roughness, bleed and misregistration together —

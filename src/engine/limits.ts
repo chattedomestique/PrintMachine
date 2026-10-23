@@ -8,8 +8,26 @@
  * valid size is.
  */
 
-/** Type size, as a fraction of the sheet's height. */
-export const SIZE_MIN = 0.015
+/**
+ * Type size, as a fraction of the sheet's height: the em, so `fontSize = size
+ * x height`. Shown as `size x 1000` percent (sizeScale.ts), so 0.10 of the
+ * sheet reads "100%".
+ *
+ *  - SIZE_MIN, 0.01 ("10%"): the one floor for the slider, a nudge, a pinch,
+ *    the keys, Fit and a typed value. At the 1800 px reference it is an 18 px
+ *    em, below which type stops reading. Every size an older build could
+ *    store (its floor was 0.015) is above it, so nothing saved moves.
+ *  - SIZE_SLIDER_MAX, 0.10 ("100%"): the end of the slider's travel, which is
+ *    where captions and headlines over a photo live. 90 steps of SIZE_STEP.
+ *  - SIZE_STEP, 0.001 ("1%"): the slider's step and a nudge's.
+ *  - SIZE_MAX, 1.2 ("1200%"): the ceiling for everything that is not the
+ *    slider — a pinch, the keys, Fit, a typed value, a stored size. Larger
+ *    type stays reachable (Fit on a short word lands well past 100%); the
+ *    slider's thumb pins at its end and the readout shows the true value.
+ */
+export const SIZE_MIN = 0.01
+export const SIZE_SLIDER_MAX = 0.1
+export const SIZE_STEP = 0.001
 export const SIZE_MAX = 1.2
 
 /**

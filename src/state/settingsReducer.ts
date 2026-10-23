@@ -152,7 +152,9 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       const inkId = NEXT_INK.find((i) => !used.has(i)) ?? NEXT_INK[state.layers.length % NEXT_INK.length]
       return {
         ...state,
-        layers: [...state.layers, makeLayer({ text: 'NEW', inkId, size: 0.12, y: 0.3 })],
+        // At makeLayer()'s size, inside the Size slider: a new plate that
+        // opened past its end would pin the thumb and jump on the first drag.
+        layers: [...state.layers, makeLayer({ text: 'NEW', inkId, y: 0.3 })],
       }
     }
 

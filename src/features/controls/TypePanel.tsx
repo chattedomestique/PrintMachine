@@ -2,7 +2,8 @@ import { useId } from 'react'
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import { ASPECTS, FONTS, type TextAlign, type TextLayer } from '../../engine/types.ts'
 import { fitSize } from '../../engine/text.ts'
-import { MAX_SIZE, MIN_SIZE } from '../editor/useLayerGestures.ts'
+import { SIZE_MIN, SIZE_SLIDER_MAX, SIZE_STEP } from '../../engine/limits.ts'
+import { formatSize } from './sizeScale.ts'
 import { canvasMeasure } from '../../state/persist.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
@@ -14,8 +15,6 @@ const ALIGNS: readonly { value: TextAlign; label: string }[] = [
   // widest — by its word gaps where it has any, by its letters where not.
   { value: 'justify', label: 'Justify' },
 ]
-
-const pct = (v: number) => `${Math.round(v * 100)}%`
 
 export default function TypePanel() {
   const { settings, dispatch, selectedLayer } = useSettings()
@@ -63,13 +62,16 @@ export default function TypePanel() {
 
       <Toggle label="Bold" checked={layer.bold} onChange={(bold) => patch({ bold })} />
 
+      {/* 10% to 100% across the whole travel, 1% a step: a tenth of the
+          sheet reads 100%. Bigger type (a pinch, the keys, Fit on a short
+          word) pins the thumb at the end and the readout shows the truth. */}
       <Slider
         label="Size"
         value={layer.size}
-        min={MIN_SIZE}
-        max={MAX_SIZE}
-        step={0.005}
-        format={pct}
+        min={SIZE_MIN}
+        max={SIZE_SLIDER_MAX}
+        step={SIZE_STEP}
+        format={formatSize}
         onChange={(size) => patch({ size }, true)}
       />
       <button

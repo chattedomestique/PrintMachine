@@ -11,8 +11,8 @@
  *
  * Kinds and their rules (normalize.ts applies them):
  *  - string   a string, else the default (`nonEmpty`: '' counts as invalid)
- *  - number   finite, else the default; then clamped to [min, max] (and
- *             rounded when `int`)
+ *  - number   finite (and above zero when `positive`), else the default;
+ *             then clamped to [min, max] (and rounded when `int`)
  *  - boolean  a boolean, else the default
  *  - enum     a member of `values`, else the default — an unknown ink, face
  *             or paper resolves to the field's default, never to "the first
@@ -43,6 +43,10 @@ export interface Row {
   min?: number
   max?: number
   int?: boolean
+  /** number: zero or below is not a value at all (the default), rather than
+   *  something to clamp up to `min` — a size of -1 is corruption, not a wish
+   *  for the smallest type. */
+  positive?: boolean
   /** object and array: the fields of the object, or of each item. */
   fields?: readonly Row[]
   /** object (when its default is null) and array items: a fresh template. */
@@ -75,7 +79,7 @@ export const LAYER_FIELDS: readonly Row[] = [
   { key: 'inkId', kind: 'enum', values: INK_IDS },
   { key: 'fontId', kind: 'enum', values: FONT_IDS },
   { key: 'bold', kind: 'boolean' },
-  { key: 'size', kind: 'number', min: SIZE_MIN, max: SIZE_MAX },
+  { key: 'size', kind: 'number', min: SIZE_MIN, max: SIZE_MAX, positive: true },
   { key: 'lineHeight', kind: 'number', min: 0.6, max: 2 },
   { key: 'tracking', kind: 'number', min: -0.1, max: 0.4 },
   { key: 'contrastInkId', kind: 'enum', nullable: true, values: INK_IDS },

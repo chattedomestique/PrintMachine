@@ -279,15 +279,18 @@ crop of a 12 MP photo sits half a pixel off the grid, and a bilinear blit at a
 half-pixel offset blurs every pixel into its neighbour: measured, 0.753 of the
 original's Laplacian energy unsnapped, 1.000 snapped. A zoomed photo snaps the
 same way at its own native height. "Holds the photo at its own pixels" means a
-scale within 2 px of 1:1 over the sheet's shorter side (`SNAP_PX`): the
+scale within 2.5 px of 1:1 over the sheet's shorter side (`SNAP_PX`): the
 planner's native height can land up to a pixel and a half past 1:1 across the
-sheet's shorter side, so on a tall sheet whose width binds (a 2268x4032 photo
-on its own sheet at 113% is drawn at 1.0005) a tolerance taken over the height
-let a resample of every pixel through. A test plans real photo sizes on every sheet at every zoom
-from 100% to 400% and checks that each native plan is drawn at the photo's own
-pixels, at a whole-pixel offset. A preview is 1:1 only for a photo no larger
-than the preview, and snaps then too; a blit that is not 1:1 (a large photo's
-preview, a small photo enlarged to the reference height) is left alone.
+sheet's shorter side on the app's sheets (just over 2 on a landscape sheet
+narrower than its photo, which none is today), so on a tall sheet whose width
+binds (a 2268x4032 photo on its own sheet at 113% is drawn at 1.0005) a
+tolerance taken over the height let a resample of every pixel through. A test
+plans real photo sizes on every sheet at every zoom from 100% to 400%, and the
+planner's random photos on random aspects, and checks that each native plan is
+drawn at the photo's own pixels, at a whole-pixel offset. A preview is 1:1
+only for a photo no larger than the preview, and snaps then too; a blit that
+is not 1:1 (a large photo's preview, a small photo enlarged to the reference
+height) is left alone.
 
 #### The photo always covers the sheet
 

@@ -239,6 +239,27 @@ describe('every native plan is drawn at the photo\'s own pixels (the snap covers
     expect(native).toBeGreaterThan(1000)
   })
 
+  it('on any sheet: the planner\'s own 2000 random photos, aspects (1:3 to 3:1) and zooms, at four pans', () => {
+    // Aspects the app does not make today (a landscape sheet narrower than its
+    // photo), so the snap holds for whatever sheet comes next.
+    const rand = mulberry32(0x5eed)
+    let native = 0
+    for (let i = 0; i < 2000; i++) {
+      const a = Math.exp((rand() * 2 - 1) * Math.log(3))
+      const p = photo(Math.round(200 + rand() * 9800), Math.round(200 + rand() * 9800), 1 + rand() * 3)
+      const plan = planExport(a, p)
+      if (plan.limit !== 'native') continue
+      native++
+      for (const [x, y] of [[0.5, 0.5], [0, 0], [1, 1], [0.3, 0.8]]) {
+        const r = groundRect({ id: 'p', ...p, x, y }, plan.width, plan.height)
+        const where = `${dims(p)} at ${p.scale} on a = ${a} -> ${dims(plan)}`
+        expect([r.dw, r.dh], where).toEqual([p.width, p.height])
+        expect(Number.isInteger(r.dx) && Number.isInteger(r.dy), where).toBe(true)
+      }
+    }
+    expect(native).toBeGreaterThan(400)
+  })
+
   it('needs the short side: the 2268x4032 case lands outside a tolerance taken over the height', () => {
     const media = { id: 'p', width: 2268, height: 4032, scale: 1.13, x: 0.5, y: 0.5 }
     const plan = planExport(sheetAspect({ aspect: 'original', media }), media)

@@ -158,9 +158,10 @@ export interface PrintSettings {
    */
   paperVeil: boolean
 
-  /** Output aspect. The render resolution is fixed in render.ts and does not
-   *  depend on the display size (playbook §5.2). */
-  aspect: '1:1' | '4:5' | '3:4' | '2:3'
+  /** The sheet's shape: a fixed ratio, or 'original', the photo's own shape
+   *  (`sheetAspect`). The render resolution does not depend on the display
+   *  size (playbook §5.2). */
+  aspect: FixedAspect | 'original'
 
   /** The stock. Its tooth and cloudiness are fixed (render.ts). */
   paperId: string
@@ -172,9 +173,38 @@ export interface PrintSettings {
   layers: TextLayer[]
 }
 
-export const ASPECTS: Record<PrintSettings['aspect'], number> = {
+/** A sheet shape with a fixed ratio. */
+export type FixedAspect = '1:1' | '4:5' | '3:4' | '2:3'
+
+/** Width over height of each fixed sheet shape. */
+export const ASPECTS: Record<FixedAspect, number> = {
   '1:1': 1,
   '4:5': 4 / 5,
   '3:4': 3 / 4,
   '2:3': 2 / 3,
+}
+
+/** How far from square an Original sheet may go: a photo more extreme than
+ *  3:1 (a panorama) is cover-cropped to 3:1, so no sheet is a sliver. */
+export const ORIGINAL_ASPECT_RANGE: readonly [number, number] = [1 / 3, 3]
+
+/** The Original sheet's shape when there is no photo to take it from (a
+ *  document holds 'original' only with a photo; this is the fallback). */
+const ORIGINAL_WITHOUT_PHOTO = ASPECTS['4:5']
+
+/**
+ * The sheet's width over its height, as a number: the one place an aspect key
+ * becomes a ratio. 'original' is the photo's own shape — its true, upright
+ * size — clamped to ORIGINAL_ASPECT_RANGE; with no photo, 4:5.
+ *
+ * Original is what the first photo opens on: with zoom at 100% and no pan the
+ * photo then fills the sheet exactly, so the untouched path neither crops nor
+ * resamples a pixel.
+ */
+export function sheetAspect(s: { aspect: PrintSettings['aspect']; media: { width: number; height: number } | null }): number {
+  if (s.aspect !== 'original') return ASPECTS[s.aspect]
+  if (!s.media || !(s.media.width > 0) || !(s.media.height > 0)) return ORIGINAL_WITHOUT_PHOTO
+  const [lo, hi] = ORIGINAL_ASPECT_RANGE
+  const a = s.media.width / s.media.height
+  return a < lo ? lo : a > hi ? hi : a
 }

@@ -244,6 +244,28 @@ overflow is cropped, so a full-bleed print has no letterbox bars. Zoom only goes
 in, 100–400%: below the cover fit there would be bare sheet round the photo,
 and no sensible size to export it at.
 
+#### The Original sheet: the photo's own shape
+
+The Sheet choice leads with **Original** — the photo's own shape, upright —
+before 1:1, 4:5, 3:4 and 2:3, and the first photo opens on it. With the zoom
+at 100% and no pan the photo then fills the sheet exactly, so the untouched
+path neither crops nor resamples a pixel: a crop is something the person
+chooses, not something the app does for them. Replacing the photo keeps the
+sheet that was chosen (an Original sheet takes the new photo's shape);
+removing the photo from an Original sheet leaves 4:5, since there is no shape
+to take. A photo more extreme than 3:1 (a panorama) is cover-cropped to 3:1,
+so no sheet is a sliver. `sheetAspect` is the one place a sheet becomes a
+number, and everything downstream — the cover fit, the pan limits, Fit, the
+preview and the export — takes that number.
+
+At the height where the sheet holds the photo at its own pixels, the blit is
+**snapped**: drawn at exactly the photo's size, at a whole-pixel offset, kept
+inside the travel that still covers the sheet (`snapRect`). Centred, the 4:5
+crop of a 12 MP photo sits half a pixel off the grid, and a bilinear blit at a
+half-pixel offset blurs every pixel into its neighbour: measured, 0.753 of the
+original's Laplacian energy unsnapped, 1.000 snapped. The preview and a zoomed
+photo are never 1:1, so they are left alone.
+
 #### The photo always covers the sheet
 
 Panning is limited to where the photo still covers the sheet: its centre can
@@ -253,8 +275,9 @@ is handed), and again by every edit that moves the photo, zooms it or changes
 the sheet's shape, so the stored value is honest too. The second place matters
 because a pan that is legal on one sheet is not on another: push a landscape
 photo to one side on a square sheet, switch to 4:5, and without it a strip of
-bare sheet would print. A property test throws random sheet changes, pans and
-zooms at the document and checks the sheet stays covered after every one.
+bare sheet would print. A property test throws random sheet changes (Original
+among them), pans, zooms and replaced photos at the document and checks the
+sheet stays covered after every one.
 
 The compositor still treats a transparent ground pixel as paper rather than
 black — `getImageData` hands untouched pixels back as transparent *black*, and
@@ -512,7 +535,9 @@ The sheet now takes the *smaller* of the two fits — the container's width, or
 the width that lets its full height fit — with the height following from the
 aspect ratio, so both constraints hold at once and neither axis is ever clamped
 alone. `container-type: size` on the wrapper is what makes `cqw`/`cqh` resolve
-against the space the sheet is actually given.
+against the space the sheet is actually given. The ratio is a number the sheet
+is handed (`--sheet-ratio`, from `sheetAspect`), not one of a list of shapes,
+so an Original sheet of any photo's proportions sizes the same way.
 
 <!-- WP2: export resolution ("always renders at reference height", below, and the export size in Status) is rewritten in WP2. -->
 ### Why the preview drops resolution while you drag
@@ -529,6 +554,17 @@ height, and the full-quality frame lands once it settles. That is only safe
 because every spatial quantity is already expressed against `REFERENCE_HEIGHT`,
 so a smaller render is the same print at lower fidelity rather than a different
 one — there is a test asserting the aspect matches at both heights.
+
+The preview is sized by a **pixel budget**, not a height: a million pixels
+settled and 78,400 while dragging, at most 1000 and 280 px tall. Its cost goes
+with its pixels, and a fixed height made a landscape sheet cost its width over
+its height more — an Original sheet for a panorama would have cost 3.75 times a
+4:5 one. The budget is exactly the most expensive sheet before (1:1 at 1000 px),
+so every portrait and square sheet renders exactly as it did, and a landscape
+one renders shorter instead of dearer (4:3 at 1155x866, 3:1 at 1731x577). The
+preview never feeds the export, and it is not sharper than 1000 px tall: on a
+high-density screen the settled preview is a little softer than the saved
+file, which is the trade that keeps a drag responsive.
 
 Two things that are easy to get wrong here:
 
@@ -613,7 +649,8 @@ height, tracking, rotation, alignment with per-line justify), each in a real
 Riso ink with an optional second ink or backing over the photo; the press
 (halftone or grain, screen size, ink, misregistration, Edge, Wear, Re-roll,
 stock); an imported photo as the printing ground (stored exactly as imported,
-shown as shot, zoomed and panned within the sheet, paper over it or not); undo/redo, persistence that
+shown as shot, on its own Original sheet or a 1:1, 4:5, 3:4 or 2:3 crop,
+zoomed and panned within the sheet, paper over it or not); undo/redo, persistence that
 opens every older save, and save via the share sheet. Four tabs: Type, Ink,
 Photo, Press.
 

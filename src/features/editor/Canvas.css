@@ -17,23 +17,10 @@
   box-shadow: var(--shadow-2);
   border-radius: 2px;
   overflow: hidden;
-}
-
-.sheet[data-aspect='1:1'] {
-  aspect-ratio: 1 / 1;
-  width: min(100cqw, 100cqh * 1 / 1);
-}
-.sheet[data-aspect='4:5'] {
-  aspect-ratio: 4 / 5;
-  width: min(100cqw, 100cqh * 4 / 5);
-}
-.sheet[data-aspect='3:4'] {
-  aspect-ratio: 3 / 4;
-  width: min(100cqw, 100cqh * 3 / 4);
-}
-.sheet[data-aspect='2:3'] {
-  aspect-ratio: 2 / 3;
-  width: min(100cqw, 100cqh * 2 / 3);
+  /* --sheet-ratio is the sheet's width over its height, set by Canvas.tsx: any
+     number, so an Original sheet takes its photo's own shape. */
+  aspect-ratio: var(--sheet-ratio, 0.8);
+  width: min(100cqw, 100cqh * var(--sheet-ratio, 0.8));
 }
 
 /* The canvas fills the sheet and never receives input itself. */

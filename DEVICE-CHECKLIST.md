@@ -48,6 +48,9 @@ So:
 - [ ] Photo tab open: drag and pinch the photo — it zooms 100–400% and stops at
       its edges, never showing bare paper round it; switch the sheet shape on
       the Photo tab and it still covers the sheet
+- [ ] The first photo opens on Sheet: Original, the photo's own shape — a
+      landscape photo gives a landscape sheet that fits the screen without
+      distortion; Remove the photo → the sheet is 4:5 again
 - [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac)
 - [ ] Type a long string → tap Fit → it sits on the sheet, and the next pinch
       or slider touch starts from that size (no jump)

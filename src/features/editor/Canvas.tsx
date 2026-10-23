@@ -3,7 +3,7 @@ import { useSettings } from '../../state/settingsStore.ts'
 import { useRenderer } from './useRenderer.ts'
 import { useLayerGestures } from './useLayerGestures.ts'
 import { stepSize } from '../controls/sizeScale.ts'
-import { ASPECTS, type MediaLayer, type TextLayer } from '../../engine/types.ts'
+import { sheetAspect, type MediaLayer, type TextLayer } from '../../engine/types.ts'
 import { clampPan } from '../../engine/media.ts'
 import './Canvas.css'
 
@@ -60,6 +60,7 @@ export default function Canvas({
   // a rotated photo would need its cover fit recomputed against the rotated
   // bounds, which is a different feature.
   const mediaTarget = settings.media
+  const aspect = sheetAspect(settings)
   const mediaAsLayer =
     mediaMode && mediaTarget
       ? ({ ...layer, x: mediaTarget.x, y: mediaTarget.y, size: mediaTarget.scale, rotation: 0 } as TextLayer)
@@ -75,14 +76,14 @@ export default function Canvas({
       if (Object.keys(next).length === 0) return
       // Clamped while dragging, so the photo stops at its edge on screen
       // rather than the stored value running ahead of what is drawn.
-      const placed = clampPan({ ...mediaTarget, ...next }, ASPECTS[settings.aspect], 1)
+      const placed = clampPan({ ...mediaTarget, ...next }, aspect, 1)
       dispatch({
         type: 'patchMedia',
         patch: { x: placed.x, y: placed.y, scale: placed.scale },
         coalesce: true,
       })
     },
-    [dispatch, mediaTarget, settings.aspect],
+    [dispatch, mediaTarget, aspect],
   )
 
   const typeGestures = useLayerGestures(surfaceRef, mediaMode ? null : layer, patch, ensureSelected)
@@ -141,7 +142,8 @@ export default function Canvas({
   )
 
   return (
-    <div className="sheet" data-aspect={settings.aspect}>
+    // The sheet's shape as a number, so any Original ratio sizes it (Canvas.css).
+    <div className="sheet" style={{ '--sheet-ratio': aspect } as React.CSSProperties}>
       <canvas ref={canvasRef} className="print-canvas" />
       <div
         ref={surfaceRef}

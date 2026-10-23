@@ -67,7 +67,7 @@ const ids = (list: readonly { id: string }[]): readonly string[] => list.map((x)
 export const INK_IDS = ids(RISO_INKS)
 export const FONT_IDS = ids(FONTS)
 export const PAPER_IDS = ids(PAPERS)
-export const ASPECT_KEYS = Object.keys(ASPECTS)
+export const ASPECT_KEYS: readonly string[] = [...Object.keys(ASPECTS), 'original']
 export const ALIGNS = ['left', 'center', 'right', 'justify'] as const
 export const METHODS = ['halftone', 'grain'] as const
 

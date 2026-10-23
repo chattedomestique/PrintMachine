@@ -20,13 +20,17 @@ import { defaultAngle, screenField } from './screen.ts'
 import { BACKING_PAD, FIT_WIDTH, alignOffset, fitSize, justifyOffsets, layoutText, lineRects, type FontMeasure } from './text.ts'
 import {
   DRAFT_HEIGHT,
+  DRAFT_PIXELS,
   PREVIEW_HEIGHT,
+  PREVIEW_PIXELS,
   detailFactor,
+  draftSize,
   ensureCache,
   grainCell,
   groundRect,
   outputSize,
   pressPlate,
+  previewSize,
   printSheet,
   renderPrint,
   type ToneSource,
@@ -37,6 +41,7 @@ import {
   bandMask,
   clampPan,
   coverRect,
+  snapRect,
   fromPanFraction,
   groundLuma,
   type InkRgb,
@@ -49,7 +54,7 @@ import { applySettings } from '../state/settingsReducer.ts'
 import { REFERENCE_HEIGHT, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from './limits.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
-import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'
+import { ASPECTS, FONTS, sheetAspect, type PrintSettings, type TextLayer } from './types.ts'
 
 const W = 24
 const H = 24
@@ -910,12 +915,16 @@ describe('photo placement', () => {
     expect(fromPanFraction(fit, SHEET.w, SHEET.h, 'y', 0)).toBe(0.5)
   })
 
-  it('random aspect switches, pans and zooms never leave the stored photo uncovering the sheet', () => {
+  it('random aspect switches, pans, zooms and replaced photos never leave the stored photo uncovering the sheet', () => {
     // Through the reducer, because that is what writes the stored placement:
-    // pan to the side on one sheet shape, switch to another, and the value
-    // that was legal before has to be pulled back, not left to the renderer.
+    // pan to the side on one sheet shape, switch to another (Original among
+    // them, whose shape is the photo's), or replace the photo with one of
+    // another shape, and the value that was legal before has to be pulled
+    // back, not left to the renderer.
     const rnd = mulberry32(99)
-    const aspects = Object.keys(ASPECTS) as PrintSettings['aspect'][]
+    const aspects = [...(Object.keys(ASPECTS) as PrintSettings['aspect'][]), 'original'] as const
+    let replaced = 0
+    let original = 0
     for (const src of SOURCES) {
       let s = applySettings(defaultSettings(), {
         type: 'setMedia',
@@ -923,14 +932,21 @@ describe('photo placement', () => {
       })
       for (let step = 0; step < 60; step++) {
         const r = rnd()
-        if (r < 0.35) s = applySettings(s, { type: 'patch', patch: { aspect: aspects[Math.floor(rnd() * aspects.length)] } })
-        else if (r < 0.7) s = applySettings(s, { type: 'patchMedia', patch: { x: rnd() * 4 - 1.5, y: rnd() * 4 - 1.5 } })
-        else s = applySettings(s, { type: 'patchMedia', patch: { scale: rnd() * 5 } })
+        if (r < 0.3) s = applySettings(s, { type: 'patch', patch: { aspect: aspects[Math.floor(rnd() * aspects.length)] } })
+        else if (r < 0.6) s = applySettings(s, { type: 'patchMedia', patch: { x: rnd() * 4 - 1.5, y: rnd() * 4 - 1.5 } })
+        else if (r < 0.85) s = applySettings(s, { type: 'patchMedia', patch: { scale: rnd() * 5 } })
+        else {
+          const next = SOURCES[Math.floor(rnd() * SOURCES.length)]
+          s = applySettings(s, { type: 'setMedia', media: makeMedia({ id: `p${step}`, ...next, scale: s.media!.scale, x: s.media!.x, y: s.media!.y }) })
+          replaced++
+        }
+        if (s.aspect === 'original') original++
         const m = s.media!
+        const a = sheetAspect(s)
         // A fixed point of the clamp, in the units the reducer works in...
-        expect(clampPan(m, ASPECTS[s.aspect], 1)).toEqual(m)
+        expect(clampPan(m, a, 1)).toEqual(m)
         // ...and covering a real sheet in pixels.
-        const W = ASPECTS[s.aspect] * 1000
+        const W = a * 1000
         const H = 1000
         expect(m.scale).toBeGreaterThanOrEqual(1)
         const { dw, dh } = coverRect(m, W, H, { scale: m.scale, x: 0.5, y: 0.5 })
@@ -940,6 +956,84 @@ describe('photo placement', () => {
         expect(m.y * H + dh / 2).toBeGreaterThanOrEqual(H - 1e-6)
       }
     }
+    // Both paths were exercised, not just possible.
+    expect(replaced).toBeGreaterThan(10)
+    expect(original).toBeGreaterThan(10)
+  })
+})
+
+describe('the sheet\'s shape as a number', () => {
+  const photo = (width: number, height: number) => makeMedia({ id: 'p', width, height })
+
+  it('is the fixed ratio for a fixed sheet, with or without a photo', () => {
+    for (const [key, a] of Object.entries(ASPECTS)) {
+      expect(sheetAspect({ aspect: key as keyof typeof ASPECTS, media: null })).toBe(a)
+      expect(sheetAspect({ aspect: key as keyof typeof ASPECTS, media: photo(4032, 3024) })).toBe(a)
+    }
+  })
+
+  it("is the photo's own, upright shape for Original, inside 1:3..3:1, and 4:5 with no photo", () => {
+    expect(sheetAspect({ aspect: 'original', media: photo(4032, 3024) })).toBeCloseTo(4 / 3, 12)
+    expect(sheetAspect({ aspect: 'original', media: photo(3024, 4032) })).toBeCloseTo(3 / 4, 12)
+    expect(sheetAspect({ aspect: 'original', media: photo(5712, 4284) })).toBeCloseTo(5712 / 4284, 12)
+    // A panorama is cover-cropped to 3:1, a tall strip to 1:3: never a sliver.
+    expect(sheetAspect({ aspect: 'original', media: photo(6000, 1200) })).toBe(3)
+    expect(sheetAspect({ aspect: 'original', media: photo(1200, 6000) })).toBe(1 / 3)
+    expect(sheetAspect({ aspect: 'original', media: null })).toBe(4 / 5)
+  })
+})
+
+describe('the blit is pixel-exact when the sheet holds the photo at its own pixels', () => {
+  it('snaps the 4:5 crop of a 12 MP photo at its native height to whole pixels and its own size', () => {
+    // 4032x3024 on 4:5 at 3024 tall: 2419 wide, the photo centred half a
+    // pixel off the grid (dx = -806.5).
+    const r = coverRect({ width: 4032, height: 3024 }, 2419, 3024, { scale: 1, x: 0.5, y: 0.5 })
+    expect(r.dx).toBeCloseTo(-806.5, 9)
+    const s = snapRect(r, 4032, 3024, 2419, 3024)
+    expect(s).toEqual({ dx: -806, dy: 0, dw: 4032, dh: 3024 })
+    for (const v of Object.values(s)) expect(Number.isInteger(v)).toBe(true)
+  })
+
+  it('still covers the sheet after the snap, from any pan', () => {
+    for (const x of [0, 0.13, 0.5, 0.77, 1]) {
+      for (const [mw, mh, W, H] of [
+        [4032, 3024, 2419, 3024],
+        [3024, 4032, 3024, 3780],
+        [4032, 3024, 4032, 3024],
+        [6000, 1200, 3600, 1200],
+      ]) {
+        const r = coverRect({ width: mw, height: mh }, W, H, { scale: 1, x, y: x })
+        const s = snapRect(r, mw, mh, W, H)
+        expect([s.dw, s.dh]).toEqual([mw, mh])
+        expect(s.dx).toBeLessThanOrEqual(0)
+        expect(s.dy).toBeLessThanOrEqual(0)
+        expect(s.dx + s.dw).toBeGreaterThanOrEqual(W)
+        expect(s.dy + s.dh).toBeGreaterThanOrEqual(H)
+        // Within a pixel of where the unsnapped blit put it.
+        expect(Math.abs(s.dx - r.dx)).toBeLessThanOrEqual(1)
+        expect(Math.abs(s.dy - r.dy)).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  it('is the identity on an already whole-pixel native rect, and leaves every other blit alone', () => {
+    // The Original sheet at native height: the photo IS the sheet.
+    const exact = coverRect({ width: 4032, height: 3024 }, 4032, 3024, { scale: 1, x: 0.5, y: 0.5 })
+    expect(snapRect(exact, 4032, 3024, 4032, 3024)).toEqual(exact)
+    expect(exact).toEqual({ dx: 0, dy: 0, dw: 4032, dh: 3024 })
+    // The preview (far from 1:1), and a zoomed export: untouched.
+    const preview = coverRect({ width: 4032, height: 3024 }, 800, 1000, { scale: 1, x: 0.5, y: 0.5 })
+    expect(snapRect(preview, 4032, 3024, 800, 1000)).toBe(preview)
+    const zoomed = coverRect({ width: 4032, height: 3024 }, 2419, 3024, { scale: 1.5, x: 0.5, y: 0.5 })
+    expect(snapRect(zoomed, 4032, 3024, 2419, 3024)).toBe(zoomed)
+    // A photo a pixel narrower than the sheet: snapped to its own size it
+    // would leave a bare column, so the blit keeps its (enlarged) rect.
+    const narrow = coverRect({ width: 1000, height: 2000 }, 1001, 1000, { scale: 1, x: 0.5, y: 0.5 })
+    expect(Math.abs(narrow.dw / 1000 - 1)).toBeLessThan(1.5 / 1000)
+    expect(snapRect(narrow, 1000, 2000, 1001, 1000)).toBe(narrow)
+    // groundRect applies it: the native export of a 4:5 crop is snapped.
+    const m = makeMedia({ id: 'p', width: 4032, height: 3024 })
+    expect(groundRect(m, 2419, 3024)).toEqual({ dx: -806, dy: 0, dw: 4032, dh: 3024 })
   })
 })
 
@@ -980,7 +1074,7 @@ describe('whichever decode of the photo is drawn, it fills the rectangle its tru
       expect(scratch.drawn).toHaveLength(1)
       const [source, dx, dy, dw, dh] = scratch.drawn[0] as [CanvasImageSource, number, number, number, number]
       expect(source).toBe(bitmap)
-      const { w, h } = outputSize(s.aspect, height)
+      const { w, h } = outputSize(sheetAspect(s), height)
       // Exactly the rectangle the document and the sheet give...
       expect({ dx, dy, dw, dh }).toEqual(groundRect(s.media!, w, h))
       // ...in sheet fractions:
@@ -1325,14 +1419,17 @@ describe('the two-ink switch is a pattern, not a fade', () => {
 })
 
 describe('draft rendering', () => {
+  const SHEETS = [1 / 3, 2 / 3, 3 / 4, 4 / 5, 1, 4 / 3, 2, 3]
+
   it('is the same picture at lower fidelity, not a different one', () => {
     // Rendering smaller while a control moves is only safe because every
     // spatial quantity is expressed against REFERENCE_HEIGHT. If the draft had
     // a different aspect the preview would jump shape on every drag.
-    for (const aspect of ['1:1', '4:5', '3:4', '2:3'] as const) {
-      const draft = outputSize(aspect, DRAFT_HEIGHT)
-      const full = outputSize(aspect, PREVIEW_HEIGHT)
-      expect(draft.w / draft.h).toBeCloseTo(full.w / full.h, 2)
+    for (const aspect of SHEETS) {
+      const draft = draftSize(aspect)
+      const full = previewSize(aspect)
+      expect(draft.w / draft.h).toBeCloseTo(full.w / full.h, 1)
+      expect(Math.abs(draft.w / draft.h - aspect)).toBeLessThan(1 / draft.h)
     }
   })
 
@@ -1340,16 +1437,58 @@ describe('draft rendering', () => {
     // The press is a dozen full-image passes per plate, so its cost goes with
     // the pixel count. A draft that is not several times cheaper buys nothing
     // and only costs a second cache.
-    const draft = outputSize('4:5', DRAFT_HEIGHT)
-    const full = outputSize('4:5', PREVIEW_HEIGHT)
-    const ratio = (full.w * full.h) / (draft.w * draft.h)
-    expect(ratio).toBeGreaterThan(4)
+    for (const aspect of SHEETS) {
+      const draft = draftSize(aspect)
+      const full = previewSize(aspect)
+      expect((full.w * full.h) / (draft.w * draft.h)).toBeGreaterThan(4)
+    }
   })
 
-  it('never reaches the export, which always renders at reference height', () => {
-    const exported = outputSize('4:5')
+  it('never reaches the export, which renders at reference height', () => {
+    const exported = outputSize(4 / 5)
     expect(exported.h).toBe(REFERENCE_HEIGHT)
     expect(exported.h).toBeGreaterThan(PREVIEW_HEIGHT)
+  })
+})
+
+describe('the preview is sized by a pixel budget, not a height', () => {
+  it('keeps every sheet at or narrower than square exactly as it was: 1000 tall, 280 for the draft', () => {
+    for (const aspect of [1 / 3, 2 / 3, 3 / 4, 4 / 5, 1]) {
+      expect(previewSize(aspect)).toEqual(outputSize(aspect, PREVIEW_HEIGHT))
+      expect(draftSize(aspect)).toEqual(outputSize(aspect, DRAFT_HEIGHT))
+    }
+  })
+
+  it('gives the plan\'s rows', () => {
+    expect(previewSize(1 / 3)).toEqual({ w: 333, h: 1000 })
+    expect(previewSize(4 / 5)).toEqual({ w: 800, h: 1000 })
+    expect(previewSize(1)).toEqual({ w: 1000, h: 1000 })
+    expect(previewSize(4 / 3)).toEqual({ w: 1155, h: 866 })
+    expect(previewSize(3)).toEqual({ w: 1731, h: 577 })
+  })
+
+  it('never costs more than the square sheet always did, up to the width\'s rounding', () => {
+    // Floored height, rounded width: the overshoot is under half a row. A
+    // flat 1,000,000 fails on correct code (4:3 is 866 x 1155 = 1,000,230).
+    // 200,001 sheets from 1:3 to 3:1; collected, then asserted once.
+    const over: string[] = []
+    let worst = 0
+    for (let i = 0; i <= 200_000; i++) {
+      const aspect = Math.exp(Math.log(1 / 3) + (i / 200_000) * Math.log(9))
+      const p = previewSize(aspect)
+      const d = draftSize(aspect)
+      worst = Math.max(worst, p.w * p.h - PREVIEW_PIXELS)
+      if (p.w * p.h > PREVIEW_PIXELS + p.h / 2) over.push(`preview ${aspect}`)
+      if (d.w * d.h > DRAFT_PIXELS + d.h / 2) over.push(`draft ${aspect}`)
+      if (aspect <= 1 && p.h !== PREVIEW_HEIGHT) over.push(`height ${aspect}`)
+    }
+    expect(over).toEqual([])
+    expect(worst).toBeLessThan(PREVIEW_HEIGHT / 2)
+  })
+
+  it('takes a landscape sheet as a plain number', () => {
+    expect(outputSize(4 / 3, 3024)).toEqual({ w: 4032, h: 3024 })
+    expect(outputSize(3, 600)).toEqual({ w: 1800, h: 600 })
   })
 })
 

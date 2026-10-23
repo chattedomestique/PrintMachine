@@ -42,10 +42,10 @@ import { paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { knockoutMask } from './knockout.ts'
-import { bandMask, coverRect, groundLuma, splitInks, type DrawRect } from './media.ts'
+import { bandMask, coverRect, groundLuma, snapRect, splitInks, type DrawRect } from './media.ts'
 import { rasterizeBacking, rasterizeText } from './text.ts'
 import { REFERENCE_HEIGHT } from './limits.ts'
-import { ASPECTS, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
+import { sheetAspect, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
  * The preview renders smaller than the export so a slider drag stays smooth on
@@ -53,8 +53,16 @@ import { ASPECTS, type MediaLayer, type PressProfile, type PrintSettings, type T
  * softness, registration offset — is scaled by `h / REFERENCE_HEIGHT` in
  * renderPlate, so the two resolutions produce the same look rather than the
  * same pixels. Changing one without the other is what makes a preview lie.
+ *
+ * The preview is sized by a PIXEL BUDGET, not a height (`previewSize`): its
+ * cost goes with its pixels, and a fixed height made a landscape sheet cost
+ * its width over its height more (a 3:1 Original sheet 3.75x a 4:5 one). The
+ * budget is exactly the most expensive sheet before (1:1 at 1000 px), so no
+ * portrait or square sheet changes and none costs more. The preview never
+ * feeds the export, and it is not sharper than 1000 px tall.
  */
 export const PREVIEW_HEIGHT = 1000
+export const PREVIEW_PIXELS = 1_000_000
 
 /**
  * Resolution used while a control is still moving.
@@ -68,9 +76,11 @@ export const PREVIEW_HEIGHT = 1000
  * Every spatial quantity is already scaled by h / REFERENCE_HEIGHT, so a
  * smaller render is the same print at lower fidelity rather than a different
  * one. Dropping to this while a value is in motion is roughly a seven-fold cut
- * in pixels; the full-height frame lands as soon as the control settles.
+ * in pixels; the full-height frame lands as soon as the control settles. A
+ * pixel budget too (280 x 280), for the same reason as the preview's.
  */
 export const DRAFT_HEIGHT = 280
+export const DRAFT_PIXELS = 78_400
 
 /**
  * The press's fixed constants, once settings and now decisions made here:
@@ -94,13 +104,28 @@ const PITCH_PER_GRAIN = 3
 export const grainCell = (screenPitch: number, scale: number): number =>
   Math.max(1, Math.round((screenPitch / PITCH_PER_GRAIN) * scale))
 
-/** Output pixel dimensions for an aspect at a given render height. */
-export function outputSize(
-  aspect: PrintSettings['aspect'],
-  height: number = REFERENCE_HEIGHT,
-): { w: number; h: number } {
-  return { w: Math.round(height * ASPECTS[aspect]), h: height }
+/** Output pixel dimensions for a sheet's width over its height (a number:
+ *  `sheetAspect`) at a given render height. The one place the width is made. */
+export function outputSize(aspect: number, height: number = REFERENCE_HEIGHT): { w: number; h: number } {
+  return { w: Math.round(height * aspect), h: height }
 }
+
+/**
+ * The tallest sheet of this aspect inside a pixel budget, at most `cap` tall:
+ * `h = min(cap, floor(sqrt(budget / a)))`, `w = round(h x a)`. Floored, so the
+ * width's rounding is the only overshoot (under half a row). Every sheet at
+ * or narrower than square keeps the full `cap`.
+ */
+function budgetSize(aspect: number, budget: number, cap: number): { w: number; h: number } {
+  const h = Math.max(1, Math.min(cap, Math.floor(Math.sqrt(budget / aspect))))
+  return outputSize(aspect, h)
+}
+
+/** The settled preview's size: a million pixels, at most 1000 px tall. */
+export const previewSize = (aspect: number) => budgetSize(aspect, PREVIEW_PIXELS, PREVIEW_HEIGHT)
+
+/** The draft's size while a control moves: 78,400 pixels, at most 280 tall. */
+export const draftSize = (aspect: number) => budgetSize(aspect, DRAFT_PIXELS, DRAFT_HEIGHT)
 
 /** Editing aids. Never non-null on an export path. The one aid is the
  *  selected plate's crosshair: the on-sheet sign of which plate the gestures
@@ -550,9 +575,12 @@ export function printSheet(
  * the photo's TRUE size, and nothing else. Whatever bitmap is drawn — the
  * preview's reduced working copy or the full original at Save — fills this
  * same rectangle, so the preview and the print place the photo identically.
+ *
+ * Snapped (`snapRect`) when the sheet holds the photo at its own pixels, so a
+ * native export copies pixels instead of resampling them by a fraction.
  */
 export function groundRect(media: MediaLayer, w: number, h: number): DrawRect {
-  return coverRect({ width: media.width, height: media.height }, w, h, media)
+  return snapRect(coverRect({ width: media.width, height: media.height }, w, h, media), media.width, media.height, w, h)
 }
 
 /**
@@ -580,7 +608,7 @@ export function renderPrint(
    *  than holding it through the whole press. */
   onGround?: () => void,
 ): void {
-  const { w, h } = outputSize(s.aspect, height)
+  const { w, h } = outputSize(sheetAspect(s), height)
 
   if (ctx.canvas.width !== w || ctx.canvas.height !== h) {
     ctx.canvas.width = w

@@ -1,5 +1,5 @@
 import {
-  ASPECTS,
+  sheetAspect,
   type MediaLayer,
   type PressProfile,
   type PrintSettings,
@@ -54,14 +54,20 @@ const LIMIT = 60
 const NEXT_INK = ['fluorescentpink', 'blue', 'yellow', 'black', 'green', 'fluorescentorange']
 
 /**
- * Keep the photo covering the sheet. Re-applied by every action that can move
- * the photo, zoom it or change the sheet's shape, so the stored placement is
- * always one that prints with no bare strip — the renderer clamps too, but a
- * stored value it has to correct would make the next pan start from a
- * position the picture is not actually at.
+ * Keep the sheet a sheet and the photo covering it. Re-applied by every action
+ * that can move the photo, zoom it, replace or remove it, or change the
+ * sheet's shape:
+ *
+ *  - An Original sheet takes its shape from the photo, so without one it is
+ *    the default 4:5 (removing the photo of an Original sheet lands there).
+ *  - The pan is clamped against the NEW numeric aspect, so the stored
+ *    placement is always one that prints with no bare strip — the renderer
+ *    clamps too, but a stored value it has to correct would make the next pan
+ *    start from a position the picture is not actually at.
  */
 function withCover(state: PrintSettings): PrintSettings {
-  return state.media ? { ...state, media: clampPan(state.media, ASPECTS[state.aspect], 1) } : state
+  const sheet: PrintSettings = state.aspect === 'original' && !state.media ? { ...state, aspect: '4:5' } : state
+  return sheet.media ? { ...sheet, media: clampPan(sheet.media, sheetAspect(sheet), 1) } : sheet
 }
 
 /** True when the plate budget has no room for another pressed pass. */
@@ -167,6 +173,9 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       return { ...state, press: { ...state.press, ...action.patch } }
 
     case 'setMedia': {
+      // Replacing a photo keeps the sheet the person chose (an Original sheet
+      // takes the new photo's shape); removing one from an Original sheet
+      // leaves 4:5 (withCover).
       if (!action.media || state.media) return withCover({ ...state, media: action.media })
       // The first photo is the moment a single ink stops being enough. Type
       // that was perfectly readable on paper goes invisible over half of any
@@ -177,8 +186,14 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       // and turning it off leaves a single ink.
       // A plate with a backing already reads over the photo (the block is
       // printed on paper there), and it may not take a second ink as well.
+      //
+      // And the sheet becomes the photo's own shape (Original): at 100% and
+      // centred the photo then fills it exactly, so the untouched path neither
+      // crops nor resamples a pixel. Choosing 4:5 or 1:1 is a crop the person
+      // makes, not one the app makes for them. Undo brings the old sheet back.
       return withCover({
         ...state,
+        aspect: 'original',
         media: action.media,
         layers: state.layers.map((l) =>
           l.contrastInkId || l.backing ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },

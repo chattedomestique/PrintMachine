@@ -1,6 +1,6 @@
 import { useId } from 'react'
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
-import { ASPECTS, FONTS, type TextAlign, type TextLayer } from '../../engine/types.ts'
+import { FONTS, sheetAspect, type TextAlign, type TextLayer } from '../../engine/types.ts'
 import { fitSize } from '../../engine/text.ts'
 import { SIZE_MIN, SIZE_SLIDER_MAX, SIZE_STEP } from '../../engine/limits.ts'
 import { formatSize } from './sizeScale.ts'
@@ -30,7 +30,7 @@ export default function TypePanel() {
   // does not re-fit; tapping Fit again does. Its own undo step.
   const fit = () => {
     const measure = canvasMeasure()
-    if (measure) patch({ size: fitSize(layer, ASPECTS[settings.aspect], measure) })
+    if (measure) patch({ size: fitSize(layer, sheetAspect(settings), measure) })
   }
 
   return (

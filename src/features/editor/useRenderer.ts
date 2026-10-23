@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
-import {
-  DRAFT_HEIGHT,
-  PREVIEW_HEIGHT,
-  renderPrint,
-  type OverlaySpec,
-  type RenderCache,
-} from '../../engine/render.ts'
-import type { PrintSettings } from '../../engine/types.ts'
+import { draftSize, previewSize, renderPrint, type OverlaySpec, type RenderCache } from '../../engine/render.ts'
+import { sheetAspect, type PrintSettings } from '../../engine/types.ts'
 
 /** Quiet gap that counts as "the control has stopped". Long enough to span the
  *  pauses inside a real drag, short enough that letting go feels immediate. */
@@ -93,13 +87,16 @@ export function useRenderer(
         }
         lastDraftRef.current = now
       }
+      // Sized by a pixel budget, not a height, so a landscape sheet costs no
+      // more than a square one (render.ts `previewSize`).
+      const aspect = sheetAspect(pending.settings)
       renderPrint(
         ctx,
         scratch,
         pending.settings,
         draft ? draftCacheRef : fullCacheRef,
         pending.overlay,
-        draft ? DRAFT_HEIGHT : PREVIEW_HEIGHT,
+        (draft ? draftSize(aspect) : previewSize(aspect)).h,
         pending.media,
       )
     }

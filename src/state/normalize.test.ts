@@ -26,7 +26,7 @@ import {
 import { normalizeSettings } from './normalize.ts'
 import { fitSize, layoutText, type FontMeasure } from '../engine/text.ts'
 import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from '../engine/limits.ts'
-import { ASPECTS, type PrintSettings } from '../engine/types.ts'
+import { sheetAspect, type PrintSettings } from '../engine/types.ts'
 
 type Doc = Record<string, unknown>
 
@@ -538,7 +538,7 @@ describe('verdict §4.1: what each removed field becomes', () => {
 
   it('layer.fitWidth: true — the fitted size, measured once on the converted layer', () => {
     const s = maxWith()
-    const aspect = ASPECTS[s.aspect]
+    const aspect = sheetAspect(s)
     for (const i of [0, 2, 3]) {
       expect(rawLayers[i].fitWidth).toBe(true)
       // fitSize of the layer as it now draws: after the case, face and weight
@@ -559,7 +559,7 @@ describe('verdict §4.1: what each removed field becomes', () => {
     expect([l.text, l.fontId, l.bold]).toEqual(['lowercase words', 'grotesk', false])
     const h = 1000
     const w = layoutText(l, h, (text, px) => stub({ stack: '', weight: 400, px }, text)).widest
-    expect(w).toBeCloseTo(0.92 * ASPECTS[s.aspect] * h, 6)
+    expect(w).toBeCloseTo(0.92 * sheetAspect(s) * h, 6)
 
     // A measure that can tell the difference: capitals and bold are wider, and
     // the Rounded stack measures as nothing at all. If the fit ran before any
@@ -570,7 +570,7 @@ describe('verdict §4.1: what each removed field becomes', () => {
       return font.px * k * [...text].reduce((a, ch) => a + (ch !== ch.toLowerCase() ? 0.7 : 0.5), 0)
     }
     const t = normalizeSettings(copy(maximal), { measure: sensitive })
-    const aspect = ASPECTS[t.aspect]
+    const aspect = sheetAspect(t)
     // caps first: the fit is of 'PRINT\nMACHINE', not of 'Print\nmachine'.
     expect(t.layers[0].size).toBeCloseTo(fitSize(t.layers[0], aspect, sensitive), 9)
     expect(t.layers[0].size).not.toBeCloseTo(fitSize({ ...t.layers[0], text: 'Print\nmachine' }, aspect, sensitive), 3)
@@ -836,6 +836,31 @@ describe('verdict §4.1: what each removed field becomes', () => {
   it('aspect: unchanged', () => {
     expect(rawMax.aspect).toBe('3:4')
     expect(max().aspect).toBe('3:4')
+  })
+
+  it("aspect 'original': kept with a photo, 4:5 without one, and the pan clamped to the photo's own shape", () => {
+    const withPhoto = copy(defaultDoc) as unknown as Doc
+    withPhoto.aspect = 'original'
+    withPhoto.media = { id: 'm', width: 4032, height: 3024, scale: 1, x: 0.1, y: 0.9, native: true }
+    const s = normalizeSettings(withPhoto)
+    expect(s.aspect).toBe('original')
+    // At zoom 1 on its own shape the photo has no travel at all.
+    expect([s.media!.x, s.media!.y]).toEqual([0.5, 0.5])
+    const without = copy(defaultDoc) as unknown as Doc
+    without.aspect = 'original'
+    expect(normalizeSettings(without).aspect).toBe('4:5')
+    // A photo that is refused takes the Original sheet with it.
+    without.media = { id: '', width: 10, height: 10 }
+    expect(normalizeSettings(without).aspect).toBe('4:5')
+  })
+
+  it("layer.fitWidth on an Original sheet fits the photo's shape", () => {
+    const d = copy(defaultDoc) as unknown as Doc
+    d.aspect = 'original'
+    d.media = { id: 'm', width: 3000, height: 1000, scale: 1, x: 0.5, y: 0.5 }
+    const s = normalizeSettings(d, { measure: stub })
+    expect(sheetAspect(s)).toBe(3)
+    expect(s.layers[0].size).toBeCloseTo(fitSize(s.layers[0], 3, stub), 12)
   })
 })
 

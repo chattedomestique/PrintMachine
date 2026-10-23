@@ -7,6 +7,9 @@ import { isReducedCopy } from '../../engine/media.ts'
 import type { MediaLayer, PrintSettings } from '../../engine/types.ts'
 
 const SHEETS: readonly { value: PrintSettings['aspect']; label: string }[] = [
+  // The photo's own shape: the default once there is a photo, and the one
+  // sheet that neither crops nor resamples it.
+  { value: 'original', label: 'Original' },
   { value: '1:1', label: '1:1' },
   { value: '4:5', label: '4:5' },
   { value: '3:4', label: '3:4' },
@@ -94,12 +97,13 @@ export default function MediaPanel({ mediaState }: { mediaState: MediaState }) {
       )}
 
       {/* The sheet's shape is a deliverable (a 4:5 feed, a square, a print),
-          and it decides which part of the photo survives the crop. */}
+          and it decides which part of the photo survives the crop. Original
+          is the photo's own shape, so it needs a photo. */}
       <Field label="Sheet">
         <Segmented
           label="Sheet proportions"
           value={settings.aspect}
-          options={SHEETS}
+          options={SHEETS.map((o) => (o.value === 'original' && !media ? { ...o, disabled: true } : o))}
           onChange={(aspect) => dispatch({ type: 'patch', patch: { aspect } })}
         />
       </Field>

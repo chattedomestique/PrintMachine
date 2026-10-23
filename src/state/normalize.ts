@@ -28,7 +28,7 @@
  */
 
 import { clampPan } from '../engine/media.ts'
-import { ASPECTS, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { ASPECTS, sheetAspect, type PrintSettings, type TextLayer } from '../engine/types.ts'
 import { fitSize, type FontMeasure } from '../engine/text.ts'
 import { defaultSettings, makeLayer } from './defaults.ts'
 import { INK_IDS, LAYER_FIELDS, SETTINGS_FIELDS, acceptMedia, type Row } from './fields.ts'
@@ -73,13 +73,17 @@ function wordCount(text: unknown): number {
 /** The stored layers that are objects — the only ones the walk will keep. */
 const layersOf = (doc: Doc): Doc[] => (Array.isArray(doc.layers) ? doc.layers.filter(isPlainObject) : [])
 
-/** The sheet's width over its height, as the walk will resolve the aspect. */
-function sheetAspect(doc: Doc): number {
+/** The sheet's width over its height, as the walk will resolve the aspect:
+ *  a fixed key's ratio, the photo's own shape for Original (4:5 without a
+ *  valid photo, as the walk then makes it), else the default sheet's. */
+function storedAspect(doc: Doc): number {
   const key = doc.aspect
+  const media = isPlainObject(doc.media) && acceptMedia(doc.media) ? (doc.media as { width: number; height: number }) : null
   // hasOwnProperty, not `in`: 'toString' is "in" every object.
-  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(ASPECTS, key)
-    ? ASPECTS[key as keyof typeof ASPECTS]
-    : ASPECTS[defaultSettings().aspect]
+  if (typeof key === 'string' && Object.prototype.hasOwnProperty.call(ASPECTS, key)) {
+    return ASPECTS[key as keyof typeof ASPECTS]
+  }
+  return key === 'original' ? sheetAspect({ aspect: 'original', media }) : sheetAspect(defaultSettings())
 }
 
 /**
@@ -136,7 +140,7 @@ const CONVERSIONS: readonly Conversion[] = [
   // was unclamped, so a line whose fit is above SIZE_MAX (in practice a single
   // glyph on a sheet wider than about 2:3) is stored at SIZE_MAX.
   function fitWidth(doc, env) {
-    const aspect = sheetAspect(doc)
+    const aspect = storedAspect(doc)
     for (const l of layersOf(doc)) {
       if (l.fitWidth === true && env.measure) {
         const asDrawn = object(LAYER_FIELDS, l, makeLayer() as unknown as Doc) as unknown as TextLayer
@@ -310,11 +314,13 @@ export function normalizeSettings(raw: unknown, env: NormalizeEnv = {}): PrintSe
   const doc = clone(raw) as Doc
   for (const convert of CONVERSIONS) convert(doc, env)
   const s = object(SETTINGS_FIELDS, doc, defaults as unknown as Doc) as unknown as PrintSettings
-  // Cross-field invariants, once every field is valid on its own. The photo
+  // Cross-field invariants, once every field is valid on its own. An Original
+  // sheet takes its shape from the photo, so without one it is 4:5. The photo
   // covers the sheet: a pan that was legal on another sheet shape is pulled
   // back to the nearest placement that leaves no bare strip. And a plate has a
   // backing or a second ink, never both; the backing wins, as above.
-  if (s.media) s.media = clampPan(s.media, ASPECTS[s.aspect], 1)
+  if (s.aspect === 'original' && !s.media) s.aspect = '4:5'
+  if (s.media) s.media = clampPan(s.media, sheetAspect(s), 1)
   for (const l of s.layers) if (l.backing && l.contrastInkId) l.contrastInkId = null
   return s
 }

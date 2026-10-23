@@ -157,6 +157,30 @@ export function isReducedCopy(media: { width: number; height: number; native?: b
   return media.native !== true && Math.max(media.width, media.height) === 2048
 }
 
+/**
+ * The blit, made pixel-exact when the sheet holds the photo at its own pixels.
+ *
+ * At the native export height the cover fit lands within a hair of 1:1, but
+ * the centred placement puts the photo half a pixel off the grid, and a
+ * bilinear blit at a half-pixel offset blurs every pixel into its neighbour
+ * (measured: Laplacian energy 0.753 of the original at native height; 1.000
+ * snapped). So when the scale is within 1.5 px of 1 over the sheet's height,
+ * draw the photo at exactly its own size, at a whole-pixel offset, kept inside
+ * the travel that still covers the sheet. Anything else — the preview, a zoom,
+ * a photo smaller than the sheet — is returned untouched.
+ */
+export function snapRect(r: DrawRect, mw: number, mh: number, sheetW: number, sheetH: number): DrawRect {
+  if (Math.abs(r.dw / mw - 1) >= 1.5 / sheetH) return r
+  // Snapped to its own size the photo would not cover the sheet: leave it.
+  if (mw < sheetW || mh < sheetH) return r
+  return {
+    dx: clampTo(Math.round(r.dx), sheetW - mw, 0),
+    dy: clampTo(Math.round(r.dy), sheetH - mh, 0),
+    dw: mw,
+    dh: mh,
+  }
+}
+
 /** Rec. 709 luma, 0..1. The channel weights a print separation actually uses. */
 export function luma(r: number, g: number, b: number): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255

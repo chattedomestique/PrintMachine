@@ -7,9 +7,17 @@ import { describe, expect, it } from 'vitest'
 
 import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
 import { contrastPartner } from '../engine/inks.ts'
-import type { PrintSettings, TextLayer } from '../engine/types.ts'
+import { sheetAspect, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { clampPan } from '../engine/media.ts'
 import { defaultSettings, makeLayer, makeMedia } from './defaults.ts'
-import { applySettings, hasSwitchPoint, overPhotoOf, overPhotoPatch } from './settingsReducer.ts'
+import {
+  applySettings,
+  hasSwitchPoint,
+  historyReducer,
+  initHistory,
+  overPhotoOf,
+  overPhotoPatch,
+} from './settingsReducer.ts'
 
 const doc = (layers: TextLayer[]): PrintSettings => ({ ...defaultSettings(), layers })
 const patch = (s: PrintSettings, id: string, p: Partial<TextLayer>) =>
@@ -140,5 +148,56 @@ describe('the plate budget', () => {
     // Removing still works, and brings it back inside.
     const fewer = applySettings(over, { type: 'removeLayer', id: over.layers[0].id })
     expect(fewer.layers).toHaveLength(3)
+  })
+})
+
+describe('the Original sheet: the photo\'s own shape', () => {
+  const landscape = makeMedia({ id: 'a', width: 4032, height: 3024 })
+  const portrait = makeMedia({ id: 'b', width: 3024, height: 4032 })
+
+  it('is the sheet the first photo opens on, and Undo brings the old sheet back', () => {
+    const before = { ...defaultSettings(), aspect: '1:1' as const }
+    let h = initHistory(before)
+    h = historyReducer(h, { type: 'setMedia', media: landscape })
+    expect(h.present.aspect).toBe('original')
+    expect(sheetAspect(h.present)).toBeCloseTo(4 / 3, 12)
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.aspect).toBe('1:1')
+  })
+
+  it('a replaced photo keeps the sheet the person chose; an Original sheet takes the new shape', () => {
+    const square = applySettings(applySettings(defaultSettings(), { type: 'setMedia', media: landscape }), {
+      type: 'patch',
+      patch: { aspect: '1:1' },
+    })
+    expect(applySettings(square, { type: 'setMedia', media: portrait }).aspect).toBe('1:1')
+    const original = applySettings(defaultSettings(), { type: 'setMedia', media: landscape })
+    const swapped = applySettings(original, { type: 'setMedia', media: portrait })
+    expect(swapped.aspect).toBe('original')
+    expect(sheetAspect(swapped)).toBeCloseTo(3 / 4, 12)
+  })
+
+  it('removing the photo from an Original sheet leaves 4:5; from a chosen sheet, that sheet', () => {
+    const original = applySettings(defaultSettings(), { type: 'setMedia', media: landscape })
+    expect(applySettings(original, { type: 'setMedia', media: null }).aspect).toBe('4:5')
+    const square = applySettings(original, { type: 'patch', patch: { aspect: '1:1' } })
+    expect(applySettings(square, { type: 'setMedia', media: null }).aspect).toBe('1:1')
+    // And with no photo there is no Original to choose.
+    expect(applySettings(defaultSettings(), { type: 'patch', patch: { aspect: 'original' } }).aspect).toBe('4:5')
+  })
+
+  it('re-clamps the pan against the new shape on every change', () => {
+    // Zoomed and pushed to the right edge of a square sheet...
+    let s = applySettings(defaultSettings(), { type: 'setMedia', media: landscape })
+    s = applySettings(s, { type: 'patch', patch: { aspect: '1:1' } })
+    s = applySettings(s, { type: 'patchMedia', patch: { scale: 1.2, x: -5, y: 0.5 } })
+    const onSquare = s.media!.x
+    // ...then the photo's own shape: less travel across, so it is pulled in.
+    s = applySettings(s, { type: 'patch', patch: { aspect: 'original' } })
+    expect(s.media!.x).toBeGreaterThan(onSquare)
+    expect(clampPan(s.media!, sheetAspect(s), 1)).toEqual(s.media)
+    // Replaced by a portrait photo on the same Original sheet: clamped again.
+    s = applySettings(s, { type: 'setMedia', media: { ...portrait, scale: 1.2, x: -5, y: 9 } })
+    expect(clampPan(s.media!, sheetAspect(s), 1)).toEqual(s.media)
   })
 })

@@ -691,6 +691,57 @@ describe('justify — one rule per line', () => {
     const out = layoutText(layer({ text: 'PRINT\nMACHINE' }), 1000, measure)
     expect(end(out.lines[0])).toBeCloseTo(end(out.lines[1]), 6)
   })
+
+  /** Each printing glyph and where it lands. */
+  const ink = (l: { glyphs: { ch: string; x: number; width: number }[] }) =>
+    l.glyphs.filter((g) => g.ch !== ' ').map((g) => [g.ch, g.x, g.x + g.width])
+
+  it('a space before the first letter or after the last is not a word gap: PRINT, "PRINT " and " PRINT" justify alike', () => {
+    // The regression: a stray space made the line "have a space", the only gap
+    // allowed to open was the one beside it, and the line printed ragged.
+    const plain = layoutText(layer({ text: 'PRINT\nMACHINE' }), 1000, measure)
+    for (const text of ['PRINT \nMACHINE', ' PRINT\nMACHINE', '  PRINT  \nMACHINE ', 'PRINT\n MACHINE']) {
+      const out = layoutText(layer({ text }), 1000, measure)
+      expect(out.widest).toBeCloseTo(plain.widest, 9)
+      for (let i = 0; i < 2; i++) {
+        const got = ink(out.lines[i])
+        const want = ink(plain.lines[i])
+        expect(got.length).toBe(want.length)
+        got.forEach((g, k) => {
+          expect(g[0]).toBe(want[k][0])
+          expect(g[1] as number).toBeCloseTo(want[k][1] as number, 9)
+        })
+        expect(out.lines[i].width).toBeCloseTo(out.widest, 9)
+      }
+      // The ink runs from the block's edge to its edge.
+      expect(ink(out.lines[0])[0][1]).toBeCloseTo(0, 9)
+      expect(ink(out.lines[0]).at(-1)?.[2] as number).toBeCloseTo(out.widest, 9)
+    }
+  })
+
+  it('a line whose only spaces are at its ends spreads its letters: "GO " over MACHINE', () => {
+    const out = layoutText(layer({ text: 'GO \nMACHINE' }), 1000, measure)
+    const [g, o] = ink(out.lines[0])
+    expect(g[1]).toBeCloseTo(0, 9)
+    expect(o[2] as number).toBeCloseTo(out.widest, 9)
+  })
+
+  it('an indented line with words opens only the gaps between its words', () => {
+    const out = layoutText(layer({ text: ' AA BB\nCCCCCCCCCC' }), 1000, measure)
+    const [a1, a2, b1, b2] = ink(out.lines[0])
+    // Inside each word nothing moved; the one word gap took the slack.
+    expect((a2[1] as number) - (a1[2] as number)).toBeCloseTo(0, 9)
+    expect((b2[1] as number) - (b1[2] as number)).toBeCloseTo(0, 9)
+    expect(a1[1]).toBeCloseTo(0, 9)
+    expect(b2[2] as number).toBeCloseTo(out.widest, 9)
+  })
+
+  it('a line of nothing but spaces holds no ink, so it is not stretched and gets no backing', () => {
+    const lay = layer({ text: 'AB\n   \nCD' })
+    const out = layoutText(lay, 1000, measure)
+    expect(out.lines[1].width).toBe(0)
+    expect(lineRects(out, lay.align, -out.widest / 2, 0)).toHaveLength(2)
+  })
 })
 
 describe('detail scaling', () => {
@@ -1490,6 +1541,20 @@ describe('backing', () => {
     expect(rects[0].x + rects[0].w / 2).toBeCloseTo(rects[1].x + rects[1].w / 2, 6)
     // The third line sits two line heights below the first.
     expect(rects[1].y - rects[0].y).toBeCloseTo(2 * layout.lineHeight, 6)
+  })
+
+  it('covers the ink, not an indent or a stray space', () => {
+    for (const align of ['left', 'center', 'right', 'justify'] as const) {
+      const layer = makeLayer({ text: '  AB \nCDEF', size: 0.1, lineHeight: 1, tracking: 0.1, align })
+      const layout = layoutText(layer, 1000, measure)
+      const [rect] = lineRects(layout, align, -layout.widest / 2, 0)
+      const line = layout.lines[0]
+      const inked = line.glyphs.filter((g) => g.ch !== ' ')
+      const ox = -layout.widest / 2 + alignOffset(line.width, layout.widest, align)
+      const pad = BACKING_PAD * layout.fontSize
+      expect(rect.x).toBeCloseTo(ox + inked[0].x - pad, 9)
+      expect(rect.x + rect.w).toBeCloseTo(ox + inked[1].x + inked[1].width + pad, 9)
+    }
   })
 
   it('knocks the photo back to paper under itself: ink on paper, not ink on black', () => {

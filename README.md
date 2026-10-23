@@ -241,7 +241,8 @@ iOS eviction path §4.2 exists to prevent.
 ### Backing, and why it knocks out
 
 A plate can carry a **backing**: a solid block of ink behind each line of its
-type, the line's extent plus 0.12 em all round, square-cornered. It is not a
+type, the line's ink (first letter to last, so an indent or a stray space is
+not covered) plus 0.12 em all round, square-cornered. It is not a
 rectangle drawn on top of the render. It is its own plate in its own ink, laid
 down *before* the type and pushed through the identical roughen → wear → screen
 → misregister pipeline, so it tears and lands like everything else on the
@@ -324,9 +325,12 @@ honest answer for what it holds, with no setting:
   stack: `PRINT` over `MACHINE`, both spanning the block.
 
 Every line, the last included, ends at the widest line; a single glyph has no
-gap to open and stays where it is. This replaced two controls (Justify by
-words/letters, and a margin for lines of one word) whose default left the
-default two-line stack unjustified.
+gap to open and stays where it is. Under Justify a line is its ink, first letter
+to last: a space before the first letter or after the last has no word on its
+far side, so it is not a word gap, takes no slack and adds no width — `PRINT `
+and ` PRINT` set exactly like `PRINT`, and a line of nothing but spaces stays
+empty. This replaced two controls (Justify by words/letters, and a margin for
+lines of one word) whose default left the default two-line stack unjustified.
 
 What it gives up: a lone short word inside a block of sentences can no longer
 be parked at a margin; it spreads across the measure. Lines break only where

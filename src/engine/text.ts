@@ -74,6 +74,19 @@ export function layerFont(layer: TextLayer, px: number): FontSpec {
 
 const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t'
 
+/** First and last glyph that prints in a line, or null for a line of nothing
+ *  but spaces. */
+function inkSpan(glyphs: readonly PlacedGlyph[]): { first: number; last: number } | null {
+  let first = -1
+  let last = -1
+  glyphs.forEach((g, k) => {
+    if (isSpace(g.ch)) return
+    if (first < 0) first = k
+    last = k
+  })
+  return first < 0 ? null : { first, last }
+}
+
 /**
  * Place every glyph in a line.
  *
@@ -124,41 +137,65 @@ export function layoutText(layer: TextLayer, canvasHeight: number, measure: Meas
   const tracking = layer.tracking * fontSize
 
   const placed = source.map((text) => placeLine(text, fontSize, tracking, measure))
-  const widest = placed.reduce((m, p) => Math.max(m, p.width), 0)
+  const justify = layer.align === 'justify'
+
+  // Justify works on a line's INK: first letter to last. A space before the
+  // first letter or after the last is not a word gap — there is no word on its
+  // far side — so it neither takes slack nor counts toward the measure. Left
+  // in, one stray space (easy to leave on a phone keyboard) made `PRINT `
+  // justify by that space alone, which pushed nothing and printed it ragged.
+  // Under the other alignments a leading space is an indent, set as typed.
+  const spans = placed.map((p) => (justify ? inkSpan(p.glyphs) : null))
+  const widthOf = (p: (typeof placed)[number], i: number): number => {
+    const span = spans[i]
+    return span ? p.width - p.glyphs[span.first].x : p.width
+  }
+  const widest = placed.reduce((m, p, i) => Math.max(m, widthOf(p, i)), 0)
 
   // Justification stretches every line to the widest one, so that is the
   // block width for alignment purposes too.
   const target = widest
 
   const lines: LaidOutLine[] = placed.map((p, i) => {
-    if (layer.align !== 'justify' || p.glyphs.length <= 1) {
-      return { text: source[i], width: p.width, glyphs: p.glyphs }
+    const span = spans[i]
+    if (!span) return { text: source[i], width: p.width, glyphs: p.glyphs }
+
+    // The ink starts the line. Spaces outside it keep their own advances
+    // either side and are never drawn.
+    const origin = p.glyphs[span.first].x
+    const run = p.glyphs.slice(span.first, span.last + 1)
+    if (run.length <= 1) {
+      return { text: source[i], width: widthOf(p, i), glyphs: p.glyphs.map((g) => ({ ...g, x: g.x - origin })) }
     }
 
     // Feed the natural gaps through so justification adds to them rather than
     // replacing them: a word gap stays wider than a letter gap, and only the
     // leftover slack is shared out.
-    const naturalGaps = p.glyphs
-      .slice(0, -1)
-      .map((g, k) => p.glyphs[k + 1].x - g.x - g.width)
-    // One rule per line, no setting. A line with a space justifies by its word
-    // gaps: the slack lands beside the spaces (a gap counts if either glyph
-    // touching it is one), so the words stay exactly as set — never
-    // `S L O W  D O W N`. A line with no space has no word gap to open, so it
-    // spreads its letters — the solid poster stack. `absorb` empty means
-    // every gap takes a share.
-    const hasSpace = p.glyphs.some((g) => isSpace(g.ch))
-    const absorb = hasSpace
-      ? p.glyphs.slice(0, -1).map((g, k) => isSpace(g.ch) || isSpace(p.glyphs[k + 1].ch))
-      : []
+    const naturalGaps = run.slice(0, -1).map((g, k) => run[k + 1].x - g.x - g.width)
+    // One rule per line, no setting. A line with a word gap justifies by its
+    // word gaps: the slack lands beside the spaces between words (a gap counts
+    // if either glyph touching it is one), so the words stay exactly as set —
+    // never `S L O W  D O W N`. A line with no word gap spreads its letters —
+    // the solid poster stack. `absorb` empty means every gap takes a share.
+    const hasSpace = run.some((g) => isSpace(g.ch))
+    const absorb = hasSpace ? run.slice(0, -1).map((g, k) => isSpace(g.ch) || isSpace(run[k + 1].ch)) : []
 
     const xs = justifyOffsets(
-      p.glyphs.map((g) => g.width),
+      run.map((g) => g.width),
       target,
       naturalGaps,
       absorb,
     )
-    const glyphs = p.glyphs.map((g, k) => ({ ...g, x: xs[k] }))
+    const last = p.glyphs[span.last]
+    const glyphs = p.glyphs.map((g, k) => ({
+      ...g,
+      x:
+        k < span.first
+          ? g.x - origin
+          : k <= span.last
+            ? xs[k - span.first]
+            : xs[run.length - 1] + (g.x - last.x),
+    }))
 
     return { text: source[i], width: target, glyphs }
   })
@@ -371,10 +408,11 @@ export interface LineRect {
 }
 
 /**
- * One rectangle per line that holds ink: the line's own extent plus
- * `BACKING_PAD` em all round, read off the same layout that places the
- * glyphs, so the block sits exactly behind its line at every size. A line with
- * no ink (blank, or only spaces) gets none.
+ * One rectangle per line that holds ink: the line's ink, first letter to last,
+ * plus `BACKING_PAD` em all round, read off the same layout that places the
+ * glyphs, so the block sits exactly behind its line at every size. A space
+ * outside the ink (an indent, a stray trailing space) is not covered, and a
+ * line with no ink (blank, or only spaces) gets no block.
  *
  * Pure: the layout and the block's origin are all it needs.
  */
@@ -386,10 +424,12 @@ export function lineRects(layout: TextLayout, align: TextAlign, blockLeft: numbe
   const below = layout.fontSize * 0.32 + pad
   const rects: LineRect[] = []
   layout.lines.forEach((line, i) => {
-    if (!(line.width > 0)) return
+    const span = inkSpan(line.glyphs)
+    if (!span || !(line.width > 0)) return
+    const lead = line.glyphs[span.first].x
     const ox = blockLeft + alignOffset(line.width, layout.widest, align)
     const oy = firstBaseline + i * layout.lineHeight
-    rects.push({ x: ox - pad, y: oy - above, w: line.width + pad * 2, h: above + below })
+    rects.push({ x: ox + lead - pad, y: oy - above, w: line.width - lead + pad * 2, h: above + below })
   })
   return rects
 }

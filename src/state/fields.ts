@@ -89,7 +89,10 @@ export const LAYER_FIELDS: readonly Row[] = [
 
 export const PRESS_FIELDS: readonly Row[] = [
   { key: 'method', kind: 'enum', values: METHODS },
-  { key: 'screenPitch', kind: 'number', min: 2, max: 24 },
+  // 36 is a 12 px dither cell (the old Dot size slider's top) in this unit, so
+  // every converted grain keeps its cell. The Screen size slider stops at 24;
+  // a larger stored value prints as saved and pins the thumb at the end.
+  { key: 'screenPitch', kind: 'number', min: 2, max: 36 },
   { key: 'density', kind: 'number', min: 0.3, max: 1 },
   { key: 'misregistration', kind: 'number', min: 0, max: 30 },
   { key: 'edge', kind: 'number', min: 0, max: 1 },

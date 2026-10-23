@@ -49,12 +49,20 @@ whole set from the same overprint math the app uses.
 ```
 src/
   engine/    pure, framework-free canvas + typed-array maths. No React, no DOM
-             events, no state. This is the product, and the only thing tested.
-  state/     one settings reducer + Context over a coalescing undo/redo hook.
+             events, no state. This is the product, and most of what is tested.
+  state/     the document: its schema and load-time normaliser, defaults,
+             persistence, and one settings reducer + Context over a coalescing
+             undo/redo hook. Tested in node like the engine.
   ui/        token-driven, app-agnostic primitives.
   features/  app-aware composition — the only layer that knows what the app is.
   styles/    tokens.css (the design system) + index.css.
 ```
+
+Node has no 2D context, so everything after the type is rasterised and the
+photo blitted is one pure stage (`printSheet`) that the tests drive directly.
+What only a browser can do — set glyphs, draw the photo — is checked by
+`scripts/harness/`, which renders frozen documents through the real
+`renderPrint` in Chromium and compares a commit against its parent.
 
 ### Saved prints keep opening
 
@@ -64,7 +72,8 @@ result is *built* from the defaults, copying across only fields the schema
 lists, each checked against its own rule — a number finite and inside the
 range any control could set, an ink, face or paper one that exists, a nullable
 field null or valid. So a field a build removed leaves the document instead of
-riding along forever, and every valid value a person chose survives. Spreading
+riding along forever, and every valid value a person chose survives, with the
+named exceptions below. Spreading
 the stored document over the defaults, which this replaced, kept every removed
 field, and a `typeof`-of-the-default check would reset any field whose default
 is null (a chosen second ink is a string, its default `null`).
@@ -72,6 +81,21 @@ is null (a chosen second ink is a string, its default `null`).
 Frozen documents written by older builds live in `state/__fixtures__/`, and the
 tests load each one: it opens, normalising it twice changes nothing, no key
 survives that the current model does not have, and no valid value is lost.
+
+Where a removed feature had no exact replacement, an old print opens changed,
+and these are the only such cases (each has a test that says so):
+
+- **A fitted line whose fit is over 1200%** (in practice a single glyph on a
+  sheet wider than about 2:3) is stored at the largest size and prints
+  smaller, by about 10-30% in the cases measured. The old fit was unclamped;
+  the size range is not.
+- **A plate hidden with plate opacity 0 prints**, at full strength. Plate
+  opacity is cut, nothing else hides a plate, and dropping the plate would
+  destroy work; delete it if it should go.
+- **Word-picked boxes become one backing** behind every line of the plate, in
+  the ink of the first box that printed (a box hidden at opacity 0 becomes
+  nothing). A plate takes a backing or a second ink, so a plate that had both
+  keeps the backing and stops switching ink over the photo.
 
 ### Offline, and why it is checked rather than inspected
 
@@ -271,10 +295,12 @@ on the block and vanish. The Ink panel offers them as one choice — Over the
 photo: Off, Second ink, Backing — and the document rules hold it in the reducer
 and the normaliser too.
 
-Saved prints with word-picked boxes open with a backing in the first worded
-box's ink: per-line instead of per-word, which is the one visible change. Word
-numbers in a box never followed the words when the text was edited, so an
-inserted word silently moved every box; the backing has nothing to go stale.
+Saved prints with word-picked boxes open with a backing in the ink of the
+first box that printed: per-line instead of per-word, and, because a plate
+takes one or the other, without the second ink the plate may also have had
+(see "Saved prints keep opening"). Word numbers in a box never followed the
+words when the text was edited, so an inserted word silently moved every box;
+the backing has nothing to go stale.
 
 ### The plate budget
 

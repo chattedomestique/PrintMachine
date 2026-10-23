@@ -611,6 +611,43 @@ describe('verdict §4.1: what each removed field becomes', () => {
     expect(s.layers[0].contrastInkId).toBe('black')
   })
 
+  it('a box that never printed (opacity 0, or on a plate at opacity 0) is no backing, and leaves the second ink', () => {
+    // The old renderer skipped a box at `opacity <= 0` and a whole plate at
+    // `opacity <= 0`, so neither box reached the sheet.
+    const hiddenBox = copy(defaultDoc) as unknown as Doc
+    ;(hiddenBox.layers as Doc[])[0].contrastInkId = 'white'
+    ;(hiddenBox.layers as Doc[])[0].boxes = [{ id: 'b', words: [0], inkId: 'yellow', opacity: 0 }]
+    const hid = normalizeSettings(copy(hiddenBox)).layers[0]
+    expect([hid.backing, hid.contrastInkId]).toEqual([null, 'white'])
+    // The first box that DID print sets the backing.
+    ;(hiddenBox.layers as Doc[])[0].boxes = [
+      { id: 'b', words: [0], inkId: 'yellow', opacity: 0 },
+      { id: 'c', words: [0], inkId: 'teal', opacity: 0.5 },
+    ]
+    expect(normalizeSettings(hiddenBox).layers[0].backing).toBe('teal')
+    // A worded, visible box on a hidden plate never printed either.
+    const hiddenPlate = copy(defaultDoc) as unknown as Doc
+    Object.assign((hiddenPlate.layers as Doc[])[0], {
+      opacity: 0,
+      contrastInkId: 'white',
+      boxes: [{ id: 'b', words: [0], inkId: 'yellow', opacity: 1 }],
+    })
+    const s = normalizeSettings(hiddenPlate)
+    expect([s.layers[0].backing, s.layers[0].contrastInkId]).toEqual([null, 'white'])
+  })
+
+  it('layer.opacity 0, the one hidden thing that shows: plate opacity is cut, so a hidden plate prints at full strength', () => {
+    // Stated, not fixed: the verdict cut plate opacity (#17) and there is no
+    // other way to hide a plate, while dropping it would destroy work. The
+    // README's "Saved prints keep opening" names this exception.
+    const d = copy(defaultDoc) as unknown as Doc
+    ;(d.layers as Doc[])[1].opacity = 0
+    const s = normalizeSettings(d)
+    expect(s.layers).toHaveLength(2)
+    expect(s.layers[1].text).toBe((defaultDoc as unknown as { layers: { text: string }[] }).layers[1].text)
+    expect(s.layers[1]).not.toHaveProperty('opacity')
+  })
+
   it('a stored backing survives a load, and a document holding both keeps the backing', () => {
     const d = copy(defaultDoc) as unknown as Doc
     ;(d.layers as Doc[])[1].backing = 'teal'
@@ -643,10 +680,18 @@ describe('verdict §4.1: what each removed field becomes', () => {
     expect(max().press.method).toBe('grain')
     // Grain cell = screen size / 3, so a 4 px dither cell is a 12 px screen.
     expect(max().press.screenPitch).toBe(12)
-    // A dither cell too big for the range is clamped to the largest screen.
+    // Every cell the old Dot size slider could set (1..12) converts exactly,
+    // so the grain prints at the size it did; the engine test pins the cell
+    // at every render height.
+    for (let cell = 1; cell <= 12; cell++) {
+      const d = copy(defaultDoc) as unknown as Doc
+      Object.assign(d.press as Doc, { method: 'dither', ditherScale: cell })
+      expect(normalizeSettings(d).press.screenPitch).toBe(cell * 3)
+    }
+    // Past anything a control could set, it is clamped into the range.
     const d = copy(defaultDoc) as unknown as Doc
-    Object.assign(d.press as Doc, { method: 'dither', ditherScale: 12 })
-    expect(normalizeSettings(d).press.screenPitch).toBe(24)
+    Object.assign(d.press as Doc, { method: 'dither', ditherScale: 40 })
+    expect(normalizeSettings(d).press.screenPitch).toBe(36)
   })
 
   it("press.method 'woodcut' or 'scribble': Halftone", () => {

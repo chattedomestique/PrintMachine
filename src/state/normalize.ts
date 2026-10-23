@@ -143,15 +143,25 @@ const CONVERSIONS: readonly Conversion[] = [
   },
 
   // Word-picked boxes become one per-line backing in the ink of the first box
-  // that had words. A plate takes a backing or a second ink, never both, and a
+  // that printed. A plate takes a backing or a second ink, never both, and a
   // box was an explicit act where the second ink may only have been seeded, so
   // the backing wins.
+  //
+  // "Printed" is the old renderer's own test: a box with words, not hidden by
+  // its opacity, on a plate not hidden by ITS opacity (`opacity <= 0` skipped
+  // either, coercions and all). A hidden box never reached the sheet, so it
+  // becomes nothing: turning it into a backing would print a block the saved
+  // print never had, and take the plate's second ink away for it.
   function boxes(doc) {
+    const hidden = (opacity: unknown) => Number(opacity) <= 0
     for (const l of layersOf(doc)) {
       if (Array.isArray(l.boxes) && !('backing' in l)) {
-        const first = l.boxes.find(
-          (b: unknown) => isPlainObject(b) && Array.isArray(b.words) && b.words.length > 0,
-        ) as Doc | undefined
+        const first = hidden(l.opacity)
+          ? undefined
+          : (l.boxes.find(
+              (b: unknown) =>
+                isPlainObject(b) && Array.isArray(b.words) && b.words.length > 0 && !hidden(b.opacity),
+            ) as Doc | undefined)
         // A box in an ink no build knows is no backing (the field's default),
         // and then it does not displace the plate's second ink either.
         if (first && typeof first.inkId === 'string' && INK_IDS.includes(first.inkId)) {
@@ -171,12 +181,12 @@ const CONVERSIONS: readonly Conversion[] = [
     // Woodcut and scribble are relief printing and pen hatching, not riso: the
     // halftone. Any dither becomes the one grain, with its cell carried over
     // as a screen size (the grain cell is a third of it), so the texture's
-    // scale survives.
+    // scale survives — for every cell the old slider could set, 1..12; the
+    // walk clamps anything else into the screen size's range.
     if (p.method === 'woodcut' || p.method === 'scribble') p.method = 'halftone'
     else if (p.method === 'dither') {
       p.method = 'grain'
-      const cell = finiteNumber(p.ditherScale) ? p.ditherScale : 3
-      p.screenPitch = Math.min(24, Math.max(2, cell * 3))
+      p.screenPitch = (finiteNumber(p.ditherScale) ? p.ditherScale : 3) * 3
     }
     // Edge was tear (+ bleed), Wear was mottle (+ dropout): each new amount is
     // the old lead value, and the engine derives its partner at the shipped

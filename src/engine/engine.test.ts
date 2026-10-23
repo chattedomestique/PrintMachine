@@ -188,7 +188,8 @@ describe('grain (Atkinson)', () => {
     // A saved dither of cell c is stored as a screen size of 3c. Its grain must
     // come out the size the dither did, at every height the app renders at.
     expect(grainCell(9, 1)).toBe(3)
-    for (let cell = 1; cell <= 8; cell++) {
+    // 1..12: the whole range the old Dot size slider could set.
+    for (let cell = 1; cell <= 12; cell++) {
       for (const h of [DRAFT_HEIGHT, PREVIEW_HEIGHT, 1500, REFERENCE_HEIGHT, 3780]) {
         const scale = h / REFERENCE_HEIGHT
         expect(grainCell(cell * 3, scale)).toBe(Math.max(1, Math.round(cell * scale)))

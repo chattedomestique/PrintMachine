@@ -66,21 +66,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     void sweepMedia(new Set(launched.media ? [launched.media.id] : [])).catch(() => undefined)
   }, [launched])
 
-  // Keyboard undo/redo.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
-      const target = e.target as HTMLElement | null
-      // Don't hijack undo inside a text field.
-      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return
-      e.preventDefault()
-      if (e.shiftKey) redo()
-      else undo()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo])
-
   const layers = present.layers
 
   const value = useMemo<SettingsStore>(() => {

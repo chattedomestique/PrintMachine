@@ -25,6 +25,9 @@
  *  5. Cancel tapped while the file is encoded (an encoder slowed to 1.5 s,
  *     as a phone's is): no file, no toast, Save again, with a share sheet
  *     and without one.
+ *  6. Ctrl+Z while the print is pressed: the document does not change (the
+ *     page is inert, and so is keyboard undo), the file is the print on
+ *     screen, and Ctrl+Z works again once the press is over.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -352,6 +355,37 @@ try {
       check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
       await ctx.close()
     }
+  }
+
+  console.log('\n6. Ctrl+Z while the print is pressed')
+  {
+    const ctx = await newContext()
+    const { page, errors } = await open(ctx)
+    const ratio = () => page.evaluate(() => getComputedStyle(document.querySelector('.sheet')).getPropertyValue('--sheet-ratio').trim())
+    // An edit to undo: the sheet from 4:5 to 1:1.
+    await page.getByRole('tab', { name: 'Photo' }).click()
+    await page.getByRole('radio', { name: '1:1' }).click()
+    await page.getByRole('tab', { name: 'Photo' }).click()
+    await page.waitForTimeout(600)
+    const caption = await page.locator(LINE).textContent()
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 120_000 }),
+      (async () => {
+        await page.locator(SAVE).click()
+        await pressing(page)
+        await page.keyboard.press('Control+z')
+        await page.keyboard.press('Meta+z')
+      })(),
+    ])
+    const during = await ratio()
+    const file = await saved(download)
+    await page.waitForTimeout(300)
+    check(caption === 'Saves 3600×3600' && during === '1' && file === '3600x3600', `Ctrl+Z during the press: "${caption}", the sheet ratio ${during} after it, the file ${file}`)
+    await page.keyboard.press('Control+z')
+    await page.waitForTimeout(300)
+    check((await ratio()) === '0.8', `Ctrl+Z after the press undoes the 1:1: ratio ${await ratio()}`)
+    check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+    await ctx.close()
   }
 } finally {
   await browser.close()

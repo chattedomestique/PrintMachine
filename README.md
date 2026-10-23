@@ -597,11 +597,13 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   **Cancel**. The press runs through `renderPrintAsync`, which runs the very
   stages the preview runs and yields to the page between them, so the progress
   paints and Cancel works, up to the file itself: a Cancel tapped while the
-  file is being encoded (a second or more on a phone) leaves no file. The preview stops rendering meanwhile (a full-size
-  press and a preview frame never hold their buffers together), and the rest of
-  the page is inert. The two entry points print the same bytes at the same
-  height: `npm run harness -- --out p.json --no-hashes --parity 1000` renders
-  every harness document through both and fails if any differs.
+  file is being encoded (a second or more on a phone) leaves no file. The
+  preview stops rendering meanwhile (a full-size press and a preview frame
+  never hold their buffers together), and the rest of the page is inert,
+  keyboard undo included, so the document cannot change under the press and
+  the file is the print on screen. The two entry points print the same bytes
+  at the same height: `npm run harness -- --out p.json --no-hashes --parity
+  1000` renders every harness document through both and fails if any differs.
 - **Sharing.** The share sheet needs the tap that opens it to be recent, and a
   press outlasts it. A press that finished within a second of the tap shares at
   once; otherwise Save becomes **Save to Photos (6.2 MB)**, a fresh tap that
@@ -676,8 +678,9 @@ and two documents of small type correlate with themselves at twice the height
 is the size the caption promised), a device whose canvases come back blank
 above 5 MP (the smaller-copy question before anything is pressed, then that
 file), a tab closed mid-press (the notice at the next launch), a stored photo
-deleted (Save says so, and no file) and a Cancel tapped while the file is
-encoded (no file, with a share sheet or without).
+deleted (Save says so, and no file), a Cancel tapped while the file is
+encoded (no file, with a share sheet or without) and Ctrl+Z pressed during a
+press (the document stays as it was, and the file is that print).
 
 ### What an export holds
 

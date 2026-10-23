@@ -76,6 +76,25 @@ export default function AppShell() {
 
   const save = useSave(settings, mediaState, announce)
   const pressing = pressInProgress(save.state)
+
+  // Keyboard undo/redo (Ctrl or Cmd+Z, with Shift to redo). A window
+  // listener, which `inert` does not reach, so it is off while the print is
+  // pressed, as the Undo and Redo buttons are: the document cannot change
+  // under a press, and the file it makes is of the document on screen.
+  useEffect(() => {
+    if (pressing) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
+      const target = e.target as HTMLElement | null
+      // Don't hijack undo inside a text field.
+      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return
+      e.preventDefault()
+      if (e.shiftKey) redo()
+      else undo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pressing, undo, redo])
   // What Save will make, said before the tap: the pixel size, and why when it
   // is not the photo's own pixels.
   const caption = useMemo(() => describePlan(planPrint(settings), settings.media), [settings])

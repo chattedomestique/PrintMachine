@@ -295,7 +295,8 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
 
   // An edit after the press: the waiting file is of the print as it was, so
   // it is dropped rather than shared under the new one's name. (While the
-  // press runs the page is inert, so nothing can edit.)
+  // press runs nothing can edit: the page is inert, and keyboard undo, a
+  // window listener inert does not reach, is off — AppShell.)
   useEffect(() => dispatch({ type: 'documentChanged' }), [settings])
 
   // A save that was in flight when the app last went away: said once, at

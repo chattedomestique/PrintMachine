@@ -138,6 +138,55 @@ So:
 > smears the dots, which is the one thing this app exists to render, so the
 > size stands.
 
+From the resolution audit (none of these can be automated):
+
+- [ ] 12 MP photo, default document, Save: completes without a tab reload; the
+      saved file's pixel size equals the Save caption; Photos shows 2419×3024
+      (or whatever the caption said)
+- [ ] Two Saves in a row: both complete, both files are the caption's size
+- [ ] Save in Low Power Mode: completes (slower is fine)
+- [ ] Time from the tap to the share sheet, written down with the device and
+      the size, so a slower build shows
+- [ ] A square 4096×4096 photo (16.8 MP, the ceiling exactly) on 1:1: Save
+      survives, or shows the explicit smaller-copy question, never a reload
+- [ ] The share sheet appears after a press of more than 10 seconds (the
+      "Save to Photos" tap is there for when the first tap's activation has
+      run out; check that it works)
+- [ ] Import a HEIC straight from the camera roll
+- [ ] An EXIF-rotated portrait (a photo taken holding the phone upright) is
+      upright in the preview and in the saved file
+
+## Limits to settle on a device
+
+- [ ] **The canvas ceiling is an area.** The app has no edge cap, only the
+      16.7 MP area (`MAX_AREA`; the 4096 edge is Borders' number, and
+      WebKit's documented limit is an area). On an iPhone, with Safari's Web
+      Inspector attached, run this in the console on the deployed app:
+
+      ```js
+      for (const [w, h] of [[4729, 3547], [7092, 2364], [2364, 7093]]) {
+        const c = document.createElement('canvas'); c.width = w; c.height = h
+        const g = c.getContext('2d'); g.fillStyle = 'rgb(1, 2, 3)'; g.fillRect(w - 1, h - 1, 1, 1)
+        console.log(w, h, [...g.getImageData(w - 1, h - 1, 1, 1).data].join()); c.width = 0
+      }
+      ```
+
+      4729×3547 is a 24 MP 4:3 photo on its own sheet (the area ceiling);
+      7092×2364 and 2364×7093 are the widest and the tallest prints the area
+      allows (3:1 and 1:3 sheets). Each should print `1,2,3,255`. If one
+      does not, Save still cannot fail quietly (the same probe runs before
+      every press, and a blank canvas gets the smaller-copy question), but
+      write down the device and the size: the README's Limits paragraph is
+      wrong for it, and the planner needs that device's limit.
+- [ ] **Settled preview sharpness.** On a 3x iPhone, compare the settled
+      preview with the saved file viewed at the same on-screen size. If the
+      preview reads visibly softer, build the recorded fallback: one idle
+      re-render at `min(CSS height × DPR, 1800)` after the preview settles,
+      run through `renderPrintAsync` with an `AbortSignal` that every new
+      input aborts, so it never blocks a touch. It stays preview-only. The
+      preview remains synchronous and inside its pixel budget until this item
+      fails.
+
 ## Both themes
 
 - [ ] Switch iOS between light and dark → the app follows, and the accent stays

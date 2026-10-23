@@ -49,6 +49,29 @@ jobs:
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
 
+      # "No down-rezzing at all" is a claim, so it is measured. The memory
+      # gate: the real export path in node with every typed array counted;
+      # it fails over 35 bytes per output pixel (an iPhone evicts a tab that
+      # holds too much, and desktop memory cannot show it).
+      - run: node scripts/measure-alloc.mjs
+      # Save keeps every pixel of the photo: the real import and the real
+      # savePrint on zone plates, compared with the original; it fails under
+      # a gate. Then the save flow in the built app, tapped: the size the
+      # caption promised, the smaller-copy question, a killed save.
+      - run: node scripts/measure-fidelity.mjs
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+      - run: node scripts/check-save.mjs
+        env:
+          PAGES: '1' # serve dist/ at the base it was built for
+          CHROMIUM_PATH: /usr/bin/google-chrome
+      # Time and resident memory of an export in desktop Chrome. Informational:
+      # V8 frees what JavaScriptCore keeps, so measure-alloc is the gate.
+      - run: node scripts/measure-export.mjs
+        continue-on-error: true
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+
       # Hand the *verified* build to the deploy job rather than rebuilding it
       # there. Whatever ships is then byte-for-byte what the gate checked.
       - name: Upload built site

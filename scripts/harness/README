@@ -3,3 +3,4 @@ Hashes of text-bearing renders depend on the installed fonts, so compare a commi
 From the commit that adds src/state/normalize.ts, each document is loaded through it exactly as an old save would be.
 Besides the frozen documents, `default`, `backing-photo`, `small-2` and `small-4` are built live from the build under test (the default print, over the test photo, and at 20% / 40% type).
 `--scale doc@h,...` renders each document at h and 2h and prints corr(box2(render(2h)), render(h)): 1 is the same print at both sizes.
+`fidelity.html` / `fidelity.ts` is the page scripts/measure-fidelity.mjs drives: the real import (into this page's IndexedDB), the real decode for Save and the real `savePrint`, on generated zone plates, an EXIF-rotated JPEG and a PNG with a transparent hole, each saved file compared with the original drawn at its own pixels. The gates live in the script.

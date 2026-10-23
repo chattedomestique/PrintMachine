@@ -38,8 +38,8 @@ const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
  * smallest type at the reference height the fine octave is under a pixel and
  * stops at one; the floor is left at a pixel on larger sheets too, because
  * sizing it to the sheet measured as a wash (the scale tests, and the
- * harness's 20% type at 1800 against 3600: 0.9706 floored at a pixel, 0.9713
- * floored at the sheet's scale).
+ * harness's 20% type at the reference height against twice it: 0.9706
+ * floored at a pixel, 0.9713 floored at the sheet's scale).
  */
 export function tearNoise(w: number, scale: number, seed: number): FbmSampler {
   return new FbmSampler(w, scale * 1.6, 2, seed ^ 0x1b873593)

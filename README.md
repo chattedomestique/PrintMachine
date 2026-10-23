@@ -36,6 +36,17 @@ npm run verify:offline # proves the build boots with no network
 PAGES=1 npm run build  # production build for the GitHub Pages sub-path
 ```
 
+```sh
+npm run measure:fidelity  # Save keeps every pixel of the photo (fails under a gate)
+npm run measure:alloc     # what an export holds, per output pixel (fails over 35 B/px)
+npm run measure:export    # export time and desktop memory (informational)
+npm run build && npm run check:save  # the save flow in the built app, tapped
+```
+
+The three that can fail run in CI after `verify`; `measure:export` runs there
+too, for the record (see "Every pixel of the photo, measured" and "What an
+export holds").
+
 `verify` is one script rather than four commands so that "it's green" means the
 same thing locally as it does in CI. Running the steps by hand once let a
 typecheck failure through, because `npm test` transpiles without type-checking
@@ -316,8 +327,12 @@ canvases are made:
   print is drawn from the original's pixels, never from the preview's copy.
 - **The export canvas** is the one ceiling a photo can meet: 16.7 MP of area
   (`MAX_AREA`, `engine/exportPlan.ts`), the most a browser canvas is guaranteed
-  to hold, and no edge cap. Saving above it would need tiled rendering and a
-  JavaScript encoder, which are not built.
+  to hold, and no edge cap. A print whose photo would land above it pixel for
+  pixel (a 24 MP photo on its own Original sheet) is the one resample, made at
+  Save and stated in the caption; the stored photo keeps every pixel, and the
+  same photo on a 4:5 sheet saves at its own 3427x4284. Saving above the
+  ceiling would need tiled rendering and a JavaScript encoder, which are not
+  built.
 
 Photos saved by an older build are the 2048 px copies it made; the originals
 are gone. Such a photo (no `native` flag, a long edge of exactly 2048) carries
@@ -606,6 +621,45 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   **Save smaller (1814×2268)** and Cancel. It does not claim the device ran out
   of memory: a mark only says the save did not end.
 
+### Every pixel of the photo, measured
+
+"No down-rezzing at all" is a claim, so `scripts/measure-fidelity.mjs` checks
+it on every CI run. In Chromium it takes generated photos through the real
+import (into IndexedDB) and the real Save (`decodeOriginal`, `savePrint`), with
+the type off and the paper veil off so that the print *is* the photo, and
+compares each file with the part of the original the sheet shows, drawn at its
+own pixels. A zone plate is the photo: rings that run up to 0.45 cycles per
+pixel at the corners, where any resampling shows.
+
+| Photo | Sheet | Saved | Laplacian energy | Correlation | Largest difference |
+|---|---|---|---|---|---|
+| 4032x3024 | Original | 4032x3024 | 1.0000 | 1.0000 | 0 |
+| 4032x3024 | 4:5 | 2419x3024 | 1.0000 | 1.0000 | 0 |
+| 6000x4500 (above the old 4096 cap) | 4:5 | 3600x4500 | 1.0000 | 1.0000 | 0 |
+| 5712x4284 (an iPhone's 24 MP) | 4:5 | 3427x4284 | 1.0000 | 1.0000 | 0 |
+| *control: drawn half a pixel off* | 4:5 | 2419x3024 | 0.79 | 0.927 | |
+| *control: from a 2048 px copy (the old import)* | 4:5 | 2419x3024 | 0.13 | 0.875 | |
+
+The gates are a Laplacian energy (the finest detail, which any resampling takes
+down) of at least 0.98 of the original's and a correlation of at least 0.999,
+with the file the size the plan says and the stored photo the picked file byte
+for byte; the two controls are the ways this app used to draw a photo, and the
+script fails if either passes. The same 5712x4284 photo on its own Original
+sheet meets the one ceiling and is saved at 4729x3547, with the caption "capped
+at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is
+5712×4284". A JPEG whose EXIF says to rotate it saves upright, a PNG's
+transparent hole prints as paper (never black), a document whose stored photo
+is gone is refused rather than printed on bare paper, and the default print
+and two documents of small type correlate at 0.97 or better with themselves at
+twice the height ("The same print at every size").
+
+`scripts/check-save.mjs` taps the same flow in the built app: a 12 MP photo on
+4:5 (the button reads Cancel within 100 ms, the line counts the press, the file
+is the size the caption promised), a device whose canvases come back blank
+above 5 MP (the smaller-copy question before anything is pressed, then that
+file), a tab closed mid-press (the notice at the next launch) and a stored
+photo deleted (no file).
+
 ### What an export holds
 
 An export at a photo's own resolution is 11-17 MP, so every sheet-sized buffer
@@ -844,12 +898,42 @@ a headless browser — but "boots in airplane mode from the home screen" and "th
 share sheet actually puts the file in Photos" are claims only an iPhone can
 settle. See `DEVICE-CHECKLIST.md`.
 
+Nothing is down-rezzed: a photo is stored as it was picked and a print is
+saved at the photo's own pixels, up to the one ceiling below, and says so when
+it is not. The one lossy step in a saved file is JPEG's own: below quality 1.0
+a browser stores colour at half resolution (4:2:0). **PNG** is the lossless
+path, beside Save.
+
 A saved print is a few megabytes, in proportion to its pixels (on the harness
 fixture: 1.9 MB for 2419×3024, 2.8 MB for 3024×3780, against the ~300 KB the
 playbook cites for a photograph). A halftone screen over paper grain is close
 to worst case for JPEG — high-frequency detail in every block — and lowering
 the quality to compensate smears the dots, so the size stands as a deliberate
 trade. PNG, the lossless choice, is several times larger again.
+
+**Limits.**
+
+- **16.7 MP.** The export canvas, by area (`MAX_AREA`, 16,777,216 px), is the
+  one ceiling: a print above it would need tiled rendering and a JavaScript
+  encoder, which are not built (the follow-up, if a print bigger than 16.7 MP
+  is ever wanted). The number is Borders', which also caps an edge at 4096;
+  WebKit's documented canvas limit is an area, so this app has no edge cap,
+  and nothing at all applies at import. It is not yet verified on an iPhone.
+  A wrong guess cannot break Save quietly: every canvas the press uses is
+  proved with a sentinel pixel first, and a canvas that comes back blank gets
+  the smaller-copy question, in numbers. The DEVICE-CHECKLIST experiment
+  probes the widest and tallest canvases the ceiling allows on a device.
+- **Colour.** A wide-gamut (Display P3) photo is converted to sRGB when it is
+  decoded; the engine, its canvases and the file are sRGB. That is a gamut
+  loss, not a resolution one.
+- **Metadata.** The file is a canvas encode: no ICC profile and no EXIF. The
+  photo's orientation is applied to the pixels; the camera's metadata is not
+  copied.
+- **Unverified on a device** (claims for an iPhone to settle, in
+  DEVICE-CHECKLIST.md): how much memory a tab may hold, whether the share
+  sheet still opens after a press of several seconds (the second tap is there
+  for when it does not), Safari's JPEG chroma, EXIF orientation on the oldest
+  supported iOS, and Blobs kept in IndexedDB across launches.
 
 ## Removed on purpose
 

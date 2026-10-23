@@ -15,20 +15,13 @@
  */
 
 export interface CompositeLayer {
-  /**
-   * Cover what is underneath rather than multiplying into it.
-   *
-   * Transparent ink is the honest default and is why overprinting works at
-   * all. An opaque plate is a deliberate departure — the words sit on the
-   * image at full strength regardless of what the image is doing there.
-   */
-  opaque?: boolean
-  /** w*h coverage in [0,1]. */
+  /** w*h coverage in [0,1]. Ink is always transparent: a plate multiplies
+   *  into what it lands on, never covers it — keeping a colour readable over
+   *  dark ground is done the riso way, by knocking the ground back to paper
+   *  (knockout.ts), not by painting over it. */
   coverage: Float32Array
   /** The ink's printed colour at full coverage on white. */
   rgb: readonly [number, number, number]
-  /** Layer master opacity in [0,1] — scales coverage uniformly. */
-  opacity: number
 }
 
 export interface PaperInput {
@@ -74,21 +67,11 @@ export function compositeLayers(
   const absR = new Float32Array(count)
   const absG = new Float32Array(count)
   const absB = new Float32Array(count)
-  const alpha = new Float32Array(count)
-  const inkR = new Float32Array(count)
-  const inkG = new Float32Array(count)
-  const inkB = new Float32Array(count)
-  const opaque: boolean[] = []
   for (let l = 0; l < count; l++) {
-    const { rgb, opacity } = layers[l]
+    const { rgb } = layers[l]
     absR[l] = 1 - rgb[0] / 255
     absG[l] = 1 - rgb[1] / 255
     absB[l] = 1 - rgb[2] / 255
-    inkR[l] = rgb[0] / 255
-    inkG[l] = rgb[1] / 255
-    inkB[l] = rgb[2] / 255
-    alpha[l] = opacity < 0 ? 0 : opacity > 1 ? 1 : opacity
-    opaque[l] = layers[l].opaque === true
   }
 
   const base = paper.base
@@ -123,17 +106,8 @@ export function compositeLayers(
     }
 
     for (let l = 0; l < count; l++) {
-      const c = layers[l].coverage[i] * alpha[l]
+      const c = layers[l].coverage[i]
       if (c <= 0) continue
-      if (opaque[l]) {
-        // Lerp to the ink rather than multiplying through it: at full coverage
-        // nothing of what was underneath survives.
-        const k = 1 - c
-        r = r * k + inkR[l] * c
-        g = g * k + inkG[l] * c
-        b = b * k + inkB[l] * c
-        continue
-      }
       r *= 1 - c * absR[l]
       g *= 1 - c * absG[l]
       b *= 1 - c * absB[l]

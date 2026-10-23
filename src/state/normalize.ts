@@ -31,7 +31,7 @@ import { clampPan } from '../engine/media.ts'
 import { ASPECTS, type PrintSettings, type TextLayer } from '../engine/types.ts'
 import { fitSize, type FontMeasure } from '../engine/text.ts'
 import { defaultSettings, makeLayer } from './defaults.ts'
-import { LAYER_FIELDS, SETTINGS_FIELDS, type Row } from './fields.ts'
+import { INK_IDS, LAYER_FIELDS, SETTINGS_FIELDS, acceptMedia, type Row } from './fields.ts'
 
 export interface NormalizeEnv {
   /** Measures text as the renderer will draw it. Absent outside a browser. */
@@ -60,7 +60,8 @@ function sheetAspect(doc: Doc): number {
  * Run in this order. A removed field with a replacement is converted here; a
  * removed field with none (the printed photo's ink, contrast and lift, its
  * opacity, the photo's own press, word spacing, justify-by, lines-of-one-word,
- * the typewriter) is simply not in the schema, so it goes.
+ * the typewriter, per-word misprints, plate opacity, box padding and corner
+ * radius) is simply not in the schema, so it goes.
  *
  * The type conversions are ordered because the last one measures: the fitted
  * size depends on the text as it will be drawn — its case, its face and its
@@ -116,6 +117,45 @@ const CONVERSIONS: readonly Conversion[] = [
       delete l.fitWidth
     }
   },
+
+  // Opaque first, then boxes, because the box conversion decides between the
+  // two when both claim a plate.
+  //
+  // Opaque ("print over the photo") painted the ink over a dark photo. The
+  // same result the riso way is the plate's own ink as its second ink: the
+  // photo is cut back to paper wherever it is darker than the ink, and the ink
+  // stays transparent. Only with a photo, where opaque did anything, and only
+  // where no second ink was already chosen.
+  function opaque(doc) {
+    const photo = isPlainObject(doc.media) && acceptMedia(doc.media)
+    for (const l of layersOf(doc)) {
+      if (l.opaque === true && photo && (l.contrastInkId === null || l.contrastInkId === undefined)) {
+        l.contrastInkId = l.inkId
+      }
+      delete l.opaque
+    }
+  },
+
+  // Word-picked boxes become one per-line backing in the ink of the first box
+  // that had words. A plate takes a backing or a second ink, never both, and a
+  // box was an explicit act where the second ink may only have been seeded, so
+  // the backing wins.
+  function boxes(doc) {
+    for (const l of layersOf(doc)) {
+      if (Array.isArray(l.boxes) && !('backing' in l)) {
+        const first = l.boxes.find(
+          (b: unknown) => isPlainObject(b) && Array.isArray(b.words) && b.words.length > 0,
+        ) as Doc | undefined
+        // A box in an ink no build knows is no backing (the field's default),
+        // and then it does not displace the plate's second ink either.
+        if (first && typeof first.inkId === 'string' && INK_IDS.includes(first.inkId)) {
+          l.backing = first.inkId
+          l.contrastInkId = null
+        }
+      }
+      delete l.boxes
+    }
+  },
 ]
 
 const isPlainObject = (v: unknown): v is Doc =>
@@ -167,8 +207,8 @@ function field(row: Row, raw: unknown, fallback: unknown): unknown {
 
     case 'array': {
       if (!Array.isArray(raw)) return invalid
-      // An item that is not an object is not a layer (or box) at all; dropping
-      // it loses nothing. A real item is never dropped, however broken.
+      // An item that is not an object is not a layer at all; dropping it loses
+      // nothing. A real item is never dropped, however broken.
       const items = raw
         .filter(isPlainObject)
         .map((item) => object(row.fields ?? [], item, row.template?.() ?? {}))
@@ -183,8 +223,6 @@ function field(row: Row, raw: unknown, fallback: unknown): unknown {
       return items
     }
 
-    case 'custom':
-      return row.normalize ? row.normalize(raw, fallback) : invalid
   }
 }
 
@@ -205,9 +243,11 @@ export function normalizeSettings(raw: unknown, env: NormalizeEnv = {}): PrintSe
   const doc = clone(raw) as Doc
   for (const convert of CONVERSIONS) convert(doc, env)
   const s = object(SETTINGS_FIELDS, doc, defaults as unknown as Doc) as unknown as PrintSettings
-  // Cross-field invariant, once every field is valid on its own: the photo
-  // covers the sheet. A pan that was legal on another sheet shape is pulled
-  // back to the nearest placement that leaves no bare strip.
+  // Cross-field invariants, once every field is valid on its own. The photo
+  // covers the sheet: a pan that was legal on another sheet shape is pulled
+  // back to the nearest placement that leaves no bare strip. And a plate has a
+  // backing or a second ink, never both; the backing wins, as above.
   if (s.media) s.media = clampPan(s.media, ASPECTS[s.aspect], 1)
+  for (const l of s.layers) if (l.backing && l.contrastInkId) l.contrastInkId = null
   return s
 }

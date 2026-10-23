@@ -16,12 +16,10 @@ import preSplit from './__fixtures__/legacy-pre-split.json'
 import unknownIds from './__fixtures__/legacy-unknown-ids.json'
 import { defaultSettings, makeLayer, makeMedia } from './defaults.ts'
 import {
-  BOX_FIELDS,
   LAYER_FIELDS,
   MEDIA_FIELDS,
   PRESS_FIELDS,
   SETTINGS_FIELDS,
-  boxTemplate,
   mediaTemplate,
   type Row,
 } from './fields.ts'
@@ -59,10 +57,6 @@ function expectNoExtraKeys(s: PrintSettings) {
   expect(keys(s.press)).toEqual(keys(d.press))
   for (const l of s.layers) {
     expect(keys(l)).toEqual(keys(makeLayer()))
-    for (const b of l.boxes) expect(keys(b)).toEqual(keys(boxTemplate()))
-    for (const over of Object.values(l.wordPress)) {
-      for (const k of Object.keys(over)) expect(['bleed', 'offset']).toContain(k)
-    }
   }
   if (s.media) expect(keys(s.media)).toEqual(keys(makeMedia({ id: 'x', width: 1, height: 1 })))
 }
@@ -75,7 +69,6 @@ describe('the schema matches the model', () => {
     expect(names(PRESS_FIELDS)).toEqual(keys(d.press))
     expect(names(LAYER_FIELDS)).toEqual(keys(makeLayer()))
     expect(names(MEDIA_FIELDS)).toEqual(keys(mediaTemplate()))
-    expect(names(BOX_FIELDS)).toEqual(keys(boxTemplate()))
   })
 
   it('accepts every default as valid — normalising the defaults changes nothing', () => {
@@ -86,14 +79,12 @@ describe('the schema matches the model', () => {
 
 /* ── Every schema row: valid, wrong type, out of range, unknown, null ─────── */
 
-/** A document in which every row is reachable: a photo and a box. */
+/** A document in which every row is reachable: one with a photo. */
 function reachable(): Doc {
   const d = copy(defaultSettings()) as unknown as Doc
   // Zoomed, so the photo can travel on both axes and a valid position is not
   // pulled back by the cover rule.
   d.media = makeMedia({ id: 'photo', width: 4032, height: 3024, scale: 4 })
-  const layers = d.layers as Doc[]
-  layers[0].boxes = [{ id: 'box-1', words: [0], inkId: 'yellow', opacity: 1 }]
   return d
 }
 
@@ -110,7 +101,6 @@ const LEVELS: { name: string; path: Path; rows: readonly Row[] }[] = [
   { name: 'press', path: ['press'], rows: PRESS_FIELDS },
   { name: 'media', path: ['media'], rows: MEDIA_FIELDS },
   { name: 'layer', path: ['layers', 0], rows: LAYER_FIELDS },
-  { name: 'box', path: ['layers', 0, 'boxes', 0], rows: BOX_FIELDS },
 ]
 
 /** Fields a photo is refused without: an invalid one drops the whole photo. */
@@ -228,8 +218,6 @@ function defaultsFor(level: string): Doc {
       return mediaTemplate()
     case 'layer':
       return makeLayer() as unknown as Doc
-    case 'box':
-      return boxTemplate()
   }
   throw new Error(level)
 }
@@ -271,25 +259,6 @@ describe('structured fields', () => {
     expect(ids[0]).toBe('same')
     expect(new Set(ids).size).toBe(3)
     for (const id of ids) expect(id.length).toBeGreaterThan(0)
-  })
-
-  it('per-word overrides keep valid word indices and clamp their deltas', () => {
-    const doc = reachable()
-    ;(doc.layers as Doc[])[0].wordPress = {
-      '0': { bleed: 0.2 },
-      '3': { offset: 99, colour: 'red' },
-      '-1': { bleed: 0.1 },
-      x: { bleed: 0.1 },
-      '4': 'loud',
-      '5': { bleed: 0, offset: 0 },
-    }
-    expect(normalizeSettings(doc).layers[0].wordPress).toEqual({ '0': { bleed: 0.2 }, '3': { offset: 30 } })
-  })
-
-  it('box words are whole, non-negative and each listed once', () => {
-    const doc = reachable()
-    ;(doc.layers as Doc[])[0].boxes = [{ id: 'b', words: [3, 1, 1, -2, 1.5, 'x'], inkId: 'blue', opacity: 2 }]
-    expect(normalizeSettings(doc).layers[0].boxes).toEqual([{ id: 'b', words: [1, 3], inkId: 'blue', opacity: 1 }])
   })
 
   it('drops a photo with no id or no real size, and keeps one that has them', () => {
@@ -344,8 +313,9 @@ describe('legacy documents', () => {
       press: [],
       media: ['scale', 'x', 'y'],
       // caps uppercases the text, Rounded becomes Grotesk, and a fitted
-      // layer's size is re-measured (only with a measure; none here).
-      layer: ['text', 'fontId', 'size'],
+      // layer's size is re-measured (only with a measure; none here); opaque
+      // and worded boxes decide the second ink.
+      layer: ['text', 'fontId', 'size', 'contrastInkId'],
     }
     const levels = (raw: Doc, out: Doc) => [
       { level: 'settings', raw, out, rows: SETTINGS_FIELDS },
@@ -560,4 +530,67 @@ describe('verdict §4.1: what each removed field becomes', () => {
       }
     }
   })
+
+  /* ── Plates (1.4) ── */
+
+  it('layer.opaque with a photo and no second ink: the plate\'s own ink as its second ink', () => {
+    // Layer 1: opaque, no second ink, no worded box, and the document has a
+    // photo — it keeps its colour over dark ground the riso way.
+    expect([rawLayers[0].opaque, rawLayers[0].contrastInkId]).toEqual([true, null])
+    expect(max().layers[0].contrastInkId).toBe(max().layers[0].inkId)
+    // Layer 3: opaque with a second ink already chosen keeps the chosen one.
+    expect([rawLayers[2].opaque, rawLayers[2].contrastInkId]).toEqual([true, 'white'])
+    expect(max().layers[2].contrastInkId).toBe('white')
+  })
+
+  it('layer.opaque without a photo: nothing to keep it readable over, so nothing changes', () => {
+    const d = copy(defaultDoc) as unknown as Doc
+    ;(d.layers as Doc[])[0].opaque = true
+    expect(normalizeSettings(d).layers[0].contrastInkId).toBeNull()
+  })
+
+  it('layer.boxes with words: a backing in the first worded box\'s ink, which wins over the second ink', () => {
+    // Layer 2: boxes [yellow, words 1-2], [green, no words] and second ink white.
+    expect(max().layers[1].backing).toBe('yellow')
+    expect(max().layers[1].contrastInkId).toBeNull()
+    // Layer 3: only an empty box — no backing.
+    expect(max().layers[2].backing).toBeNull()
+    // Layer 4: opaque AND a worded box. Opaque converts first (same-ink second
+    // ink), then the box takes the plate, so it ends with the backing only.
+    expect(max().layers[3].backing).toBe('blue')
+    expect(max().layers[3].contrastInkId).toBeNull()
+  })
+
+  it('a box in an ink no build knows is no backing, and leaves the second ink', () => {
+    const d = copy(defaultDoc) as unknown as Doc
+    ;(d.layers as Doc[])[0].contrastInkId = 'black'
+    ;(d.layers as Doc[])[0].boxes = [{ id: 'b', words: [0], inkId: 'ultraviolet', opacity: 1 }]
+    const s = normalizeSettings(d)
+    expect(s.layers[0].backing).toBeNull()
+    expect(s.layers[0].contrastInkId).toBe('black')
+  })
+
+  it('a stored backing survives a load, and a document holding both keeps the backing', () => {
+    const d = copy(defaultDoc) as unknown as Doc
+    ;(d.layers as Doc[])[1].backing = 'teal'
+    expect(normalizeSettings(copy(d)).layers[1].backing).toBe('teal')
+    ;(d.layers as Doc[])[1].contrastInkId = 'white'
+    const s = normalizeSettings(d)
+    expect([s.layers[1].backing, s.layers[1].contrastInkId]).toEqual(['teal', null])
+  })
+
+  it('layer.wordPress, opacity, boxPadding, boxRadius, boxes, opaque: dropped', () => {
+    for (const l of max().layers) {
+      for (const k of ['wordPress', 'opacity', 'boxPadding', 'boxRadius', 'boxes', 'opaque']) {
+        expect(l).not.toHaveProperty(k)
+      }
+    }
+  })
+
+  it('a document over the plate budget keeps every plate', () => {
+    // Four plates in legacy-maximal, one more than the budget allows to ADD.
+    expect(rawLayers).toHaveLength(4)
+    expect(max().layers).toHaveLength(4)
+  })
 })
+

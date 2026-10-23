@@ -19,7 +19,6 @@
  *             entry in the table"
  *  - object   a plain object, normalised against `fields` and the template
  *  - array    an array of plain objects, each normalised against `fields`
- *  - custom   its own `normalize`, for the odd shapes
  *
  * `nullable`: null and valid values pass, and anything else becomes null.
  *
@@ -35,7 +34,7 @@ import { makeLayer, makeMedia, nextLayerId } from './defaults.ts'
 
 export interface Row {
   key: string
-  kind: 'string' | 'number' | 'boolean' | 'enum' | 'object' | 'array' | 'custom'
+  kind: 'string' | 'number' | 'boolean' | 'enum' | 'object' | 'array'
   nullable?: boolean
   /** string: the empty string is not a valid value. */
   nonEmpty?: boolean
@@ -55,8 +54,6 @@ export interface Row {
   uniqueId?: () => string
   /** object: a stored object failing this is not one at all (null, or the default). */
   accept?: (raw: Record<string, unknown>) => boolean
-  /** custom */
-  normalize?: (raw: unknown, fallback: unknown) => unknown
 }
 
 const ids = (list: readonly { id: string }[]): readonly string[] => list.map((x) => x.id)
@@ -72,49 +69,7 @@ export const SCREEN_SHAPES = ['circle', 'square', 'line', 'ellipse', 'cross', 'd
 /** Sheet positions: the drag and the keys let type bleed a little off the trim. */
 const POSITION = { min: -0.3, max: 1.3 }
 
-const isPlainObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
-
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
-
-/** Per-word press overrides: keys are word indices, values deltas on the press. */
-function normalizeWordPress(raw: unknown, fallback: unknown): unknown {
-  if (!isPlainObject(raw)) return fallback
-  const out: Record<string, { bleed?: number; offset?: number }> = {}
-  for (const [k, v] of Object.entries(raw)) {
-    if (!/^(0|[1-9]\d*)$/.test(k) || !isPlainObject(v)) continue
-    const entry: { bleed?: number; offset?: number } = {}
-    if (finite(v.bleed)) entry.bleed = Math.min(0.6, Math.max(0, v.bleed))
-    if (finite(v.offset)) entry.offset = Math.min(30, Math.max(0, v.offset))
-    // Zero on both is "normal", which the reducer stores as no entry at all.
-    if (entry.bleed || entry.offset) out[k] = entry
-  }
-  return out
-}
-
-/** Word indices a box covers: non-negative integers, each once, in order. */
-function normalizeWords(raw: unknown, fallback: unknown): unknown {
-  if (!Array.isArray(raw)) return fallback
-  const words = raw.filter((n): n is number => Number.isInteger(n) && n >= 0)
-  return [...new Set(words)].sort((a, b) => a - b)
-}
-
-let restored = 0
-const restoredId = (prefix: string) => () => `${prefix}-restored-${Date.now().toString(36)}-${restored++}`
-
-export const BOX_FIELDS: readonly Row[] = [
-  { key: 'id', kind: 'string', nonEmpty: true },
-  { key: 'words', kind: 'custom', normalize: normalizeWords },
-  { key: 'inkId', kind: 'enum', values: INK_IDS },
-  { key: 'opacity', kind: 'number', min: 0, max: 1 },
-]
-
-export const boxTemplate = (): Record<string, unknown> => ({
-  id: restoredId('box')(),
-  words: [],
-  inkId: 'blue',
-  opacity: 1,
-})
 
 export const LAYER_FIELDS: readonly Row[] = [
   { key: 'id', kind: 'string', nonEmpty: true },
@@ -125,18 +80,13 @@ export const LAYER_FIELDS: readonly Row[] = [
   { key: 'size', kind: 'number', min: SIZE_MIN, max: SIZE_MAX },
   { key: 'lineHeight', kind: 'number', min: 0.6, max: 2 },
   { key: 'tracking', kind: 'number', min: -0.1, max: 0.4 },
-  { key: 'wordPress', kind: 'custom', normalize: normalizeWordPress },
-  { key: 'opaque', kind: 'boolean' },
   { key: 'contrastInkId', kind: 'enum', nullable: true, values: INK_IDS },
   { key: 'contrastThreshold', kind: 'number', min: 0.1, max: 0.9 },
   { key: 'align', kind: 'enum', values: ALIGNS },
   { key: 'x', kind: 'number', ...POSITION },
   { key: 'y', kind: 'number', ...POSITION },
   { key: 'rotation', kind: 'number', min: -180, max: 180 },
-  { key: 'opacity', kind: 'number', min: 0, max: 1 },
-  { key: 'boxes', kind: 'array', fields: BOX_FIELDS, template: boxTemplate, uniqueId: restoredId('box') },
-  { key: 'boxPadding', kind: 'number', min: 0, max: 0.6 },
-  { key: 'boxRadius', kind: 'number', min: 0, max: 0.8 },
+  { key: 'backing', kind: 'enum', nullable: true, values: INK_IDS },
 ]
 
 export const PRESS_FIELDS: readonly Row[] = [

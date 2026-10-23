@@ -7,23 +7,27 @@
  * the overprint model, and the layout maths — rather than chasing coverage.
  */
 
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import { compositeLayers } from './composite.ts'
 import { DITHER_TYPES, ditherField } from './dither.ts'
 import { applyDensity, applyMottle, registrationOffset, shiftField } from './ink.ts'
-import { contrastPartner, inkById, overprint, paperById, RISO_INKS } from './inks.ts'
+import { contrastPartner, inkById, paperById, RISO_INKS } from './inks.ts'
 import { paperField } from './paper.ts'
 import { mulberry32, valueNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
-import { FIT_WIDTH, alignOffset, fitSize, justifyOffsets, layoutText, wordsOf, type FontMeasure } from './text.ts'
+import { BACKING_PAD, FIT_WIDTH, alignOffset, fitSize, justifyOffsets, layoutText, lineRects, type FontMeasure } from './text.ts'
 import {
   DRAFT_HEIGHT,
   PREVIEW_HEIGHT,
   REFERENCE_HEIGHT,
   detailFactor,
+  ensureCache,
   outputSize,
+  pressPlate,
 } from './render.ts'
+import { knockoutMask } from './knockout.ts'
 import {
   bandMask,
   clampPan,
@@ -47,6 +51,20 @@ import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'
 const W = 24
 const H = 24
 
+/**
+ * The compositor's documented model, as a test-local oracle: transparent ink
+ * at full coverage multiplies each channel of what is under it by its own.
+ * Kept here, not in the app, because nothing in the app needs it.
+ */
+const expectedOverprint = (
+  bottom: readonly [number, number, number],
+  top: readonly [number, number, number],
+): [number, number, number] => [
+  Math.round((bottom[0] * top[0]) / 255),
+  Math.round((bottom[1] * top[1]) / 255),
+  Math.round((bottom[2] * top[2]) / 255),
+]
+
 const ramp = (): Float32Array => {
   const f = new Float32Array(W * H)
   for (let i = 0; i < f.length; i++) f[i] = (i % W) / (W - 1)
@@ -58,7 +76,7 @@ describe('composite — the subtractive overprint model', () => {
     const out = new Uint8ClampedArray(W * H * 4)
     const paper = { shade: new Float32Array(W * H).fill(1), rgb: [242, 239, 230] as const }
     compositeLayers(out, W, H, paper, [
-      { coverage: new Float32Array(W * H), rgb: [255, 72, 176], opacity: 1 },
+      { coverage: new Float32Array(W * H), rgb: [255, 72, 176] },
     ])
     expect([out[0], out[1], out[2], out[3]]).toEqual([242, 239, 230, 255])
   })
@@ -67,7 +85,7 @@ describe('composite — the subtractive overprint model', () => {
     const out = new Uint8ClampedArray(4)
     const paper = { shade: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const }
     compositeLayers(out, 1, 1, paper, [
-      { coverage: new Float32Array(1).fill(1), rgb: [255, 72, 176], opacity: 1 },
+      { coverage: new Float32Array(1).fill(1), rgb: [255, 72, 176] },
     ])
     expect([out[0], out[1], out[2]]).toEqual([255, 72, 176])
   })
@@ -78,13 +96,12 @@ describe('composite — the subtractive overprint model', () => {
     const pink = [255, 72, 176] as const
     const blue = [0, 120, 191] as const
     compositeLayers(out, 1, 1, paper, [
-      { coverage: new Float32Array(1).fill(1), rgb: blue, opacity: 1 },
-      { coverage: new Float32Array(1).fill(1), rgb: pink, opacity: 1 },
+      { coverage: new Float32Array(1).fill(1), rgb: blue },
+      { coverage: new Float32Array(1).fill(1), rgb: pink },
     ])
-    // Not the top layer, and matches the standalone overprint helper the UI
-    // uses to preview the pairing — the two must not be able to drift apart.
+    // Not the top layer: the product of the two, channel by channel.
     expect([out[0], out[1], out[2]]).not.toEqual([...pink])
-    expect([out[0], out[1], out[2]]).toEqual(overprint(blue, pink))
+    expect([out[0], out[1], out[2]]).toEqual(expectedOverprint(blue, pink))
   })
 
   it('always writes an opaque pixel — a print has no transparency', () => {
@@ -311,11 +328,14 @@ describe('text layout', () => {
   })
 
   it('lets letter tracking widen the word gaps too, like native letter-spacing', () => {
-    const base = wordsOf(layoutText(layer({ text: 'AA BB CC' }), 1000, measure))
-    const out = wordsOf(layoutText(layer({ text: 'AA BB CC', tracking: 0.2 }), 1000, measure))
+    // Glyph 3 is the first letter of the second word, after the space.
+    const gap = (l: TextLayer) => {
+      const g = layoutText(l, 1000, measure).lines[0].glyphs
+      return g[3].x - (g[1].x + g[1].width)
+    }
     // Native letter-spacing lands on the space as well, so opening the type up
     // opens the word gaps with it rather than jamming the words together.
-    expect(out[1].x - out[0].x).toBeGreaterThan(base[1].x - base[0].x)
+    expect(gap(layer({ text: 'AA BB CC', tracking: 0.2 }))).toBeGreaterThan(gap(layer({ text: 'AA BB CC' })))
   })
 
   it('measures a line to its ink, not to the trailing tracking gap', () => {
@@ -648,45 +668,6 @@ describe('fading is dots, not opacity', () => {
   })
 })
 
-describe('word layout', () => {
-  // Every glyph is half the font size wide, so positions are exactly
-  // predictable and the assertions can be about arithmetic, not fonts.
-  const measure = (text: string, size: number) => text.length * size * 0.5
-
-  const layer = (over: Partial<TextLayer> = {}): TextLayer =>
-    makeLayer({ text: 'AA BB\nCC', fontId: 'grotesk', size: 0.1, lineHeight: 1, tracking: 0, align: 'left', ...over })
-
-  it('numbers words continuously across lines', () => {
-    const words = wordsOf(layoutText(layer(), 1000, measure))
-    expect(words.map((w) => w.text)).toEqual(['AA', 'BB', 'CC'])
-    expect(words.map((w) => w.index)).toEqual([0, 1, 2])
-    expect(words.map((w) => w.line)).toEqual([0, 0, 1])
-  })
-
-  it('gives each word the span its glyphs actually occupy', () => {
-    const out = layoutText(layer(), 1000, measure)
-    const [aa, bb] = out.lines[0].words
-    const glyph = out.fontSize * 0.5
-    expect(aa.x).toBeCloseTo(0, 6)
-    expect(aa.width).toBeCloseTo(glyph * 2, 6)
-    // "AA" + space = 3 advances before "BB" starts.
-    expect(bb.x).toBeCloseTo(glyph * 3, 6)
-  })
-
-  it('collapses runs of whitespace rather than inventing empty words', () => {
-    const words = wordsOf(layoutText(layer({ text: 'A   B' }), 1000, measure))
-    expect(words.map((w) => w.text)).toEqual(['A', 'B'])
-  })
-
-  it('still numbers words correctly when justified', () => {
-    const words = wordsOf(layoutText(layer({ align: 'justify' }), 1000, measure))
-    expect(words.map((w) => w.index)).toEqual([0, 1, 2])
-    // Justification moved them, but they are still ordered left to right.
-    const line0 = words.filter((w) => w.line === 0)
-    expect(line0[1].x).toBeGreaterThan(line0[0].x)
-  })
-})
-
 describe('justify — one rule per line', () => {
   const measure = (text: string, size: number) => text.length * size * 0.5
   const layer = (over: Partial<TextLayer> = {}): TextLayer =>
@@ -915,7 +896,7 @@ describe('photo as the printing ground', () => {
     const n = 4
     const shade = new Float32Array(n).fill(0.9)
     const paper = { shade, rgb: [250, 245, 235] as const }
-    const plates = [{ coverage: new Float32Array(n).fill(0.5), rgb: [255, 0, 128] as const, opacity: 1 }]
+    const plates = [{ coverage: new Float32Array(n).fill(0.5), rgb: [255, 0, 128] as const }]
 
     const a = new Uint8ClampedArray(n * 4)
     const b = new Uint8ClampedArray(n * 4)
@@ -959,7 +940,7 @@ describe('photo as the printing ground', () => {
     // the photo's own colour — not replace it, which is what a sticker does.
     const base = new Uint8ClampedArray([200, 200, 200, 255])
     const paper = { shade: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const }
-    const ink = [{ coverage: new Float32Array(1).fill(1), rgb: [0, 0, 255] as const, opacity: 1 }]
+    const ink = [{ coverage: new Float32Array(1).fill(1), rgb: [0, 0, 255] as const }]
 
     const out = new Uint8ClampedArray(4)
     compositeLayers(out, 1, 1, { ...paper, base, paperAmount: 0 }, ink)
@@ -1161,8 +1142,8 @@ describe('reading type across a photograph', () => {
     const paper = { shade: new Float32Array(1).fill(1), rgb: [250, 245, 235] as const }
     const out = new Uint8ClampedArray(4)
     compositeLayers(out, 1, 1, paper, [
-      { coverage: photo, rgb: [0, 0, 0] as const, opacity: 1 },
-      { coverage: onDark, rgb: [255, 255, 255] as const, opacity: 1 },
+      { coverage: photo, rgb: [0, 0, 0] as const },
+      { coverage: onDark, rgb: [255, 255, 255] as const },
     ])
     // Paper survives, so a light ink printed here actually reads.
     expect(out[0]).toBeGreaterThan(200)
@@ -1229,85 +1210,6 @@ describe('the two-ink switch is a pattern, not a fade', () => {
   })
 })
 
-describe('per-word press overrides', () => {
-  const measure = (t: string, s: number) => t.length * s * 0.5
-  const base = (over: Partial<TextLayer> = {}): TextLayer =>
-    makeLayer({ text: 'one two three', fontId: 'grotesk', size: 0.1, lineHeight: 1, tracking: 0, align: 'left', ...over })
-
-  it('groups words by their setting, not one plate each', () => {
-    // Three words given the same extra bleed went through the press together
-    // on a real job, so they should tear and land together here.
-    const layer = base({
-      wordPress: { '0': { bleed: 0.2 }, '1': { bleed: 0.2 }, '2': { offset: 5 } },
-    })
-    const keys = new Set(
-      Object.values(layer.wordPress).map((o) => `${o.bleed ?? 0}:${o.offset ?? 0}`),
-    )
-    expect(keys.size).toBe(2)
-  })
-
-  it('word indices match the whitespace split the panel shows', () => {
-    // A word overridden by index must be the word tapped, or the wrong word
-    // misprints — the same contract the box selection relies on.
-    const words = wordsOf(layoutText(base(), 1000, measure)).map((w) => w.text)
-    expect(words).toEqual(['one', 'two', 'three'])
-  })
-})
-
-describe('box word selection', () => {
-  const layerWith = (boxes: { id: string; words: number[] }[]) => {
-    const l = makeLayer({
-      text: 'one two three four',
-      boxes: boxes.map((b) => ({ id: b.id, words: b.words, inkId: 'blue', opacity: 1 })),
-    })
-    return { ...defaultSettings(), layers: [l] }
-  }
-
-  it('select all claims every word for the chosen box', () => {
-    const s = layerWith([{ id: 'a', words: [] }])
-    const next = applySettings(s, {
-      type: 'setBoxWords',
-      layerId: s.layers[0].id,
-      boxId: 'a',
-      words: [0, 1, 2, 3],
-    })
-    expect(next.layers[0].boxes[0].words).toEqual([0, 1, 2, 3])
-  })
-
-  it('takes words away from any other box rather than sharing them', () => {
-    // A word in two boxes stacks two inks in the same rectangle and the result
-    // is neither colour. Select all has to honour that the same way a single
-    // tap does — this is the case that made the bulk action worth testing.
-    const s = layerWith([
-      { id: 'a', words: [0, 1, 2, 3] },
-      { id: 'b', words: [] },
-    ])
-    const next = applySettings(s, {
-      type: 'setBoxWords',
-      layerId: s.layers[0].id,
-      boxId: 'b',
-      words: [0, 1, 2, 3],
-    })
-    expect(next.layers[0].boxes[1].words).toEqual([0, 1, 2, 3])
-    expect(next.layers[0].boxes[0].words).toEqual([])
-  })
-
-  it('clear empties only the chosen box', () => {
-    const s = layerWith([
-      { id: 'a', words: [0, 1] },
-      { id: 'b', words: [2, 3] },
-    ])
-    const next = applySettings(s, {
-      type: 'setBoxWords',
-      layerId: s.layers[0].id,
-      boxId: 'b',
-      words: [],
-    })
-    expect(next.layers[0].boxes[1].words).toEqual([])
-    expect(next.layers[0].boxes[0].words).toEqual([0, 1])
-  })
-})
-
 describe('draft rendering', () => {
   it('is the same picture at lower fidelity, not a different one', () => {
     // Rendering smaller while a control moves is only safe because every
@@ -1334,52 +1236,6 @@ describe('draft rendering', () => {
     const exported = outputSize('4:5')
     expect(exported.h).toBe(REFERENCE_HEIGHT)
     expect(exported.h).toBeGreaterThan(PREVIEW_HEIGHT)
-  })
-})
-
-describe('opaque plates', () => {
-  const paper = { shade: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const }
-
-  it('covers what is under it instead of multiplying into it', () => {
-    // The whole point: unaffected by whatever the photo is doing there.
-    const dark = new Uint8ClampedArray([10, 10, 10, 255])
-    const light = new Uint8ClampedArray([240, 240, 240, 255])
-    const ink = [
-      { coverage: new Float32Array(1).fill(1), rgb: [255, 0, 128] as const, opacity: 1, opaque: true },
-    ]
-    const a = new Uint8ClampedArray(4)
-    const b = new Uint8ClampedArray(4)
-    compositeLayers(a, 1, 1, { ...paper, base: dark, paperAmount: 0 }, ink)
-    compositeLayers(b, 1, 1, { ...paper, base: light, paperAmount: 0 }, ink)
-
-    expect([...a]).toEqual([...b])
-    expect(a[0]).toBeCloseTo(255, 0)
-    expect(a[1]).toBeCloseTo(0, 0)
-  })
-
-  it('leaves the transparent default exactly as it was', () => {
-    // A new flag through the inner loop has to be provably inert when unset.
-    const base = new Uint8ClampedArray([200, 200, 200, 255])
-    const cov = new Float32Array(1).fill(0.6)
-    const withFlag = new Uint8ClampedArray(4)
-    const without = new Uint8ClampedArray(4)
-    compositeLayers(withFlag, 1, 1, { ...paper, base, paperAmount: 0 }, [
-      { coverage: cov, rgb: [0, 0, 255] as const, opacity: 1, opaque: false },
-    ])
-    compositeLayers(without, 1, 1, { ...paper, base, paperAmount: 0 }, [
-      { coverage: cov, rgb: [0, 0, 255] as const, opacity: 1 },
-    ])
-    expect([...withFlag]).toEqual([...without])
-  })
-
-  it('still respects plate opacity, so it can be dialled back', () => {
-    const base = new Uint8ClampedArray([0, 0, 0, 255])
-    const out = new Uint8ClampedArray(4)
-    compositeLayers(out, 1, 1, { ...paper, base, paperAmount: 0 }, [
-      { coverage: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const, opacity: 0.5, opaque: true },
-    ])
-    expect(out[0]).toBeGreaterThan(100)
-    expect(out[0]).toBeLessThan(160)
   })
 })
 
@@ -1510,3 +1366,258 @@ describe('detail scaling reaches the wear, not just the screen', () => {
     }
   })
 })
+
+describe('the press hands its outline to the knockout', () => {
+  it('pressPlate returns the very roughened field and offset a knockout under it needs', () => {
+    // The knockout used to roughen the tone a second time, with the same input,
+    // seed and parameters as the plate's own call — a full blur pass for a
+    // field already in memory. It now takes the plate's own.
+    const w = 96
+    const h = 120
+    const s = defaultSettings()
+    const tone = new Float32Array(w * h)
+    for (let y = 30; y < 90; y++) for (let x = 20; x < 76; x++) tone[y * w + x] = 1
+    const cache = ensureCache(null, s, w, h)
+    const fontSize = h * 0.12
+    const index = 1
+    const out = pressPlate({ field: tone, fontSize }, index, s.press, s.seed, cache, w, h)
+
+    const scale = h / REFERENCE_HEIGHT
+    const detail = detailFactor(fontSize, h)
+    const own = roughenEdges(tone, w, h, {
+      roughness: s.press.roughness,
+      scale: s.press.roughScale * scale * detail,
+      bleed: s.press.bleed * detail,
+      seed: s.seed ^ (index * 0x9e3779b9),
+    })
+    expect([...out.roughened]).toEqual([...own])
+    expect({ dx: out.dx, dy: out.dy }).toEqual(
+      registrationOffset(s.seed, index, s.press.misregistration * scale * Math.sqrt(detail)),
+    )
+    // ...and it did not touch the cached tone it was given.
+    expect(tone[0]).toBe(0)
+    expect(tone[40 * w + 40]).toBe(1)
+  })
+})
+
+describe('knockoutMask', () => {
+  /** A fixed 300 px synthetic case: soft-edged discs and bars as the plate's
+   *  roughened tone, a luminance ramp with a bright bump as the ground. */
+  const N = 300
+  const synthetic = () => {
+    const tone = new Float32Array(N * N)
+    const lum = new Float32Array(N * N)
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const i = y * N + x
+        const d = Math.hypot(x - 90, y - 110)
+        const disc = Math.min(1, Math.max(0, (40 - d) / 3))
+        const bar = y > 180 && y < 240 && x > 40 && x < 270 ? 1 : 0
+        const edge = Math.min(1, Math.max(0, (x - 150) / 4)) * (y > 60 && y < 160 ? 1 : 0)
+        tone[i] = Math.max(disc, bar, edge * (x < 260 ? 1 : 0))
+        lum[i] = Math.min(1, x / N + 0.4 * Math.exp(-((x - 220) ** 2 + (y - 200) ** 2) / 900))
+      }
+    }
+    return { tone, lum, light: bandMask(lum, 0.5) }
+  }
+  const sha = (f: Float32Array) =>
+    createHash('sha256').update(new Uint8Array(f.buffer, f.byteOffset, f.byteLength)).digest('hex')
+
+  it('is a golden on a fixed synthetic case (pinned: later work must keep it)', () => {
+    const { tone, lum, light } = synthetic()
+    const split = knockoutMask(tone, lum, {
+      w: N,
+      h: N,
+      dx: 2.37,
+      dy: -1.61,
+      split: { light, onLightLuma: 0.2, onDarkLuma: 0.9 },
+    })
+    const block = knockoutMask(tone, null, { w: N, h: N, dx: -3.2, dy: 1.75 })
+    expect(sha(split)).toBe(KNOCKOUT_GOLDEN.split)
+    expect(sha(block)).toBe(KNOCKOUT_GOLDEN.block)
+  })
+
+  it('cuts a solid hole, not the anti-aliased skirt, and travels with the plate', () => {
+    const w = 20
+    const h = 10
+    const tone = new Float32Array(w * h)
+    for (let y = 2; y < 8; y++) for (let x = 5; x < 10; x++) tone[y * w + x] = x === 5 ? 0.5 : 1
+    const k = knockoutMask(tone, null, { w, h, dx: 3, dy: 0 })
+    // A 0.5 edge pixel is a whole hole; the field moved three pixels.
+    expect(k[4 * w + 8]).toBe(1)
+    expect(k[4 * w + 5]).toBe(0)
+    expect(k[4 * w + 12]).toBe(1)
+  })
+
+  it('with a split, cuts only where the ink chosen there is lighter than the ground', () => {
+    const tone = new Float32Array(4).fill(1)
+    const lum = new Float32Array([0.1, 0.1, 0.95, 0.95])
+    const light = new Float32Array([0, 1, 0, 1])
+    const k = knockoutMask(tone, lum, {
+      w: 4,
+      h: 1,
+      dx: 0,
+      dy: 0,
+      split: { light, onLightLuma: 0.05, onDarkLuma: 0.9 },
+    })
+    // Dark ground: the light ink (on the dark half of the mask) needs a hole;
+    // the dark ink does not. Light ground: neither ink is lighter than it.
+    expect([...k]).toEqual([1, 0, 0, 0])
+  })
+})
+
+describe('the plate\'s own ink as its second ink (what Opaque became)', () => {
+  // Ported from the trial's render check (pm/judge-opaque.mjs) to pure stages:
+  // pink type in a solid band across a dark half and a light half of a photo.
+  const w = 120
+  const h = 60
+  const pink = inkById('fluorescentpink').rgb
+  const ground = new Uint8ClampedArray(w * h * 4)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const n = ((x * 7919 + y * 104729) % 23) - 11
+      const v = (x < w / 2 ? 30 : 225) + n
+      const o = (y * w + x) * 4
+      ground[o] = ground[o + 1] = ground[o + 2] = v
+      ground[o + 3] = 255
+    }
+  }
+  const tone = new Float32Array(w * h)
+  for (let y = 15; y < 45; y++) for (let x = 6; x < w - 6; x++) tone[y * w + x] = 0.5
+  const screen = (f: Float32Array) =>
+    screenField(f, w, h, { shape: 'circle', pitch: 5, angle: 45, softness: 0, originX: 0, originY: 0 })
+  const coverage = screen(tone)
+  const groundLum = groundLuma(ground, w, h, 4)
+  const light = screen(bandMask(groundLum, 0.5))
+  const paper = { shade: new Float32Array(w * h).fill(1), rgb: [255, 255, 255] as const }
+
+  const sameInk = () => {
+    const split = splitInks(pink, pink)
+    const onLight = new Float32Array(w * h)
+    const onDark = new Float32Array(w * h)
+    for (let i = 0; i < coverage.length; i++) {
+      onLight[i] = coverage[i] * light[i]
+      onDark[i] = coverage[i] * (1 - light[i])
+    }
+    const k = knockoutMask(tone, groundLum, {
+      w,
+      h,
+      dx: 0,
+      dy: 0,
+      split: { light, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma },
+    })
+    const cut = new Uint8ClampedArray(ground)
+    for (let i = 0; i < k.length; i++) cut[i * 4 + 3] = cut[i * 4 + 3] * (1 - k[i])
+    const out = new Uint8ClampedArray(w * h * 4)
+    compositeLayers(out, w, h, { ...paper, base: cut, paperAmount: 0 }, [
+      { coverage: onLight, rgb: split.onLight },
+      { coverage: onDark, rgb: split.onDark },
+    ])
+    return out
+  }
+
+  /** What Opaque drew: the ink lerped over the photo by coverage. */
+  const opaqueReference = () => {
+    const out = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) {
+      const c = coverage[i]
+      for (let ch = 0; ch < 3; ch++) out[i * 4 + ch] = ground[i * 4 + ch] * (1 - c) + pink[ch] * c
+      out[i * 4 + 3] = 255
+    }
+    return out
+  }
+
+  const pinkShare = (img: Uint8ClampedArray, x0: number, x1: number) => {
+    let n = 0
+    let hits = 0
+    for (let y = 20; y < 40; y++) {
+      for (let x = x0; x < x1; x++) {
+        const o = (y * w + x) * 4
+        n++
+        if (img[o] > 170 && img[o + 1] < 130 && img[o + 2] > 100) hits++
+      }
+    }
+    return (100 * hits) / n
+  }
+
+  it('keeps the ink readable over the dark half, as Opaque did, within 5 points', () => {
+    const same = pinkShare(sameInk(), 12, 50)
+    const opaque = pinkShare(opaqueReference(), 12, 50)
+    expect(opaque).toBeGreaterThan(20)
+    expect(Math.abs(same - opaque)).toBeLessThanOrEqual(5)
+    // Plain transparent pink over the dark half is not readable at all.
+    const plain = new Uint8ClampedArray(w * h * 4)
+    compositeLayers(plain, w, h, { ...paper, base: ground, paperAmount: 0 }, [{ coverage, rgb: pink }])
+    expect(pinkShare(plain, 12, 50)).toBe(0)
+  })
+
+  it('is the ordinary transparent overprint over the light half', () => {
+    const same = sameInk()
+    const plain = new Uint8ClampedArray(w * h * 4)
+    compositeLayers(plain, w, h, { ...paper, base: ground, paperAmount: 0 }, [{ coverage, rgb: pink }])
+    for (let y = 0; y < h; y++) {
+      for (let x = w / 2 + 8; x < w; x++) {
+        const o = (y * w + x) * 4
+        expect([same[o], same[o + 1], same[o + 2]]).toEqual([plain[o], plain[o + 1], plain[o + 2]])
+      }
+    }
+  })
+})
+
+describe('backing', () => {
+  const measure = (text: string, size: number) => text.length * size * 0.5
+
+  it('is one block per line with ink, read off the layout, padded 0.12 em', () => {
+    const layer = makeLayer({ text: 'AB\n\nCDEF', size: 0.1, lineHeight: 1, tracking: 0, align: 'center' })
+    const layout = layoutText(layer, 1000, measure)
+    const rects = lineRects(layout, layer.align, -layout.widest / 2, 0)
+    // The blank line gets no block.
+    expect(rects).toHaveLength(2)
+    const pad = BACKING_PAD * layout.fontSize
+    expect(rects[0].w).toBeCloseTo(layout.lines[0].width + 2 * pad, 6)
+    expect(rects[1].w).toBeCloseTo(layout.lines[2].width + 2 * pad, 6)
+    // Centred like the glyphs it sits behind.
+    expect(rects[0].x + rects[0].w / 2).toBeCloseTo(rects[1].x + rects[1].w / 2, 6)
+    // The third line sits two line heights below the first.
+    expect(rects[1].y - rects[0].y).toBeCloseTo(2 * layout.lineHeight, 6)
+  })
+
+  it('knocks the photo back to paper under itself: ink on paper, not ink on black', () => {
+    const w = 10
+    const h = 4
+    const black = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) black[i * 4 + 3] = 255
+    const block = new Float32Array(w * h)
+    for (let y = 1; y < 3; y++) for (let x = 2; x < 8; x++) block[y * w + x] = 1
+    const k = knockoutMask(block, null, { w, h, dx: 0, dy: 0 })
+    const cut = new Uint8ClampedArray(black)
+    for (let i = 0; i < k.length; i++) cut[i * 4 + 3] = cut[i * 4 + 3] * (1 - k[i])
+    const yellow = inkById('yellow').rgb
+    const paper = { shade: new Float32Array(w * h).fill(1), rgb: [250, 246, 236] as const }
+    const out = new Uint8ClampedArray(w * h * 4)
+    compositeLayers(out, w, h, { ...paper, base: cut, paperAmount: 1 }, [{ coverage: block, rgb: yellow }])
+    const inside = (1 * w + 4) * 4
+    expect([out[inside], out[inside + 1], out[inside + 2]]).toEqual(expectedOverprint(paper.rgb, yellow))
+    // Outside the block the photo is still there.
+    expect(out[0]).toBe(0)
+  })
+
+  it('is overprinted by the type into a third colour', () => {
+    const paper = { shade: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const }
+    const back = inkById('yellow').rgb
+    const type = inkById('fluorescentpink').rgb
+    const out = new Uint8ClampedArray(4)
+    compositeLayers(out, 1, 1, paper, [
+      { coverage: new Float32Array(1).fill(1), rgb: back },
+      { coverage: new Float32Array(1).fill(1), rgb: type },
+    ])
+    const want = expectedOverprint(back, type)
+    for (let c = 0; c < 3; c++) expect(Math.abs(out[c] - want[c])).toBeLessThanOrEqual(2)
+  })
+})
+
+/** Pinned hashes of knockoutMask on the synthetic case above. */
+const KNOCKOUT_GOLDEN = {
+  split: 'e1e0a65032399b0bfed8c5b2c0b57f3c821f3203348d5ce76ae52d40d3a4c229',
+  block: 'ff6947ade8218fd8789c6b617b49d2bd7ac3c96268ef8ae5eb2c38738a57b0cb',
+}

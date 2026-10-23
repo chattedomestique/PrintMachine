@@ -22,7 +22,7 @@ printed, all of which this engine models:
 | Density ceiling    | Riso ink never reaches full black. Capping density is what keeps it from looking like inkjet.      |
 | Torn edges         | The master is a thermal stencil burned as a coarse raster, then ink is forced through it into paper fibre. Nothing in that chain makes a clean curve. |
 | Misprints          | Drum streaks, ink drag along the feed direction, and patches where ink never transferred at all.  |
-| Boxes as plates    | A background box is its own plate in its own ink, so it screens, misregisters and wears like everything else — and the type overprints it. |
+| Backing as a plate | A block behind the type is its own plate in its own ink, so it screens, misregisters and wears like everything else — and the type overprints it into a third colour. |
 
 ## Running it
 
@@ -148,20 +148,32 @@ Three things make it actually work:
   light ink over solid black is still solid black, so without this the second
   ink buys nothing.
 
-One thing about that knockout took a second pass to get right, and it turned
-reversed type to mush in the first cut:
+Two things about that knockout took a second pass to get right, and both
+turned reversed type to mush in the first cut:
 
-- It is cut from the **unpressed tone**, not from the screened coverage.
+- It is cut from the plate's **tone**, not from its screened coverage.
   Knocking out with the halftone leaves the photo standing in every gap between
   the type's own dots, so the light ink prints onto a still-black ground. A
   stencil has a solid hole in it.
+- It is cut from the **same pressed outline** the ink lands on: the plate's own
+  torn, bled tone and its own registration offset, which `pressPlate` hands to
+  `knockoutMask` (`engine/knockout.ts`) rather than the knockout roughening the
+  tone a second time. A hole a couple of pixels off the ink could only be
+  covered by spreading it, which at text size swells every counter shut.
 
-The hole is also **trapped** — spread a couple of pixels past the glyph, then
-cut back to hard. Nothing on a press lands twice in the same place, so a
-knockout cut exactly to the artwork shows a dark fringe the moment anything
-shifts. Keeping the blurred skirt instead of cutting back gives the opposite
-failure: a halo of bare paper round every reversed word, a glow rather than a
-trap.
+There is **no trap**. The hole travels with the plate, so there is nothing to
+trap against — and what the eye reads as a reversed word is the *hole*, not the
+ink: bare paper and a light ink are nearly the same colour, so the letterform
+you see is the shape of the cut. Spreading it would not protect the letter, it
+would fatten it. The cut is only hardened past the anti-aliased skirt.
+
+**Keep this ink.** The second ink can be the plate's own ink. Then both halves
+print that ink, and the photo is cut back to paper wherever it is darker than
+the ink, so one colour reads across the whole photograph — the riso way, with
+the ink still transparent. (This replaced an "opaque" switch that painted the
+ink over the photo: rendered side by side, the two put the same share of pink
+pixels on a dark ground.) The choice is listed first in the second-ink picker,
+and it follows the plate when its ink changes.
 
 ### Four ways to lay ink, not two
 
@@ -201,18 +213,6 @@ the gouge marks show, and the white between hatch strokes is what makes them
 read as drawn. There are tests for both ends — a solid field must come back
 broken up, and the mark must track the artwork rather than sit on top of it.
 
-### Ink that covers instead of overprinting
-
-Riso ink is transparent, and that is why type genuinely overprints a photograph
-rather than sitting on it. Sometimes the opposite is what you want: the words at
-full strength regardless of what the image is doing underneath. **Print over the
-photo** switches that plate and its boxes from multiplying into the ground to
-covering it.
-
-A new flag through the compositor's inner loop has to be provably nothing when
-unset, so there is a test asserting the transparent path is byte-identical with
-and without it.
-
 ### Dithering as a real choice
 
 Twelve algorithms, because they are genuinely different textures rather than
@@ -228,18 +228,6 @@ dithering a reduced grid and expanding the result, so every algorithm coarsens
 the same way rather than each needing its own notion of size — and the
 reduction *averages* rather than samples, or the dither tracks the noise
 instead of the artwork.
-
-### Per-word misprints
-
-Bleed and offset are properties of a **plate**, not of a pixel: bleed is where
-the stencil's threshold sits, offset is where the paper landed. So a word given
-either comes off the main plate and goes through the press separately — which
-is also exactly how a real second hit on one word would behave.
-
-Words sharing a setting share a plate, so they tear and land together. Each
-group gets its own registration seed, which is what makes an offset word land
-somewhere the rest of the line did not. Both values are deltas on the layer's
-press, so the global controls still move everything.
 
 #### Nothing is ever stretched
 
@@ -283,23 +271,46 @@ the print. Imports are downscaled to a 2048px long edge first — a 12-megapixel
 photo decoded at full size is ~48 MB of RGBA, and holding two of those is the
 iOS eviction path §4.2 exists to prevent.
 
-### Boxes, and why they are plates
+### Backing, and why it knocks out
 
-A background box behind a word is not a rectangle drawn on top of the render.
-It is its own plate, with its own ink and opacity, laid down *before* the type
-and pushed through the identical roughen → wear → screen → misregister
-pipeline. Anything less and it would be the one clean, undistressed rectangle
-on an otherwise convincingly printed sheet.
+A plate can carry a **backing**: a solid block of ink behind each line of its
+type, the line's extent plus 0.12 em all round, square-cornered. It is not a
+rectangle drawn on top of the render. It is its own plate in its own ink, laid
+down *before* the type and pushed through the identical roughen → wear → screen
+→ misregister pipeline, so it tears and lands like everything else on the
+sheet. The blocks are read off the same layout that places the glyphs, so a
+block can never drift from its line at any size.
 
-Because the inks are transparent, the type then genuinely overprints the box:
-pink type on a blue box comes out navy, and where two boxes overlap you get the
-third colour. That is what a real second pass does.
+Because the inks are transparent, the type then genuinely overprints the block:
+pink type on a yellow backing comes out red-orange. That is what a real second
+pass does.
 
-Word positions come from the same layout pass that places the glyphs. A box
-computed from one set of numbers while the glyphs are drawn from another drifts
-apart, and drifts differently at every size — so there is one layout, and a
-test asserting the engine's word grouping matches the plain whitespace split
-the selection UI shows you.
+The photo is **knocked back to paper under the block's own pressed outline**,
+by the same `knockoutMask` the second ink uses. Without it a pale block over a
+dark part of the photo would be invisible — a transparent yellow over black is
+black — so the block prints on paper wherever it is, and reads the same over any
+part of the picture.
+
+A plate takes a backing **or** a second ink, never both. The second ink decides
+each glyph's ink from the photo's luminance, but over a backing the real ground
+is the block, so a light second ink chosen for a dark patch of photo would land
+on the block and vanish. The Ink panel offers them as one choice — Over the
+photo: Off, Second ink, Backing — and the document rules hold it in the reducer
+and the normaliser too.
+
+Saved prints with word-picked boxes open with a backing in the first worded
+box's ink: per-line instead of per-word, which is the one visible change. Word
+numbers in a box never followed the words when the text was edited, so an
+inserted word silently moved every box; the backing has nothing to go stale.
+
+### The plate budget
+
+At most **3 text plates and 4 pressed passes** — a backing is a pass of its
+own, while a second ink is pressed once and then split, so it counts once.
+Every pass is a full press at export resolution, so the cap is what keeps the
+worst export knowable on a phone. Over budget, Add and Backing are disabled and
+the panel says why. A print saved with more plates keeps all of them: dropping
+a plate would destroy work, and a slow save is recoverable.
 
 ### Type: one size, set as typed
 
@@ -526,7 +537,7 @@ same code the preview uses.
 ## Status
 
 Working: multi-plate type, the full press and wear model, forced paragraph
-justification, letter tracking, a one-shot Fit, word-selectable background boxes, an
+justification, letter tracking, a one-shot Fit, a per-line backing, an
 imported photo as the printing ground (shown as shot, zoomed and panned within
 the sheet), undo/redo, persistence, and save via the share sheet.
 

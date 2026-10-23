@@ -61,21 +61,6 @@ export function fontById(id: string): FontChoice {
   return FONTS.find((f) => f.id === id) ?? FONTS[0]
 }
 
-/**
- * A solid box behind a chosen set of words.
- *
- * Its own ink and opacity, because the whole point is emphasis — a box in the
- * text's colour is just a heavier weight. Rendered as a separate plate under
- * the type, through the identical wear pipeline.
- */
-export interface WordBox {
-  id: string
-  /** Global word indices, whitespace-split across the layer's whole text. */
-  words: number[]
-  inkId: string
-  opacity: number
-}
-
 /** One plate: some type, in one ink. */
 export interface TextLayer {
   id: string
@@ -94,27 +79,6 @@ export interface TextLayer {
   /** Letter spacing in em — between every character. */
   tracking: number
   /**
-   * Per-word press overrides, keyed by word index.
-   *
-   * Bleed and offset are properties *of a plate*, not of a pixel — bleed is
-   * where the stencil's threshold sits, offset is where the paper landed. So a
-   * word given either becomes its own plate and goes through the press
-   * separately, which is also exactly how a real second hit would behave.
-   * Deltas on the layer's press, so the global controls still move everything.
-   */
-  wordPress: Record<string, { bleed?: number; offset?: number }>
-
-  /**
-   * Print this layer's type and boxes *over* the photo instead of into it.
-   *
-   * Riso ink is transparent, so by default a plate multiplies down from
-   * whatever it lands on — which is the whole reason type genuinely overprints
-   * a photograph. Sometimes what you want is the opposite: the words sitting on
-   * the image at full strength, unaffected by whatever is underneath.
-   */
-  opaque: boolean
-
-  /**
    * A second ink for wherever the photo behind the type is dark.
    *
    * Type in one ink over a photograph is unreadable by definition: the photo
@@ -124,7 +88,13 @@ export interface TextLayer {
    * and knocks the photo back to paper under the second ink, because a
    * transparent light ink over solid black is still solid black.
    *
-   * null is off, and the type prints in one ink everywhere.
+   * The plate's own ink is a valid second ink ("Keep this ink"): both halves
+   * print that ink, and the photo is knocked back to paper wherever it is
+   * darker than the ink, so one colour stays readable across the whole photo
+   * — the riso way, with the ink still transparent.
+   *
+   * null is off, and the type prints in one ink everywhere. Never set
+   * together with `backing`.
    */
   contrastInkId: string | null
   /** Luminance below which the photo counts as dark, 0..1. */
@@ -138,14 +108,16 @@ export interface TextLayer {
   y: number
   /** Degrees, clockwise. */
   rotation: number
-  opacity: number
 
-  /** Background boxes, drawn under the type in plate order. */
-  boxes: WordBox[]
-  /** How far a box extends past its words, in em. */
-  boxPadding: number
-  /** Box corner radius in em. 0 is a hard rectangle. */
-  boxRadius: number
+  /**
+   * A solid block of ink behind each line of the type, or null for none: the
+   * ink id it is printed in. Pressed as its own plate before the type, so it
+   * tears, bleeds and misregisters like everything else, and the type
+   * overprints it into a third colour. The photo is cut back to paper under
+   * it, so the block reads the same over any part of the picture. Padding
+   * 0.12 em, square corners. Never set together with `contrastInkId`.
+   */
+  backing: string | null
 }
 
 /**

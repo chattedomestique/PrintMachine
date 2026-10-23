@@ -74,6 +74,8 @@ export function Slider({
 export interface SegmentedOption<T extends string> {
   value: T
   label: string
+  /** Shown but not choosable; the caller says why in text nearby. */
+  disabled?: boolean
 }
 
 /**
@@ -93,8 +95,11 @@ export function Segmented<T extends string>({
 }) {
   const move = (delta: number) => {
     const i = options.findIndex((o) => o.value === value)
-    const next = options[(i + delta + options.length) % options.length]
-    if (next) onChange(next.value)
+    // Arrow keys skip an option that cannot be chosen.
+    for (let step = 1; step < options.length; step++) {
+      const next = options[(i + delta * step + options.length * step) % options.length]
+      if (next && !next.disabled) return onChange(next.value)
+    }
   }
 
   return (
@@ -122,6 +127,8 @@ export function Segmented<T extends string>({
             aria-checked={checked}
             tabIndex={checked ? 0 : -1}
             className="segmented-option"
+            disabled={o.disabled}
+            aria-disabled={o.disabled || undefined}
             onClick={() => onChange(o.value)}
           >
             {o.label}

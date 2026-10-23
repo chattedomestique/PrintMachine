@@ -2,17 +2,13 @@ import TypePanel from './TypePanel.tsx'
 import InkPanel from './InkPanel.tsx'
 import PressPanel from './PressPanel.tsx'
 import PaperPanel from './PaperPanel.tsx'
-import BoxPanel from './BoxPanel.tsx'
 import MediaPanel from './MediaPanel.tsx'
-import WordPanel from './WordPanel.tsx'
 import WearPanel from './WearPanel.tsx'
 import './Controls.css'
 
 export const TABS = [
   { id: 'type', label: 'Type' },
   { id: 'ink', label: 'Ink' },
-  { id: 'box', label: 'Box' },
-  { id: 'word', label: 'Words' },
   { id: 'media', label: 'Photo' },
   { id: 'press', label: 'Press' },
   { id: 'wear', label: 'Wear' },
@@ -34,8 +30,6 @@ export default function Controls({ tab }: { tab: TabId | null }) {
     <div className="control-group">
       {tab === 'type' && <TypePanel />}
       {tab === 'ink' && <InkPanel />}
-      {tab === 'box' && <BoxPanel />}
-      {tab === 'word' && <WordPanel />}
       {tab === 'media' && <MediaPanel />}
       {tab === 'press' && <PressPanel />}
       {tab === 'wear' && <WearPanel />}

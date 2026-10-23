@@ -20,16 +20,18 @@
 
 import { renderPrint, type RenderCache } from '../../src/engine/render.ts'
 import type { PrintSettings } from '../../src/engine/types.ts'
-import { defaultSettings } from '../../src/state/defaults.ts'
+import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
 import plain from './docs/plain.json'
 import photoAsShot from './docs/photo-asshot.json'
 import photoSecondInk from './docs/photo-second-ink.json'
 import textFreePhoto from './docs/text-free-photo.json'
 
 /**
- * The frozen documents, plus `default`: whatever `defaultSettings()` is in the
- * build under test. That one changes on purpose when the defaults do, which is
- * the point of rendering it.
+ * The frozen documents, plus two built live from the build under test:
+ * `default` (whatever `defaultSettings()` is) and `backing-photo` (the default
+ * over the test photo, the first plate keeping its own ink as its second ink
+ * and the second on a yellow backing). Those change on purpose when the
+ * defaults do, which is the point of rendering them.
  */
 const DOCS: Record<string, () => unknown> = {
   plain: () => plain,
@@ -37,6 +39,13 @@ const DOCS: Record<string, () => unknown> = {
   'photo-second-ink': () => photoSecondInk,
   'text-free-photo': () => textFreePhoto,
   default: () => defaultSettings(),
+  'backing-photo': () => {
+    const s = defaultSettings()
+    s.media = makeMedia({ id: 'harness-photo', width: 1600, height: 1200 })
+    s.layers[0] = { ...s.layers[0], contrastInkId: s.layers[0].inkId }
+    s.layers[1] = { ...s.layers[1], backing: 'yellow' }
+    return s
+  },
 }
 
 type Normalize = (raw: unknown, env: { measure?: unknown }) => PrintSettings
@@ -129,12 +138,14 @@ export interface RenderResult {
   ms: number
   w: number
   h: number
+  /** A PNG data URL of the render, when `png` was asked for. */
+  png?: string
 }
 
 async function render(
   name: string,
   height: number,
-  opts: { photo?: number } = {},
+  opts: { photo?: number; png?: boolean } = {},
 ): Promise<RenderResult> {
   const settings = load(name)
   const media = settings.media
@@ -151,10 +162,12 @@ async function render(
   const { width: w, height: h } = out.canvas
   const pixels = out.getImageData(0, 0, w, h).data
   const sha256 = hex(await crypto.subtle.digest('SHA-256', pixels))
+  // For eyeballing: the render as a PNG, when asked.
+  const png = opts.png ? out.canvas.toDataURL('image/png') : undefined
   // Let the big buffers go before the next render.
   out.canvas.width = 0
   scratch.canvas.width = 0
-  return { sha256, ms, w, h }
+  return { sha256, ms, w, h, png }
 }
 
 declare global {

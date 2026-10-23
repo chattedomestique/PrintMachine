@@ -5,6 +5,7 @@
  *   node scripts/harness/run.mjs --out a.json
  *   node scripts/harness/run.mjs --out a.json --heights 300,1000 --docs plain,default
  *   node scripts/harness/run.mjs --out t.json --no-hashes --time photo-second-ink@3780 --photo-mp 12 --runs 3
+ *   node scripts/harness/run.mjs --out a.json --heights 1000 --png shots/   (also writes each render as a PNG)
  *
  * Then `node scripts/harness/compare.mjs a.json b.json`. Hashes of documents
  * with text depend on the installed fonts, so compare runs from ONE machine
@@ -14,7 +15,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,7 +26,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 function parseArgs(argv) {
-  const opts = { heights: [300, 1000, 1800], docs: null, time: [], photoMp: undefined, runs: 3, hashes: true, out: null }
+  const opts = { heights: [300, 1000, 1800], docs: null, time: [], photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -40,6 +41,7 @@ function parseArgs(argv) {
     else if (a === '--photo-mp') opts.photoMp = Number(next())
     else if (a === '--runs') opts.runs = Number(next())
     else if (a === '--no-hashes') opts.hashes = false
+    else if (a === '--png') opts.png = next()
     else throw new Error(`unknown argument ${a}`)
   }
   if (!opts.out) throw new Error('--out <file.json> is required')
@@ -119,8 +121,12 @@ try {
     const docs = opts.docs ?? info.docs
     for (const doc of docs) {
       for (const height of opts.heights) {
-        const r = await page.evaluate(([d, h]) => window.H.render(d, h), [doc, height])
+        const r = await page.evaluate(([d, h, png]) => window.H.render(d, h, { png }), [doc, height, !!opts.png])
         result.renders[`${doc}@${height}`] = { sha256: r.sha256, w: r.w, h: r.h, ms: Math.round(r.ms) }
+        if (opts.png && r.png) {
+          mkdirSync(opts.png, { recursive: true })
+          writeFileSync(join(opts.png, `${doc}@${height}.png`), Buffer.from(r.png.split(',')[1], 'base64'))
+        }
         console.log(`${doc}@${height}`.padEnd(28), r.sha256.slice(0, 16), `${r.w}x${r.h}`, `${Math.round(r.ms)} ms`)
       }
     }

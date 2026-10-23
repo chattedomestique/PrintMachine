@@ -1,9 +1,14 @@
-import { Field, IconButton, Slider, Swatches, Toggle } from '../../ui/controls.tsx'
+import { Field, IconButton, Segmented, Slider, Swatches, Toggle } from '../../ui/controls.tsx'
 import { PlusIcon, TrashIcon } from '../../ui/icons.tsx'
-import { contrastPartner, cssRgb, inkById, overprint, RISO_INKS } from '../../engine/inks.ts'
+import { contrastPartner, cssRgb, inkById, RISO_INKS } from '../../engine/inks.ts'
+import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES } from '../../engine/limits.ts'
+import type { TextLayer } from '../../engine/types.ts'
+import { atPassLimit, atPlateLimit, overPhotoOf, overPhotoPatch, type OverPhoto } from '../../state/settingsReducer.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
+
+const BUDGET = `Up to ${MAX_TEXT_PLATES} plates and ${MAX_PRESSED_PASSES} passes (a backing is a pass of its own).`
 
 /**
  * Plates, and what colour each one is.
@@ -15,6 +20,13 @@ const pct = (v: number) => `${Math.round(v * 100)}%`
 export default function InkPanel() {
   const { settings, dispatch, selectedLayerId, selectLayer, selectedLayer } = useSettings()
   const layer = selectedLayer ?? settings.layers[0]
+  const plateLimit = atPlateLimit(settings)
+  const passLimit = atPassLimit(settings)
+
+  const patch = (p: Partial<TextLayer>, coalesce = false) =>
+    layer && dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce })
+
+  const setOver = (over: OverPhoto) => layer && patch(overPhotoPatch(layer, over))
 
   return (
     <div className="control-stack">
@@ -39,7 +51,7 @@ export default function InkPanel() {
           })}
         </div>
         <div className="plate-actions">
-          <IconButton label="Add a plate" onClick={() => dispatch({ type: 'addLayer' })}>
+          <IconButton label="Add a plate" disabled={plateLimit} onClick={() => dispatch({ type: 'addLayer' })}>
             <PlusIcon />
           </IconButton>
           <IconButton
@@ -50,9 +62,11 @@ export default function InkPanel() {
             <TrashIcon />
           </IconButton>
           <span className="plate-hint">
-            {settings.layers.length > 1
-              ? 'Plates print in order — the last one lays on top.'
-              : 'Add a second plate to get overprinting.'}
+            {plateLimit
+              ? BUDGET
+              : settings.layers.length > 1
+                ? 'Plates print in order — the last one lays on top.'
+                : 'Add a second plate to get overprinting.'}
           </span>
         </div>
       </Field>
@@ -60,123 +74,82 @@ export default function InkPanel() {
       {layer && (
         <>
           <Field label="Ink" value={inkById(layer.inkId).name}>
-            <Swatches
-              label="Ink"
-              value={layer.inkId}
-              options={RISO_INKS}
-              onChange={(inkId) => dispatch({ type: 'patchLayer', id: layer.id, patch: { inkId } })}
-            />
+            <Swatches label="Ink" value={layer.inkId} options={RISO_INKS} onChange={(inkId) => patch({ inkId })} />
           </Field>
 
-          <Toggle
-            label="Print over the photo"
-            checked={layer.opaque}
-            onChange={(opaque: boolean) =>
-              dispatch({ type: 'patchLayer', id: layer.id, patch: { opaque } })
-            }
-          />
-          <p className="panel-note">
-            Riso ink is transparent, so by default this plate and its boxes multiply down from
-            whatever they land on — which is what makes type genuinely overprint a photograph.
-            On, they sit on the image at full strength regardless of what it is doing underneath.
-          </p>
+          {/* One choice per plate, because the two cannot be combined: the
+              second ink reads the photo, but over a backing the ground is the
+              block. */}
+          <Field label="Over the photo">
+            <Segmented
+              label="Over the photo"
+              value={overPhotoOf(layer)}
+              options={[
+                { value: 'off', label: 'Off' },
+                { value: 'second', label: 'Second ink' },
+                { value: 'backing', label: 'Backing', disabled: passLimit && !layer.backing },
+              ]}
+              onChange={setOver}
+            />
+            {passLimit && !layer.backing && <p className="plate-hint">{BUDGET}</p>}
+          </Field>
 
-          {/* The second ink only means anything with a photo under the type. */}
-          {settings.media && (
+          {overPhotoOf(layer) === 'second' && layer.contrastInkId && (
             <>
+              <p className="panel-note">
+                Type in one ink cannot read across a whole photograph. The pass is pressed once and
+                split between two inks by what is behind it, and the photo is knocked back to paper
+                wherever the ink is lighter than what it lands on — a transparent light ink over
+                solid black is still solid black. Keep this ink to stay in one colour: the photo is
+                cut back wherever it is darker than the ink, so the colour reads everywhere.
+                {settings.media ? '' : ' It shows once there is a photo behind the type.'}
+              </p>
               <Toggle
-                label="Second ink so it reads throughout"
-                checked={layer.contrastInkId !== null}
-                onChange={(on: boolean) =>
-                  dispatch({
-                    type: 'patchLayer',
-                    id: layer.id,
-                    patch: { contrastInkId: on ? contrastPartner(layer.inkId) : null },
-                  })
+                label="Keep this ink"
+                checked={layer.contrastInkId === layer.inkId}
+                onChange={(keep) =>
+                  patch({ contrastInkId: keep ? layer.inkId : contrastPartner(layer.inkId) })
                 }
               />
-              <p className="panel-note">
-                Type in one ink cannot read across a whole photograph. With this on the pass is
-                pressed once and split between two inks by what is behind it, and the photo is
-                knocked back to paper wherever the ink is lighter than what it lands on — a
-                transparent light ink over solid black is still solid black. Which ink goes on
-                the bright areas and which on the dark is decided by the two colours, so it does
-                not matter which way round they are chosen.
-              </p>
-
-              {layer.contrastInkId && (
-                <>
-                  <Field label="Second ink" value={inkById(layer.contrastInkId).name}>
-                    <Swatches
-                      label="Second ink"
-                      value={layer.contrastInkId}
-                      options={RISO_INKS}
-                      onChange={(contrastInkId) =>
-                        dispatch({ type: 'patchLayer', id: layer.id, patch: { contrastInkId } })
-                      }
-                    />
-                  </Field>
-                  <Slider
-                    label="Switch point"
-                    value={layer.contrastThreshold}
-                    min={0.1}
-                    max={0.9}
-                    step={0.01}
-                    format={pct}
-                    onChange={(contrastThreshold) =>
-                      dispatch({
-                        type: 'patchLayer',
-                        id: layer.id,
-                        patch: { contrastThreshold },
-                        coalesce: true,
-                      })
-                    }
-                  />
-                </>
-              )}
+              <Field label="Second ink" value={inkById(layer.contrastInkId).name}>
+                <Swatches
+                  label="Second ink"
+                  value={layer.contrastInkId}
+                  options={RISO_INKS.filter((i) => i.id !== layer.inkId)}
+                  onChange={(contrastInkId) => patch({ contrastInkId })}
+                />
+              </Field>
+              <Slider
+                label="Switch point"
+                value={layer.contrastThreshold}
+                min={0.1}
+                max={0.9}
+                step={0.01}
+                format={pct}
+                onChange={(contrastThreshold) => patch({ contrastThreshold }, true)}
+              />
             </>
           )}
 
-          <Slider
-            label="Plate opacity"
-            value={layer.opacity}
-            min={0}
-            max={1}
-            step={0.01}
-            format={pct}
-            onChange={(opacity) =>
-              dispatch({ type: 'patchLayer', id: layer.id, patch: { opacity }, coalesce: true })
-            }
-          />
-
-          {settings.layers.length > 1 && <OverprintPreview />}
+          {overPhotoOf(layer) === 'backing' && layer.backing && (
+            <>
+              <p className="panel-note">
+                A solid block of ink behind each line, pressed as its own plate before the type, so
+                the type overprints it into a third colour. The photo is cut back to paper under the
+                block, so it reads the same over any part of the picture.
+              </p>
+              <Field label="Backing ink" value={inkById(layer.backing).name}>
+                <Swatches
+                  label="Backing ink"
+                  value={layer.backing}
+                  options={RISO_INKS}
+                  onChange={(backing) => patch({ backing })}
+                />
+              </Field>
+            </>
+          )}
         </>
       )}
     </div>
-  )
-}
-
-/** Shows what the inks actually make where they cross, computed with the same
- *  subtractive model as the compositor — so it can't drift from the render. */
-function OverprintPreview() {
-  const { settings } = useSettings()
-  const inks = settings.layers.map((l) => inkById(l.inkId))
-  const mixed = inks.slice(1).reduce<[number, number, number]>(
-    (acc, ink) => overprint(acc, ink.rgb),
-    [...inks[0].rgb] as [number, number, number],
-  )
-
-  return (
-    <Field label="Where they overlap">
-      <div className="overprint">
-        {inks.map((ink, i) => (
-          <span key={i} className="overprint-chip" style={{ background: cssRgb(ink.rgb) }} />
-        ))}
-        <span className="overprint-arrow" aria-hidden="true">
-          →
-        </span>
-        <span className="overprint-chip is-result" style={{ background: cssRgb(mixed) }} />
-      </div>
-    </Field>
   )
 }

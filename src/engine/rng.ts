@@ -72,6 +72,12 @@ export function valueNoise2D(
  * Fractal sum of value noise. `octaves` doublings of frequency at halving
  * amplitude, normalised back to [0,1]. Used for paper fibre, where a single
  * frequency looks obviously synthetic.
+ *
+ * @param minCell the finest cell an octave may have. A pixel by default: a
+ *   cell finer than the raster cannot be drawn, only aliased. A field that
+ *   has to be the same picture at every render height passes the height's
+ *   own scale here (at least a pixel), so its finest octave grows with the
+ *   sheet instead of stopping at one pixel while the rest of it grows.
  */
 export function fbm2D(
   w: number,
@@ -79,6 +85,7 @@ export function fbm2D(
   cell: number,
   octaves: number,
   seed: number,
+  minCell = 1,
 ): Float32Array {
   const out = new Float32Array(w * h)
   let amp = 1
@@ -86,7 +93,7 @@ export function fbm2D(
   let c = cell
 
   for (let o = 0; o < octaves; o++) {
-    const layer = valueNoise2D(w, h, Math.max(1, c), seed + o * 8191)
+    const layer = valueNoise2D(w, h, Math.max(minCell, c), seed + o * 8191)
     for (let i = 0; i < out.length; i++) out[i] += layer[i] * amp
     total += amp
     amp *= 0.5
@@ -97,10 +104,47 @@ export function fbm2D(
   return out
 }
 
-/** White noise in [0,1], one value per pixel. Used for speckle dropout. */
-export function whiteNoise2D(w: number, h: number, seed: number): Float32Array {
-  const rand = mulberry32(seed)
-  const out = new Float32Array(w * h)
-  for (let i = 0; i < out.length; i++) out[i] = rand()
-  return out
+/**
+ * A uniform value in [0, 1) for the integer point (i, j), from a seed: a
+ * coordinate hash rather than a stream, so any point can be read in any order
+ * and nothing has to be stored. (A stream such as mulberry32 numbers its values
+ * by how many came before, which ties a value to the pixel COUNT: a sheet twice
+ * as tall reads a different value at the same place.)
+ *
+ * Two rounds of murmur3's finaliser, one per axis, so neighbouring points are
+ * unrelated in both directions.
+ */
+export function hash2D(i: number, j: number, seed: number): number {
+  let h = fmix32(Math.imul(j | 0, 0x85ebca77) ^ (seed | 0))
+  h = fmix32(Math.imul(i | 0, 0x9e3779b1) ^ h)
+  return (h >>> 0) / 4294967296
+}
+
+function fmix32(h: number): number {
+  h ^= h >>> 16
+  h = Math.imul(h, 0x85ebca6b)
+  h ^= h >>> 13
+  h = Math.imul(h, 0xc2b2ae35)
+  h ^= h >>> 16
+  return h
+}
+
+/**
+ * White noise on square cells of `cell` pixels: one value per cell, the same
+ * value across it. Read a pixel at a time (`cellNoiseAt`), so it costs no
+ * memory and only the pixels that ask for it are computed.
+ *
+ * The cell is how a white field stays the same picture at every size: one
+ * pixel at the reference height, two at twice it. A field of one value per
+ * PIXEL is a different, finer noise on every size of sheet.
+ */
+export interface CellNoise {
+  /** Cell size in pixels, at least 1 (a pixel is the finest a raster holds). */
+  cell: number
+  seed: number
+}
+
+/** The value of `noise` at pixel (x, y), in [0, 1). */
+export function cellNoiseAt(noise: CellNoise, x: number, y: number): number {
+  return hash2D(Math.floor(x / noise.cell), Math.floor(y / noise.cell), noise.seed)
 }

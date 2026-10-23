@@ -17,6 +17,12 @@ export interface PaperOptions {
   /** Large-scale cloudiness in [0,1] — how unevenly the sheet was made. */
   blotch: number
   seed: number
+  /**
+   * The render height over the reference height. The fibre is a print's
+   * texture, so its grain is sized to the sheet: 3 px at the reference height,
+   * 6 px at twice it. Omitted, 1.
+   */
+  scale?: number
 }
 
 export interface PaperField {
@@ -24,6 +30,9 @@ export interface PaperField {
   shade: Float32Array
   rgb: readonly [number, number, number]
 }
+
+/** The fibre's grain at the reference height, in pixels. */
+const FIBRE_CELL = 3
 
 /**
  * Build the paper's per-pixel shading field.
@@ -37,7 +46,12 @@ export function paperField(w: number, h: number, opts: PaperOptions): PaperField
 
   if (opts.texture > 0) {
     // Fibre: fine, high-frequency, a few octaves so it isn't a single grain size.
-    const fibre = fbm2D(w, h, 3, 3, opts.seed)
+    // Sized to the sheet, finest octave included: a grain held at 3 px (and
+    // its finest octave at one pixel) on every sheet is a finer, different
+    // texture on a larger export, which is a different print. Never finer than
+    // a pixel, which is all a smaller render (the preview) can show of it.
+    const scale = opts.scale ?? 1
+    const fibre = fbm2D(w, h, FIBRE_CELL * scale, 3, opts.seed, Math.max(1, scale))
     const amt = opts.texture * 0.13
     for (let i = 0; i < shade.length; i++) shade[i] *= 1 + amt * (fibre[i] * 2 - 1)
   }

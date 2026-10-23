@@ -8,6 +8,8 @@
  * twice, and the ink never reaches full density no matter how many passes.
  */
 
+import { cellNoiseAt, type CellNoise } from './rng.ts'
+
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
 
 /**
@@ -59,17 +61,20 @@ export function applyDensity(tone: Float32Array, density: number): Float32Array 
  *
  * `amount` swings coverage by ±amount around 1, so 0.25 means the ink film
  * varies between 75% and 125% of nominal across the sheet. `dropout` is the
- * probability of a pixel losing most of its ink — dust on the drum, a fibre in
+ * probability of a speck losing most of its ink — dust on the drum, a fibre in
  * the paper. Both are weighted toward areas that already carry ink, because
  * bare paper has nothing to go wrong with.
  *
  * @param mottle  w*h low-frequency noise in [0,1] (see rng.fbm2D).
- * @param speckle w*h white noise in [0,1] (see rng.whiteNoise2D).
+ * @param speckle white noise on cells sized to the sheet (rng.CellNoise): a
+ *   speck is a pixel at the reference height and grows with the sheet, so dust
+ *   is the same size on the print at every resolution. Read where the pixel
+ *   has ink, and only there.
  */
 export function applyMottle(
   coverage: Float32Array,
   mottle: Float32Array,
-  speckle: Float32Array,
+  speckle: CellNoise,
   amount: number,
   dropout: number,
   w: number,
@@ -86,6 +91,10 @@ export function applyMottle(
    * step larger than one, which walks through the same noise faster and so
    * yields proportionally finer blotch. Wrapped, because striding runs off the
    * end of a field that was only ever w by h.
+   *
+   * The speckle is not strided: it is white, so a stride would only pick other
+   * values of the same noise, and its speck is already the finest the sheet
+   * holds.
    */
   detail = 1,
 ): Float32Array {
@@ -101,7 +110,7 @@ export function applyMottle(
       const j = step === 1 ? i : sy * w + ((x * step) % w)
       const m = 1 + amount * (mottle[j] * 2 - 1)
       let v = c * m
-      if (dropout > 0 && speckle[j] < dropout) v *= 0.15
+      if (dropout > 0 && cellNoiseAt(speckle, x, y) < dropout) v *= 0.15
       out[i] = clamp01(v)
     }
   }

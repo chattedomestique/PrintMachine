@@ -544,6 +544,35 @@ against the space the sheet is actually given. The ratio is a number the sheet
 is handed (`--sheet-ratio`, from `sheetAspect`), not one of a list of shapes,
 so an Original sheet of any photo's proportions sizes the same way.
 
+### The same print at every size
+
+A print is rendered at many heights — the preview, the reference sheet of
+1800 px, and a photo's own resolution when it is saved — so everything the
+press draws is a fraction of the sheet, never a count of pixels. Four things
+were pixels, and each made a larger render a different print:
+
+- **Paper fibre** was a 3 px grain whose finest octave stopped at one pixel on
+  every sheet: on a 3600 px sheet, half the size. It is 3 px at the reference
+  height and grows with the sheet, finest octave included.
+- **Dropout speckle** was one value per pixel of a seeded stream, so a larger
+  sheet printed finer dust in a different pattern. A speck is now a cell of
+  the sheet (a pixel at 1800, two at 3600), read from a coordinate hash, so it
+  is the same dust anywhere and costs no memory.
+- **The grain cell** was rounded to whole pixels (1.68 px became 2, 19% too
+  big). It is exact now: pixel *x* belongs to cell `floor(x / cell)`.
+- **The switch mask's screen origin** was a fixed few pixels.
+
+At the reference height each of these is the value it always was; only the
+speckle's pattern is new. The check is two-fold: in node, each field's
+correlation length must grow in step with the height (within 15%); in the
+browser harness, a render at twice the height, averaged back down, must
+correlate with the render at the height (`npm run harness -- --out s.json
+--no-hashes --scale default@1800`). From the reference height up, which is
+every height a print is saved at, the default print and two documents of
+small type correlate at 0.97 or better. Below it the preview is a
+lower-fidelity picture: a halftone for small type is finer than a 900 px
+raster can draw, and a speck or a fibre stops at one pixel.
+
 <!-- WP2: export resolution ("always renders at reference height", below, and the export size in Status) is rewritten in WP2. -->
 ### Why the preview drops resolution while you drag
 

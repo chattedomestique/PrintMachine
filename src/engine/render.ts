@@ -39,8 +39,8 @@ import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftField,
 import { inkById, paperById } from './inks.ts'
 import { roughenEdges } from './rough.ts'
 import { paperField, type PaperField } from './paper.ts'
-import { fbm2D, whiteNoise2D } from './rng.ts'
-import { defaultAngle, screenField } from './screen.ts'
+import { fbm2D, type CellNoise } from './rng.ts'
+import { defaultAngle, screenField, type ScreenOptions } from './screen.ts'
 import { knockoutMask } from './knockout.ts'
 import { bandMask, coverRect, groundLuma, snapRect, splitInks, type DrawRect } from './media.ts'
 import { rasterizeBacking, rasterizeText } from './text.ts'
@@ -99,10 +99,12 @@ const PAPER_CLOUD = 0.5
 /** The grain cell rides the screen size, a third of it, so the default 9 px
  *  screen gives the 3 px grain the press always shipped with. A division, not
  *  a multiplication by 1/3, so a converted dither's cell (stored as cell x 3)
- *  comes back exactly. */
+ *  comes back exactly. Scaled with the render height and NOT rounded: the
+ *  grain is the same size on the print at every height (dither.ts takes a
+ *  fractional cell). Never finer than a pixel. */
 const PITCH_PER_GRAIN = 3
 export const grainCell = (screenPitch: number, scale: number): number =>
-  Math.max(1, Math.round((screenPitch / PITCH_PER_GRAIN) * scale))
+  Math.max(1, (screenPitch / PITCH_PER_GRAIN) * scale)
 
 /** Output pixel dimensions for a sheet's width over its height (a number:
  *  `sheetAspect`) at a given render height. The one place the width is made. */
@@ -147,7 +149,9 @@ export interface RenderCache {
   h: number
   paper: PaperField
   mottle: Float32Array
-  speckle: Float32Array
+  /** The dropout's white noise: one value per speck, a speck a pixel at the
+   *  reference height. Read on demand, so it holds no memory. */
+  speckle: CellNoise
   /** Rasterised tone per plate, keyed on the properties that affect it.
    *  Dragging a press slider must not re-run getImageData for every plate.
    *  A backing is keyed separately from its glyphs under the same layer id. */
@@ -187,11 +191,15 @@ function buildCache(s: PrintSettings, w: number, h: number): RenderCache {
       texture: PAPER_TOOTH,
       blotch: PAPER_CLOUD,
       seed: s.seed,
+      scale: h / REFERENCE_HEIGHT,
     }),
     // Mottle cell is tied to the sheet, not to a pixel count, so the blotch
     // scale looks the same at preview and export resolution.
     mottle: fbm2D(w, h, Math.max(6, h / 90), 3, s.seed ^ 0x9e3779b9),
-    speckle: whiteNoise2D(w, h, s.seed ^ 0x85ebca6b),
+    // So is the speck: a pixel at the reference height, two at twice it.
+    // (It was one value per PIXEL of a seeded stream, so a larger export
+    // printed finer dust in a different pattern.)
+    speckle: { cell: Math.max(1, h / REFERENCE_HEIGHT), seed: s.seed ^ 0x85ebca6b },
     tone: new Map(),
   }
 }
@@ -390,13 +398,24 @@ function binarise(
   if (press.method === 'grain') {
     return ditherField(mask, w, h, { scale: grainCell(press.screenPitch, scale) })
   }
-  return screenField(mask, w, h, {
+  return screenField(mask, w, h, switchScreen(index, press, seed, scale))
+}
+
+/**
+ * The halftone a switch mask is screened with. Its origin is a seed-chosen
+ * offset in REFERENCE pixels, scaled with the sheet like every other offset,
+ * so the mask's dots sit at the same place against the plate's at every
+ * render height (it was a fixed count of pixels, a smaller fraction of a cell
+ * on every larger sheet). Exported for the scale tests.
+ */
+export function switchScreen(index: number, press: PressProfile, seed: number, scale: number): ScreenOptions {
+  return {
     pitch: Math.max(1.2, press.screenPitch * scale),
     angle: defaultAngle(index),
     softness: 0,
-    originX: seed % 7,
-    originY: seed % 5,
-  })
+    originX: (seed % 7) * scale,
+    originY: (seed % 5) * scale,
+  }
 }
 
 /** Where each plate's tone comes from. The renderer rasterises glyphs into a

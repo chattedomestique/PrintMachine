@@ -1,3 +1,5 @@
 Renders the frozen documents in docs/ (written by the build before the simplification) through the real engine in Chromium: `npm run harness -- --out run.json`.
 Hashes of text-bearing renders depend on the installed fonts, so compare a commit against its parent on ONE machine (`git worktree add`, then `node scripts/harness/compare.mjs parent.json commit.json`); only text-free hashes are committed (text-free.sha256.json).
 From the commit that adds src/state/normalize.ts, each document is loaded through it exactly as an old save would be.
+Besides the frozen documents, `default`, `backing-photo`, `small-2` and `small-4` are built live from the build under test (the default print, over the test photo, and at 20% / 40% type).
+`--scale doc@h,...` renders each document at h and 2h and prints corr(box2(render(2h)), render(h)): 1 is the same print at both sizes.

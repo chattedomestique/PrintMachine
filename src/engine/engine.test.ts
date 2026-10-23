@@ -15,7 +15,7 @@ import { ditherField } from './dither.ts'
 import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftField, wearToMottle } from './ink.ts'
 import { contrastPartner, inkById, paperById, RISO_INKS } from './inks.ts'
 import { paperField } from './paper.ts'
-import { mulberry32, valueNoise2D, whiteNoise2D } from './rng.ts'
+import { mulberry32, valueNoise2D, type CellNoise } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { BACKING_PAD, FIT_WIDTH, alignOffset, fitSize, justifyOffsets, layoutText, lineRects, type FontMeasure } from './text.ts'
 import {
@@ -195,11 +195,13 @@ describe('grain (Atkinson)', () => {
     // A saved dither of cell c is stored as a screen size of 3c. Its grain must
     // come out the size the dither did, at every height the app renders at.
     expect(grainCell(9, 1)).toBe(3)
-    // 1..12: the whole range the old Dot size slider could set.
+    // 1..12: the whole range the old Dot size slider could set. Exact at the
+    // reference height; scaled with the sheet, unrounded, elsewhere.
     for (let cell = 1; cell <= 12; cell++) {
+      expect(grainCell(cell * 3, 1)).toBe(cell)
       for (const h of [DRAFT_HEIGHT, PREVIEW_HEIGHT, 1500, REFERENCE_HEIGHT, 3780]) {
         const scale = h / REFERENCE_HEIGHT
-        expect(grainCell(cell * 3, scale)).toBe(Math.max(1, Math.round(cell * scale)))
+        expect(grainCell(cell * 3, scale)).toBeCloseTo(Math.max(1, cell * scale), 12)
       }
     }
   })
@@ -236,7 +238,7 @@ describe('ink', () => {
   it('keeps mottled coverage in range even at extreme settings', () => {
     const cov = new Float32Array(W * H).fill(0.9)
     const noise = valueNoise2D(W, H, 4, 99)
-    const speckle = valueNoise2D(W, H, 1, 7)
+    const speckle: CellNoise = { cell: 1, seed: 7 }
     const out = applyMottle(cov, noise, speckle, 0.8, 0.5, W, H)
     for (const v of out) expect(v).toBeGreaterThanOrEqual(0)
     for (const v of out) expect(v).toBeLessThanOrEqual(1)
@@ -246,7 +248,7 @@ describe('ink', () => {
     const out = applyMottle(
       new Float32Array(W * H),
       valueNoise2D(W, H, 4, 1),
-      valueNoise2D(W, H, 1, 2),
+      { cell: 1, seed: 2 },
       0.8,
       0.1,
       W,
@@ -647,7 +649,7 @@ describe('fading is dots, not opacity', () => {
     originY: 0,
   }
   const mottle = valueNoise2D(N, N, 8, 3)
-  const speckle = whiteNoise2D(N, N, 11)
+  const speckle: CellNoise = { cell: 1, seed: 11 }
   // Heavy wear: a wide mottle swing and a lot of dropout.
   const wear = (f: Float32Array) => applyMottle(f, mottle, speckle, 0.8, 0.3, N, N)
   const flat = () => new Float32Array(N * N).fill(0.7)
@@ -1513,7 +1515,7 @@ describe('detail scaling reaches the wear, not just the screen', () => {
     // down touches it.
     const cov = new Float32Array(W * H).fill(0.9)
     const noise = valueNoise2D(W, H, 16, 5)
-    const speckle = new Float32Array(W * H).fill(1)
+    const speckle: CellNoise = { cell: 1, seed: 1 }
 
     const coarse = applyMottle(cov, noise, speckle, 0.8, 0, W, H, 1)
     const fine = applyMottle(cov, noise, speckle, 0.8, 0, W, H, 0.25)
@@ -1532,7 +1534,7 @@ describe('detail scaling reaches the wear, not just the screen', () => {
     // was right for big type all along.
     const cov = new Float32Array(W * H).fill(0.7)
     const noise = valueNoise2D(W, H, 8, 3)
-    const speckle = valueNoise2D(W, H, 1, 4)
+    const speckle: CellNoise = { cell: 1, seed: 4 }
     const a = applyMottle(cov, noise, speckle, 0.5, 0.2, W, H, 1)
     const b = applyMottle(cov, noise, speckle, 0.5, 0.2, W, H)
     expect([...a]).toEqual([...b])
@@ -1543,7 +1545,7 @@ describe('detail scaling reaches the wear, not just the screen', () => {
       const out = applyMottle(
         new Float32Array(W * H),
         valueNoise2D(W, H, 4, 1),
-        valueNoise2D(W, H, 1, 2),
+        { cell: 1, seed: 2 },
         0.8,
         0.1,
         W,

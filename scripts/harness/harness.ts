@@ -27,11 +27,13 @@ import photoSecondInk from './docs/photo-second-ink.json'
 import textFreePhoto from './docs/text-free-photo.json'
 
 /**
- * The frozen documents, plus two built live from the build under test:
- * `default` (whatever `defaultSettings()` is) and `backing-photo` (the default
+ * The frozen documents, plus some built live from the build under test:
+ * `default` (whatever `defaultSettings()` is), `backing-photo` (the default
  * over the test photo, the first plate keeping its own ink as its second ink
- * and the second on a yellow backing). Those change on purpose when the
- * defaults do, which is the point of rendering them.
+ * and the second on a yellow backing), and `small-2` / `small-4` (the default
+ * with every plate at 20% / 40%, the band captions over a photo live in, where
+ * the press's detail scaling is furthest from poster type). Those change on
+ * purpose when the defaults do, which is the point of rendering them.
  */
 const DOCS: Record<string, () => unknown> = {
   plain: () => plain,
@@ -46,6 +48,14 @@ const DOCS: Record<string, () => unknown> = {
     s.layers[1] = { ...s.layers[1], backing: 'yellow' }
     return s
   },
+  'small-2': () => smallType(0.02),
+  'small-4': () => smallType(0.04),
+}
+
+function smallType(size: number): PrintSettings {
+  const s = defaultSettings()
+  s.layers = s.layers.map((l) => ({ ...l, size }))
+  return s
 }
 
 type Normalize = (raw: unknown, env: { measure?: unknown }) => PrintSettings
@@ -170,10 +180,77 @@ async function render(
   return { sha256, ms, w, h, png }
 }
 
+/** Rec. 709 luma of an RGBA buffer, 0..255. */
+function lumaOf(rgba: Uint8ClampedArray): Float64Array {
+  const out = new Float64Array(rgba.length / 4)
+  for (let i = 0; i < out.length; i++) {
+    const o = i * 4
+    out[i] = 0.2126 * rgba[o] + 0.7152 * rgba[o + 1] + 0.0722 * rgba[o + 2]
+  }
+  return out
+}
+
+function correlation(a: Float64Array, b: Float64Array): number {
+  let ma = 0
+  let mb = 0
+  for (let i = 0; i < a.length; i++) {
+    ma += a[i]
+    mb += b[i]
+  }
+  ma /= a.length
+  mb /= b.length
+  let ab = 0
+  let aa = 0
+  let bb = 0
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] - ma
+    const y = b[i] - mb
+    ab += x * y
+    aa += x * x
+    bb += y * y
+  }
+  return ab / Math.sqrt(aa * bb)
+}
+
+async function pixels(name: string, height: number): Promise<{ data: Uint8ClampedArray; w: number; h: number }> {
+  const settings = load(name)
+  const media = settings.media ? await photoBitmap(settings.media.width, settings.media.height) : null
+  const out = context(false)
+  const scratch = context(true)
+  renderPrint(out, scratch, settings, { current: null }, null, height, media)
+  const { width: w, height: h } = out.canvas
+  const data = out.getImageData(0, 0, w, h).data
+  out.canvas.width = 0
+  scratch.canvas.width = 0
+  return { data, w, h }
+}
+
+/**
+ * Is a larger render the same print? The document at `height` and at twice
+ * it; the larger box-averaged 2x2 down to the smaller's size, and the two
+ * correlated on luminance. 1 is the same picture; a quantity held in pixels
+ * rather than in sheet fractions decorrelates it.
+ */
+async function scaleCorrelation(name: string, height: number): Promise<{ corr: number; w: number; h: number }> {
+  const small = await pixels(name, height)
+  const big = await pixels(name, height * 2)
+  if (big.w !== small.w * 2 || big.h !== small.h * 2) throw new Error(`${name}: ${big.w}x${big.h} is not twice ${small.w}x${small.h}`)
+  const a = lumaOf(small.data)
+  const b = lumaOf(big.data)
+  const down = new Float64Array(a.length)
+  for (let y = 0; y < small.h; y++) {
+    for (let x = 0; x < small.w; x++) {
+      const i = 2 * y * big.w + 2 * x
+      down[y * small.w + x] = (b[i] + b[i + 1] + b[i + big.w] + b[i + big.w + 1]) / 4
+    }
+  }
+  return { corr: correlation(down, a), w: small.w, h: small.h }
+}
+
 declare global {
   interface Window {
-    H: { docs: string[]; render: typeof render; normalized: boolean }
+    H: { docs: string[]; render: typeof render; scaleCorrelation: typeof scaleCorrelation; normalized: boolean }
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, normalized: !!normalizeSettings }

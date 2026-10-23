@@ -6,6 +6,7 @@
  *   node scripts/harness/run.mjs --out a.json --heights 300,1000 --docs plain,default
  *   node scripts/harness/run.mjs --out t.json --no-hashes --time photo-second-ink@3780 --photo-mp 12 --runs 3
  *   node scripts/harness/run.mjs --out a.json --heights 1000 --png shots/   (also writes each render as a PNG)
+ *   node scripts/harness/run.mjs --out s.json --no-hashes --scale default@900,small-2@1800   (h against 2h)
  *
  * Then `node scripts/harness/compare.mjs a.json b.json`. Hashes of documents
  * with text depend on the installed fonts, so compare runs from ONE machine
@@ -26,7 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 function parseArgs(argv) {
-  const opts = { heights: [300, 1000, 1800], docs: null, time: [], photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
+  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -38,6 +39,7 @@ function parseArgs(argv) {
     else if (a === '--heights') opts.heights = next().split(',').map(Number)
     else if (a === '--docs') opts.docs = next().split(',')
     else if (a === '--time') opts.time.push(next())
+    else if (a === '--scale') opts.scale.push(...next().split(','))
     else if (a === '--photo-mp') opts.photoMp = Number(next())
     else if (a === '--runs') opts.runs = Number(next())
     else if (a === '--no-hashes') opts.hashes = false
@@ -111,6 +113,7 @@ const result = {
   normalized: null,
   renders: {},
   timings: {},
+  scale: {},
 }
 
 try {
@@ -129,6 +132,19 @@ try {
         }
         console.log(`${doc}@${height}`.padEnd(28), r.sha256.slice(0, 16), `${r.w}x${r.h}`, `${Math.round(r.ms)} ms`)
       }
+    }
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
+  if (opts.scale.length) {
+    // The same print at twice the height: corr(box2(render(2h)), render(h)).
+    const { page, errors } = await openPage()
+    for (const spec of opts.scale) {
+      const [doc, h] = spec.split('@')
+      const r = await page.evaluate(([d, hh]) => window.H.scaleCorrelation(d, hh), [doc, Number(h)])
+      result.scale[spec] = { corr: Number(r.corr.toFixed(4)), w: r.w, h: r.h }
+      console.log(`scale ${spec} vs ${Number(h) * 2}`.padEnd(32), `corr ${r.corr.toFixed(4)}`)
     }
     if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
     await page.close()

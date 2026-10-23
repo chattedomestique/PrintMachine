@@ -33,6 +33,19 @@ export interface RoughOptions {
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
 
 /**
+ * The threshold's wander: two octaves of value noise, the coarse one 1.6 times
+ * the tear's feature size, so it grows with the type and the sheet. On the
+ * smallest type at the reference height the fine octave is under a pixel and
+ * stops at one; the floor is left at a pixel on larger sheets too, because
+ * sizing it to the sheet measured as a wash (the scale tests, and the
+ * harness's 20% type at 1800 against 3600: 0.9706 floored at a pixel, 0.9713
+ * floored at the sheet's scale).
+ */
+export function tearField(w: number, h: number, scale: number, seed: number): Float32Array {
+  return fbm2D(w, h, scale * 1.6, 2, seed ^ 0x1b873593)
+}
+
+/**
  * Roughen and bleed a tone field.
  *
  * Runs on the *tone*, before screening, so the screen bites on the ragged
@@ -62,10 +75,10 @@ export function roughenEdges(
   const soft = blurField(tone, w, h, radius)
 
   // Two octaves is enough: a coarse wander plus a fine nibble. More just
-  // averages back toward a smooth edge. Unfloored for the same reason as the
+  // averages back toward a smooth edge. Unrounded for the same reason as the
   // radius — a wavelength pinned to a pixel is a different wavelength on every
   // size of sheet.
-  const wander = roughness > 0 ? fbm2D(w, h, opts.scale * 1.6, 2, seed ^ 0x1b873593) : null
+  const wander = roughness > 0 ? tearField(w, h, opts.scale, seed) : null
 
   // Cutting at 0.5 reproduces the original outline. Lowering it keeps more of
   // the blurred skirt, which is precisely ink spread.

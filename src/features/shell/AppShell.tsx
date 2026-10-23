@@ -231,6 +231,18 @@ export default function AppShell() {
             <p id="save-question">
               {question.text}
             </p>
+            {/* Asked at launch, the question can come before the photo is
+                back: its saves wait for it, as Save does. */}
+            {question.choices.length > 0 && mediaState === 'loading' && (
+              <p className="panel-note" role="status">
+                Loading the photo…
+              </p>
+            )}
+            {question.choices.length > 0 && mediaState === 'failed' && (
+              <p className="panel-note" role="alert">
+                This photo could not be loaded. Choose it again.
+              </p>
+            )}
             <div className="media-actions">
               {question.choices.map((choice, i) => (
                 <button
@@ -238,6 +250,7 @@ export default function AppShell() {
                   type="button"
                   className="icon-button"
                   data-variant={i === 0 ? 'primary' : undefined}
+                  disabled={!canStart(save.state, mediaState)}
                   onClick={() => save.answer(choice.height)}
                 >
                   {choice.label}

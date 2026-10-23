@@ -212,17 +212,32 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
 
     // The same pixels as renderPrint at the same height (the harness checks
     // this on real glyphs and a real photo).
-    let syncOut: Uint8ClampedArray | undefined
-    let asyncOut: Uint8ClampedArray | undefined
-    const capture = (fake: ReturnType<typeof fakeContext>, set: (d: Uint8ClampedArray) => void) => {
-      ;(fake.ctx as unknown as { putImageData: (img: { data: Uint8ClampedArray }) => void }).putImageData = (img) => set(img.data)
+    // The canvas's pixels, as the bands are put on it.
+    const capture = (fake: ReturnType<typeof fakeContext>) => {
+      const sheet = { data: new Uint8ClampedArray(0), bands: 0 }
+      ;(fake.ctx as unknown as { putImageData: unknown }).putImageData = (
+        img: { data: Uint8ClampedArray },
+        _dx: number,
+        dy: number,
+        _x: number,
+        _y: number,
+        dw: number,
+        dh: number,
+      ) => {
+        const w = fake.ctx.canvas.width
+        if (sheet.data.length !== w * fake.ctx.canvas.height * 4) sheet.data = new Uint8ClampedArray(w * fake.ctx.canvas.height * 4)
+        sheet.data.set(img.data.subarray(0, dw * dh * 4), dy * w * 4)
+        sheet.bands++
+      }
+      return sheet
     }
-    capture(a, (d) => (asyncOut = d))
-    capture(b, (d) => (syncOut = d))
+    const asyncOut = capture(a)
+    const syncOut = capture(b)
     await renderPrintAsync(a.ctx, fakeContext().ctx, doc(), 300, decoded)
     renderPrint(b.ctx, fakeContext().ctx, doc(), { current: null }, null, 300, decoded)
-    expect(asyncOut).toBeDefined()
-    expect(asyncOut).toEqual(syncOut)
+    expect(asyncOut.bands).toBeGreaterThan(0)
+    expect(asyncOut.data.length).toBe(240 * 300 * 4)
+    expect(asyncOut.data).toEqual(syncOut.data)
   })
 
   it('stops at the next step once cancelled, with an AbortError', async () => {

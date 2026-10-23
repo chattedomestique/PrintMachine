@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import { FbmSampler, ValueNoiseSampler, fbm2D, mulberry32, mulberryAt, valueNoise2D } from './rng.ts'
 import { PaperSampler, paperField } from './paper.ts'
-import { ensureCache, makeWorkspace, pressPlate, printSheet, sampledNoise, toneAsFloat, type ToneSource } from './render.ts'
+import { ensureCache, makeWorkspace, pressPlate, printSheet, printSheetSteps, sampledNoise, toneAsFloat, type ToneSource } from './render.ts'
 import { inkById, paperById } from './inks.ts'
 import { screenField } from './screen.ts'
 import { ditherField } from './dither.ts'
@@ -19,7 +19,7 @@ import { cutKnockout, knockoutMask } from './knockout.ts'
 import { applyDensity, applyMottle, shiftField, shiftInPlace } from './ink.ts'
 import { blurField, blurInPlace } from './blur.ts'
 import { roughenEdges, roughenInPlace } from './rough.ts'
-import { compositeLayers } from './composite.ts'
+import { clampByte, compositeLayers } from './composite.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import type { PrintSettings } from './types.ts'
 
@@ -331,5 +331,64 @@ describe('step 3: every pass in place, in one workspace, to the same numbers', (
       }
     }
     expect(createHash('sha256').update(lines.join('\n')).digest('hex')).toBe('2a7563da5955c30fe47a6dde773a91e10c20869a444dbd3815100593fee7b00a')
+  })
+})
+
+describe('step 4: nothing the canvas holds is held twice', () => {
+  it('clampByte rounds as a byte store does, half to even', () => {
+    const store = new Uint8ClampedArray(1)
+    for (const v of [-3, -0.5, 0, 0.49, 0.5, 0.51, 1.5, 2.5, 3.5, 127.4999, 127.5, 128.5, 254.5, 254.6, 255, 300, NaN, Infinity]) {
+      store[0] = v
+      expect(clampByte(v)).toBe(store[0])
+    }
+    for (let k = 0; k < 20000; k++) {
+      const v = ((k * 2654435761) % 300000) / 1000 - 10
+      store[0] = v
+      expect(clampByte(v)).toBe(store[0])
+    }
+  })
+
+  it('a knockout applied as the ground is read prints what a cut copy of the ground printed', () => {
+    const w = 64
+    const h = 40
+    const ground = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) ground.set([(i * 7) % 256, (i * 13) % 256, (i * 3) % 256, i % 9 ? 255 : 77], i * 4)
+    const knockout = Uint8ClampedArray.from({ length: w * h }, (_, i) => (i * 37) % 256)
+    const cut = ground.slice()
+    for (let i = 0; i < w * h; i++) cut[i * 4 + 3] = cut[i * 4 + 3] * (1 - knockout[i] / 255)
+    const paper = paperField(w, h, { rgb: paperById('natural').rgb, texture: 0.4, blotch: 0.5, seed: 2 })
+    const layers = [{ coverage: Uint8ClampedArray.from({ length: w * h }, (_, i) => (i * 11) % 256), rgb: inkById('blue').rgb }]
+    for (const paperAmount of [0, 1]) {
+      const a = new Uint8ClampedArray(w * h * 4)
+      const b = new Uint8ClampedArray(w * h * 4)
+      compositeLayers(a, w, h, { ...paper, base: cut, paperAmount }, layers)
+      compositeLayers(b, w, h, { ...paper, base: ground, knockout, paperAmount }, layers)
+      expect(b).toEqual(a)
+    }
+  })
+
+  it('a sheet printed band by band into one band buffer is the sheet printed whole', () => {
+    const w = 90
+    const h = 77
+    const s = defaultSettings()
+    s.media = makeMedia({ id: 'p', width: w, height: h })
+    s.layers = [makeLayer({ id: 'p0', inkId: 'black', contrastInkId: 'white' }), makeLayer({ id: 'p1', backing: 'yellow' })]
+    const ground = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) ground.set([(i * 5) % 256, (i * 9) % 256, (i * 2) % 256, 255], i * 4)
+    const tone = new Float32Array(w * h).map((_, i) => ((i % w) > 10 && (i % w) < 70 ? 1 : 0))
+    const src: ToneSource = { type: () => ({ field: tone, fontSize: 9 }), backing: () => ({ field: tone, fontSize: 9 }) }
+    const whole = new Uint8ClampedArray(w * h * 4)
+    printSheet(whole, s, ground, src, sampledNoise(s, w, h), w, h)
+    for (const rows of [1, 10, 33, 77]) {
+      const sheet = new Uint8ClampedArray(w * h * 4)
+      const band = new Uint8ClampedArray(w * rows * 4)
+      const steps = printSheetSteps({ band, rows, put: (y0, y1) => sheet.set(band.subarray(0, (y1 - y0) * w * 4), y0 * w * 4) }, s, ground, src, sampledNoise(s, w, h), w, h)
+      while (!steps.next().done);
+      expect(sheet).toEqual(whole)
+    }
+    // ...and the ground it was handed is untouched.
+    const again = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) again.set([(i * 5) % 256, (i * 9) % 256, (i * 2) % 256, 255], i * 4)
+    expect(ground).toEqual(again)
   })
 })

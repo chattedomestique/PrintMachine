@@ -617,6 +617,11 @@ output pixel.
   shift walks the sheet in the direction it moves, so it never overwrites a
   pixel it still has to read). The knockout is cut straight into the running
   bytes, and the second ink's light half takes the coverage's own buffer.
+- **Nothing the canvas holds is held twice.** The sheet is printed a band of
+  rows at a time into one band-sized buffer, and each band is put on the
+  canvas, instead of a full-size copy being put at the end; the knockout
+  takes the photo's alpha down as each pixel is printed, instead of on a copy
+  of the photo; a glyph raster's alpha is read a band at a time.
 
 ### The same print at every size
 

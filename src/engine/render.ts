@@ -549,7 +549,8 @@ const PRINT_BAND_PIXELS = 1 << 20
  * of it.
  *
  * @param out    RGBA bytes, w*h*4, written in full.
- * @param ground the photo at sheet size (RGBA), or undefined with no photo.
+ * @param ground the photo at sheet size (RGBA), or undefined with no photo;
+ *               read, never written.
  * @returns every pass in print order, as composited.
  */
 export function printSheet(
@@ -579,7 +580,7 @@ function drain<T>(steps: Generator<RenderProgress, T>): T {
  * different pixels.
  */
 export function* printSheetSteps(
-  out: Uint8ClampedArray,
+  out: SheetOutput,
   s: PrintSettings,
   ground: Uint8ClampedArray | undefined,
   tones: ToneSource,
@@ -716,23 +717,19 @@ export function* printSheetSteps(
     }
   }
 
-  let base = ground
-  if (base && knockout) {
-    // The photo is the ground, so knocking out means taking its alpha down and
-    // letting the paper underneath come back through. That alpha path is also
-    // what a transparent PNG's own transparency takes: both read as paper.
-    base = new Uint8ClampedArray(base)
-    for (let i = 0; i < knockout.length; i++) {
-      base[i * 4 + 3] = base[i * 4 + 3] * (1 - knockout[i] / 255)
-    }
-  }
+  // The photo is the ground, so knocking out means taking its alpha down and
+  // letting the paper underneath come back through. That alpha path is also
+  // what a transparent PNG's own transparency takes: both read as paper. Done
+  // as each pixel is printed (compositeLayers), not on a copy of the ground.
+  const ground_ = ground ? { base: ground, knockout, paperAmount: s.paperVeil ? 1 : 0 } : {}
 
   // Printed in bands, so an export can hand the page a moment between them —
-  // and so a sampled paper is only ever a band of shade.
-  const band = Math.max(1, Math.floor(PRINT_BAND_PIXELS / w))
+  // and so a sampled paper is only ever a band of shade, and the printed
+  // pixels only ever a band before they are on the canvas.
+  const banded = out instanceof Uint8ClampedArray ? null : out
+  const band = banded ? banded.rows : Math.max(1, Math.floor(PRINT_BAND_PIXELS / w))
   const sampled = noise.paper instanceof PaperSampler ? noise.paper : null
   const bandShade = sampled ? new Float32Array(Math.min(h, band) * w) : null
-  const ground_ = base ? { base, paperAmount: s.paperVeil ? 1 : 0 } : {}
   for (let y = 0; y < h; y += band) {
     yield { step: 'print', pass: passes, passes }
     const y1 = Math.min(h, y + band)
@@ -743,10 +740,22 @@ export function* printSheetSteps(
     } else {
       paper = { ...(noise.paper as PaperField), ...ground_ }
     }
-    compositeLayers(out, w, h, paper, plates, y, y1)
+    if (banded) {
+      compositeLayers(banded.band, w, h, paper, plates, y, y1, y)
+      banded.put(y, y1)
+    } else {
+      compositeLayers(out as Uint8ClampedArray, w, h, paper, plates, y, y1)
+    }
   }
   return plates
 }
+
+/**
+ * Where the printed sheet goes: its whole RGBA (w*h*4), or a band of rows at a
+ * time — `band` holds up to `rows` rows, and `put(y0, y1)` takes rows
+ * [y0, y1) from it (to the canvas) before it is reused for the next band.
+ */
+export type SheetOutput = Uint8ClampedArray | { band: Uint8ClampedArray; rows: number; put(y0: number, y1: number): void }
 
 /**
  * Where the photo is drawn on a w x h sheet: from the document's placement and
@@ -888,9 +897,13 @@ function* renderSteps(
   }
   onGround?.()
 
-  const image = ctx.createImageData(w, h)
+  // The sheet is printed a band of rows at a time into one band-sized buffer,
+  // and each band put on the canvas: the canvas already holds the print, so
+  // it is not held a second time in a full-size array.
+  const rows = Math.max(1, Math.min(h, Math.floor(PRINT_BAND_PIXELS / w)))
+  const image = ctx.createImageData(w, rows)
   yield* printSheetSteps(
-    image.data,
+    { band: image.data, rows, put: (y0, y1) => ctx.putImageData(image, 0, y0, 0, 0, w, y1 - y0) },
     s,
     ground,
     cache
@@ -906,7 +919,6 @@ function* renderSteps(
     w,
     h,
   )
-  ctx.putImageData(image, 0, 0)
 
   if (overlay) drawOverlay(ctx, s, overlay, w, h)
 }

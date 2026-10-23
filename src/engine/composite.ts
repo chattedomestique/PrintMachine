@@ -42,6 +42,27 @@ export interface PaperInput {
    *  (an export samples the paper a band at a time). 0, the whole sheet, by
    *  default. */
   shadeRow0?: number
+  /**
+   * Where the ground is cut back to paper, 0..255 per pixel (knockout.ts),
+   * applied to `base`'s alpha as it is read: alpha x (1 - k / 255), rounded
+   * as a byte store rounds it. The same as cutting a copy of the ground first,
+   * without the copy (4 bytes a pixel).
+   */
+  knockout?: Uint8ClampedArray
+}
+
+/**
+ * A number stored into a Uint8ClampedArray, as the store rounds it (ECMAScript
+ * ToUint8Clamp: clamped to 0..255, the nearest integer, a half to the even
+ * one), without a store.
+ */
+export function clampByte(v: number): number {
+  if (!(v > 0)) return 0
+  if (v >= 255) return 255
+  const f = Math.floor(v)
+  if (f + 0.5 < v) return f + 1
+  if (v < f + 0.5) return f
+  return f % 2 === 1 ? f + 1 : f
 }
 
 /**
@@ -57,6 +78,8 @@ export interface PaperInput {
  * @param y0, y1 the band of rows to print, [y0, y1); the whole sheet by
  *   default. Every pixel is printed on its own, so printing the sheet in bands
  *   gives exactly the bytes printing it at once does.
+ * @param outRow0 the sheet row `out` starts at: 0 when `out` is the whole
+ *   sheet, `y0` when it holds only the band.
  */
 export function compositeLayers(
   out: Uint8ClampedArray,
@@ -66,6 +89,7 @@ export function compositeLayers(
   layers: readonly CompositeLayer[],
   y0 = 0,
   y1 = h,
+  outRow0 = 0,
 ): void {
   const n = y1 * w
   const pr = paper.rgb[0] / 255
@@ -87,6 +111,8 @@ export function compositeLayers(
   }
 
   const base = paper.base
+  const knockout = paper.knockout
+  const outStart = outRow0 * w
   const shade = paper.shade
   const shadeStart = (paper.shadeRow0 ?? 0) * w
   // Without a photo the paper *is* the ground, so the veil is fully on and the
@@ -106,7 +132,7 @@ export function compositeLayers(
       // that has simply been panned. Uncovered sheet is paper, so the ground is
       // the photo composited over white and the veil is forced fully on there,
       // which is exactly the paper this function draws without a photo at all.
-      const a = base[o + 3] / 255
+      const a = (knockout ? clampByte(base[o + 3] * (1 - knockout[i] / 255)) : base[o + 3]) / 255
       const veil = amount * a + (1 - a)
       const s = 1 - veil * (1 - shade[i - shadeStart])
       r = ((base[o] / 255) * a + (1 - a)) * (1 - veil * (1 - pr)) * s
@@ -128,7 +154,7 @@ export function compositeLayers(
       b *= 1 - c * absB[l]
     }
 
-    const o = i * 4
+    const o = (i - outStart) * 4
     out[o] = r * 255
     out[o + 1] = g * 255
     out[o + 2] = b * 255

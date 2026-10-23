@@ -550,7 +550,9 @@ export interface ToneSource {
 /**
  * Where a render has got to. Reported between its stages, which is where an
  * export yields to the page (`renderPrintAsync`): before the photo is laid
- * down, before each pass on the press, and between bands of the final print.
+ * down, before each pass on the press and between its slow steps (after the
+ * tear, after the wear, after the switch's luminance), and between bands of
+ * the final print.
  */
 export interface RenderProgress {
   /** `photo`: laying the photo down; `press`: a pass on the press; `print`:
@@ -875,8 +877,8 @@ export interface AsyncRenderOptions {
  * the page able to paint its progress and take a Cancel. It adds nothing but
  * the yields, the abort checks and the progress reports, so at one height it
  * prints exactly the pixels the preview does (harness `--parity`). Never an
- * overlay, and a cache of its own: the export's noise fields are its size,
- * not the preview's.
+ * overlay, and no cache: a one-shot render reads its noise where it prints
+ * it (bit for bit the preview's arrays) and keeps nothing for a next frame.
  */
 export async function renderPrintAsync(
   ctx: CanvasRenderingContext2D,

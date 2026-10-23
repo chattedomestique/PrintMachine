@@ -606,13 +606,16 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   pixel (rgb 1, 2, 3) written at the last pixel and read back (`fitsCanvas`,
   `engine/export.ts`) — and a canvas that fails, an encoder that returns
   nothing, or memory running out is one error, `CanvasLimitError`, with the
-  plan in it. Save then asks, in numbers: "This device couldn't press
-  2419×3024. Save a smaller 1814×2268 copy instead?" The copy offered is the
+  plan in it. Save then asks, in numbers and with the reason: "This device
+  couldn't press 2419×3024 (a canvas that size came back blank). Save a
+  smaller 1814×2268 copy instead?" (a reason in the browser's own words — "Out
+  of memory" — is shown as it came, so a fault that is not about size cannot
+  hide behind the offer). The copy offered is the
   largest that proves itself here, stepping down by three quarters of the
   height at a time (the sheet's shape kept) and never under 600 px; when none
   does, it says this device cannot save the print. Nothing is pressed until the
-  person picks Save smaller, and the file then says what it is ("a smaller
-  copy, as asked").
+  person picks Save smaller, and the confirmation names what was saved
+  ("Saved 1814×2268, a smaller copy").
 - **A save that did not finish.** iOS evicts a tab that holds too much without
   a word, and the app restarts as if nothing happened. Save marks itself in
   `localStorage` before it decodes the photo (the height and the format) and

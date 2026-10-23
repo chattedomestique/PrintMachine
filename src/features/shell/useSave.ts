@@ -48,9 +48,11 @@ export type SaveState =
   | { kind: 'ready'; file: File; plan: ExportPlan }
   | { kind: 'sharing'; file: File; plan: ExportPlan }
   | { kind: 'error'; message: string }
-  /** This device could not press `failed`; `smaller` is the largest copy it
-   *  can (null: none it can). Asked, never done unasked. */
-  | { kind: 'tooBig'; format: ExportFormat; failed: ExportPlan; smaller: ExportPlan | null }
+  /** This device could not press `failed` (`why`: a canvas came back blank,
+   *  the encoder gave nothing, memory ran out — the browser's own words);
+   *  `smaller` is the largest copy it can (null: none it can). Asked, never
+   *  done unasked. */
+  | { kind: 'tooBig'; format: ExportFormat; failed: ExportPlan; why: string; smaller: ExportPlan | null }
   /** A save of `height` was in flight when the app last went away (a killed
    *  tab, perhaps): said at launch, without claiming why. */
   | { kind: 'interrupted'; format: ExportFormat; height: number }
@@ -67,7 +69,7 @@ export type SaveEvent =
   | { type: 'shareFailed' }
   | { type: 'cancelled' }
   | { type: 'failed'; message: string }
-  | { type: 'tooBig'; failed: ExportPlan; smaller: ExportPlan | null }
+  | { type: 'tooBig'; failed: ExportPlan; why: string; smaller: ExportPlan | null }
   | { type: 'interrupted'; format: ExportFormat; height: number }
   | { type: 'dismiss' }
   /** The document was edited: a file waiting for its tap is no longer this
@@ -109,7 +111,7 @@ export function saveReducer(state: SaveState, event: SaveEvent): SaveState {
       return { kind: 'error', message: event.message }
     case 'tooBig':
       return state.kind === 'loadingPhoto' || state.kind === 'pressing'
-        ? { kind: 'tooBig', format: state.format, failed: event.failed, smaller: event.smaller }
+        ? { kind: 'tooBig', format: state.format, failed: event.failed, why: event.why, smaller: event.smaller }
         : state
     case 'interrupted':
       return state.kind === 'idle' ? { kind: 'interrupted', format: event.format, height: event.height } : state
@@ -177,7 +179,9 @@ export interface SaveChoice {
 export function saveQuestion(state: SaveState, planAt: (maxHeight: number) => ExportPlan): { text: string; choices: SaveChoice[] } | null {
   const size = (p: ExportPlan) => dims(p.width, p.height)
   if (state.kind === 'tooBig') {
-    const failed = size(state.failed)
+    // The reason in the browser's words too: a "too big" that was really
+    // something else must not hide behind the offer.
+    const failed = `${size(state.failed)} (${state.why})`
     if (!state.smaller) return { text: `This device couldn't press ${failed}, nor a copy smaller than it: it cannot save this print.`, choices: [] }
     return {
       text: `This device couldn't press ${failed}. Save a smaller ${size(state.smaller)} copy instead?`,
@@ -351,7 +355,7 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
           // canvases this device proves it can hold.
           photo?.close()
           photo = null
-          dispatch({ type: 'tooBig', failed: err.plan, smaller: findSmallerPlan(settings, err.plan.height, canvasesFit) })
+          dispatch({ type: 'tooBig', failed: err.plan, why: err.why, smaller: findSmallerPlan(settings, err.plan.height, canvasesFit) })
           return
         }
         // Never a quieter, smaller file: the reason, with the numbers.

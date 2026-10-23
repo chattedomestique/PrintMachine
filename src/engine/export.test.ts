@@ -455,5 +455,8 @@ describe('what Save says', () => {
     expect(saveMessage('shared', p)).toBe('Saved 2419×3024')
     expect(saveMessage('downloaded', p)).toBe('Downloaded 2419×3024')
     expect(saveMessage('cancelled', p)).toBeNull()
+    // A smaller copy says so: the caption above Save names the full size.
+    const smaller = planPrint(withPhoto(4032, 3024), { maxHeight: 2268 })
+    expect(saveMessage('shared', smaller)).toBe('Saved 1814×2268, a smaller copy')
   })
 })

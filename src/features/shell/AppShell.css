@@ -183,7 +183,7 @@
   background: rgb(0 0 0 / 0.32);
 }
 
-.save-question p {
+.save-question p:first-child {
   margin: 0 0 var(--space-4);
   font-size: var(--text-md);
   line-height: 1.4;

@@ -139,11 +139,11 @@ describe('a print too big for this device, and a save that did not finish', () =
 
   it('a press that fails for size asks about a smaller copy; it never starts one by itself', () => {
     const pressing = run([{ type: 'start', format: 'png', plan, photo: true }, { type: 'photoLoaded' }])
-    const asked = saveReducer(pressing, { type: 'tooBig', failed: plan, smaller })
-    expect(asked).toEqual({ kind: 'tooBig', format: 'png', failed: plan, smaller })
+    const asked = saveReducer(pressing, { type: 'tooBig', failed: plan, why: 'a canvas that size came back blank', smaller })
+    expect(asked).toEqual({ kind: 'tooBig', format: 'png', failed: plan, why: 'a canvas that size came back blank', smaller })
     expect(pressInProgress(asked)).toBe(false)
     expect(saveQuestion(asked, planAt)).toEqual({
-      text: "This device couldn't press 3024×3780. Save a smaller 2268×2835 copy instead?",
+      text: "This device couldn't press 3024×3780 (a canvas that size came back blank). Save a smaller 2268×2835 copy instead?",
       choices: [{ label: 'Save smaller', height: 2835 }],
     })
     // Choosing it starts a press at that size, in the format asked for.
@@ -154,13 +154,13 @@ describe('a print too big for this device, and a save that did not finish', () =
     })
     expect(saveReducer(asked, { type: 'dismiss' })).toEqual(IDLE)
     // Only a press can fail for size.
-    expect(saveReducer(IDLE, { type: 'tooBig', failed: plan, smaller })).toBe(IDLE)
+    expect(saveReducer(IDLE, { type: 'tooBig', failed: plan, why: 'a canvas that size came back blank', smaller })).toBe(IDLE)
   })
 
   it('with no copy this device can press, it says so and offers nothing', () => {
-    const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, smaller: null }])
+    const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, why: 'Out of memory', smaller: null }])
     expect(saveQuestion(asked, planAt)).toEqual({
-      text: "This device couldn't press 3024×3780, nor a copy smaller than it: it cannot save this print.",
+      text: "This device couldn't press 3024×3780 (Out of memory), nor a copy smaller than it: it cannot save this print.",
       choices: [],
     })
   })
@@ -180,7 +180,7 @@ describe('a print too big for this device, and a save that did not finish', () =
     // Its offer is worked out from the document as it is, so an edit keeps it;
     // a smaller copy worked out for a failed press is dropped.
     expect(saveReducer(notice, { type: 'documentChanged' })).toBe(notice)
-    const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, smaller }])
+    const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, why: 'a canvas that size came back blank', smaller }])
     expect(saveReducer(asked, { type: 'documentChanged' })).toEqual(IDLE)
     // Never over a save in progress.
     const pressing = run([{ type: 'start', format: 'jpeg', plan, photo: false }])

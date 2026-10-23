@@ -190,14 +190,17 @@ try {
     await waitForQuestion(page)
     const q = await question(page)
     const pressed = await page.evaluate(() => window.__labels.some((x) => x.l.includes('plate') || x.l.includes('printing')))
-    check(q.text === "This device couldn't press 2419×3024. Save a smaller 1814×2268 copy instead?", `asked: "${q.text}"`)
+    check(
+      q.text === "This device couldn't press 2419×3024 (a canvas that size came back blank). Save a smaller 1814×2268 copy instead?",
+      `asked: "${q.text}"`,
+    )
     check(q.buttons.join('|') === 'Save smaller|Cancel', `choices: ${q.buttons.join(', ')}`)
     check(!pressed && files.length === 0, 'nothing pressed, no file, before the answer')
     const [download] = await Promise.all([page.waitForEvent('download', { timeout: 120_000 }), page.getByRole('button', { name: 'Save smaller' }).click()])
     const file = await saved(download)
     await page.waitForTimeout(300)
     const toast = await page.locator('.toast').allTextContents()
-    check(file === '1814x2268' && toast.includes('Downloaded 1814×2268'), `Save smaller: a ${file} file, "${toast.join('')}"`)
+    check(file === '1814x2268' && toast.includes('Downloaded 1814×2268, a smaller copy'), `Save smaller: a ${file} file, "${toast.join('')}"`)
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     await ctx.close()
 
@@ -208,7 +211,8 @@ try {
     await waitForQuestion(p2)
     const none = await question(p2)
     check(
-      none.text === "This device couldn't press 2419×3024, nor a copy smaller than it: it cannot save this print." && none.buttons.join('|') === 'OK',
+      none.text === "This device couldn't press 2419×3024 (a canvas that size came back blank), nor a copy smaller than it: it cannot save this print." &&
+        none.buttons.join('|') === 'OK',
       `blank above 0.3 MP: "${none.text}" [${none.buttons.join(', ')}]`,
     )
     await ctx2.close()

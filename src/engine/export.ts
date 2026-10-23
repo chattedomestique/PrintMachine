@@ -295,13 +295,16 @@ export function describePlan(plan: ExportPlan, media: Pick<MediaLayer, 'width' |
 
 /** The confirmation after a save. Deliberately does not claim the file reached
  *  Photos — the share promise resolving only means the sheet was dismissed
- *  (§6.3). "Saved" is honest shorthand; "saved to your camera roll" is not. */
+ *  (§6.3). "Saved" is honest shorthand; "saved to your camera roll" is not.
+ *  A smaller copy says it is one: the caption above Save still names the full
+ *  size, so the confirmation is where the smaller file is named. */
 export function saveMessage(delivery: Delivery, plan: ExportPlan): string | null {
+  const what = `${dims(plan.width, plan.height)}${plan.limit === 'smaller' ? ', a smaller copy' : ''}`
   switch (delivery) {
     case 'shared':
-      return `Saved ${dims(plan.width, plan.height)}`
+      return `Saved ${what}`
     case 'downloaded':
-      return `Downloaded ${dims(plan.width, plan.height)}`
+      return `Downloaded ${what}`
     case 'cancelled':
       return null
   }

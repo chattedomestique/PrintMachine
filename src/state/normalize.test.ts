@@ -445,6 +445,18 @@ describe('verdict §4.1: what each removed field becomes', () => {
     expect(m.id).toBe(raw.id)
   })
 
+  it('media.opacity 0: photo opacity is cut, so a hidden photo shows, as shot', () => {
+    // Stated, not fixed, like a plate at opacity 0: the old renderer drew the
+    // photo at its opacity, so at 0 it was invisible; the photo is the ground
+    // now and has no opacity. The README's "Saved prints keep opening" names
+    // this exception.
+    const d = copy(defaultDoc) as unknown as Doc
+    d.media = { id: 'm', width: 300, height: 200, scale: 1, x: 0.5, y: 0.5, opacity: 0, printed: false }
+    const s = normalizeSettings(d)
+    expect(s.media).toEqual(makeMedia({ id: 'm', width: 300, height: 200 }))
+    expect(s.media).not.toHaveProperty('opacity')
+  })
+
   it('media.scale below 1: 1, and the centre is pulled inside the cover travel', () => {
     expect((rawMax.media as Doc).scale).toBe(0.5)
     const m = max().media!
@@ -636,7 +648,7 @@ describe('verdict §4.1: what each removed field becomes', () => {
     expect([s.layers[0].backing, s.layers[0].contrastInkId]).toEqual([null, 'white'])
   })
 
-  it('layer.opacity 0, the one hidden thing that shows: plate opacity is cut, so a hidden plate prints at full strength', () => {
+  it('layer.opacity 0: plate opacity is cut, so a hidden plate prints at full strength', () => {
     // Stated, not fixed: the verdict cut plate opacity (#17) and there is no
     // other way to hide a plate, while dropping it would destroy work. The
     // README's "Saved prints keep opening" names this exception.

@@ -82,8 +82,10 @@ Frozen documents written by older builds live in `state/__fixtures__/`, and the
 tests load each one: it opens, normalising it twice changes nothing, no key
 survives that the current model does not have, and no valid value is lost.
 
-Where a removed feature had no exact replacement, an old print opens changed,
-and these are the only such cases (each has a test that says so):
+Every feature under "Removed on purpose" is gone from old prints too: a print
+that used one opens without it (the smear, a second press, a dither algorithm,
+a box's padding). Beyond that, these are the only cases where an old print
+opens changed (each has a test that says so):
 
 - **A fitted line whose fit is over 1200%** (in practice a single glyph on a
   sheet wider than about 2:3) is stored at the largest size and prints
@@ -92,6 +94,9 @@ and these are the only such cases (each has a test that says so):
 - **A plate hidden with plate opacity 0 prints**, at full strength. Plate
   opacity is cut, nothing else hides a plate, and dropping the plate would
   destroy work; delete it if it should go.
+- **A photo hidden with photo opacity 0 shows**, as shot. Photo opacity is cut
+  (fading the photo is the one thing it did), and the photo is the ground;
+  remove it if it should go.
 - **Word-picked boxes become one backing** behind every line of the plate, in
   the ink of the first box that printed (a box hidden at opacity 0 becomes
   nothing). A plate takes a backing or a second ink, so a plate that had both

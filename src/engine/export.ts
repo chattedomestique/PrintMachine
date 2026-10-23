@@ -64,7 +64,7 @@ export async function savePrint(
   format: ExportFormat = 'jpeg',
   name = 'print-machine',
   /** The photo, decoded from its ORIGINAL bytes (not the preview's working
-   *  copy), so the print is pressed from every pixel the photo has. */
+   *  copy), so the print is drawn from the original's pixels. */
   media: CanvasImageSource | null = null,
   /** Called once the photo is in the ground: the caller frees its decode. */
   onGround?: () => void,

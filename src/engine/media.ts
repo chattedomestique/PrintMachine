@@ -166,8 +166,10 @@ export function isReducedCopy(media: { width: number; height: number; native?: b
  * (measured: Laplacian energy 0.753 of the original at native height; 1.000
  * snapped). So when the scale is within 1.5 px of 1 over the sheet's height,
  * draw the photo at exactly its own size, at a whole-pixel offset, kept inside
- * the travel that still covers the sheet. Anything else — the preview, a zoom,
- * a photo smaller than the sheet — is returned untouched.
+ * the travel that still covers the sheet — zoomed or not, since a zoomed photo
+ * lands 1:1 at its own (smaller) native height. Anything that is not 1:1 — the
+ * preview, a zoom at another height — or a photo smaller than the sheet is
+ * returned untouched.
  */
 export function snapRect(r: DrawRect, mw: number, mh: number, sheetW: number, sheetH: number): DrawRect {
   if (Math.abs(r.dw / mw - 1) >= 1.5 / sheetH) return r

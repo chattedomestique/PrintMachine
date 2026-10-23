@@ -99,8 +99,9 @@ opens changed (each has a test that says so):
   remove it if it should go.
 - **Word-picked boxes become one backing** behind every line of the plate, in
   the ink of the first box that printed (a box hidden at opacity 0, or whose
-  word numbers the text no longer has, never printed and becomes nothing). A plate takes a backing or a second ink, so a plate that had both
-  keeps the backing and stops switching ink over the photo.
+  word numbers the text no longer has, never printed and becomes nothing). A
+  plate takes a backing or a second ink, so a plate that had both keeps the
+  backing and stops switching ink over the photo.
 
 ### Offline, and why it is checked rather than inspected
 
@@ -263,8 +264,9 @@ At the height where the sheet holds the photo at its own pixels, the blit is
 inside the travel that still covers the sheet (`snapRect`). Centred, the 4:5
 crop of a 12 MP photo sits half a pixel off the grid, and a bilinear blit at a
 half-pixel offset blurs every pixel into its neighbour: measured, 0.753 of the
-original's Laplacian energy unsnapped, 1.000 snapped. The preview and a zoomed
-photo are never 1:1, so they are left alone.
+original's Laplacian energy unsnapped, 1.000 snapped. A zoomed photo snaps the
+same way at its own native height; the preview is never 1:1, so it is left
+alone.
 
 #### The photo always covers the sheet
 
@@ -338,9 +340,12 @@ the print.
 Remove and Replace do not delete a photo's bytes: Undo can bring the old photo
 back and must find it there. Once per launch a sweep deletes the stored photos
 the saved document does not reference — history does not outlive the page, so
-nothing else can — but only those imported more than a day ago, so an import
-landing mid-sweep, or another tab's not yet saved, is never taken. Storage is
-bounded by a day's worth of replaced photos.
+after a relaunch nothing else can — but only those imported more than a day
+ago, so an import landing mid-sweep, or another tab's not yet saved, is never
+taken. Storage is bounded by a day's worth of replaced photos. One gap is
+left: a second tab kept open for over a day can hold an undo step back to a
+photo the sweep has since taken; undoing to it shows "This photo could not be
+loaded" rather than printing bare paper.
 
 ### Backing, and why it knocks out
 
@@ -650,9 +655,9 @@ Riso ink with an optional second ink or backing over the photo; the press
 (halftone or grain, screen size, ink, misregistration, Edge, Wear, Re-roll,
 stock); an imported photo as the printing ground (stored exactly as imported,
 shown as shot, on its own Original sheet or a 1:1, 4:5, 3:4 or 2:3 crop,
-zoomed and panned within the sheet, paper over it or not); undo/redo, persistence that
-opens every older save, and save via the share sheet. Four tabs: Type, Ink,
-Photo, Press.
+zoomed and panned within the sheet, paper over it or not); undo/redo,
+persistence that opens every older save, and save via the share sheet. Four
+tabs: Type, Ink, Photo, Press.
 
 Photos only — **video is not in yet**. A JPEG cannot hold one, so it needs a
 decision about what Save produces, and `MediaRecorder` on iOS Safari is limited

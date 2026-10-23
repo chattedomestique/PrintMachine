@@ -43,7 +43,7 @@ export const NO_PHOTO_HEIGHT = 3600
  * sheet reads "100%".
  *
  *  - SIZE_MIN, 0.01 ("10%"): the one floor for the slider, a nudge, a pinch,
- *    the keys, Fit and a typed value. At the 1800 px reference it is an 18 px
+ *    the keys, Fit and a typed value. At the reference height it is an 18 px
  *    em, below which type stops reading. Every size an older build could
  *    store (its floor was 0.015) is above it, so nothing saved moves.
  *  - SIZE_SLIDER_MAX, 0.10 ("100%"): the end of the slider's travel, which is

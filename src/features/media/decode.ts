@@ -9,9 +9,9 @@
  *    pixels nobody sees. Geometry never reads this copy's size — the cover
  *    fit, the pan and the export plan all use the photo's TRUE size from the
  *    document, and the copy is drawn scaled into that same rectangle.
- *  - For Save, the ORIGINAL in full, so the print is pressed from every pixel
- *    the photo has, never from the preview's copy. Closed as soon as the
- *    ground is drawn.
+ *  - For Save, the ORIGINAL in full, so the print is drawn from the original's
+ *    pixels, never from the preview's copy. Closed as soon as the ground is
+ *    drawn.
  *
  * Every decode applies the photo's EXIF orientation, so the size the document
  * stores and every bitmap drawn from it agree on which way up it is.

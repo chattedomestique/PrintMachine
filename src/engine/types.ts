@@ -186,7 +186,7 @@ export const ASPECTS: Record<FixedAspect, number> = {
 
 /** How far from square an Original sheet may go: a photo more extreme than
  *  3:1 (a panorama) is cover-cropped to 3:1, so no sheet is a sliver. */
-export const ORIGINAL_ASPECT_RANGE: readonly [number, number] = [1 / 3, 3]
+const ORIGINAL_ASPECT_RANGE: readonly [number, number] = [1 / 3, 3]
 
 /** The Original sheet's shape when there is no photo to take it from (a
  *  document holds 'original' only with a photo; this is the fallback). */

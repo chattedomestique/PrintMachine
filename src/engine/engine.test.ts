@@ -1021,11 +1021,17 @@ describe('the blit is pixel-exact when the sheet holds the photo at its own pixe
     const exact = coverRect({ width: 4032, height: 3024 }, 4032, 3024, { scale: 1, x: 0.5, y: 0.5 })
     expect(snapRect(exact, 4032, 3024, 4032, 3024)).toEqual(exact)
     expect(exact).toEqual({ dx: 0, dy: 0, dw: 4032, dh: 3024 })
-    // The preview (far from 1:1), and a zoomed export: untouched.
+    // The preview (far from 1:1), and a zoom at a height where it is 1.5x:
+    // untouched.
     const preview = coverRect({ width: 4032, height: 3024 }, 800, 1000, { scale: 1, x: 0.5, y: 0.5 })
     expect(snapRect(preview, 4032, 3024, 800, 1000)).toBe(preview)
     const zoomed = coverRect({ width: 4032, height: 3024 }, 2419, 3024, { scale: 1.5, x: 0.5, y: 0.5 })
     expect(snapRect(zoomed, 4032, 3024, 2419, 3024)).toBe(zoomed)
+    // At the zoom's own native height (the plan's 1613x2016) it is 1:1, and
+    // snaps like any other.
+    const zoomedNative = coverRect({ width: 4032, height: 3024 }, 1613, 2016, { scale: 1.5, x: 0.5, y: 0.5 })
+    expect(zoomedNative.dx).toBeCloseTo(-1209.5, 9)
+    expect(snapRect(zoomedNative, 4032, 3024, 1613, 2016)).toEqual({ dx: -1209, dy: -504, dw: 4032, dh: 3024 })
     // A photo a pixel narrower than the sheet: snapped to its own size it
     // would leave a bare column, so the blit keeps its (enlarged) rect.
     const narrow = coverRect({ width: 1000, height: 2000 }, 1001, 1000, { scale: 1, x: 0.5, y: 0.5 })

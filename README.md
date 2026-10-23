@@ -622,6 +622,9 @@ output pixel.
   canvas, instead of a full-size copy being put at the end; the knockout
   takes the photo's alpha down as each pixel is printed, instead of on a copy
   of the photo; a glyph raster's alpha is read a band at a time.
+- **Let go as soon as done.** Once the plates are pressed the workspace, the
+  ground's luminance and the switch mask are dropped, and an export's glyph
+  canvas is emptied (its width set to 0), before the print and the encode.
 
 ### The same print at every size
 

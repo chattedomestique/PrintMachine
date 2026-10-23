@@ -357,6 +357,9 @@ export function makeWorkspace(n: number): Workspace {
   return { rough: new Float32Array(n), work: new Float32Array(n), scratch: new Float32Array(n) }
 }
 
+/** No workspace: what a render holds once its plates are pressed. */
+const RELEASED: Workspace = makeWorkspace(0)
+
 /** A plate after the press, and what a knockout under it has to match. */
 export interface PressedPlate {
   /** Screened coverage in bytes, 0..255: a quarter of a float field, held for
@@ -587,6 +590,8 @@ export function* printSheetSteps(
   noise: SheetNoise,
   w: number,
   h: number,
+  /** Called once every plate is pressed, before the sheet is printed. */
+  onPressed?: () => void,
 ): Generator<RenderProgress, CompositeLayer[]> {
   // Plate order is print order: a plate's backing goes down before its type,
   // so the type overprints the block into a third colour — what a real second
@@ -614,8 +619,9 @@ export function* printSheetSteps(
   let knockout: Uint8ClampedArray | undefined
   const knock = () => (knockout ??= new Uint8ClampedArray(w * h))
 
-  // One set of working buffers for every plate (see Workspace).
-  const ws = makeWorkspace(w * h)
+  // One set of working buffers for every plate (see Workspace). Let go, with
+  // everything else only the plates needed, before the sheet is printed.
+  let ws = makeWorkspace(w * h)
 
   for (const layer of s.layers) {
     // A plate takes a backing OR a second ink, never both, and that is held
@@ -716,6 +722,14 @@ export function* printSheetSteps(
       plates.push({ coverage, rgb: inkById(layer.inkId).rgb })
     }
   }
+
+  // Pressed: the working buffers, the ground's luminance and the switch mask
+  // are let go (a suspended generator would otherwise hold them through the
+  // print), and the caller may let go of whatever it pressed with.
+  ws = RELEASED
+  groundLum = undefined
+  light = undefined
+  onPressed?.()
 
   // The photo is the ground, so knocking out means taking its alpha down and
   // letting the paper underneath come back through. That alpha path is also
@@ -918,6 +932,14 @@ function* renderSteps(
     noise,
     w,
     h,
+    // An export's glyph canvas is done once the plates are: let it go before
+    // the print and the encode (4 bytes a pixel). The preview keeps its own
+    // for the next frame.
+    cache
+      ? undefined
+      : () => {
+          scratch.canvas.width = 0
+        },
   )
 
   if (overlay) drawOverlay(ctx, s, overlay, w, h)

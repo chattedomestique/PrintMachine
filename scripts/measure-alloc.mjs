@@ -10,7 +10,8 @@
  * Save calls) in node, where every typed array is counted: each constructor
  * is wrapped, and at every allocation of a full-sheet-sized buffer a full
  * garbage collection runs and the bytes still live are read back
- * (`process.memoryUsage().arrayBuffers`). A buffer is live while anything can
+ * (`process.memoryUsage().arrayBuffers`); runs agree to about 0.1 B/px. A
+ * buffer is live while anything can
  * still reach it — a local not yet out of scope included, which is how a
  * conservative collector like JavaScriptCore's sees it too. The peak of that,
  * over the output's pixel count, is the gate: <= 35 bytes per pixel for cases
@@ -41,7 +42,7 @@ const GATE = 35
 
 /* ── Accounting ──────────────────────────────────────────────────────── */
 
-const meter = { on: false, base: 0, n: 1, total: 0, peak: 0, phase: 'ground', peaks: { ground: 0, press: 0 }, threshold: 1 }
+const meter = { on: false, base: 0, n: 1, total: 0, peak: 0, phase: 'ground', peaks: { ground: 0, press: 0, print: 0 }, threshold: 1 }
 const live = () => process.memoryUsage().arrayBuffers - meter.base
 function sample() {
   globalThis.gc()
@@ -151,12 +152,16 @@ function fakeContext() {
 /* ── The cases (export-cases.mjs) ───────────────────────────────────── */
 
 const { createServer } = await import('vite')
-const server = await createServer({ root, configFile: false, logLevel: 'error', server: { middlewareMode: true }, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] } })
+const server = await createServer({ root, configFile: false, logLevel: 'error', server: { middlewareMode: true, watch: null }, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] } })
 const load = (p) => server.ssrLoadModule(resolve(root, p))
 const { renderPrintAsync } = await load('src/engine/render.ts')
 const { planPrint } = await load('src/engine/export.ts')
 const { defaultSettings, makeLayer, makeMedia } = await load('src/state/defaults.ts')
 const { contrastPartner } = await load('src/engine/inks.ts')
+// The modules are loaded; the server (its file watcher, its bundler) is shut
+// before anything is counted, so nothing in the background allocates while
+// the export runs.
+await server.close()
 track()
 
 const CASES = exportCases({ defaultSettings, makeLayer, makeMedia, contrastPartner })
@@ -176,30 +181,41 @@ for (const c of CASES.filter((k) => only.length === 0 || only.includes(k.id))) {
 
   globalThis.gc()
   meter.base = process.memoryUsage().arrayBuffers
-  Object.assign(meter, { on: true, n, total: 0, peak: 0, phase: 'ground', peaks: { ground: 0, press: 0 }, threshold: Math.floor(n / 4) })
+  Object.assign(meter, { on: true, n, total: 0, peak: 0, phase: 'ground', peaks: { ground: 0, press: 0, print: 0 }, threshold: Math.floor(n / 4) })
   const t0 = performance.now()
   await renderPrintAsync(out, scratch, s, plan.height, photo, {
     onGround: () => {
       sample()
       meter.phase = 'press'
     },
+    onProgress: (p) => {
+      if (p.step === 'print' && meter.phase !== 'print') {
+        sample()
+        meter.phase = 'print'
+      }
+    },
   })
   const ms = performance.now() - t0
   sample()
   meter.on = false
 
-  const canvases = 8 // the export's two canvases, 4 B/px each
+  // The export's two canvases, 4 B/px each, until the plates are pressed;
+  // then the glyph canvas is let go (its width set to 0) and only the output
+  // canvas is left for the print and the encode.
+  const released = scratch.canvas.width === 0
   const decode = photoBytes / n
-  const groundPhase = meter.peaks.ground / n + canvases + decode
-  const pressPhase = meter.peaks.press / n + canvases
+  const groundPhase = meter.peaks.ground / n + 8 + decode
+  const pressPhase = meter.peaks.press / n + 8
+  const printPhase = meter.peaks.print / n + (released ? 4 : 8)
   const peak = meter.peak / n
   const over = c.gated && peak > GATE
   if (over) failed = true
   console.log(`case ${c.id}: ${c.name}`)
   console.log(`  ${plan.width}x${plan.height} (${(n / 1e6).toFixed(1)} MP), ${s.layers.length} plates, ${ms.toFixed(0)} ms in node`)
   console.log(`  typed arrays: peak ${fmt(peak)} B/px (${(meter.peak / 1e6).toFixed(0)} MB)${c.gated ? (over ? `  OVER the ${GATE} B/px gate` : '  ok') : '  (recorded)'}; allocated in all ${fmt(meter.total / n)} B/px`)
-  console.log(`  with the canvases (8 B/px) and the decoded photo (${fmt(decode)} B/px, until it is in the ground):`)
-  console.log(`    laying the photo down ${fmt(groundPhase)} B/px, pressing ${fmt(pressPhase)} B/px: peak ${fmt(Math.max(groundPhase, pressPhase))} B/px (${((Math.max(groundPhase, pressPhase) * n) / 1e6).toFixed(0)} MB)\n`)
+  const total = Math.max(groundPhase, pressPhase, printPhase)
+  console.log(`  typed arrays by phase: laying the photo down ${fmt(meter.peaks.ground / n)}, pressing ${fmt(meter.peaks.press / n)}, printing ${fmt(meter.peaks.print / n)} B/px`)
+  console.log(`  with the canvases (8 B/px; 4 once ${released ? 'the glyph canvas is let go, before the print' : 'pressed — NOT let go'}) and the decoded photo (${fmt(decode)} B/px, until it is in the ground):`)
+  console.log(`    laying the photo down ${fmt(groundPhase)}, pressing ${fmt(pressPhase)}, printing ${fmt(printPhase)} B/px: peak ${fmt(total)} B/px (${((total * n) / 1e6).toFixed(0)} MB)\n`)
 }
-await server.close()
 process.exit(failed ? 1 : 0)

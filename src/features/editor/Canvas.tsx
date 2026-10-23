@@ -125,9 +125,9 @@ export default function Canvas({
         ArrowRight: () => ({ x: clamp(layer.x + move, -0.3, 1.3) }),
         ArrowUp: () => ({ y: clamp(layer.y - move, -0.3, 1.3) }),
         ArrowDown: () => ({ y: clamp(layer.y + move, -0.3, 1.3) }),
-        '+': () => ({ size: clamp(layer.size * (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE), fitWidth: false }),
-        '=': () => ({ size: clamp(layer.size * (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE), fitWidth: false }),
-        '-': () => ({ size: clamp(layer.size / (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE), fitWidth: false }),
+        '+': () => ({ size: clamp(layer.size * (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE) }),
+        '=': () => ({ size: clamp(layer.size * (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE) }),
+        '-': () => ({ size: clamp(layer.size / (big ? 1.2 : 1.05), MIN_SIZE, MAX_SIZE) }),
         '[': () => ({ rotation: clamp(layer.rotation - (big ? 15 : 1), -180, 180) }),
         ']': () => ({ rotation: clamp(layer.rotation + (big ? 15 : 1), -180, 180) }),
       }

@@ -39,14 +39,6 @@ export interface MediaLayer {
   y: number
 }
 
-export type JustifyBy = 'words' | 'letters'
-
-/** Which edge a line with no spaces sits against inside a justified block.
- *  Such a line has no word gap to open, and pulling its letters apart to reach
- *  the measure tears the word in half — so it keeps its natural spacing and
- *  parks at one edge instead. */
-export type SoloAlign = 'left' | 'right'
-
 /** Screening method. A duplicator's RIP does one or the other, not both. */
 export type ScreenMethod = 'halftone' | 'dither' | 'woodcut' | 'scribble'
 
@@ -62,7 +54,6 @@ export const FONTS: readonly FontChoice[] = [
   { id: 'grotesk', name: 'Grotesk', stack: `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` },
   { id: 'serif', name: 'Serif', stack: `ui-serif, 'New York', Georgia, 'Times New Roman', serif` },
   { id: 'mono', name: 'Mono', stack: `ui-monospace, SFMono-Regular, Menlo, 'Courier New', monospace` },
-  { id: 'rounded', name: 'Rounded', stack: `ui-rounded, 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', system-ui, sans-serif` },
   { id: 'poster', name: 'Poster', stack: `Impact, Haettenschweiler, 'Arial Narrow Bold', 'Helvetica Neue', sans-serif` },
 ]
 
@@ -92,28 +83,16 @@ export interface TextLayer {
   /** Ink id from inks.ts. */
   inkId: string
   fontId: string
-  /** CSS font-weight, 100–900. Ignored by fonts with a single weight. */
-  weight: number
-  /** Type size as a fraction of the canvas height. */
+  /** Bold (weight 700) or regular (400). The weight decision that matters on a
+   *  photo: heavier strokes survive the screen, the tear and the bleed. */
+  bold: boolean
+  /** Type size as a fraction of the canvas height. The size that prints: the
+   *  Fit action writes one, nothing scales it afterwards. */
   size: number
   /** Multiple of the type size. */
   lineHeight: number
   /** Letter spacing in em — between every character. */
   tracking: number
-  /** Word spacing in em — extra at each space, on top of tracking. */
-  wordSpacing: number
-  /**
-   * A second ink for wherever the photo behind the type is dark.
-   *
-   * Type in one ink over a photograph is unreadable by definition: the photo
-   * runs from paper-white to solid, and no single transparent ink reads
-   * against both ends. So the pass switches ink by what is underneath — a
-   * split fountain driven by the image rather than by position on the sheet —
-   * and knocks the photo back to paper under the second ink, because a
-   * transparent light ink over solid black is still solid black.
-   *
-   * null is off, and the type prints in one ink everywhere.
-   */
   /**
    * Per-word press overrides, keyed by word index.
    *
@@ -136,40 +115,30 @@ export interface TextLayer {
   opaque: boolean
 
   /**
-   * Strike this layer like a typewriter.
+   * A second ink for wherever the photo behind the type is dark.
    *
-   * Not a font and not a filter: the glyphs are placed on a fixed pitch and
-   * each one is struck with the offset belonging to *its own type slug*, so
-   * every `e` on the sheet leans the same way while the force behind each
-   * keystroke varies. null is off.
+   * Type in one ink over a photograph is unreadable by definition: the photo
+   * runs from paper-white to solid, and no single transparent ink reads
+   * against both ends. So the pass switches ink by what is underneath — a
+   * split fountain driven by the image rather than by position on the sheet —
+   * and knocks the photo back to paper under the second ink, because a
+   * transparent light ink over solid black is still solid black.
+   *
+   * null is off, and the type prints in one ink everywhere.
    */
-  typewriter: {
-    /** 0..1. How far out of true the type bars have worn. */
-    wear: number
-    /** 0..1. How unevenly the keys are hit. */
-    strike: number
-    /** 0..1. Ink squeezed to the edge of the stroke by the slug. */
-    impression: number
-    /** 0..1. The fabric ribbon's weave showing in the fill. */
-    ribbon: number
-  } | null
-
   contrastInkId: string | null
   /** Luminance below which the photo counts as dark, 0..1. */
   contrastThreshold: number
 
+  /** Justify stretches every line to the widest: a line with a space by its
+   *  word gaps, a line without one by its letters. */
   align: TextAlign
-  justifyBy: JustifyBy
-  soloAlign: SoloAlign
   /** Anchor position, 0..1 of canvas width/height. */
   x: number
   y: number
   /** Degrees, clockwise. */
   rotation: number
-  caps: boolean
   opacity: number
-  /** Scale the block uniformly so its widest line fills the canvas width. */
-  fitWidth: boolean
 
   /** Background boxes, drawn under the type in plate order. */
   boxes: WordBox[]

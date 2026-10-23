@@ -6,8 +6,7 @@ import type { TextLayer } from '../../engine/types.ts'
 /** Whitespace split — the same rule the engine groups words by, so an index
  *  here means the same word it means on the sheet. */
 function wordsOf(layer: TextLayer): string[] {
-  const raw = layer.caps ? layer.text.toUpperCase() : layer.text
-  return raw.split(/\s+/).filter((t) => t.length > 0)
+  return layer.text.split(/\s+/).filter((t) => t.length > 0)
 }
 
 /**

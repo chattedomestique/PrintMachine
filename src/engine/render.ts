@@ -47,7 +47,6 @@ import { defaultAngle, screenField } from './screen.ts'
 import { scribbleField, woodcutField } from './carve.ts'
 import { bandMask, coverRect, groundLuma, splitInks } from './media.ts'
 import { rasterizeBoxes, rasterizeText } from './text.ts'
-import { ribbonInk } from './typewriter.ts'
 import { ASPECTS, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
@@ -127,19 +126,14 @@ function toneKey(l: TextLayer): string {
   return [
     l.text,
     l.fontId,
-    l.weight,
+    l.bold,
     l.size,
     l.lineHeight,
     l.tracking,
-    l.wordSpacing,
     l.align,
-    l.justifyBy,
-    l.soloAlign,
     l.x,
     l.y,
     l.rotation,
-    l.caps,
-    l.fitWidth,
   ].join('')
 }
 
@@ -529,23 +523,8 @@ export function renderPrint(
       special.size > 0
         ? cachedTone(scratch, layer, cache, w, h, { except: special }, `${layer.id}:base`)
         : cachedTone(scratch, layer, cache, w, h)
-    // The slug's impression and the ribbon's weave happen at the moment of
-    // striking, so they belong to the tone — before the press tears, wears and
-    // screens it, exactly like every other thing that shapes the ink.
-    const struck = layer.typewriter
-      ? {
-          field: ribbonInk(tone.field, w, h, {
-            impression: layer.typewriter.impression,
-            ribbon: layer.typewriter.ribbon,
-            seed: s.seed,
-            scale: h / REFERENCE_HEIGHT,
-          }),
-          fontSize: tone.fontSize,
-        }
-      : tone
-
     const basePlateIndex = plateIndex
-    const coverage = pressPlate(struck, plateIndex, s.press, s.seed, cache, w, h)
+    const coverage = pressPlate(tone, plateIndex, s.press, s.seed, cache, w, h)
     plateIndex++
 
     let gi = 0
@@ -661,7 +640,7 @@ export function renderPrint(
       // to cover the ink's own spread, which is well under a pixel.
       const detail = s.press.detailScaling ? detailFactor(tone.fontSize, h) : 1
       const sheetScale = h / REFERENCE_HEIGHT
-      const cut = roughenEdges(struck.field, w, h, {
+      const cut = roughenEdges(tone.field, w, h, {
         roughness: s.press.roughness,
         scale: s.press.roughScale * sheetScale * detail,
         bleed: s.press.bleed * detail,

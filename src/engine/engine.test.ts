@@ -16,7 +16,7 @@ import { contrastPartner, inkById, overprint, paperById, RISO_INKS } from './ink
 import { paperField } from './paper.ts'
 import { mulberry32, valueNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
-import { alignOffset, justifyOffsets, layoutText, wordsOf } from './text.ts'
+import { FIT_WIDTH, alignOffset, fitSize, justifyOffsets, layoutText, wordsOf, type FontMeasure } from './text.ts'
 import {
   DRAFT_HEIGHT,
   PREVIEW_HEIGHT,
@@ -36,13 +36,13 @@ import {
   splitInks,
 } from './media.ts'
 import { scribbleField, woodcutField } from './carve.ts'
-import { ribbonInk, strikeFor } from './typewriter.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
+import { SIZE_MAX, SIZE_MIN } from './limits.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
-import { ASPECTS, type PrintSettings, type TextLayer } from './types.ts'
+import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'
 
 const W = 24
 const H = 24
@@ -287,57 +287,19 @@ describe('rng', () => {
 })
 
 describe('text layout', () => {
-  const layer = (over: Partial<TextLayer> = {}): TextLayer => ({
-    id: 't',
-    text: 'AB\nCDEF',
-    inkId: 'black',
-    fontId: 'grotesk',
-    weight: 700,
-    size: 0.1,
-    lineHeight: 1,
-    tracking: 0,
-    wordSpacing: 0,
-    align: 'left',
-    wordPress: {},
-    opaque: false,
-    typewriter: null,
-    contrastInkId: null,
-    contrastThreshold: 0.5,
-    justifyBy: 'letters',
-    soloAlign: 'left',
-    x: 0.5,
-    y: 0.5,
-    rotation: 0,
-    caps: false,
-    opacity: 1,
-    fitWidth: false,
-    boxes: [],
-    boxPadding: 0.12,
-    boxRadius: 0,
-    ...over,
-  })
+  const layer = (over: Partial<TextLayer> = {}): TextLayer =>
+    makeLayer({ text: 'AB\nCDEF', fontId: 'grotesk', size: 0.1, lineHeight: 1, tracking: 0, align: 'left', ...over })
 
   // A stand-in for the browser: every glyph is exactly half the font size wide.
   const measure = (text: string, size: number) => text.length * size * 0.5
 
-  it('scales the block so its widest line fills the target width', () => {
-    const out = layoutText(layer({ fitWidth: true }), 1000, 600, measure)
-    expect(out.widest).toBeCloseTo(600, 5)
-  })
-
-  it('scales tracking with the type, so fitting does not change the letterfit', () => {
-    const plain = layoutText(layer({ tracking: 0.1 }), 1000, 600, measure)
-    const fitted = layoutText(layer({ tracking: 0.1, fitWidth: true }), 1000, 600, measure)
-    expect(fitted.tracking / fitted.fontSize).toBeCloseTo(plain.tracking / plain.fontSize, 6)
-  })
-
-  it('uppercases before measuring when caps is on', () => {
-    const out = layoutText(layer({ text: 'ab', caps: true }), 1000, 600, measure)
-    expect(out.lines[0].text).toBe('AB')
+  it('sets the text exactly as typed — no case transform', () => {
+    const out = layoutText(layer({ text: 'ab' }), 1000, measure)
+    expect(out.lines[0].text).toBe('ab')
   })
 
   it('counts blank lines in the block height so stanza spacing survives', () => {
-    const out = layoutText(layer({ text: 'A\n\nB' }), 1000, 600, measure)
+    const out = layoutText(layer({ text: 'A\n\nB' }), 1000, measure)
     expect(out.lines).toHaveLength(3)
     expect(out.blockHeight).toBeCloseTo(out.lineHeight * 3, 5)
   })
@@ -346,6 +308,77 @@ describe('text layout', () => {
     expect(alignOffset(40, 100, 'left')).toBe(0)
     expect(alignOffset(40, 100, 'center')).toBe(30)
     expect(alignOffset(40, 100, 'right')).toBe(60)
+  })
+
+  it('lets letter tracking widen the word gaps too, like native letter-spacing', () => {
+    const base = wordsOf(layoutText(layer({ text: 'AA BB CC' }), 1000, measure))
+    const out = wordsOf(layoutText(layer({ text: 'AA BB CC', tracking: 0.2 }), 1000, measure))
+    // Native letter-spacing lands on the space as well, so opening the type up
+    // opens the word gaps with it rather than jamming the words together.
+    expect(out[1].x - out[0].x).toBeGreaterThan(base[1].x - base[0].x)
+  })
+
+  it('measures a line to its ink, not to the trailing tracking gap', () => {
+    // A trailing gap counted in the width pushes a centred line left of centre
+    // and stops a right-aligned one short of the margin.
+    const tight = layoutText(layer({ text: 'AA', tracking: 0 }), 1000, measure)
+    const loose = layoutText(layer({ text: 'AA', tracking: 0.5 }), 1000, measure)
+    expect(loose.lines[0].width - tight.lines[0].width).toBeCloseTo(0.5 * tight.fontSize, 6)
+  })
+})
+
+describe('fitSize — the one-shot Fit action', () => {
+  // The browser stand-in the plan pins: width is 0.55 x size x characters,
+  // read from the face's pixel size, so it is linear in size.
+  const stub: FontMeasure = (font, text) => 0.55 * font.px * [...text].length
+  const layer = (over: Partial<TextLayer> = {}): TextLayer =>
+    makeLayer({ text: 'MACHINE', fontId: 'grotesk', tracking: 0, size: 0.1, ...over })
+  const widest = (l: TextLayer, h: number) =>
+    layoutText(l, h, (text, px) => stub({ stack: '', weight: 400, px }, text)).widest
+
+  it('gives the size the plan pins: MACHINE on 4:5 is 0.92 x 0.8 / (0.55 x 7)', () => {
+    expect(fitSize(layer(), 0.8, stub)).toBeCloseTo((0.92 * 0.8) / (0.55 * 7), 12)
+  })
+
+  it('makes the widest line span 0.92 of the sheet width, to within a pixel', () => {
+    for (const [aspect, text] of [
+      [0.8, 'PRINT\nMACHINE'],
+      [1, 'A LONGER LINE\nSHORT'],
+      [2 / 3, 'riso on a photo'],
+      [0.75, 'x\nwide second line here'],
+    ] as const) {
+      const size = fitSize(layer({ text }), aspect, stub)
+      for (const h of [1000, 1800, 3780]) {
+        expect(Math.abs(widest(layer({ text, size }), h) - FIT_WIDTH * aspect * h)).toBeLessThan(1)
+      }
+    }
+  })
+
+  it('scales tracking with the type, so fitting does not change the letterfit', () => {
+    const tracked = layer({ tracking: 0.1 })
+    const size = fitSize(tracked, 0.8, stub)
+    expect(Math.abs(widest({ ...tracked, size }, 1000) - FIT_WIDTH * 0.8 * 1000)).toBeLessThan(1)
+    // ...and tracking makes the same text fit smaller, never larger.
+    expect(size).toBeLessThan(fitSize(layer(), 0.8, stub))
+  })
+
+  it('clamps at both ends of the size range', () => {
+    expect(fitSize(layer({ text: 'A' }), 1, stub)).toBe(SIZE_MAX)
+    expect(fitSize(layer({ text: 'A'.repeat(400) }), 0.5, stub)).toBe(SIZE_MIN)
+  })
+
+  it('keeps the size when there is nothing to measure', () => {
+    expect(fitSize(layer({ text: '', size: 0.07 }), 0.8, stub)).toBe(0.07)
+  })
+
+  it('measures the face it will draw: bold and the typeface reach the measure', () => {
+    const seen: string[] = []
+    const spy: FontMeasure = (font, text) => {
+      seen.push(`${font.weight}|${font.stack.slice(0, 8)}`)
+      return stub(font, text)
+    }
+    fitSize(layer({ bold: true, fontId: 'serif' }), 0.8, spy)
+    expect(new Set(seen)).toEqual(new Set([`700|${FONTS.find((f) => f.id === 'serif')!.stack.slice(0, 8)}`]))
   })
 })
 
@@ -620,45 +653,18 @@ describe('word layout', () => {
   // predictable and the assertions can be about arithmetic, not fonts.
   const measure = (text: string, size: number) => text.length * size * 0.5
 
-  const layer = (over: Partial<TextLayer> = {}): TextLayer => ({
-    id: 't',
-    text: 'AA BB\nCC',
-    inkId: 'black',
-    fontId: 'grotesk',
-    weight: 700,
-    size: 0.1,
-    lineHeight: 1,
-    tracking: 0,
-    wordSpacing: 0,
-    align: 'left',
-    wordPress: {},
-    opaque: false,
-    typewriter: null,
-    contrastInkId: null,
-    contrastThreshold: 0.5,
-    justifyBy: 'letters',
-    soloAlign: 'left',
-    x: 0.5,
-    y: 0.5,
-    rotation: 0,
-    caps: false,
-    opacity: 1,
-    fitWidth: false,
-    boxes: [],
-    boxPadding: 0.12,
-    boxRadius: 0,
-    ...over,
-  })
+  const layer = (over: Partial<TextLayer> = {}): TextLayer =>
+    makeLayer({ text: 'AA BB\nCC', fontId: 'grotesk', size: 0.1, lineHeight: 1, tracking: 0, align: 'left', ...over })
 
   it('numbers words continuously across lines', () => {
-    const words = wordsOf(layoutText(layer(), 1000, 600, measure))
+    const words = wordsOf(layoutText(layer(), 1000, measure))
     expect(words.map((w) => w.text)).toEqual(['AA', 'BB', 'CC'])
     expect(words.map((w) => w.index)).toEqual([0, 1, 2])
     expect(words.map((w) => w.line)).toEqual([0, 0, 1])
   })
 
   it('gives each word the span its glyphs actually occupy', () => {
-    const out = layoutText(layer(), 1000, 600, measure)
+    const out = layoutText(layer(), 1000, measure)
     const [aa, bb] = out.lines[0].words
     const glyph = out.fontSize * 0.5
     expect(aa.x).toBeCloseTo(0, 6)
@@ -667,42 +673,13 @@ describe('word layout', () => {
     expect(bb.x).toBeCloseTo(glyph * 3, 6)
   })
 
-  it('word spacing widens the gap without touching the words', () => {
-    const glyph = layoutText(layer(), 1000, 600, measure).fontSize * 0.5
-    const wide = layoutText(layer({ wordSpacing: 1 }), 1000, 600, measure)
-    const [aa, bb] = wide.lines[0].words
-    expect(aa.width).toBeCloseTo(glyph * 2, 6)
-    // One em of extra space lands between the words, and nowhere else.
-    expect(bb.x - (aa.x + aa.width)).toBeCloseTo(glyph + wide.fontSize, 6)
-  })
-
-  it('keeps letter tracking and word spacing independent', () => {
-    const base = layoutText(layer(), 1000, 600, measure)
-    const tracked = layoutText(layer({ tracking: 0.1 }), 1000, 600, measure)
-    const spaced = layoutText(layer({ wordSpacing: 0.5 }), 1000, 600, measure)
-
-    // Tracking stretches the word itself; word spacing does not.
-    expect(tracked.lines[0].words[0].width).toBeGreaterThan(base.lines[0].words[0].width)
-    expect(spaced.lines[0].words[0].width).toBeCloseTo(base.lines[0].words[0].width, 6)
-  })
-
   it('collapses runs of whitespace rather than inventing empty words', () => {
-    const words = wordsOf(layoutText(layer({ text: 'A   B' }), 1000, 600, measure))
+    const words = wordsOf(layoutText(layer({ text: 'A   B' }), 1000, measure))
     expect(words.map((w) => w.text)).toEqual(['A', 'B'])
   })
 
-  it('agrees with a plain whitespace split — the index a box stores', () => {
-    // The selection UI derives its word list by splitting the raw text. If the
-    // engine grouped words differently, a box would highlight one word in the
-    // panel and print behind another.
-    const text = 'ONE TWO\nTHREE  FOUR'
-    const fromEngine = wordsOf(layoutText(layer({ text }), 1000, 600, measure)).map((w) => w.text)
-    const fromSplit = text.split(/\s+/).filter(Boolean)
-    expect(fromEngine).toEqual(fromSplit)
-  })
-
   it('still numbers words correctly when justified', () => {
-    const words = wordsOf(layoutText(layer({ align: 'justify' }), 1000, 600, measure))
+    const words = wordsOf(layoutText(layer({ align: 'justify' }), 1000, measure))
     expect(words.map((w) => w.index)).toEqual([0, 1, 2])
     // Justification moved them, but they are still ordered left to right.
     const line0 = words.filter((w) => w.line === 0)
@@ -710,180 +687,47 @@ describe('word layout', () => {
   })
 })
 
-describe('word tracking', () => {
+describe('justify — one rule per line', () => {
   const measure = (text: string, size: number) => text.length * size * 0.5
+  const layer = (over: Partial<TextLayer> = {}): TextLayer =>
+    makeLayer({ fontId: 'grotesk', size: 0.1, lineHeight: 1, tracking: 0, align: 'justify', ...over })
+  const end = (l: { glyphs: { x: number; width: number }[] }) => {
+    const g = l.glyphs[l.glyphs.length - 1]
+    return g.x + g.width
+  }
+  const intra = (l: { glyphs: { x: number; width: number }[] }, k = 0) =>
+    l.glyphs[k + 1].x - l.glyphs[k].x - l.glyphs[k].width
 
-  const layer = (over: Partial<TextLayer> = {}): TextLayer => ({
-    id: 't',
-    text: 'AA BB CC',
-    inkId: 'black',
-    fontId: 'grotesk',
-    weight: 400,
-    size: 0.1,
-    lineHeight: 1,
-    tracking: 0,
-    wordSpacing: 0,
-    align: 'left',
-    wordPress: {},
-    opaque: false,
-    typewriter: null,
-    contrastInkId: null,
-    contrastThreshold: 0.5,
-    justifyBy: 'letters',
-    soloAlign: 'left',
-    x: 0.5,
-    y: 0.5,
-    rotation: 0,
-    caps: false,
-    opacity: 1,
-    fitWidth: false,
-    boxes: [],
-    boxPadding: 0.1,
-    boxRadius: 0,
-    ...over,
+  it('a line with a space opens only its word gaps: the words keep their shapes', () => {
+    const text = 'AA BB\nCCCCCCCCCC'
+    const justified = layoutText(layer({ text }), 1000, measure).lines[0]
+    const natural = layoutText(layer({ text, align: 'left' }), 1000, measure).lines[0]
+    // Inside a word nothing moved...
+    expect(intra(justified, 0)).toBeCloseTo(intra(natural, 0), 6)
+    expect(intra(justified, 3)).toBeCloseTo(intra(natural, 3), 6)
+    // ...and the gap round the space took all the slack.
+    expect(intra(justified, 1) + intra(justified, 2)).toBeGreaterThan(intra(natural, 1) + intra(natural, 2) + 1)
   })
 
-  it('widens the gaps between words without touching the words', () => {
-    const base = wordsOf(layoutText(layer(), 1000, 600, measure))
-    const out = wordsOf(layoutText(layer({ wordSpacing: 0.5 }), 1000, 600, measure))
-
-    // Every word keeps its own width — word tracking is the gap, not the word.
-    for (let i = 0; i < base.length; i++) expect(out[i].width).toBeCloseTo(base[i].width, 6)
-    // ...and each successive gap has opened up by the same amount.
-    expect(out[1].x - out[0].x).toBeGreaterThan(base[1].x - base[0].x)
-    expect(out[2].x - out[1].x).toBeCloseTo(out[1].x - out[0].x, 6)
-  })
-
-  it('lets letter tracking widen the word gaps too, like native letter-spacing', () => {
-    const base = wordsOf(layoutText(layer(), 1000, 600, measure))
-    const out = wordsOf(layoutText(layer({ tracking: 0.2 }), 1000, 600, measure))
-
-    // Native letter-spacing lands on the space as well, so opening the type up
-    // opens the word gaps with it rather than jamming the words together.
-    expect(out[1].x - out[0].x).toBeGreaterThan(base[1].x - base[0].x)
-  })
-
-  it('keeps word tracking out of the letters under forced justification', () => {
-    // Justification spreads slack across every gap. Measuring that slack from
-    // bare glyph widths throws the placed gaps away and re-spreads them, which
-    // turns word tracking into letter tracking — the words end up no further
-    // apart than the letters, which is the whole point of the control gone.
-    const intra = (l: TextLayer) => {
-      const g = layoutText(l, 1000, 600, measure).lines[0].glyphs
-      return g[1].x - g[0].x - g[0].width
-    }
-    for (const fitWidth of [false, true]) {
-      const base = intra(layer({ text: 'AA BB', align: 'justify', fitWidth }))
-      const wide = intra(layer({ text: 'AA BB', align: 'justify', fitWidth, wordSpacing: 0.8 }))
-      expect(wide).toBeCloseTo(base, 6)
-    }
-  })
-
-  it('still fills the measure when justified with word tracking on', () => {
-    // The gaps must not be preserved by simply refusing to justify.
-    const out = layoutText(
-      layer({ text: 'AA BB\nCCCCCCCC', align: 'justify', wordSpacing: 0.8 }),
-      1000,
-      600,
-      measure,
-    )
-    const [short, long] = out.lines
-    const end = (l: typeof short) => {
-      const g = l.glyphs[l.glyphs.length - 1]
-      return g.x + g.width
-    }
-    expect(end(short)).toBeCloseTo(end(long), 6)
-  })
-
-  it('justifying by words leaves the letters alone entirely', () => {
-    const line = (l: TextLayer) => layoutText(l, 1000, 600, measure).lines[0]
-    // A short line stretched to a long one: all the slack has to go somewhere.
-    const opts = { text: 'AA BB\nCCCCCCCCCC', align: 'justify' as const }
-    const byLetters = line(layer({ ...opts, justifyBy: 'letters' }))
-    const byWords = line(layer({ ...opts, justifyBy: 'words' }))
-    const natural = line(layer({ ...opts, align: 'left' as const }))
-
-    const intra = (l: typeof natural) => l.glyphs[1].x - l.glyphs[0].x - l.glyphs[0].width
-    // Letters mode spreads into the word; words mode does not touch it.
-    expect(intra(byLetters)).toBeGreaterThan(intra(natural) + 1)
-    expect(intra(byWords)).toBeCloseTo(intra(natural), 6)
-  })
-
-  it('justifying by words still reaches the measure', () => {
-    // Leaving the letters alone must not mean leaving the line short.
-    const out = layoutText(
-      layer({ text: 'AA BB\nCCCCCCCCCC', align: 'justify', justifyBy: 'words' }),
-      1000,
-      600,
-      measure,
-    )
-    const end = (l: (typeof out.lines)[number]) => {
-      const g = l.glyphs[l.glyphs.length - 1]
-      return g.x + g.width
-    }
-    expect(end(out.lines[0])).toBeCloseTo(end(out.lines[1]), 6)
-  })
-
-  it('never tears a single-word line apart to reach the measure', () => {
-    // The failure this replaced: "go" on its own line justified to "g" at one
-    // margin and "o" at the other. A word has no word gap to open, so words
-    // mode must leave its letters exactly as set rather than spanning it.
-    const l = (over: Partial<TextLayer>) =>
-      layoutText(
-        layer({ text: 'go\nthe quick brown fox', align: 'justify', justifyBy: 'words', ...over }),
-        1000,
-        600,
-        measure,
-      )
-    const natural = layoutText(
-      layer({ text: 'go', align: 'left' }),
-      1000,
-      600,
-      measure,
-    ).lines[0]
-    const solo = l({}).lines[0]
-    const gap = (line: typeof solo) => line.glyphs[1].x - line.glyphs[0].x - line.glyphs[0].width
-
-    expect(gap(solo)).toBeCloseTo(gap(natural), 6)
-    expect(solo.width).toBeCloseTo(natural.width, 6)
-  })
-
-  it('parks a single-word line against the chosen margin', () => {
-    const l = (soloAlign: 'left' | 'right') =>
-      layoutText(
-        layer({ text: 'go\nthe quick brown fox', align: 'justify', justifyBy: 'words', soloAlign }),
-        1000,
-        600,
-        measure,
-      )
-    const left = l('left')
-    const right = l('right')
-    const block = left.widest
-
-    expect(left.lines[0].glyphs[0].x).toBeCloseTo(0, 6)
-    const last = right.lines[0].glyphs[right.lines[0].glyphs.length - 1]
-    expect(last.x + last.width).toBeCloseTo(block, 6)
-  })
-
-  it('still spreads a lone word in letters mode, where that is the point', () => {
-    const out = layoutText(
-      layer({ text: 'go\nthe quick brown fox', align: 'justify', justifyBy: 'letters' }),
-      1000,
-      600,
-      measure,
-    )
+  it('a line with no space spreads its letters — the solid poster stack', () => {
+    const out = layoutText(layer({ text: 'GO\nTHE QUICK BROWN FOX' }), 1000, measure)
     const solo = out.lines[0]
-    const last = solo.glyphs[solo.glyphs.length - 1]
-    expect(last.x + last.width).toBeCloseTo(out.widest, 6)
+    const natural = layoutText(layer({ text: 'GO', align: 'left' }), 1000, measure).lines[0]
+    expect(intra(solo)).toBeGreaterThan(intra(natural) + 1)
+    expect(end(solo)).toBeCloseTo(out.widest, 6)
   })
 
-  it('measures a line to its ink, not to the trailing tracking gap', () => {
-    // A trailing gap counted in the width pushes a centred line left of centre
-    // and stops a right-aligned one short of the margin.
-    const tight = layoutText(layer({ text: 'AA', tracking: 0 }), 1000, 600, measure)
-    const loose = layoutText(layer({ text: 'AA', tracking: 0.5 }), 1000, 600, measure)
+  it('every line ends at the widest line, whatever it holds', () => {
+    const out = layoutText(layer({ text: 'PRINT\nMACHINE\nA B\nTHE QUICK BROWN FOX\nX' }), 1000, measure)
+    for (const line of out.lines) {
+      // A one-glyph line has no gap to open and stays where it is.
+      if (line.glyphs.length > 1) expect(end(line)).toBeCloseTo(out.widest, 6)
+    }
+  })
 
-    expect(loose.lines[0].width - tight.lines[0].width).toBeCloseTo(0.5 * tight.fontSize, 6)
+  it('the default stack justifies: PRINT and MACHINE both span the block', () => {
+    const out = layoutText(layer({ text: 'PRINT\nMACHINE' }), 1000, measure)
+    expect(end(out.lines[0])).toBeCloseTo(end(out.lines[1]), 6)
   })
 })
 
@@ -1387,13 +1231,8 @@ describe('the two-ink switch is a pattern, not a fade', () => {
 
 describe('per-word press overrides', () => {
   const measure = (t: string, s: number) => t.length * s * 0.5
-  const base = (over: Partial<TextLayer> = {}): TextLayer => ({
-    id: 't', text: 'one two three', inkId: 'black', fontId: 'grotesk', weight: 400,
-    size: 0.1, lineHeight: 1, tracking: 0, wordSpacing: 0, wordPress: {}, typewriter: null,
-    opaque: false,     contrastInkId: null, contrastThreshold: 0.5, align: 'left', justifyBy: 'letters',
-    soloAlign: 'left', x: 0.5, y: 0.5, rotation: 0, caps: false, opacity: 1,
-    fitWidth: false, boxes: [], boxPadding: 0.1, boxRadius: 0, ...over,
-  })
+  const base = (over: Partial<TextLayer> = {}): TextLayer =>
+    makeLayer({ text: 'one two three', fontId: 'grotesk', size: 0.1, lineHeight: 1, tracking: 0, align: 'left', ...over })
 
   it('groups words by their setting, not one plate each', () => {
     // Three words given the same extra bleed went through the press together
@@ -1410,7 +1249,7 @@ describe('per-word press overrides', () => {
   it('word indices match the whitespace split the panel shows', () => {
     // A word overridden by index must be the word tapped, or the wrong word
     // misprints — the same contract the box selection relies on.
-    const words = wordsOf(layoutText(base(), 1000, 600, measure)).map((w) => w.text)
+    const words = wordsOf(layoutText(base(), 1000, measure)).map((w) => w.text)
     expect(words).toEqual(['one', 'two', 'three'])
   })
 })
@@ -1668,112 +1507,6 @@ describe('detail scaling reaches the wear, not just the screen', () => {
         d,
       )
       expect(out.every((v) => v === 0)).toBe(true)
-    }
-  })
-})
-
-describe('typewriter', () => {
-  const opts = { wear: 0.7, strike: 0.6, seed: 42 }
-
-  it('gives the same letter the same slug everywhere it appears', () => {
-    // The load-bearing claim. A typewriter's misalignment belongs to the type
-    // slug, not the keystroke: every `e` is struck by the same worn piece of
-    // metal, so every `e` on the page leans the same way. Randomising this per
-    // keystroke is what makes most typewriter effects read as noise.
-    const first = strikeFor(101, 0, opts)
-    const later = strikeFor(101, 37, opts)
-    expect(later.dx).toBe(first.dx)
-    expect(later.dy).toBe(first.dy)
-    expect(later.rot).toBe(first.rot)
-  })
-
-  it('gives different letters different slugs', () => {
-    const e = strikeFor(101, 0, opts)
-    const o = strikeFor(111, 0, opts)
-    expect([e.dx, e.dy, e.rot]).not.toEqual([o.dx, o.dy, o.rot])
-  })
-
-  it('varies the force per keystroke, not per letter', () => {
-    // The other half: how hard a key was hit belongs to the instance, so the
-    // same letter is darker in one word than the next.
-    const a = strikeFor(101, 0, opts)
-    const b = strikeFor(101, 1, opts)
-    expect(a.density).not.toBe(b.density)
-  })
-
-  it('never strikes harder than the ribbon can give', () => {
-    for (let c = 32; c < 126; c++) {
-      for (let i = 0; i < 40; i++) {
-        const s = strikeFor(c, i, opts)
-        expect(s.density).toBeGreaterThan(0)
-        expect(s.density).toBeLessThanOrEqual(1)
-      }
-    }
-  })
-
-  it('always leaves a letter, however light the strike', () => {
-    // The stencil is cut by a threshold, so a tone under it is not a faint
-    // letter — it is no letter, and whole characters drop out of a word. The
-    // ribbon decides how much ink comes through the hole, never whether the
-    // hole is there, so the faintest possible strike still has to clear where
-    // the tear cuts: 0.5 with no bleed, which is the highest that cut goes.
-    const hardest = { wear: 1, strike: 1, seed: 7 }
-    let faintest = 1
-    for (let c = 32; c < 126; c++) {
-      for (let i = 0; i < 200; i++) faintest = Math.min(faintest, strikeFor(c, i, hardest).density)
-    }
-    expect(faintest).toBeGreaterThan(0.5)
-    // ...and still visibly lighter than a full one, or the control does nothing.
-    expect(faintest).toBeLessThan(0.8)
-  })
-
-  it('lines up perfectly with no wear, and never with some', () => {
-    const clean = strikeFor(101, 0, { wear: 0, strike: 0, seed: 1 })
-    // `=== 0` rather than toBe(0): scaling a negative offset by zero yields -0,
-    // which is numerically zero but fails Object.is against 0.
-    expect(clean.dx === 0).toBe(true)
-    expect(clean.dy === 0).toBe(true)
-    expect(clean.rot === 0).toBe(true)
-    expect(clean.density).toBe(1)
-
-    const worn = strikeFor(101, 0, { wear: 1, strike: 0, seed: 1 })
-    expect(Math.abs(worn.dx) + Math.abs(worn.dy) + Math.abs(worn.rot)).toBeGreaterThan(0)
-  })
-
-  it('moves ink to the edge of a stroke rather than adding any', () => {
-    // The slug squeezes ink outward, so a struck character is darker round its
-    // edge than through its middle. Adding ink instead would just embolden it.
-    const W = 9
-    const H = 9
-    const tone = new Float32Array(W * H)
-    for (let y = 2; y < 7; y++) for (let x = 2; x < 7; x++) tone[y * W + x] = 1
-
-    const out = ribbonInk(tone, W, H, { impression: 1, ribbon: 0, seed: 1, scale: 1 })
-    const centre = out[4 * W + 4]
-    const edge = out[2 * W + 4]
-    expect(edge).toBeGreaterThan(centre)
-    // And it stays inside the shape — no ink outside what was struck.
-    expect(out[0]).toBe(0)
-  })
-
-  it('leaves the tone alone when every effect is off', () => {
-    const tone = new Float32Array(16).fill(0.6)
-    const out = ribbonInk(tone, 4, 4, { impression: 0, ribbon: 0, seed: 1, scale: 1 })
-    expect([...out]).toEqual([...tone])
-  })
-
-  it('types on a fixed escapement, so an i takes a whole cell', () => {
-    // Every character advances the carriage by the same amount whatever its
-    // shape — that even rhythm is half of what reads as typed.
-    const measure = (t: string, s: number) => t.length * s * 0.5
-    const layer = (over: Partial<TextLayer>): TextLayer => ({
-      ...makeLayer({ text: 'illi', fitWidth: false, size: 0.1, tracking: 0, ...over }),
-    })
-    const typed = layoutText(layer({ typewriter: { wear: 0, strike: 0, impression: 0, ribbon: 0 } }), 1000, 600, measure)
-    const g = typed.lines[0].glyphs
-    const step = g[1].x - g[0].x
-    for (let i = 2; i < g.length; i++) {
-      expect(g[i].x - g[i - 1].x).toBeCloseTo(step, 6)
     }
   })
 })

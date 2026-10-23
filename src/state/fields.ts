@@ -29,6 +29,7 @@
 
 import { DITHER_TYPES } from '../engine/dither.ts'
 import { PAPERS, RISO_INKS } from '../engine/inks.ts'
+import { SIZE_MAX, SIZE_MIN } from '../engine/limits.ts'
 import { ASPECTS, FONTS } from '../engine/types.ts'
 import { makeLayer, makeMedia, nextLayerId } from './defaults.ts'
 
@@ -115,45 +116,24 @@ export const boxTemplate = (): Record<string, unknown> => ({
   opacity: 1,
 })
 
-export const TYPEWRITER_FIELDS: readonly Row[] = [
-  { key: 'wear', kind: 'number', min: 0, max: 1 },
-  { key: 'strike', kind: 'number', min: 0, max: 1 },
-  { key: 'impression', kind: 'number', min: 0, max: 1 },
-  { key: 'ribbon', kind: 'number', min: 0, max: 1 },
-]
-
-/** What the Typewriter toggle switches on with. */
-export const typewriterTemplate = (): Record<string, unknown> => ({
-  wear: 0.5,
-  strike: 0.55,
-  impression: 0.4,
-  ribbon: 0.35,
-})
-
 export const LAYER_FIELDS: readonly Row[] = [
   { key: 'id', kind: 'string', nonEmpty: true },
   { key: 'text', kind: 'string' },
   { key: 'inkId', kind: 'enum', values: INK_IDS },
   { key: 'fontId', kind: 'enum', values: FONT_IDS },
-  { key: 'weight', kind: 'number', min: 100, max: 900 },
-  { key: 'size', kind: 'number', min: 0.015, max: 1.2 },
+  { key: 'bold', kind: 'boolean' },
+  { key: 'size', kind: 'number', min: SIZE_MIN, max: SIZE_MAX },
   { key: 'lineHeight', kind: 'number', min: 0.6, max: 2 },
   { key: 'tracking', kind: 'number', min: -0.1, max: 0.4 },
-  { key: 'wordSpacing', kind: 'number', min: -0.2, max: 2 },
   { key: 'wordPress', kind: 'custom', normalize: normalizeWordPress },
   { key: 'opaque', kind: 'boolean' },
-  { key: 'typewriter', kind: 'object', nullable: true, fields: TYPEWRITER_FIELDS, template: typewriterTemplate },
   { key: 'contrastInkId', kind: 'enum', nullable: true, values: INK_IDS },
   { key: 'contrastThreshold', kind: 'number', min: 0.1, max: 0.9 },
   { key: 'align', kind: 'enum', values: ALIGNS },
-  { key: 'justifyBy', kind: 'enum', values: ['words', 'letters'] },
-  { key: 'soloAlign', kind: 'enum', values: ['left', 'right'] },
   { key: 'x', kind: 'number', ...POSITION },
   { key: 'y', kind: 'number', ...POSITION },
   { key: 'rotation', kind: 'number', min: -180, max: 180 },
-  { key: 'caps', kind: 'boolean' },
   { key: 'opacity', kind: 'number', min: 0, max: 1 },
-  { key: 'fitWidth', kind: 'boolean' },
   { key: 'boxes', kind: 'array', fields: BOX_FIELDS, template: boxTemplate, uniqueId: restoredId('box') },
   { key: 'boxPadding', kind: 'number', min: 0, max: 0.6 },
   { key: 'boxRadius', kind: 'number', min: 0, max: 0.8 },

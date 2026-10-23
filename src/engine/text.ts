@@ -7,8 +7,8 @@
  * the export path can pass an offscreen one.
  *
  * Layout is separated from drawing and produces *placed glyphs* — every
- * character's x offset within its line. Letter tracking, word tracking,
- * justification and the background boxes all read those same numbers, which is
+ * character's x offset within its line. Tracking, justification and the
+ * background boxes all read those same numbers, which is
  * the point: a box drawn from one set of positions while the glyphs are drawn
  * from another will drift apart, and it will drift differently at every font
  * size. One layout, one source of truth.
@@ -19,7 +19,7 @@
  * alternative is boxes that don't line up with the words they sit behind.
  */
 
-import { strikeFor } from './typewriter.ts'
+import { SIZE_MAX, SIZE_MIN } from './limits.ts'
 import { fontById, type TextAlign, type TextLayer } from './types.ts'
 
 export interface PlacedGlyph {
@@ -42,7 +42,7 @@ export interface PlacedWord {
 
 export interface LaidOutLine {
   text: string
-  /** Advance width in pixels, tracking and word spacing included. */
+  /** Advance width in pixels, tracking included. */
   width: number
   glyphs: PlacedGlyph[]
   words: PlacedWord[]
@@ -50,12 +50,10 @@ export interface LaidOutLine {
 
 export interface TextLayout {
   lines: LaidOutLine[]
-  /** Font size in pixels, after any fit-to-width scaling. */
+  /** Font size in pixels. */
   fontSize: number
-  /** Letter spacing in pixels, after scaling. */
+  /** Letter spacing in pixels. */
   tracking: number
-  /** Extra space at each word gap, in pixels, after scaling. */
-  wordSpacing: number
   lineHeight: number
   widest: number
   blockHeight: number
@@ -82,21 +80,20 @@ export type FontMeasure = (font: FontSpec, text: string) => number
  *  and anything that measures, so the two can never set different fonts. */
 export const cssFont = (f: FontSpec): string => `${f.weight} ${f.px}px ${f.stack}`
 
+/** The face a layer is set in, at a pixel size: Bold is weight 700, else 400. */
+export function layerFont(layer: TextLayer, px: number): FontSpec {
+  return { stack: fontById(layer.fontId).stack, weight: layer.bold ? 700 : 400, px }
+}
+
 const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t'
 
 /**
- * Place every glyph in a line, and group them into words as it goes.
+ * Place every glyph in a line, and group them into words as it goes, so a
+ * word's span is read off the same positions its glyphs are drawn at.
  *
- * One pass rather than place-then-group, because per-word tracking makes the
- * two inseparable: the advance after a character depends on which word that
- * character belongs to. Grouping afterwards would mean deciding word
- * boundaries twice, and any disagreement between the two puts a word's box in
- * a different place from the word.
- *
- * Advances are the character's own width, plus `tracking` (global) plus that
- * word's own tracking delta, plus `wordSpacing` additionally after a space.
- * Tracking lands on spaces as well as letters, matching native letter-spacing,
- * so opening the type up widens the gaps between words along with it.
+ * Advances are the character's own width plus `tracking`. Tracking lands on
+ * spaces as well as letters, matching native letter-spacing, so opening the
+ * type up widens the gaps between words along with it.
  */
 function placeLine(
   text: string,
@@ -104,10 +101,7 @@ function placeLine(
   startWordIndex: number,
   fontSize: number,
   tracking: number,
-  wordSpacing: number,
   measure: MeasureFn,
-  /** Fixed escapement, in px. 0 for proportional. */
-  pitch = 0,
 ): { glyphs: PlacedGlyph[]; words: PlacedWord[]; width: number; nextWordIndex: number } {
   const glyphs: PlacedGlyph[] = []
   const words: PlacedWord[] = []
@@ -139,19 +133,15 @@ function placeLine(
   }
 
   for (const ch of text) {
-    // A typewriter has one escapement: every character advances the carriage
-    // by the same amount whatever its shape, which is why an `i` sits alone in
-    // its cell. Measured from a wide glyph so nothing collides.
-    const width = pitch > 0 ? pitch : measure(ch, fontSize)
+    const width = measure(ch, fontSize)
     const glyph = { ch, x: pen, width }
     glyphs.push(glyph)
 
     if (isSpace(ch)) {
       closeWord()
       // Tracking lands on the space too, the way native letter-spacing does, so
-      // opening the type up widens the word gaps with it. Word tracking is the
-      // extra on top, for when the gaps should move independently.
-      pen += width + tracking + wordSpacing
+      // opening the type up widens the word gaps with it.
+      pen += width + tracking
     } else {
       run.push(glyph)
       ink = pen + width
@@ -164,52 +154,26 @@ function placeLine(
 }
 
 /**
- * Lay out a text block.
+ * Lay out a text block. Lines break only where the text breaks them, and the
+ * text is set exactly as typed — no case transform, no fitting: the stored size
+ * is the size that prints (the Fit action writes one, see `fitSize`).
  *
- * @param measure  returns the natural advance width of `text` at `fontSize`,
- *                 excluding tracking. Injected so this stays pure.
- * @param maxWidth the width to fit into when `layer.fitWidth` is set.
+ * @param measure returns the natural advance width of `text` at `fontSize`,
+ *                excluding tracking. Injected so this stays pure.
  */
-export function layoutText(
-  layer: TextLayer,
-  canvasHeight: number,
-  maxWidth: number,
-  measure: MeasureFn,
-): TextLayout {
-  const raw = layer.caps ? layer.text.toUpperCase() : layer.text
-  const source = raw.split('\n')
+export function layoutText(layer: TextLayer, canvasHeight: number, measure: MeasureFn): TextLayout {
+  const source = layer.text.split('\n')
 
-  let fontSize = Math.max(1, layer.size * canvasHeight)
-  // 10 characters to the inch against a 6-line inch is close to pica, and
-  // measuring from `M` keeps the cell wide enough for every glyph in the face.
-  let pitch = layer.typewriter ? measure('M', fontSize) * 1.02 : 0
-  let tracking = layer.tracking * fontSize
-  let wordSpacing = layer.wordSpacing * fontSize
+  const fontSize = Math.max(1, layer.size * canvasHeight)
+  const tracking = layer.tracking * fontSize
 
-  const placeAll = () => {
-    let next = 0
-    return source.map((text, i) => {
-      const out = placeLine(text, i, next, fontSize, tracking, wordSpacing, measure, pitch)
-      next = out.nextWordIndex
-      return out
-    })
-  }
-
-  let placed = placeAll()
-  let widest = placed.reduce((m, p) => Math.max(m, p.width), 0)
-
-  if (layer.fitWidth && widest > 0 && maxWidth > 0) {
-    const scale = maxWidth / widest
-    fontSize *= scale
-    tracking *= scale
-    wordSpacing *= scale
-    pitch *= scale
-    // Re-place rather than scaling the offsets: glyph advances are not exactly
-    // linear in font size once hinting is involved, and a box positioned from
-    // scaled offsets would sit slightly off the re-measured glyphs.
-    placed = placeAll()
-    widest = placed.reduce((m, p) => Math.max(m, p.width), 0)
-  }
+  let next = 0
+  const placed = source.map((text, i) => {
+    const out = placeLine(text, i, next, fontSize, tracking, measure)
+    next = out.nextWordIndex
+    return out
+  })
+  const widest = placed.reduce((m, p) => Math.max(m, p.width), 0)
 
   // Justification stretches every line to the widest one, so that is the
   // block width for alignment purposes too.
@@ -220,38 +184,22 @@ export function layoutText(
       return { text: source[i], width: p.width, glyphs: p.glyphs, words: p.words }
     }
 
-    // Justification moves glyphs, so the words have to be re-derived from the
-    // moved glyphs rather than kept from the natural placement — otherwise a
-    // box would sit where the word *would* have been.
     // Feed the natural gaps through so justification adds to them rather than
-    // replacing them: a word gap stays wider than a letter gap by exactly the
-    // word tracking, and only the leftover slack is shared out.
+    // replacing them: a word gap stays wider than a letter gap, and only the
+    // leftover slack is shared out.
     const naturalGaps = p.glyphs
       .slice(0, -1)
       .map((g, k) => p.glyphs[k + 1].x - g.x - g.width)
-    // Justifying by words means the slack lands beside the spaces: a gap counts
-    // if either glyph touching it is one, so the space itself grows on both
-    // sides and the words stay as tight as they were set.
-    const absorb =
-      layer.justifyBy === 'words'
-        ? p.glyphs.slice(0, -1).map((g, k) => isSpace(g.ch) || isSpace(p.glyphs[k + 1].ch))
-        : []
-
-    // A line with no space has no word gap to open. Stretching it anyway means
-    // pulling its letters apart to span the measure, which tears the word in
-    // half — "go" printing as "g" at one margin and "o" at the other. Nothing
-    // is worth that, so the line keeps its natural spacing and parks against
-    // an edge instead.
-    if (layer.justifyBy === 'words' && !absorb.some(Boolean)) {
-      const shift = layer.soloAlign === 'right' ? target - p.width : 0
-      const glyphs = p.glyphs.map((g) => ({ ...g, x: g.x + shift }))
-      return {
-        text: source[i],
-        width: p.width,
-        glyphs,
-        words: p.words.map((wd) => ({ ...wd, x: wd.x + shift })),
-      }
-    }
+    // One rule per line, no setting. A line with a space justifies by its word
+    // gaps: the slack lands beside the spaces (a gap counts if either glyph
+    // touching it is one), so the words stay exactly as set — never
+    // `S L O W  D O W N`. A line with no space has no word gap to open, so it
+    // spreads its letters — the solid poster stack. `absorb` empty means
+    // every gap takes a share.
+    const hasSpace = p.glyphs.some((g) => isSpace(g.ch))
+    const absorb = hasSpace
+      ? p.glyphs.slice(0, -1).map((g, k) => isSpace(g.ch) || isSpace(p.glyphs[k + 1].ch))
+      : []
 
     const xs = justifyOffsets(
       p.glyphs.map((g) => g.width),
@@ -261,6 +209,9 @@ export function layoutText(
     )
     const glyphs = p.glyphs.map((g, k) => ({ ...g, x: xs[k] }))
 
+    // Justification moved the glyphs, so the words are re-derived from the
+    // moved glyphs rather than kept from the natural placement — otherwise a
+    // box would sit where the word *would* have been.
     const words: PlacedWord[] = []
     let run: PlacedGlyph[] = []
     let w = 0
@@ -293,11 +244,38 @@ export function layoutText(
     lines,
     fontSize,
     tracking,
-    wordSpacing,
     lineHeight,
     widest,
     blockHeight: lineHeight * Math.max(1, lines.length),
   }
+}
+
+/** How much of the sheet's width the Fit action fills: a small margin either
+ *  side, so fitted type does not run into the trim. */
+export const FIT_WIDTH = 0.92
+
+/**
+ * The size at which the layer's widest line spans `FIT_WIDTH` of the sheet's
+ * width — what the Fit action stores. One-shot: it computes a size and the
+ * layer keeps it, so there is one size and one source of truth, and the first
+ * touch of the slider, a pinch or a key starts from what is on the sheet.
+ *
+ * Measured once, at a large reference size, and scaled: width is linear in
+ * size (tracking is in em, so it scales too), and measuring big keeps hinting
+ * error out of the ratio. Clamped to the size range.
+ *
+ * @param aspect the sheet's width over its height, as a NUMBER — never an
+ *               aspect key, so a sheet shape the table does not list cannot
+ *               reach it.
+ * @param measure measures text set in a face, as the renderer will draw it.
+ */
+export function fitSize(layer: TextLayer, aspect: number, measure: FontMeasure): number {
+  const REFERENCE = 1000
+  const layout = layoutText({ ...layer, size: 1 }, REFERENCE, (text, px) =>
+    measure(layerFont(layer, px), text),
+  )
+  const size = layout.widest > 0 ? (FIT_WIDTH * aspect * REFERENCE) / layout.widest : layer.size
+  return Math.min(SIZE_MAX, Math.max(SIZE_MIN, size))
 }
 
 /** Horizontal offset of a line within the block, for a given alignment. */
@@ -329,16 +307,15 @@ export function alignOffset(lineWidth: number, blockWidth: number, align: TextAl
  * arbitrary measure. That is what keeps the extra gap non-negative: pass
  * something narrower than a line's natural width and the gap goes negative,
  * which pulls glyphs on top of each other and swallows the spaces between
- * words. Scale the type to the measure first (fit-to-width), then justify to
- * the widest line — in that order.
+ * words.
  *
  * A single-character line has no gaps to absorb the slack, so it is left where
  * it is instead of being scaled.
  *
  * @param widths per-character glyph widths, in order.
  * @param targetWidth width every line is stretched to — the widest natural line.
- * @param gaps the gap already sitting before each following character (tracking,
- *   and word tracking at spaces). Omitted, every gap starts at zero.
+ * @param gaps the gap already sitting before each following character
+ *   (tracking). Omitted, every gap starts at zero.
  * @returns the x offset for each character, relative to the line start.
  */
 export function justifyOffsets(
@@ -350,14 +327,12 @@ export function justifyOffsets(
   const count = widths.length - 1
   // The slack is measured against the *placed* line, gaps included. Measuring
   // it against bare glyph widths instead throws the existing gaps away and
-  // re-spreads them evenly, which silently converts word tracking into letter
-  // tracking — the words end up no further apart than the letters.
+  // re-spreads them evenly, which silently changes the letterfit the tracking
+  // set.
   const natural =
     widths.reduce((a, b) => a + b, 0) + gaps.slice(0, count).reduce((a, b) => a + b, 0)
-  // Only some gaps may be allowed to grow — the ones beside a space, when
-  // justifying by words. A line with no such gap (one long word) would have
-  // nowhere to put the slack and would not reach the measure, so it falls back
-  // to spreading across everything.
+  // Only some gaps may be allowed to grow — the ones beside a space, on a line
+  // that has one. With none marked, the slack spreads across every gap.
   const eligible: number[] = []
   for (let i = 0; i < count; i++) if (absorb.length === 0 || absorb[i]) eligible.push(i)
   const takers = eligible.length > 0 ? eligible : Array.from({ length: count }, (_, i) => i)
@@ -390,15 +365,9 @@ interface Prepared {
 
 /** Set the font, lay the block out, and place it. Shared by both rasterisers
  *  so glyphs and boxes are positioned by identical arithmetic. */
-function prepare(
-  ctx: CanvasRenderingContext2D,
-  layer: TextLayer,
-  w: number,
-  h: number,
-): Prepared {
-  const font = fontById(layer.fontId)
+function prepare(ctx: CanvasRenderingContext2D, layer: TextLayer, h: number): Prepared {
   const setFont = (size: number) => {
-    ctx.font = cssFont({ stack: font.stack, weight: layer.weight, px: size })
+    ctx.font = cssFont(layerFont(layer, size))
   }
 
   setFont(Math.max(1, layer.size * h))
@@ -407,8 +376,7 @@ function prepare(
     return ctx.measureText(text).width
   }
 
-  // Leave a small margin so fit-to-width type doesn't bleed off the sheet.
-  const layout = layoutText(layer, h, w * 0.92, measure)
+  const layout = layoutText(layer, h, measure)
   setFont(layout.fontSize)
 
   return {
@@ -451,7 +419,7 @@ export function rasterizeText(
   words?: { only: ReadonlySet<number> } | { except: ReadonlySet<number> },
 ): { tone: Float32Array; fontSize: number } {
   ctx.clearRect(0, 0, w, h)
-  const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, w, h)
+  const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, h)
 
   ctx.save()
   transform(ctx, layer, w, h)
@@ -473,60 +441,22 @@ export function rasterizeText(
     return 'only' in words ? words.only.has(index) : !words.except.has(index)
   }
 
-  const tw = layer.typewriter
-  const em = layout.fontSize
-  let struck = 0
-
   layout.lines.forEach((line, i) => {
     const ox = blockLeft + alignOffset(line.width, layout.widest, layer.align)
     const oy = firstBaseline + i * layout.lineHeight
     for (const g of line.glyphs) {
-      if (isSpace(g.ch)) {
-        // Spaces still advance the carriage, so they still count toward where
-        // in the text a strike falls.
-        struck++
-        continue
-      }
+      if (isSpace(g.ch)) continue
       if (words) {
         const word = line.words.find((word) => g.x >= word.x && g.x < word.x + word.width)
-        if (!wanted(word?.index ?? -1)) {
-          struck++
-          continue
-        }
+        if (!wanted(word?.index ?? -1)) continue
       }
-
-      if (!tw) {
-        ctx.fillText(g.ch, ox + g.x, oy)
-        struck++
-        continue
-      }
-
-      // The slug's own offset, plus this keystroke's force. Centred on the
-      // glyph so a rotation pivots about the character rather than swinging it
-      // out of its cell.
-      const s = strikeFor(g.ch.codePointAt(0) ?? 0, struck, {
-        wear: tw.wear,
-        strike: tw.strike,
-        seed: 0x5bf03635,
-      })
-      const cx = ox + g.x + g.width / 2
-      ctx.save()
-      ctx.translate(cx + s.dx * em, oy + s.dy * em)
-      if (s.rot !== 0) ctx.rotate(s.rot)
-
-      const d = Math.max(0, Math.min(1, s.density))
-      ctx.globalAlpha = d
-      ctx.fillText(g.ch, -g.width / 2, 0)
-      ctx.restore()
-      struck++
+      ctx.fillText(g.ch, ox + g.x, oy)
     }
   })
-  ctx.globalAlpha = 1
 
   ctx.restore()
-  // The rendered size is reported back because fit-to-width means the layer's
-  // requested `size` is not what actually landed on the sheet, and the press
-  // scales its detail to the real thing.
+  // The rendered size is reported back so the press can scale its detail to
+  // the type that actually landed on the sheet.
   return { tone: alphaToTone(ctx, w, h), fontSize: layout.fontSize }
 }
 
@@ -550,7 +480,7 @@ export function rasterizeBoxes(
   ctx.clearRect(0, 0, w, h)
   if (words.size === 0) return new Float32Array(w * h)
 
-  const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, w, h)
+  const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, h)
   const pad = layer.boxPadding * layout.fontSize
   const radius = Math.max(0, layer.boxRadius * layout.fontSize)
 

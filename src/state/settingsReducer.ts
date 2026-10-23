@@ -108,7 +108,7 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       const inkId = NEXT_INK.find((i) => !used.has(i)) ?? NEXT_INK[state.layers.length % NEXT_INK.length]
       return {
         ...state,
-        layers: [...state.layers, makeLayer({ text: 'NEW', inkId, size: 0.12, y: 0.3, fitWidth: false })],
+        layers: [...state.layers, makeLayer({ text: 'NEW', inkId, size: 0.12, y: 0.3 })],
       }
     }
 

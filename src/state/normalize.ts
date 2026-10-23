@@ -28,10 +28,10 @@
  */
 
 import { clampPan } from '../engine/media.ts'
-import { ASPECTS, type PrintSettings } from '../engine/types.ts'
-import type { FontMeasure } from '../engine/text.ts'
-import { defaultSettings } from './defaults.ts'
-import { SETTINGS_FIELDS, type Row } from './fields.ts'
+import { ASPECTS, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { fitSize, type FontMeasure } from '../engine/text.ts'
+import { defaultSettings, makeLayer } from './defaults.ts'
+import { LAYER_FIELDS, SETTINGS_FIELDS, type Row } from './fields.ts'
 
 export interface NormalizeEnv {
   /** Measures text as the renderer will draw it. Absent outside a browser. */
@@ -45,10 +45,26 @@ type Conversion = (doc: Doc, env: NormalizeEnv) => void
 
 const finiteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
+/** The stored layers that are objects — the only ones the walk will keep. */
+const layersOf = (doc: Doc): Doc[] => (Array.isArray(doc.layers) ? doc.layers.filter(isPlainObject) : [])
+
+/** The sheet's width over its height, as the walk will resolve the aspect. */
+function sheetAspect(doc: Doc): number {
+  const key = doc.aspect
+  return typeof key === 'string' && Object.hasOwn(ASPECTS, key)
+    ? ASPECTS[key as keyof typeof ASPECTS]
+    : ASPECTS[defaultSettings().aspect]
+}
+
 /**
  * Run in this order. A removed field with a replacement is converted here; a
  * removed field with none (the printed photo's ink, contrast and lift, its
- * opacity, the photo's own press) is simply not in the schema, so it goes.
+ * opacity, the photo's own press, word spacing, justify-by, lines-of-one-word,
+ * the typewriter) is simply not in the schema, so it goes.
+ *
+ * The type conversions are ordered because the last one measures: the fitted
+ * size depends on the text as it will be drawn — its case, its face and its
+ * weight — so those are converted first.
  */
 const CONVERSIONS: readonly Conversion[] = [
   // The paper veil was an amount, 0..1, and is now a switch. More than half
@@ -56,6 +72,49 @@ const CONVERSIONS: readonly Conversion[] = [
   function paperVeil(doc) {
     if ('paperVeil' in doc) return
     doc.paperVeil = (finiteNumber(doc.paperAmount) ? doc.paperAmount : 1) > 0.5
+  },
+
+  // (1) The caps switch drew the text uppercased; now the text is what prints,
+  // so it is uppercased once. Whitespace, and so the word count, is unchanged.
+  function caps(doc) {
+    for (const l of layersOf(doc)) {
+      if (l.caps === true && typeof l.text === 'string') l.text = l.text.toUpperCase()
+      delete l.caps
+    }
+  },
+
+  // (2) Rounded was a fourth sans with no printed character of its own.
+  function rounded(doc) {
+    for (const l of layersOf(doc)) if (l.fontId === 'rounded') l.fontId = 'grotesk'
+  },
+
+  // (3) Nine weights become Bold or not, split where a face turns bold.
+  function weight(doc) {
+    for (const l of layersOf(doc)) {
+      if (finiteNumber(l.weight) && !('bold' in l)) l.bold = l.weight >= 600
+      delete l.weight
+    }
+  },
+
+  // (4) is the schema: word spacing, justify-by, lines-of-one-word and the
+  // typewriter are not in it, so they leave with the walk.
+
+  // (5) LAST. Fit to width was a mode that kept a second, hidden size: layout
+  // scaled the type and never stored the result. It is converted once to the
+  // size that fits, measured on the layer exactly as it will now be drawn, so
+  // a fitted headline opens the size it was. Without a measure (outside a
+  // browser) the stored size stays. One saved size can shrink here: the old fit
+  // was unclamped, so a line whose fit is above SIZE_MAX (in practice a single
+  // glyph on a sheet wider than about 2:3) is stored at SIZE_MAX.
+  function fitWidth(doc, env) {
+    const aspect = sheetAspect(doc)
+    for (const l of layersOf(doc)) {
+      if (l.fitWidth === true && env.measure) {
+        const asDrawn = object(LAYER_FIELDS, l, makeLayer() as unknown as Doc) as unknown as TextLayer
+        l.size = fitSize(asDrawn, aspect, env.measure)
+      }
+      delete l.fitWidth
+    }
   },
 ]
 
@@ -100,7 +159,7 @@ function field(row: Row, raw: unknown, fallback: unknown): unknown {
     case 'object': {
       if (!isPlainObject(raw) || (row.accept && !row.accept(raw))) return invalid
       // A field whose default is an object normalises against that object; one
-      // whose default is null (a photo, a typewriter) against its own template.
+      // whose default is null (the photo) against its own template.
       const template = isPlainObject(fallback) ? fallback : row.template?.()
       if (!template) return invalid
       return object(row.fields ?? [], raw, template)

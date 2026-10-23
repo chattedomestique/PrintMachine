@@ -17,8 +17,7 @@ const pct = (v: number) => `${Math.round(v * 100)}%`
  * would point at different words than the ones highlighted here.
  */
 function wordsOf(layer: TextLayer): string[] {
-  const raw = layer.caps ? layer.text.toUpperCase() : layer.text
-  return raw.split(/\s+/).filter((t) => t.length > 0)
+  return layer.text.split(/\s+/).filter((t) => t.length > 0)
 }
 
 export default function BoxPanel() {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { SIZE_MAX, SIZE_MIN } from '../../engine/limits.ts'
 import type { TextLayer } from '../../engine/types.ts'
 
 /**
@@ -15,8 +16,10 @@ import type { TextLayer } from '../../engine/types.ts'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
-export const MIN_SIZE = 0.015
-export const MAX_SIZE = 1.2
+/** The size range, from engine/limits.ts — re-exported under the names the
+ *  controls already use. */
+export const MIN_SIZE = SIZE_MIN
+export const MAX_SIZE = SIZE_MAX
 
 /** Type's limits: its size range, and a little past the trim so it can bleed
  *  off deliberately without being lost off-screen. Module constants, so the
@@ -145,10 +148,6 @@ export function useLayerGestures(
         const [a, b] = pts
         const spread = Math.hypot(b.x - a.x, b.y - a.y)
         next.size = clamp(g.origin.size * (spread / g.startSpread), sizeRange[0], sizeRange[1])
-        // Scaling by hand is an explicit statement about size, so fit-to-width
-        // has to yield — otherwise the layout immediately overrides the pinch
-        // and the type appears not to respond at all.
-        next.fitWidth = false
 
         const angle = Math.atan2(b.y - a.y, b.x - a.x)
         let delta = ((angle - g.startAngle) * 180) / Math.PI

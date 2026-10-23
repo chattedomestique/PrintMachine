@@ -301,103 +301,58 @@ apart, and drifts differently at every size — so there is one layout, and a
 test asserting the engine's word grouping matches the plain whitespace split
 the selection UI shows you.
 
-### Typewriter
+### Type: one size, set as typed
 
-Not a font and not a filter. Two facts about the machine do almost all the work,
-and they pull in opposite directions:
+The text prints exactly as typed — there is no case switch (the keyboard asks
+iOS for capitals already) and no hidden transform. The size is the size: **Fit**
+is a one-shot action that measures the widest line and stores the size at which
+it spans 92% of the sheet's width. It used to be a mode that scaled the type in
+layout and never stored the result, so the slider, a pinch and the `+`/`-` keys
+all started from a stale size and the first touch jumped. Now there is one size
+and one source of truth; editing the text does not re-fit, tapping Fit again
+does. `fitSize` is pure and takes the sheet's aspect as a number and the text
+measure as an argument, so it is tested in node with a stand-in measure: the
+widest line lands on 92% of the width to within a pixel at every render height.
 
-**The misalignment belongs to the slug, not the keystroke.** Every `e` is struck
-by the same little piece of metal on the same worn arm, so if that arm sits a
-hair low, *every* `e` on the page sits a hair low. Randomising per keypress —
-which is what most typewriter effects do — reads as noise, because noise is what
-it is. Here the offset, the rotation and the horizontal drift are keyed on the
-character code alone, so they repeat everywhere that letter appears. There is a
-test asserting the same letter gets the same slug at position 0 and position 37.
+The weight decision that matters over a photo is regular or bold — heavier
+strokes survive the screen, the tear and the bleed — so it is a **Bold** switch
+(700 or 400). The faces are Poster, Grotesk, Serif and Mono; all four are system
+stacks, so nothing loads and everything works offline.
 
-**The force belongs to the keystroke.** How hard a key was hit is the typist, not
-the machine, so ink density is keyed on position in the text. Same letter, darker
-in one word than the next.
-
-Plus a fixed escapement: every character advances the carriage by the same
-amount whatever its shape, which is why an `i` sits alone in the middle of its
-cell. That even rhythm is half of what reads as typed.
-
-#### Why a weak strike prints hollow
-
-A light strike does not simply lay down less ink. Less of the slug face reaches
-the paper at all, so the raised rim prints and the middle does not — the letter
-comes out as an outline.
-
-That turned out to be the only part of an uneven strike that *survives being
-screened*. At text size a stroke is about one halftone cell across, so the
-screen cannot resolve a difference in darkness within it: two renders at 0.67
-and 1.0 density came out indistinguishable. A difference in **shape** it can
-resolve. So a weak strike fades its fill and draws its own rim back over the
-top, and the variation is visible at any size.
-
-Two numbers needed care, both found by rendering rather than reasoning. Squaring
-the strike draw put nearly every character at full ink and the effect vanished
-entirely. Leaving the density unfloored let the light ones fall through the
-screen and words came out with holes in them — a ribbon that touched the paper
-at all left *something*.
-
-The slug's impression and the ribbon's weave run on the tone, before the press,
-so a typed sheet still tears, wears and misregisters like everything else. The
-impression moves ink to the edge of each stroke rather than adding any; the
-weave is centred on zero so it modulates the fill instead of only subtracting
-from it, which is what quietly erased the lightest strikes on the first attempt.
-
-### Two spacing controls, both global
+### Tracking and line height
 
 **Letter tracking** letterspaces the layer. It lands on spaces as well as
 letters, the way native `letter-spacing` does, so opening the type up widens
 the gaps between words along with it rather than jamming the words together.
 
-**Word tracking** is the extra on the gaps only, for when they should move
-independently of the letters. Words keep their own widths; only the space
-between them changes.
+**Line height** is the leading. A stacked caps headline wants it tight; a
+two-line caption in mixed case needs it open, or its descenders meet the next
+line's ascenders.
 
-Justification has to respect that. It stretches lines by sharing slack across
-the gaps, and measuring that slack from bare glyph widths throws the placed
-gaps away and re-spreads them evenly — which silently converts word tracking
-into letter tracking, leaving words no further apart than letters. So the
-natural gaps are fed through and justification adds to them, keeping a word gap
-wider than a letter gap by exactly the word tracking. There is a test, plus one
-asserting lines still reach the measure, since "preserve the gaps" is also
-satisfied by refusing to justify at all.
+Justification has to respect the tracking. It stretches lines by sharing slack
+across the gaps, and measuring that slack from bare glyph widths throws the
+placed gaps away and re-spreads them evenly. So the natural gaps are fed through
+and justification adds to them.
 
-### Justify by words, or by letters
+### Justify: one rule per line
 
-Filling the measure means putting slack somewhere, and there are two honest
-answers. **Justify by words** puts it beside the spaces: the words themselves
-stay exactly as set and the gaps between them open up. **Justify by letters**
-shares it across every gap, which is the solid rectangular block of type — and
-which necessarily letterspaces a short line.
+Filling the measure means putting slack somewhere, and each line gets the
+honest answer for what it holds, with no setting:
 
-Words is the default, because a short line rendered as `S L O W  D O W N` is
-rarely what anyone wanted. The choice appears under Alignment only while
-justify is selected: it does nothing in any other mode, and putting it directly
-beneath the control that switches it on beats leaving it inert in the panel.
+- **A line with a space** justifies by its word gaps. The slack goes beside the
+  spaces, so the words stay exactly as set — a short line never comes out as
+  `S L O W  D O W N`.
+- **A line without a space** spreads its letters. That is the solid poster
+  stack: `PRINT` over `MACHINE`, both spanning the block.
 
-A line with no spaces — one word on its own line — has no word gap to open.
-Words mode leaves it at its natural width and parks it against a margin, left
-or right by the "Lines of one word" control.
+Every line, the last included, ends at the widest line; a single glyph has no
+gap to open and stays where it is. This replaced two controls (Justify by
+words/letters, and a margin for lines of one word) whose default left the
+default two-line stack unjustified.
 
-The first attempt spread its letters instead, reasoning that a line short of
-the measure reads as a bug. That was worse: `go` printed as `g` at one margin
-and `o` at the other, and `slow` came out as `s l o w` across the full column.
-Tearing a word in half to satisfy a rectangle is never the right trade. Letters
-mode still spreads a lone word, because there the spreading *is* the effect.
-
-Tested: a lone word keeps exactly its natural letter gaps and width, sits at
-whichever margin is chosen, and still spreads under letters mode.
-
-That is the whole model. An earlier version also had *per-word* tracking —
-select individual words from a row of chips, letterspace just those. It was
-removed: it answered a question nobody asked, and the selection UI was clutter
-in a panel that should be sliders. Word-level selection still exists in exactly
-one place, where it earns itself: choosing which words a background box sits
-behind.
+What it gives up: a lone short word inside a block of sentences can no longer
+be parked at a margin; it spreads across the measure. Lines break only where
+you break them, so the way to avoid that is to break the line differently.
 
 ### Small type
 
@@ -571,7 +526,7 @@ same code the preview uses.
 ## Status
 
 Working: multi-plate type, the full press and wear model, forced paragraph
-justification, letter and word tracking, word-selectable background boxes, an
+justification, letter tracking, a one-shot Fit, word-selectable background boxes, an
 imported photo as the printing ground (shown as shot, zoomed and panned within
 the sheet), undo/redo, persistence, and save via the share sheet.
 
@@ -580,14 +535,14 @@ decision about what Save produces, and `MediaRecorder` on iOS Safari is limited
 enough that it would have to be proven on a device rather than assumed.
 
 Lines break where you break them. There is no automatic wrapping yet, so a long
-paragraph typed as one line stays one line and runs off the sheet unless
-fit-to-width is on.
+paragraph typed as one line stays one line and runs off the sheet until you tap
+Fit (or size it down).
 
 **Forced justification** stretches every line — including the last — to the
-width of the widest line in the block, spacing between *characters* rather than
-words. Justifying to an arbitrary measure instead of the widest line is what
-makes the gap go negative and pulls glyphs on top of each other; there is a test
-for that.
+width of the widest line in the block: by its word gaps where it has any, by its
+letters where it has none. Justifying to an arbitrary measure instead of the
+widest line is what makes the gap go negative and pulls glyphs on top of each
+other; there is a test for that.
 
 **Not yet verified on a real device.** The precache manifest demonstrably
 contains the real hashed assets, and the `<a download>` save branch is proven in

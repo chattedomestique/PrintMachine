@@ -46,7 +46,8 @@ So:
 - [ ] Dragging the sheet moves the selected plate; nothing eats the taps
 - [ ] Double-tap re-centres
 - [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac)
-- [ ] Type a long string → fit-to-width keeps it on the sheet
+- [ ] Type a long string → tap Fit → it sits on the sheet, and the next pinch
+      or slider touch starts from that size (no jump)
 - [ ] Drag a press slider → the preview keeps up, and the grain does **not**
       visibly re-randomise
 - [ ] One slider drag is one undo step; adding a plate is its own step

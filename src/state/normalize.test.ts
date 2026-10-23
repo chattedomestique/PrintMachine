@@ -21,14 +21,14 @@ import {
   MEDIA_FIELDS,
   PRESS_FIELDS,
   SETTINGS_FIELDS,
-  TYPEWRITER_FIELDS,
   boxTemplate,
   mediaTemplate,
-  typewriterTemplate,
   type Row,
 } from './fields.ts'
 import { normalizeSettings } from './normalize.ts'
-import type { PrintSettings } from '../engine/types.ts'
+import { fitSize, layoutText, type FontMeasure } from '../engine/text.ts'
+import { SIZE_MAX } from '../engine/limits.ts'
+import { ASPECTS, type PrintSettings } from '../engine/types.ts'
 
 type Doc = Record<string, unknown>
 
@@ -59,7 +59,6 @@ function expectNoExtraKeys(s: PrintSettings) {
   expect(keys(s.press)).toEqual(keys(d.press))
   for (const l of s.layers) {
     expect(keys(l)).toEqual(keys(makeLayer()))
-    if (l.typewriter) expect(keys(l.typewriter)).toEqual(keys(typewriterTemplate()))
     for (const b of l.boxes) expect(keys(b)).toEqual(keys(boxTemplate()))
     for (const over of Object.values(l.wordPress)) {
       for (const k of Object.keys(over)) expect(['bleed', 'offset']).toContain(k)
@@ -76,7 +75,6 @@ describe('the schema matches the model', () => {
     expect(names(PRESS_FIELDS)).toEqual(keys(d.press))
     expect(names(LAYER_FIELDS)).toEqual(keys(makeLayer()))
     expect(names(MEDIA_FIELDS)).toEqual(keys(mediaTemplate()))
-    expect(names(TYPEWRITER_FIELDS)).toEqual(keys(typewriterTemplate()))
     expect(names(BOX_FIELDS)).toEqual(keys(boxTemplate()))
   })
 
@@ -88,14 +86,13 @@ describe('the schema matches the model', () => {
 
 /* ── Every schema row: valid, wrong type, out of range, unknown, null ─────── */
 
-/** A document in which every row is reachable: a photo, a typewriter, a box. */
+/** A document in which every row is reachable: a photo and a box. */
 function reachable(): Doc {
   const d = copy(defaultSettings()) as unknown as Doc
   // Zoomed, so the photo can travel on both axes and a valid position is not
   // pulled back by the cover rule.
   d.media = makeMedia({ id: 'photo', width: 4032, height: 3024, scale: 4 })
   const layers = d.layers as Doc[]
-  layers[0].typewriter = typewriterTemplate()
   layers[0].boxes = [{ id: 'box-1', words: [0], inkId: 'yellow', opacity: 1 }]
   return d
 }
@@ -113,7 +110,6 @@ const LEVELS: { name: string; path: Path; rows: readonly Row[] }[] = [
   { name: 'press', path: ['press'], rows: PRESS_FIELDS },
   { name: 'media', path: ['media'], rows: MEDIA_FIELDS },
   { name: 'layer', path: ['layers', 0], rows: LAYER_FIELDS },
-  { name: 'typewriter', path: ['layers', 0, 'typewriter'], rows: TYPEWRITER_FIELDS },
   { name: 'box', path: ['layers', 0, 'boxes', 0], rows: BOX_FIELDS },
 ]
 
@@ -232,8 +228,6 @@ function defaultsFor(level: string): Doc {
       return mediaTemplate()
     case 'layer':
       return makeLayer() as unknown as Doc
-    case 'typewriter':
-      return typewriterTemplate()
     case 'box':
       return boxTemplate()
   }
@@ -277,18 +271,6 @@ describe('structured fields', () => {
     expect(ids[0]).toBe('same')
     expect(new Set(ids).size).toBe(3)
     for (const id of ids) expect(id.length).toBeGreaterThan(0)
-  })
-
-  it('a typewriter is null, or a whole typewriter', () => {
-    for (const [raw, want] of [
-      [null, null],
-      ['on', null],
-      [{ wear: 2, strike: 'x' }, { ...typewriterTemplate(), wear: 1 }],
-    ] as const) {
-      const doc = reachable()
-      ;(doc.layers as Doc[])[0].typewriter = raw
-      expect(normalizeSettings(doc).layers[0].typewriter).toEqual(want)
-    }
   })
 
   it('per-word overrides keep valid word indices and clamp their deltas', () => {
@@ -361,7 +343,9 @@ describe('legacy documents', () => {
       settings: [],
       press: [],
       media: ['scale', 'x', 'y'],
-      layer: [],
+      // caps uppercases the text, Rounded becomes Grotesk, and a fitted
+      // layer's size is re-measured (only with a measure; none here).
+      layer: ['text', 'fontId', 'size'],
     }
     const levels = (raw: Doc, out: Doc) => [
       { level: 'settings', raw, out, rows: SETTINGS_FIELDS },
@@ -481,6 +465,99 @@ describe('verdict §4.1: what each removed field becomes', () => {
       delete doc.paperVeil
       doc.paperAmount = amount
       expect(normalizeSettings(doc).paperVeil).toBe(veil)
+    }
+  })
+
+  /* ── Type (1.3) ── */
+
+  const stub: FontMeasure = (font, text) => 0.55 * font.px * [...text].length
+  const maxWith = () => normalizeSettings(copy(maximal), { measure: stub })
+  const rawLayers = rawMax.layers as Doc[]
+
+  it('layer.caps: true — the text is uppercased once, whitespace unchanged', () => {
+    expect(rawLayers[0].caps).toBe(true)
+    expect(rawLayers[0].text).toBe('Print\nmachine')
+    expect(max().layers[0].text).toBe('PRINT\nMACHINE')
+    // caps false: the text stays exactly as typed.
+    expect(rawLayers[3].caps).toBe(false)
+    expect(max().layers[3].text).toBe('lowercase words')
+  })
+
+  it('layer.weight: Bold at 600 and above, regular below', () => {
+    expect(rawLayers.map((l) => l.weight)).toEqual([300, 700, 600, 300])
+    expect(max().layers.map((l) => l.bold)).toEqual([false, true, true, false])
+  })
+
+  it("layer.fontId 'rounded': Grotesk; the other faces stay", () => {
+    expect(rawLayers.map((l) => l.fontId)).toEqual(['rounded', 'serif', 'mono', 'rounded'])
+    expect(max().layers.map((l) => l.fontId)).toEqual(['grotesk', 'serif', 'mono', 'grotesk'])
+  })
+
+  it('layer.fitWidth: true — the fitted size, measured once on the converted layer', () => {
+    const s = maxWith()
+    const aspect = ASPECTS[s.aspect]
+    for (const i of [0, 2, 3]) {
+      expect(rawLayers[i].fitWidth).toBe(true)
+      // fitSize of the layer as it now draws: after the case, face and weight
+      // conversions, with nothing of the removed fields.
+      expect(s.layers[i].size).toBeCloseTo(fitSize(s.layers[i], aspect, stub), 9)
+    }
+    // An unfitted layer keeps its size.
+    expect(rawLayers[1].fitWidth).toBe(false)
+    expect(s.layers[1].size).toBe(rawLayers[1].size)
+  })
+
+  it('the conversion order: case, face and weight are converted BEFORE the fit measures', () => {
+    // Layer 4: caps off, lowercase, Rounded, weight 300, word spacing 0.5,
+    // fitted. It converts to lowercase Grotesk regular, and its widest line —
+    // measured through the converted layer — spans 0.92 of the sheet's width.
+    const s = maxWith()
+    const l = s.layers[3]
+    expect([l.text, l.fontId, l.bold]).toEqual(['lowercase words', 'grotesk', false])
+    const h = 1000
+    const w = layoutText(l, h, (text, px) => stub({ stack: '', weight: 400, px }, text)).widest
+    expect(w).toBeCloseTo(0.92 * ASPECTS[s.aspect] * h, 6)
+
+    // A measure that can tell the difference: capitals and bold are wider, and
+    // the Rounded stack measures as nothing at all. If the fit ran before any
+    // of the other conversions it would measure the wrong text or face.
+    const sensitive: FontMeasure = (font, text) => {
+      if (font.stack.startsWith('ui-rounded')) return NaN
+      const k = font.weight === 700 ? 1.1 : 1
+      return font.px * k * [...text].reduce((a, ch) => a + (ch !== ch.toLowerCase() ? 0.7 : 0.5), 0)
+    }
+    const t = normalizeSettings(copy(maximal), { measure: sensitive })
+    const aspect = ASPECTS[t.aspect]
+    // caps first: the fit is of 'PRINT\nMACHINE', not of 'Print\nmachine'.
+    expect(t.layers[0].size).toBeCloseTo(fitSize(t.layers[0], aspect, sensitive), 9)
+    expect(t.layers[0].size).not.toBeCloseTo(fitSize({ ...t.layers[0], text: 'Print\nmachine' }, aspect, sensitive), 3)
+    // weight first: layer 3 (weight 600) is measured bold.
+    expect(t.layers[2].size).toBeCloseTo(fitSize(t.layers[2], aspect, sensitive), 9)
+    expect(t.layers[2].size).not.toBeCloseTo(fitSize({ ...t.layers[2], bold: false }, aspect, sensitive), 3)
+    // face first: layer 4 was Rounded, which this measure cannot measure.
+    expect(Number.isFinite(t.layers[3].size)).toBe(true)
+    expect(t.layers[3].size).toBeCloseTo(fitSize(t.layers[3], aspect, sensitive), 9)
+  })
+
+  it('layer.fitWidth without a measure (not in a browser): the stored size stays', () => {
+    expect(max().layers[0].size).toBe(rawLayers[0].size)
+  })
+
+  it('layer.fitWidth: a fit above SIZE_MAX is stored at SIZE_MAX (the one size that shrinks)', () => {
+    // The old fit was unclamped. One glyph on a square sheet fits at about
+    // 1.67; it is stored at the ceiling and prints smaller than it did.
+    const doc = copy(defaultDoc) as unknown as Doc
+    doc.aspect = '1:1'
+    ;(doc.layers as Doc[])[0] = { ...(doc.layers as Doc[])[0], text: 'A', fitWidth: true }
+    expect(normalizeSettings(doc, { measure: stub }).layers[0].size).toBe(SIZE_MAX)
+  })
+
+  it('layer.typewriter, wordSpacing, justifyBy, soloAlign: dropped', () => {
+    expect(rawLayers[0].typewriter).not.toBeNull()
+    for (const l of maxWith().layers) {
+      for (const k of ['typewriter', 'wordSpacing', 'justifyBy', 'soloAlign', 'caps', 'weight', 'fitWidth']) {
+        expect(l).not.toHaveProperty(k)
+      }
     }
   })
 })

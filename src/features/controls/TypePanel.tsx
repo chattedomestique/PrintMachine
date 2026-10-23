@@ -1,32 +1,18 @@
 import { useId } from 'react'
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
-import {
-  FONTS,
-  type JustifyBy,
-  type SoloAlign,
-  type TextAlign,
-  type TextLayer,
-} from '../../engine/types.ts'
+import { ASPECTS, FONTS, type TextAlign, type TextLayer } from '../../engine/types.ts'
+import { fitSize } from '../../engine/text.ts'
 import { MAX_SIZE, MIN_SIZE } from '../editor/useLayerGestures.ts'
+import { canvasMeasure } from '../../state/persist.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const ALIGNS: readonly { value: TextAlign; label: string }[] = [
   { value: 'left', label: 'Left' },
   { value: 'center', label: 'Centre' },
   { value: 'right', label: 'Right' },
-  // Forced justification: every line, including the last, stretched to fill
-  // the measure by spacing between characters. The solid rectangular block.
+  // Forced justification: every line, including the last, stretched to the
+  // widest — by its word gaps where it has any, by its letters where not.
   { value: 'justify', label: 'Justify' },
-]
-
-const JUSTIFY_BY: readonly { value: JustifyBy; label: string }[] = [
-  { value: 'words', label: 'Words' },
-  { value: 'letters', label: 'Letters' },
-]
-
-const SOLO_ALIGN: readonly { value: SoloAlign; label: string }[] = [
-  { value: 'left', label: 'Left' },
-  { value: 'right', label: 'Right' },
 ]
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -39,6 +25,14 @@ export default function TypePanel() {
 
   const patch = (p: Partial<TextLayer>, coalesce = false) =>
     dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce })
+
+  // One-shot: computes the size at which the widest line spans the sheet and
+  // stores it, so there is only ever one size. Editing the text afterwards
+  // does not re-fit; tapping Fit again does. Its own undo step.
+  const fit = () => {
+    const measure = canvasMeasure()
+    if (measure) patch({ size: fitSize(layer, ASPECTS[settings.aspect], measure) })
+  }
 
   return (
     <div className="control-stack">
@@ -67,30 +61,25 @@ export default function TypePanel() {
         />
       </Field>
 
-      <Slider
-        label="Weight"
-        value={layer.weight}
-        min={100}
-        max={900}
-        step={100}
-        onChange={(weight) => patch({ weight }, true)}
-      />
+      <Toggle label="Bold" checked={layer.bold} onChange={(bold) => patch({ bold })} />
 
-      <Toggle label="Fit to width" checked={layer.fitWidth} onChange={(fitWidth) => patch({ fitWidth })} />
-
-      {/* Always available, never hidden behind fit-to-width — a control that
-          disappears when a toggle flips is a control you cannot find again.
-          Setting a size explicitly is a statement about size, so it releases
-          fit-to-width rather than being silently overridden by it. */}
       <Slider
-        label={layer.fitWidth ? 'Size · fit to width' : 'Size'}
+        label="Size"
         value={layer.size}
         min={MIN_SIZE}
         max={MAX_SIZE}
         step={0.005}
         format={pct}
-        onChange={(size) => patch({ size, fitWidth: false }, true)}
+        onChange={(size) => patch({ size }, true)}
       />
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Fit: size the widest line to the sheet's width"
+        onClick={fit}
+      >
+        Fit
+      </button>
 
       <Slider
         label="Line height"
@@ -113,16 +102,6 @@ export default function TypePanel() {
       />
 
       <Slider
-        label="Word tracking"
-        value={layer.wordSpacing}
-        min={-0.2}
-        max={2}
-        step={0.01}
-        format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}em`}
-        onChange={(wordSpacing) => patch({ wordSpacing }, true)}
-      />
-
-      <Slider
         label="Rotation"
         value={layer.rotation}
         min={-180}
@@ -132,65 +111,6 @@ export default function TypePanel() {
         onChange={(rotation) => patch({ rotation }, true)}
       />
 
-      <Toggle
-        label="Typewriter"
-        checked={layer.typewriter !== null}
-        onChange={(on) =>
-          patch({
-            typewriter: on ? { wear: 0.5, strike: 0.55, impression: 0.4, ribbon: 0.35 } : null,
-          })
-        }
-      />
-      <p className="panel-note">
-        Fixed escapement, and every character struck by its own type slug — so the same
-        letter leans the same way everywhere on the sheet while the force behind each
-        keystroke varies. Randomising per keystroke instead is what makes most typewriter
-        effects read as noise.
-      </p>
-
-      {layer.typewriter && (
-        <>
-          <Slider
-            label="Type bar wear"
-            value={layer.typewriter.wear}
-            min={0}
-            max={1}
-            step={0.01}
-            format={pct}
-            onChange={(wear) => patch({ typewriter: { ...layer.typewriter!, wear } }, true)}
-          />
-          <Slider
-            label="Uneven strike"
-            value={layer.typewriter.strike}
-            min={0}
-            max={1}
-            step={0.01}
-            format={pct}
-            onChange={(strike) => patch({ typewriter: { ...layer.typewriter!, strike } }, true)}
-          />
-          <Slider
-            label="Slug impression"
-            value={layer.typewriter.impression}
-            min={0}
-            max={1}
-            step={0.01}
-            format={pct}
-            onChange={(impression) =>
-              patch({ typewriter: { ...layer.typewriter!, impression } }, true)
-            }
-          />
-          <Slider
-            label="Ribbon weave"
-            value={layer.typewriter.ribbon}
-            min={0}
-            max={1}
-            step={0.01}
-            format={pct}
-            onChange={(ribbon) => patch({ typewriter: { ...layer.typewriter!, ribbon } }, true)}
-          />
-        </>
-      )}
-
       <Field label="Alignment">
         <Segmented
           label="Alignment"
@@ -199,39 +119,6 @@ export default function TypePanel() {
           onChange={(align) => patch({ align })}
         />
       </Field>
-
-      {/* Only meaningful while justifying, and inert otherwise — so it appears
-          directly under the control that switches it on rather than sitting
-          dead in the panel the rest of the time. */}
-      {layer.align === 'justify' && (
-        <Field label="Justify by">
-          <Segmented
-            label="Justify by"
-            value={layer.justifyBy}
-            options={JUSTIFY_BY}
-            onChange={(justifyBy) => patch({ justifyBy })}
-          />
-          <p className="panel-note">
-            Filling the measure needs slack somewhere. Words keeps the words tight and opens
-            the spaces; letters spreads every gap for the solid block.
-          </p>
-        </Field>
-      )}
-
-      {/* A line of one word has no space to open, so words mode leaves it at its
-          natural width — this is which margin it sits against. */}
-      {layer.align === 'justify' && layer.justifyBy === 'words' && (
-        <Field label="Lines of one word">
-          <Segmented
-            label="Lines of one word"
-            value={layer.soloAlign}
-            options={SOLO_ALIGN}
-            onChange={(soloAlign) => patch({ soloAlign })}
-          />
-        </Field>
-      )}
-
-      <Toggle label="Uppercase" checked={layer.caps} onChange={(caps) => patch({ caps })} />
     </div>
   )
 }

@@ -33,13 +33,13 @@
  *    produce that.
  */
 
-import { compositeLayers, type CompositeLayer } from './composite.ts'
+import { compositeLayers, type CompositeLayer, type PaperInput } from './composite.ts'
 import { ditherField } from './dither.ts'
 import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftField, wearToMottle } from './ink.ts'
 import { inkById, paperById } from './inks.ts'
 import { roughenEdges } from './rough.ts'
-import { paperField, type PaperField } from './paper.ts'
-import { fbm2D, type CellNoise } from './rng.ts'
+import { PaperSampler, paperField, type PaperField, type PaperOptions, type PaperSource } from './paper.ts'
+import { FbmSampler, fbm2D, type CellNoise } from './rng.ts'
 import { defaultAngle, screenField, type ScreenOptions } from './screen.ts'
 import { knockoutMask } from './knockout.ts'
 import { bandMask, coverRect, groundLuma, snapRect, splitInks, type DrawRect } from './media.ts'
@@ -137,21 +137,68 @@ export interface OverlaySpec {
 }
 
 /**
- * Cache for the expensive derived fields.
+ * The sheet's noise: the paper's shade, the ink film's mottle and the dropout
+ * speckle. It depends only on the sheet's size, the seed and the stock.
+ *
+ * The preview's cache holds the paper and the mottle as arrays, built once and
+ * reused every frame. An export reads both where they are needed and holds
+ * neither (`sampledNoise`): 8 bytes a pixel it never allocates, on a phone
+ * pressing 11 MP. The numbers are the same to the last bit either way.
+ */
+export interface SheetNoise {
+  paper: PaperSource
+  mottle: Float32Array | FbmSampler
+  /** The dropout's white noise: one value per speck, a speck a pixel at the
+   *  reference height. Read on demand, so it holds no memory. */
+  speckle: CellNoise
+}
+
+/** What the sheet's noise is made from: one place, so the cached arrays and
+ *  the samplers can never be built from different numbers. */
+function noiseRecipe(s: PrintSettings, h: number) {
+  const scale = h / REFERENCE_HEIGHT
+  const paper: PaperOptions = {
+    rgb: paperById(s.paperId).rgb,
+    texture: PAPER_TOOTH,
+    blotch: PAPER_CLOUD,
+    seed: s.seed,
+    scale,
+  }
+  return {
+    paper,
+    // Mottle cell is tied to the sheet, not to a pixel count, so the blotch
+    // scale looks the same at preview and export resolution.
+    mottle: { cell: Math.max(6, h / 90), octaves: 3, seed: s.seed ^ 0x9e3779b9 },
+    // So is the speck: a pixel at the reference height, two at twice it.
+    // (It was one value per PIXEL of a seeded stream, so a larger export
+    // printed finer dust in a different pattern.)
+    speckle: { cell: Math.max(1, scale), seed: s.seed ^ 0x85ebca6b },
+  }
+}
+
+/** The sheet's noise for an export: read where it is printed, held nowhere. */
+export function sampledNoise(s: PrintSettings, w: number, h: number): SheetNoise {
+  const r = noiseRecipe(s, h)
+  return {
+    paper: new PaperSampler(w, h, r.paper),
+    mottle: new FbmSampler(w, r.mottle.cell, r.mottle.octaves, r.mottle.seed),
+    speckle: r.speckle,
+  }
+}
+
+/**
+ * Cache for the expensive derived fields (the preview's).
  *
  * Paper texture and the noise fields depend only on size and seed, so they must
  * not regenerate when an unrelated slider moves — that wastes work and, worse,
  * visibly re-randomises the grain, which reads as a bug (§5.7).
  */
-export interface RenderCache {
+export interface RenderCache extends SheetNoise {
   key: string
   w: number
   h: number
   paper: PaperField
   mottle: Float32Array
-  /** The dropout's white noise: one value per speck, a speck a pixel at the
-   *  reference height. Read on demand, so it holds no memory. */
-  speckle: CellNoise
   /** Rasterised tone per plate, keyed on the properties that affect it.
    *  Dragging a press slider must not re-run getImageData for every plate.
    *  A backing is keyed separately from its glyphs under the same layer id. */
@@ -182,24 +229,14 @@ function toneKey(l: TextLayer): string {
 }
 
 function buildCache(s: PrintSettings, w: number, h: number): RenderCache {
+  const r = noiseRecipe(s, h)
   return {
     key: cacheKey(s, w, h),
     w,
     h,
-    paper: paperField(w, h, {
-      rgb: paperById(s.paperId).rgb,
-      texture: PAPER_TOOTH,
-      blotch: PAPER_CLOUD,
-      seed: s.seed,
-      scale: h / REFERENCE_HEIGHT,
-    }),
-    // Mottle cell is tied to the sheet, not to a pixel count, so the blotch
-    // scale looks the same at preview and export resolution.
-    mottle: fbm2D(w, h, Math.max(6, h / 90), 3, s.seed ^ 0x9e3779b9),
-    // So is the speck: a pixel at the reference height, two at twice it.
-    // (It was one value per PIXEL of a seeded stream, so a larger export
-    // printed finer dust in a different pattern.)
-    speckle: { cell: Math.max(1, h / REFERENCE_HEIGHT), seed: s.seed ^ 0x85ebca6b },
+    paper: paperField(w, h, r.paper),
+    mottle: fbm2D(w, h, r.mottle.cell, r.mottle.octaves, r.mottle.seed),
+    speckle: r.speckle,
     tone: new Map(),
   }
 }
@@ -242,6 +279,8 @@ function cachedBackingTone(
   cache.tone.set(slot, entry)
   return entry
 }
+
+const toneOf = (r: { tone: Float32Array; fontSize: number }) => ({ field: r.tone, fontSize: r.fontSize })
 
 /** Get a valid cache for these settings, rebuilding only when the inputs move. */
 export function ensureCache(
@@ -305,7 +344,7 @@ export function pressPlate(
   index: number,
   s: PressProfile,
   seed: number,
-  cache: RenderCache,
+  noise: SheetNoise,
   w: number,
   h: number,
 ): PressedPlate {
@@ -345,8 +384,8 @@ export function pressPlate(
   // texturing the ink and starts eating the letterform.
   const worn = applyMottle(
     applyDensity(rough, s.density),
-    cache.mottle,
-    cache.speckle,
+    noise.mottle,
+    noise.speckle,
     wear.mottle * detail,
     wear.dropout * detail,
     w,
@@ -460,11 +499,11 @@ export function printSheet(
   s: PrintSettings,
   ground: Uint8ClampedArray | undefined,
   tones: ToneSource,
-  cache: RenderCache,
+  noise: SheetNoise,
   w: number,
   h: number,
 ): CompositeLayer[] {
-  return drain(printSheetSteps(out, s, ground, tones, cache, w, h))
+  return drain(printSheetSteps(out, s, ground, tones, noise, w, h))
 }
 
 /** Run a staged render to the end, synchronously, and hand back its result. */
@@ -486,7 +525,7 @@ export function* printSheetSteps(
   s: PrintSettings,
   ground: Uint8ClampedArray | undefined,
   tones: ToneSource,
-  cache: RenderCache,
+  noise: SheetNoise,
   w: number,
   h: number,
 ): Generator<RenderProgress, CompositeLayer[]> {
@@ -527,7 +566,7 @@ export function* printSheetSteps(
     // vanish.
     if (layer.backing) {
       yield { step: 'press', pass: plateIndex + 1, passes }
-      const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, cache, w, h)
+      const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h)
       plates.push({ coverage: backing.coverage, rgb: inkById(layer.backing).rgb })
       // The block prints on paper: the photo is cut back under its own torn,
       // misregistered outline, so a pale block over a dark photo still reads.
@@ -537,7 +576,7 @@ export function* printSheetSteps(
 
     yield { step: 'press', pass: plateIndex + 1, passes }
     const tone = tones.type(layer)
-    const pressed = pressPlate(tone, plateIndex, s.press, s.seed, cache, w, h)
+    const pressed = pressPlate(tone, plateIndex, s.press, s.seed, noise, w, h)
     plateIndex++
     const coverage = pressed.coverage
 
@@ -627,12 +666,23 @@ export function* printSheetSteps(
     }
   }
 
-  // Printed in bands, so an export can hand the page a moment between them.
-  const paper = base ? { ...cache.paper, base, paperAmount: s.paperVeil ? 1 : 0 } : cache.paper
+  // Printed in bands, so an export can hand the page a moment between them —
+  // and so a sampled paper is only ever a band of shade.
   const band = Math.max(1, Math.floor(PRINT_BAND_PIXELS / w))
+  const sampled = noise.paper instanceof PaperSampler ? noise.paper : null
+  const bandShade = sampled ? new Float32Array(Math.min(h, band) * w) : null
+  const ground_ = base ? { base, paperAmount: s.paperVeil ? 1 : 0 } : {}
   for (let y = 0; y < h; y += band) {
     yield { step: 'print', pass: passes, passes }
-    compositeLayers(out, w, h, paper, plates, y, Math.min(h, y + band))
+    const y1 = Math.min(h, y + band)
+    let paper: PaperInput
+    if (sampled && bandShade) {
+      sampled.rows(y, y1, bandShade)
+      paper = { shade: bandShade, shadeRow0: y, rgb: sampled.rgb, ...ground_ }
+    } else {
+      paper = { ...(noise.paper as PaperField), ...ground_ }
+    }
+    compositeLayers(out, w, h, paper, plates, y, y1)
   }
   return plates
 }
@@ -708,7 +758,7 @@ export async function renderPrintAsync(
   media: CanvasImageSource | null,
   opts: AsyncRenderOptions = {},
 ): Promise<void> {
-  const steps = renderSteps(ctx, scratch, s, { current: null }, null, height, media, opts.onGround)
+  const steps = renderSteps(ctx, scratch, s, null, null, height, media, opts.onGround)
   try {
     for (;;) {
       throwIfAborted(opts.signal)
@@ -730,12 +780,18 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw new DOMException('The save was cancelled.', 'AbortError')
 }
 
-/** Both entry points' one implementation, in stages. */
+/**
+ * Both entry points' one implementation, in stages.
+ *
+ * @param cacheRef the preview's cache, or null for an export: a one-shot render
+ *   keeps nothing for a next frame, so it samples the noise where it prints it
+ *   and drops each plate's glyphs once the plate is pressed.
+ */
 function* renderSteps(
   ctx: CanvasRenderingContext2D,
   scratch: CanvasRenderingContext2D,
   s: PrintSettings,
-  cacheRef: { current: RenderCache | null },
+  cacheRef: { current: RenderCache | null } | null,
   overlay: OverlaySpec | null,
   height: number,
   media: CanvasImageSource | null,
@@ -752,8 +808,9 @@ function* renderSteps(
     scratch.canvas.height = h
   }
 
-  const cache = ensureCache(cacheRef.current, s, w, h)
-  cacheRef.current = cache
+  const cache = cacheRef ? ensureCache(cacheRef.current, s, w, h) : null
+  if (cacheRef) cacheRef.current = cache
+  const noise: SheetNoise = cache ?? sampledNoise(s, w, h)
 
   // The photo is laid down first — before any type is rasterised — because the
   // type needs to know what is underneath it before it can decide what colour
@@ -775,11 +832,16 @@ function* renderSteps(
     image.data,
     s,
     ground,
-    {
-      type: (layer) => cachedTone(scratch, layer, cache, w, h),
-      backing: (layer) => cachedBackingTone(scratch, layer, cache, w, h),
-    },
-    cache,
+    cache
+      ? {
+          type: (layer) => cachedTone(scratch, layer, cache, w, h),
+          backing: (layer) => cachedBackingTone(scratch, layer, cache, w, h),
+        }
+      : {
+          type: (layer) => toneOf(rasterizeText(scratch, layer, w, h)),
+          backing: (layer) => toneOf(rasterizeBacking(scratch, layer, w, h)),
+        },
+    noise,
     w,
     h,
   )

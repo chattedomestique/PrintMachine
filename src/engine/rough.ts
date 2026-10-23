@@ -18,7 +18,7 @@
  */
 
 import { blurField } from './blur.ts'
-import { fbm2D } from './rng.ts'
+import { FbmSampler } from './rng.ts'
 
 export interface RoughOptions {
   /** How far the edge is allowed to wander, 0..1. 0 is a clean vector edge. */
@@ -41,8 +41,8 @@ const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
  * harness's 20% type at 1800 against 3600: 0.9706 floored at a pixel, 0.9713
  * floored at the sheet's scale).
  */
-export function tearField(w: number, h: number, scale: number, seed: number): Float32Array {
-  return fbm2D(w, h, scale * 1.6, 2, seed ^ 0x1b873593)
+export function tearNoise(w: number, scale: number, seed: number): FbmSampler {
+  return new FbmSampler(w, scale * 1.6, 2, seed ^ 0x1b873593)
 }
 
 /**
@@ -78,7 +78,9 @@ export function roughenEdges(
   // averages back toward a smooth edge. Unrounded for the same reason as the
   // radius — a wavelength pinned to a pixel is a different wavelength on every
   // size of sheet.
-  const wander = roughness > 0 ? tearField(w, h, opts.scale, seed) : null
+  // Read only on the edge (0 < soft < 1), the few percent of the sheet the
+  // cut wanders on, rather than laid out over all of it.
+  const wander = roughness > 0 ? tearNoise(w, opts.scale, seed) : null
 
   // Cutting at 0.5 reproduces the original outline. Lowering it keeps more of
   // the blurred skirt, which is precisely ink spread.
@@ -87,19 +89,22 @@ export function roughenEdges(
   const e = 0.06
 
   const out = new Float32Array(w * h)
-  for (let i = 0; i < out.length; i++) {
-    const s = soft[i]
-    // Interior and bare paper are already settled — leave them alone so the
-    // roughening cannot punch holes in the middle of a solid.
-    if (s <= 0) continue
-    if (s >= 1) {
-      out[i] = 1
-      continue
-    }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      const s = soft[i]
+      // Interior and bare paper are already settled — leave them alone so the
+      // roughening cannot punch holes in the middle of a solid.
+      if (s <= 0) continue
+      if (s >= 1) {
+        out[i] = 1
+        continue
+      }
 
-    const cut = wander ? base + (wander[i] - 0.5) * roughness * 0.55 : base
-    const t = (s - (cut - e)) / (2 * e)
-    out[i] = clamp01(t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t))
+      const cut = wander ? base + (wander.at(x, y) - 0.5) * roughness * 0.55 : base
+      const t = (s - (cut - e)) / (2 * e)
+      out[i] = clamp01(t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t))
+    }
   }
 
   return out

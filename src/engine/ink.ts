@@ -8,7 +8,7 @@
  * twice, and the ink never reaches full density no matter how many passes.
  */
 
-import { cellNoiseAt, type CellNoise } from './rng.ts'
+import { cellNoiseAt, type CellNoise, type FbmSampler } from './rng.ts'
 
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
 
@@ -65,7 +65,8 @@ export function applyDensity(tone: Float32Array, density: number): Float32Array 
  * the paper. Both are weighted toward areas that already carry ink, because
  * bare paper has nothing to go wrong with.
  *
- * @param mottle  w*h low-frequency noise in [0,1] (see rng.fbm2D).
+ * @param mottle  w*h low-frequency noise in [0,1] (see rng.fbm2D): the field,
+ *   or a sampler of it (an export holds no field; the values are the same).
  * @param speckle white noise on cells sized to the sheet (rng.CellNoise): a
  *   speck is a pixel at the reference height and grows with the sheet, so dust
  *   is the same size on the print at every resolution. Read where the pixel
@@ -73,7 +74,7 @@ export function applyDensity(tone: Float32Array, density: number): Float32Array 
  */
 export function applyMottle(
   coverage: Float32Array,
-  mottle: Float32Array,
+  mottle: Float32Array | FbmSampler,
   speckle: CellNoise,
   amount: number,
   dropout: number,
@@ -100,6 +101,8 @@ export function applyMottle(
 ): Float32Array {
   const out = new Float32Array(coverage.length)
   const step = detail >= 1 ? 1 : Math.max(1, Math.round(1 / detail))
+  const field = mottle instanceof Float32Array ? mottle : null
+  const sampler = field ? null : (mottle as FbmSampler)
 
   for (let y = 0; y < h; y++) {
     const sy = step === 1 ? y : (y * step) % h
@@ -107,8 +110,8 @@ export function applyMottle(
       const i = y * w + x
       const c = coverage[i]
       if (c <= 0) continue
-      const j = step === 1 ? i : sy * w + ((x * step) % w)
-      const m = 1 + amount * (mottle[j] * 2 - 1)
+      const sx = step === 1 ? x : (x * step) % w
+      const m = 1 + amount * ((field ? field[sy * w + sx] : sampler!.at(sx, sy)) * 2 - 1)
       let v = c * m
       if (dropout > 0 && cellNoiseAt(speckle, x, y) < dropout) v *= 0.15
       out[i] = clamp01(v)

@@ -37,6 +37,10 @@ export interface PaperInput {
   base?: Uint8ClampedArray
   /** 0..1. Ignored without `base`, where the paper is the ground by definition. */
   paperAmount?: number
+  /** The sheet row `shade` starts at: a band's shade is just that band's rows
+   *  (an export samples the paper a band at a time). 0, the whole sheet, by
+   *  default. */
+  shadeRow0?: number
 }
 
 /**
@@ -81,6 +85,8 @@ export function compositeLayers(
   }
 
   const base = paper.base
+  const shade = paper.shade
+  const shadeStart = (paper.shadeRow0 ?? 0) * w
   // Without a photo the paper *is* the ground, so the veil is fully on and the
   // arithmetic below collapses back to exactly `rgb × shade`.
   const amount = base ? Math.max(0, Math.min(1, paper.paperAmount ?? 1)) : 1
@@ -100,12 +106,12 @@ export function compositeLayers(
       // which is exactly the paper this function draws without a photo at all.
       const a = base[o + 3] / 255
       const veil = amount * a + (1 - a)
-      const s = 1 - veil * (1 - paper.shade[i])
+      const s = 1 - veil * (1 - shade[i - shadeStart])
       r = ((base[o] / 255) * a + (1 - a)) * (1 - veil * (1 - pr)) * s
       g = ((base[o + 1] / 255) * a + (1 - a)) * (1 - veil * (1 - pg)) * s
       b = ((base[o + 2] / 255) * a + (1 - a)) * (1 - veil * (1 - pb)) * s
     } else {
-      const s = paper.shade[i]
+      const s = shade[i - shadeStart]
       r = pr * s
       g = pg * s
       b = pb * s

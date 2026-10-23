@@ -25,7 +25,7 @@ import { applyMottle } from './ink.ts'
 import { ditherField } from './dither.ts'
 import { paperField } from './paper.ts'
 import { cellNoiseAt, hash2D, type CellNoise } from './rng.ts'
-import { tearField } from './rough.ts'
+import { tearNoise } from './rough.ts'
 import { ensureCache, grainCell, printSheet, switchScreen, type ToneSource } from './render.ts'
 import { paperById } from './inks.ts'
 import { REFERENCE_HEIGHT } from './limits.ts'
@@ -182,7 +182,12 @@ describe('the same print at every size: each texture grows with the sheet', () =
       [0.25, [1800, 3600, 7200]],
       [0.22, [1800, 3600, 7200]],
     ] as const) {
-      const lengths = heights.map((h) => corrLength(tearField(W, h, 3 * (h / REFERENCE_HEIGHT) * detail, 99), W, h))
+      const lengths = heights.map((h) => {
+        const noise = tearNoise(W, 3 * (h / REFERENCE_HEIGHT) * detail, 99)
+        const f = new Float32Array(W * h)
+        for (let y = 0; y < h; y++) for (let x = 0; x < W; x++) f[y * W + x] = noise.at(x, y)
+        return corrLength(f, W, h)
+      })
       expectLinear(growth(lengths, [...heights]))
     }
   })

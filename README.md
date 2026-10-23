@@ -586,6 +586,24 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   browsers store JPEG colour at half resolution (4:2:0), the one loss a quality
   setting cannot remove, so **PNG** sits beside Save as the lossless file.
 
+### What an export holds
+
+An export at a photo's own resolution is 11-17 MP, so every sheet-sized buffer
+is 45-67 MB of a phone's memory, and an iPhone evicts a tab that holds too
+much. `scripts/measure-alloc.mjs` counts it exactly: it runs the export path in
+node with every typed-array constructor wrapped and, at each sheet-sized
+allocation, collects the garbage and reads back what is still live — the same
+on every run, unlike a browser's resident memory. Its gate is 35 bytes per
+output pixel.
+
+- **No cache, no noise fields.** The preview keeps the paper's shade and the
+  ink film's mottle as arrays, reused every frame. An export reads them where
+  it prints them: the noise is a seeded lattice whose every value can be read
+  directly (`ValueNoiseSampler`, `FbmSampler`), the paper a band of rows at a
+  time, the mottle only on inked pixels, the tear's wander only on the edge.
+  The numbers are the arrays' to the last bit (tested), so the preview and the
+  print still agree byte for byte (`--parity`).
+
 ### The same print at every size
 
 A print is rendered at many heights — the preview, the reference sheet of
@@ -656,7 +674,8 @@ Two things that are easy to get wrong here:
 Measured before and after on the same throttled profile, dragging a press
 slider: 90th-percentile frame time went from **595 ms to 41 ms**. The export is
 untouched — it presses at the photo's own resolution, through its own entry
-point and with its own cache (see "Saving at the photo's own pixels").
+point, and keeps no cache at all: it reads the noise where it prints it (see
+"What an export holds").
 
 <!-- WP3: Touch and Layout are rewritten for the style guide's dock in WP3. -->
 ### Touch

@@ -7,7 +7,7 @@
  * way to make a good screen look like a screenshot of a screen.
  */
 
-import { fbm2D, valueNoise2D } from './rng.ts'
+import { FbmSampler, ValueNoiseSampler, fbm2D, valueNoise2D } from './rng.ts'
 
 export interface PaperOptions {
   /** Base stock colour, straight from PAPERS in inks.ts. */
@@ -30,6 +30,10 @@ export interface PaperField {
   shade: Float32Array
   rgb: readonly [number, number, number]
 }
+
+/** The paper's shade, held as a field (the preview's cache) or read where it
+ *  is printed (an export: `PaperSampler`). The same numbers either way. */
+export type PaperSource = PaperField | PaperSampler
 
 /** The fibre's grain at the reference height, in pixels. */
 const FIBRE_CELL = 3
@@ -64,4 +68,45 @@ export function paperField(w: number, h: number, opts: PaperOptions): PaperField
   }
 
   return { shade, rgb: opts.rgb }
+}
+
+/**
+ * The same paper as `paperField`, read a row at a time: what an export prints
+ * from, so it never holds a sheet-sized shade field. Identical to the field
+ * to the last bit (the noise is read with rng's samplers, and the shade is
+ * multiplied up in float32 exactly as the field is); a test holds them equal.
+ */
+export class PaperSampler {
+  readonly rgb: readonly [number, number, number]
+  private readonly fibre: FbmSampler | null
+  private readonly cloud: ValueNoiseSampler | null
+  private readonly fibreAmt: number
+  private readonly cloudAmt: number
+
+  constructor(
+    private readonly w: number,
+    h: number,
+    opts: PaperOptions,
+  ) {
+    this.rgb = opts.rgb
+    const scale = opts.scale ?? 1
+    this.fibre = opts.texture > 0 ? new FbmSampler(w, FIBRE_CELL * scale, 3, opts.seed, Math.max(1, scale)) : null
+    this.cloud = opts.blotch > 0 ? new ValueNoiseSampler(w, Math.max(24, Math.min(w, h) / 5), opts.seed ^ 0x5bf03635) : null
+    this.fibreAmt = opts.texture * 0.13
+    this.cloudAmt = opts.blotch * 0.06
+  }
+
+  /** Rows [y0, y1) of the shade into `out`, row y at out[(y - y0) * w]. */
+  rows(y0: number, y1: number, out: Float32Array): void {
+    const { w, fibre, cloud, fibreAmt, cloudAmt } = this
+    let k = 0
+    for (let y = y0; y < y1; y++) {
+      for (let x = 0; x < w; x++) {
+        let v = 1
+        if (fibre) v = Math.fround(v * (1 + fibreAmt * (fibre.at(x, y) * 2 - 1)))
+        if (cloud) v = Math.fround(v * (1 + cloudAmt * (cloud.at(x, y) * 2 - 1)))
+        out[k++] = v
+      }
+    }
+  }
 }

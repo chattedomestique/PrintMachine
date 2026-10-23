@@ -48,15 +48,13 @@ function boxV(src: Float32Array, dst: Float32Array, w: number, h: number, r: num
   }
 }
 
-/** Three box passes at an integer radius. */
-function boxes(src: Float32Array, w: number, h: number, r: number): Float32Array {
-  const a = src.slice()
-  const b = new Float32Array(src.length)
+/** Three box passes at an integer radius, on `a` in place, with `b` as the
+ *  other half of the ping-pong. */
+function boxesInPlace(a: Float32Array, b: Float32Array, w: number, h: number, r: number): void {
   for (let pass = 0; pass < 3; pass++) {
     boxH(a, b, w, h, r)
     boxV(b, a, w, h, r)
   }
-  return a
 }
 
 /**
@@ -85,15 +83,46 @@ const FRACTIONAL_BELOW = 4
  * they were meant to save. Both were measured.
  */
 export function blurField(src: Float32Array, w: number, h: number, radius: number): Float32Array {
-  if (radius <= 0.01) return src.slice()
+  const out = src.slice()
+  blurInPlace(out, w, h, radius, new Float32Array(src.length), needsSpare(radius) ? new Float32Array(src.length) : undefined)
+  return out
+}
+
+/** Whether `blurInPlace` at this radius needs its `spare` buffer: only to mix
+ *  two blurs, for a fraction of a pixel below FRACTIONAL_BELOW. */
+export function needsSpare(radius: number): boolean {
+  if (radius <= 0.01) return false
+  const lo = Math.floor(radius)
+  return !(radius - lo < 0.01 || lo >= FRACTIONAL_BELOW)
+}
+
+/**
+ * `blurField`, on `field` itself: the same numbers, with caller-owned
+ * buffers instead of fresh ones (an export reuses one workspace for every
+ * plate). `scratch` is the box blur's other half; `spare` holds the source
+ * for the second of two mixed blurs, and is needed only when `needsSpare`.
+ */
+export function blurInPlace(
+  field: Float32Array,
+  w: number,
+  h: number,
+  radius: number,
+  scratch: Float32Array,
+  spare?: Float32Array,
+): void {
+  if (radius <= 0.01) return
 
   const lo = Math.floor(radius)
   const frac = radius - lo
-  if (frac < 0.01 || lo >= FRACTIONAL_BELOW) return boxes(src, w, h, Math.max(1, lo))
+  if (frac < 0.01 || lo >= FRACTIONAL_BELOW) {
+    boxesInPlace(field, scratch, w, h, Math.max(1, lo))
+    return
+  }
+  if (!spare) throw new Error('blurInPlace: a fractional radius needs a spare buffer')
 
   // Radius zero is the field itself, so the low end of the mix is free below 1.
-  const base = lo >= 1 ? boxes(src, w, h, lo) : src.slice()
-  const up = boxes(src, w, h, lo + 1)
-  for (let i = 0; i < base.length; i++) base[i] += (up[i] - base[i]) * frac
-  return base
+  spare.set(field)
+  if (lo >= 1) boxesInPlace(field, scratch, w, h, lo)
+  boxesInPlace(spare, scratch, w, h, lo + 1)
+  for (let i = 0; i < field.length; i++) field[i] += (spare[i] - field[i]) * frac
 }

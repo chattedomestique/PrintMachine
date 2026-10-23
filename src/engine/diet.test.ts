@@ -6,15 +6,19 @@
  * shares, and held to a bound.
  */
 
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import { FbmSampler, ValueNoiseSampler, fbm2D, mulberry32, mulberryAt, valueNoise2D } from './rng.ts'
 import { PaperSampler, paperField } from './paper.ts'
-import { ensureCache, pressPlate, printSheet, sampledNoise, toneAsFloat, type ToneSource } from './render.ts'
+import { ensureCache, makeWorkspace, pressPlate, printSheet, sampledNoise, toneAsFloat, type ToneSource } from './render.ts'
 import { inkById, paperById } from './inks.ts'
 import { screenField } from './screen.ts'
 import { ditherField } from './dither.ts'
-import { knockoutMask } from './knockout.ts'
+import { cutKnockout, knockoutMask } from './knockout.ts'
+import { applyDensity, applyMottle, shiftField, shiftInPlace } from './ink.ts'
+import { blurField, blurInPlace } from './blur.ts'
+import { roughenEdges, roughenInPlace } from './rough.ts'
 import { compositeLayers } from './composite.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import type { PrintSettings } from './types.ts'
@@ -219,5 +223,113 @@ describe('step 2: bytes where they hold the value (tone exact; coverage and mask
       expect(max).toBeLessThanOrEqual(2)
       expect(sum / ((floats.length * 3) / 4)).toBeLessThan(0.05)
     }
+  })
+})
+
+describe('step 3: every pass in place, in one workspace, to the same numbers', () => {
+  const sha = (a: ArrayBufferView) =>
+    createHash('sha256').update(new Uint8Array(a.buffer, a.byteOffset, a.byteLength)).digest('hex')
+  const field = (w: number, h: number, k = 1) => {
+    const f = new Float32Array(w * h)
+    for (let i = 0; i < f.length; i++) f[i] = (((i * 2654435761) >>> 0) % 1000) / 1000 * k
+    return f
+  }
+
+  it('shifting in place gives shiftField\'s field, for any offset either way', () => {
+    const w = 37
+    const h = 29
+    for (const dx of [0, 0.4, -0.4, 1, -1, 2.7, -3.25, 0.999]) {
+      for (const dy of [0, 0.3, -0.3, 1, -2, 4.6, -1.01]) {
+        const src = field(w, h)
+        const inPlace = src.slice()
+        shiftInPlace(inPlace, w, h, dx, dy)
+        expect(sha(inPlace)).toBe(sha(shiftField(src, w, h, dx, dy)))
+      }
+    }
+  })
+
+  it('the blur, the tear, density and wear in place give the fresh-array numbers', () => {
+    const w = 64
+    const h = 48
+    const tone = field(w, h)
+    for (const r of [0, 0.005, 0.4, 1, 1.5, 2.25, 3.99, 4, 6.5, 12]) {
+      const inPlace = tone.slice()
+      blurInPlace(inPlace, w, h, r, new Float32Array(w * h), new Float32Array(w * h))
+      expect(sha(inPlace)).toBe(sha(blurField(tone, w, h, r)))
+    }
+    for (const opts of [
+      { roughness: 0.55, scale: 1.3, bleed: 0.35, seed: 4 },
+      { roughness: 1, scale: 5.5, bleed: 0, seed: 9 },
+      { roughness: 0, scale: 2, bleed: 0.6, seed: 2 },
+    ]) {
+      const inPlace = tone.slice()
+      roughenInPlace(inPlace, w, h, opts, new Float32Array(w * h), new Float32Array(w * h))
+      expect(sha(inPlace)).toBe(sha(roughenEdges(tone, w, h, opts)))
+    }
+    const d = tone.slice()
+    expect(sha(applyDensity(d, 0.84, d))).toBe(sha(applyDensity(tone, 0.84)))
+    const mottle = valueNoise2D(w, h, 8, 3)
+    for (const detail of [1, 0.3]) {
+      const m = tone.slice()
+      applyMottle(m, mottle, { cell: 1, seed: 5 }, 0.6, 0.2, w, h, detail, m)
+      expect(sha(m)).toBe(sha(applyMottle(tone, mottle, { cell: 1, seed: 5 }, 0.6, 0.2, w, h, detail)))
+    }
+  })
+
+  it('a knockout cut straight into the running bytes is knockoutMask, rounded, deepest cut kept', () => {
+    const w = 50
+    const h = 40
+    const rough = field(w, h, 0.3)
+    const lum = field(w, h)
+    const light = Uint8ClampedArray.from(field(w, h), (v) => (v > 0.5 ? 255 : 0))
+    const p = { w, h, dx: 1.6, dy: -0.7, split: { light, onLightLuma: 0.2, onDarkLuma: 0.8 } }
+    const into = Uint8ClampedArray.from(field(w, h), (v) => v * 40)
+    const expected = into.slice()
+    const k = knockoutMask(rough, lum, p)
+    for (let i = 0; i < k.length; i++) expected[i] = Math.max(expected[i], Math.round(k[i] * 255))
+    cutKnockout(into, rough.slice(), lum, p)
+    expect(into).toEqual(expected)
+  })
+
+  it('pressPlate in a workspace presses what it pressed with fresh arrays (48 plates, pinned before the change)', () => {
+    // Recorded at a6b6a24 (scratch golden3.ts): four sheet sizes (a fractional
+    // tear blur, whole ones, one past the mixing range), halftone and grain,
+    // three edge/wear settings, an unshifted and a misregistered plate. The
+    // coverage, the torn tone and the offset, for each.
+    const words = (w: number, h: number) => {
+      const t = new Uint8Array(w * h)
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const inWord = x % 23 < 15 && y % 37 < 24 && x > 3 && x < w - 3
+          t[y * w + x] = inWord ? ((x * 7 + y * 3) % 5 === 0 ? 128 : 255) : 0
+        }
+      }
+      return t
+    }
+    const short = (a: ArrayBufferView) => sha(a).slice(0, 24)
+    const lines: string[] = []
+    for (const [w, h, fontSize] of [
+      [150, 190, 30],
+      [64, 1800, 288],
+      [64, 1800, 72],
+      [48, 2400, 400],
+    ] as const) {
+      const s = defaultSettings()
+      const noise = ensureCache(null, s, w, h)
+      const ws = makeWorkspace(w * h)
+      for (const method of ['halftone', 'grain'] as const) {
+        for (const [edge, wear] of [
+          [0.55, 0.22],
+          [0, 0.6],
+          [1, 0],
+        ]) {
+          for (const index of [0, 1]) {
+            const p = pressPlate({ field: words(w, h), fontSize }, index, { ...s.press, method, edge, wear }, s.seed, noise, w, h, ws)
+            lines.push(`press ${w}x${h} f${fontSize} ${method} e${edge} w${wear} i${index}=${short(p.coverage)} ${short(p.roughened)} ${p.dx.toFixed(6)},${p.dy.toFixed(6)}`)
+          }
+        }
+      }
+    }
+    expect(createHash('sha256').update(lines.join('\n')).digest('hex')).toBe('2a7563da5955c30fe47a6dde773a91e10c20869a444dbd3815100593fee7b00a')
   })
 })

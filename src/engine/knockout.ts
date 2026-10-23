@@ -15,7 +15,7 @@
  * already sitting in memory, byte for byte the same.
  */
 
-import { shiftField } from './ink.ts'
+import { shiftField, shiftInPlace } from './ink.ts'
 
 export interface KnockoutParams {
   w: number
@@ -69,20 +69,50 @@ export function knockoutMask(
   groundLum: Float32Array | null,
   p: KnockoutParams,
 ): Float32Array {
-  const { w, h, split } = p
+  const { w, h } = p
   const moved = shiftField(roughened, w, h, p.dx, p.dy)
   const out = new Float32Array(w * h)
+  const split = groundLum ? p.split : undefined
   const unit = split?.light instanceof Uint8ClampedArray ? 255 : 1
-  for (let i = 0; i < out.length; i++) {
-    const solid = moved[i] > HOLE ? 1 : moved[i]
-    if (!split || !groundLum) {
-      out[i] = solid
-      continue
-    }
-    const g = groundLum[i]
-    const light = split.light[i] / unit
-    const need = (split.onLightLuma > g ? light : 0) + (split.onDarkLuma > g ? 1 - light : 0)
-    out[i] = solid * need
-  }
+  for (let i = 0; i < out.length; i++) out[i] = holeAt(moved[i], groundLum, split, unit, i)
   return out
+}
+
+/**
+ * `knockoutMask`, cut straight into the sheet's running knockout (bytes,
+ * 0..255; each pixel keeps the deepest cut any plate made there) instead of
+ * into a new field. Shifts `roughened` IN PLACE to the plate's offset, so the
+ * caller hands over a buffer it is done with. The same values as
+ * `knockoutMask` (as float32), times 255, rounded.
+ */
+export function cutKnockout(
+  into: Uint8ClampedArray,
+  roughened: Float32Array,
+  groundLum: Float32Array | null,
+  p: KnockoutParams,
+): void {
+  const { w, h } = p
+  shiftInPlace(roughened, w, h, p.dx, p.dy)
+  const split = groundLum ? p.split : undefined
+  const unit = split?.light instanceof Uint8ClampedArray ? 255 : 1
+  for (let i = 0; i < into.length; i++) {
+    const v = Math.fround(holeAt(roughened[i], groundLum, split, unit, i)) * 255
+    if (v > into[i]) into[i] = v
+  }
+}
+
+/** How much of the ground one pixel of a plate takes away (see knockoutMask). */
+function holeAt(
+  moved: number,
+  groundLum: Float32Array | null,
+  split: KnockoutParams['split'],
+  unit: number,
+  i: number,
+): number {
+  const solid = moved > HOLE ? 1 : moved
+  if (!split || !groundLum) return solid
+  const g = groundLum[i]
+  const light = split.light[i] / unit
+  const need = (split.onLightLuma > g ? light : 0) + (split.onDarkLuma > g ? 1 - light : 0)
+  return solid * need
 }

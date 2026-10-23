@@ -35,14 +35,14 @@
 
 import { compositeLayers, type CompositeLayer, type PaperInput } from './composite.ts'
 import { ditherField } from './dither.ts'
-import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftField, wearToMottle } from './ink.ts'
+import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftInPlace, wearToMottle } from './ink.ts'
 import { inkById, paperById } from './inks.ts'
-import { roughenEdges } from './rough.ts'
+import { roughenInPlace } from './rough.ts'
 import { PaperSampler, paperField, type PaperField, type PaperOptions, type PaperSource } from './paper.ts'
 import { FbmSampler, fbm2D, type CellNoise } from './rng.ts'
 import { defaultAngle, screenField, type ScreenOptions } from './screen.ts'
-import { knockoutMask } from './knockout.ts'
-import { bandMask, coverRect, groundLuma, snapRect, splitInks, type DrawRect } from './media.ts'
+import { cutKnockout } from './knockout.ts'
+import { SWITCH_BAND, bandMask, coverRect, groundLuma, snapRect, splitInks, type DrawRect } from './media.ts'
 import { rasterizeBacking, rasterizeText } from './text.ts'
 import { REFERENCE_HEIGHT, passCount } from './limits.ts'
 import { sheetAspect, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
@@ -326,12 +326,35 @@ export function detailFactor(fontSize: number, canvasHeight: number): number {
 export type ToneField = Uint8Array | Float32Array
 
 /** The tone as floats in 0..1, for the passes that need fractions: a byte
- *  field is converted (b / 255, as float32), a float field is used as is. */
-export function toneAsFloat(tone: ToneField): Float32Array {
-  if (tone instanceof Float32Array) return tone
-  const out = new Float32Array(tone.length)
-  for (let i = 0; i < tone.length; i++) out[i] = tone[i] / 255
+ *  field is converted (b / 255, as float32), a float field copied. Into
+ *  `out` when given. */
+export function toneAsFloat(tone: ToneField, out: Float32Array = new Float32Array(tone.length)): Float32Array {
+  if (tone instanceof Float32Array) out.set(tone)
+  else for (let i = 0; i < tone.length; i++) out[i] = tone[i] / 255
   return out
+}
+
+/**
+ * The press's working buffers: three float fields the size of the sheet, made
+ * once per render and reused by every plate, where each plate used to make a
+ * dozen of its own (tone, blur ping-pong, roughened, density, mottle, shift,
+ * knockout...). Every pass that used them now works on these in place, to the
+ * same numbers.
+ *
+ *  - `rough`: the tone, then the torn tone (handed back as `roughened`, valid
+ *    until the next plate is pressed);
+ *  - `work`: the second blur's source, then the worn, shifted tone the screen
+ *    reads; between plates, the switch mask before it is screened;
+ *  - `scratch`: the blur's other half.
+ */
+export interface Workspace {
+  rough: Float32Array
+  work: Float32Array
+  scratch: Float32Array
+}
+
+export function makeWorkspace(n: number): Workspace {
+  return { rough: new Float32Array(n), work: new Float32Array(n), scratch: new Float32Array(n) }
 }
 
 /** A plate after the press, and what a knockout under it has to match. */
@@ -339,6 +362,8 @@ export interface PressedPlate {
   /** Screened coverage in bytes, 0..255: a quarter of a float field, held for
    *  every pass until the sheet is printed. */
   coverage: Uint8ClampedArray
+  /** The torn tone: the workspace's `rough`, so it is only good until the
+   *  next plate is pressed with the same workspace. */
   roughened: Float32Array
   dx: number
   dy: number
@@ -365,16 +390,24 @@ export function pressPlate(
   noise: SheetNoise,
   w: number,
   h: number,
+  /** Reused buffers (a render passes one for all its plates); fresh ones by
+   *  default. */
+  ws: Workspace = makeWorkspace(w * h),
 ): PressedPlate {
-  const tone = toneAsFloat(plate.field)
+  const rough = toneAsFloat(plate.field, ws.rough)
   const scale = h / REFERENCE_HEIGHT
   const detail = detailFactor(plate.fontSize, h)
   const edge = edgeToRough(s.edge)
   const wear = wearToMottle(s.wear)
 
   // Ragged stencil edge + ink spread, before anything downstream sees the
-  // outline. Seeded per plate so two plates don't tear identically.
-  const rough = roughenEdges(tone, w, h, {
+  // outline. Seeded per plate so two plates don't tear identically. In place:
+  // the tone becomes the torn tone.
+  roughenInPlace(
+    rough,
+    w,
+    h,
+    {
     roughness: edge.roughness,
     // Unfloored: roughenEdges needs the size that was actually asked for,
     // not a whole number, or it cannot tell a fine tear from a clamped one.
@@ -383,7 +416,10 @@ export function pressPlate(
     // the holes in a, e, o fill and the word turns into a row of blobs.
     bleed: edge.bleed * detail,
     seed: seed ^ (index * 0x9e3779b9),
-  })
+    },
+    ws.scratch,
+    ws.work,
+  )
 
   // ── Wear, applied to TONE and therefore before the screen ───────────
   //
@@ -400,22 +436,15 @@ export function pressPlate(
   // scaling reaches the wear as well as the screen: on body copy a sheet-sized
   // blotch cell is about the height of a letter, so unscaled wear stops
   // texturing the ink and starts eating the letterform.
-  const worn = applyMottle(
-    applyDensity(rough, s.density),
-    noise.mottle,
-    noise.speckle,
-    wear.mottle * detail,
-    wear.dropout * detail,
-    w,
-    h,
-    detail,
-  )
+  const worn = applyDensity(rough, s.density, ws.work)
+  applyMottle(worn, noise.mottle, noise.speckle, wear.mottle * detail, wear.dropout * detail, w, h, detail, worn)
 
   // Misregistration is a paper-feed error, physically the same for the whole
   // sheet — but at 5px it obliterates 20px type while barely showing on a
   // poster. Scaled by sqrt so it stays visible on small type without eating it.
   const { dx, dy } = registrationOffset(seed, index, s.misregistration * scale * Math.sqrt(detail))
-  const shifted = shiftField(worn, w, h, dx, dy)
+  shiftInPlace(worn, w, h, dx, dy)
+  const shifted = worn
 
   // Screened straight into bytes: the dot's soft edge is kept to half a
   // level, and every pass held until the print costs a quarter of a float.
@@ -582,13 +611,10 @@ export function* printSheetSteps(
   // solid dark area, so without this neither buys anything.
   // Held in bytes (0..255): only the anti-aliased skirt of a hole is between.
   let knockout: Uint8ClampedArray | undefined
-  const cutOut = (k: Float32Array) => {
-    if (!knockout) knockout = new Uint8ClampedArray(w * h)
-    for (let i = 0; i < k.length; i++) {
-      const v = k[i] * 255
-      if (v > knockout[i]) knockout[i] = v
-    }
-  }
+  const knock = () => (knockout ??= new Uint8ClampedArray(w * h))
+
+  // One set of working buffers for every plate (see Workspace).
+  const ws = makeWorkspace(w * h)
 
   for (const layer of s.layers) {
     // A plate takes a backing OR a second ink, never both, and that is held
@@ -599,17 +625,17 @@ export function* printSheetSteps(
     // vanish.
     if (layer.backing) {
       yield { step: 'press', pass: plateIndex + 1, passes }
-      const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h)
+      const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h, ws)
       plates.push({ coverage: backing.coverage, rgb: inkById(layer.backing).rgb })
       // The block prints on paper: the photo is cut back under its own torn,
       // misregistered outline, so a pale block over a dark photo still reads.
-      if (ground) cutOut(knockoutMask(backing.roughened, null, { w, h, dx: backing.dx, dy: backing.dy }))
+      if (ground) cutKnockout(knock(), backing.roughened, null, { w, h, dx: backing.dx, dy: backing.dy })
       plateIndex++
     }
 
     yield { step: 'press', pass: plateIndex + 1, passes }
     const tone = tones.type(layer)
-    const pressed = pressPlate(tone, plateIndex, s.press, s.seed, noise, w, h)
+    const pressed = pressPlate(tone, plateIndex, s.press, s.seed, noise, w, h, ws)
     plateIndex++
     const coverage = pressed.coverage
 
@@ -637,7 +663,8 @@ export function* printSheetSteps(
         // white ink and about the size of a letter, so a tighter blur decides
         // light-or-dark differently inside a single word. A word is the unit
         // legibility is actually judged in, so it is the unit that commits.
-        groundLum = groundLuma(ground, w, h, Math.max(2, tone.fontSize * 1.5))
+        // (The workspace's spare buffers do the blur: the plate is screened.)
+        groundLum = groundLuma(ground, w, h, Math.max(2, tone.fontSize * 1.5), ws.scratch, ws.work)
       }
       if (!light || light.threshold !== layer.contrastThreshold) {
         // Screened, not left soft. A soft mask makes *both* inks print at
@@ -656,16 +683,18 @@ export function* printSheetSteps(
         light = undefined
         switchIndex ??= plateIndex
         const threshold = layer.contrastThreshold
-        light = { threshold, mask: binarise(bandMask(groundLum, threshold), switchIndex, s.press, s.seed, w, h) }
+        const soft = bandMask(groundLum, threshold, SWITCH_BAND, ws.work)
+        light = { threshold, mask: binarise(soft, switchIndex, s.press, s.seed, w, h) }
       }
       const mask = light.mask
       // The mask is hard (0 or 255), so each half is the coverage or nothing.
-      const onLight = new Uint8ClampedArray(w * h)
+      // The light half takes the coverage's own buffer.
       const onDark = new Uint8ClampedArray(w * h)
       for (let i = 0; i < coverage.length; i++) {
-        onLight[i] = (coverage[i] * mask[i]) / 255
         onDark[i] = (coverage[i] * (255 - mask[i])) / 255
+        coverage[i] = (coverage[i] * mask[i]) / 255
       }
+      const onLight = coverage
       plates.push({ coverage: onLight, rgb: split.onLight })
       plates.push({ coverage: onDark, rgb: split.onDark })
 
@@ -675,15 +704,13 @@ export function* printSheetSteps(
       // the raw tone instead leaves the hole a couple of pixels off, and the
       // only way to cover that gap is to spread the hole: on a poster a trap,
       // at text size a flood that swells every counter shut.
-      cutOut(
-        knockoutMask(pressed.roughened, groundLum, {
-          w,
-          h,
-          dx: pressed.dx,
-          dy: pressed.dy,
-          split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma },
-        }),
-      )
+      cutKnockout(knock(), pressed.roughened, groundLum, {
+        w,
+        h,
+        dx: pressed.dx,
+        dy: pressed.dy,
+        split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma },
+      })
     } else {
       plates.push({ coverage, rgb: inkById(layer.inkId).rgb })
     }

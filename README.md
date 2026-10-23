@@ -610,6 +610,13 @@ output pixel.
   within half a level, which moves the printed sheet by at most one level
   (mean 0.002 on the harness documents). That rounding is in the stages the
   preview shares, so the preview shows it too.
+- **One workspace, every pass in place.** A plate used to make a dozen
+  sheet-sized arrays of its own (the tone, the blur's ping-pong, the torn
+  tone, density, wear, the shift, the knockout); now three float buffers are
+  made once per render and every pass works in them, to the same numbers (the
+  shift walks the sheet in the direction it moves, so it never overwrites a
+  pixel it still has to read). The knockout is cut straight into the running
+  bytes, and the second ink's light half takes the coverage's own buffer.
 
 ### The same print at every size
 

@@ -17,7 +17,7 @@
  * exactly what a burned stencil gives you.
  */
 
-import { blurField } from './blur.ts'
+import { blurInPlace, needsSpare } from './blur.ts'
 import { FbmSampler } from './rng.ts'
 
 export interface RoughOptions {
@@ -58,8 +58,27 @@ export function roughenEdges(
   h: number,
   opts: RoughOptions,
 ): Float32Array {
+  if (opts.roughness <= 0 && opts.bleed <= 0) return tone
+  const out = tone.slice()
+  roughenInPlace(out, w, h, opts, new Float32Array(tone.length), needsSpare(Math.max(0, opts.scale)) ? new Float32Array(tone.length) : undefined)
+  return out
+}
+
+/**
+ * `roughenEdges` on `field` itself (the tone in, the torn tone out), with
+ * caller-owned buffers for the blur (see blur.ts `blurInPlace`): the same
+ * numbers, and no sheet-sized allocation of its own.
+ */
+export function roughenInPlace(
+  field: Float32Array,
+  w: number,
+  h: number,
+  opts: RoughOptions,
+  scratch: Float32Array,
+  spare?: Float32Array,
+): void {
   const { roughness, bleed, seed } = opts
-  if (roughness <= 0 && bleed <= 0) return tone
+  if (roughness <= 0 && bleed <= 0) return
 
   // The blur radius sets how far the edge can travel. Tie it to the requested
   // feature scale so raggedness and its wavelength stay proportional — a wide
@@ -72,7 +91,10 @@ export function roughenEdges(
   // letterforms the print kept whole.
   const radius = Math.max(0, opts.scale)
 
-  const soft = blurField(tone, w, h, radius)
+  // The softened tone, in place: each pixel is read once, below, and then
+  // overwritten with the cut.
+  blurInPlace(field, w, h, radius, scratch, spare)
+  const soft = field
 
   // Two octaves is enough: a coarse wander plus a fine nibble. More just
   // averages back toward a smooth edge. Unrounded for the same reason as the
@@ -88,14 +110,17 @@ export function roughenEdges(
   // A narrow ramp either side of the cut keeps the edge hard but not aliased.
   const e = 0.06
 
-  const out = new Float32Array(w * h)
+  const out = field
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x
       const s = soft[i]
       // Interior and bare paper are already settled — leave them alone so the
       // roughening cannot punch holes in the middle of a solid.
-      if (s <= 0) continue
+      if (s <= 0) {
+        out[i] = 0
+        continue
+      }
       if (s >= 1) {
         out[i] = 1
         continue
@@ -106,6 +131,4 @@ export function roughenEdges(
       out[i] = clamp01(t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t))
     }
   }
-
-  return out
 }

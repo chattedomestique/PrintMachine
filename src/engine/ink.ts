@@ -49,9 +49,9 @@ export function wearToMottle(wear: number): { mottle: number; dropout: number } 
  * cheapest single thing that stops output looking like an inkjet print.
  *
  * @param density max coverage in [0,1] — 0.88 is a realistic single pass.
+ * @param out where to write; `tone` itself works (each pixel is read once).
  */
-export function applyDensity(tone: Float32Array, density: number): Float32Array {
-  const out = new Float32Array(tone.length)
+export function applyDensity(tone: Float32Array, density: number, out: Float32Array = new Float32Array(tone.length)): Float32Array {
   for (let i = 0; i < tone.length; i++) out[i] = clamp01(tone[i]) * density
   return out
 }
@@ -98,8 +98,9 @@ export function applyMottle(
    * holds.
    */
   detail = 1,
+  /** Where to write; `coverage` itself works (each pixel is read once). */
+  out: Float32Array = new Float32Array(coverage.length),
 ): Float32Array {
-  const out = new Float32Array(coverage.length)
   const step = detail >= 1 ? 1 : Math.max(1, Math.round(1 / detail))
   const field = mottle instanceof Float32Array ? mottle : null
   const sampler = field ? null : (mottle as FbmSampler)
@@ -109,7 +110,10 @@ export function applyMottle(
     for (let x = 0; x < w; x++) {
       const i = y * w + x
       const c = coverage[i]
-      if (c <= 0) continue
+      if (c <= 0) {
+        out[i] = 0
+        continue
+      }
       const sx = step === 1 ? x : (x * step) % w
       const m = 1 + amount * ((field ? field[sy * w + sx] : sampler!.at(sx, sy)) * 2 - 1)
       let v = c * m
@@ -169,6 +173,44 @@ export function shiftField(
     }
   }
   return out
+}
+
+/**
+ * `shiftField` on `field` itself: the same numbers, no second field.
+ *
+ * Every output pixel reads the source a fraction of a pixel or more AGAINST
+ * the shift (at x - dx, y - dy). So walking the rows and columns in the
+ * direction of the shift — from the far end towards the near one — reaches
+ * every pixel's sources before it overwrites them: a pixel is only ever
+ * overwritten after the last pixel that reads it. The one pixel read from its
+ * own row and column is read before it is written.
+ */
+export function shiftInPlace(field: Float32Array, w: number, h: number, dx: number, dy: number): void {
+  if (dx === 0 && dy === 0) return
+  const at = (x: number, y: number): number => (x < 0 || x >= w || y < 0 || y >= h ? 0 : field[y * w + x])
+  const yDown = dy > 0
+  const xDown = dx > 0
+  for (let k = 0; k < h; k++) {
+    const y = yDown ? h - 1 - k : k
+    const sy = y - dy
+    const y0 = Math.floor(sy)
+    const fy = sy - y0
+    for (let j = 0; j < w; j++) {
+      const x = xDown ? w - 1 - j : j
+      const sx = x - dx
+      const x0 = Math.floor(sx)
+      const fx = sx - x0
+
+      const a = at(x0, y0)
+      const b = at(x0 + 1, y0)
+      const c = at(x0, y0 + 1)
+      const d = at(x0 + 1, y0 + 1)
+
+      const top = a + (b - a) * fx
+      const bot = c + (d - c) * fx
+      field[y * w + x] = top + (bot - top) * fy
+    }
+  }
 }
 
 /**

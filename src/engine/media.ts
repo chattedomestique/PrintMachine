@@ -12,7 +12,7 @@
  * and the part worth testing.
  */
 
-import { blurField } from './blur.ts'
+import { blurInPlace, needsSpare } from './blur.ts'
 
 export interface MediaSize {
   width: number
@@ -208,6 +208,9 @@ export function groundLuma(
   w: number,
   h: number,
   blurRadius: number,
+  /** Buffers for the blur, if the caller has them (blur.ts `blurInPlace`). */
+  scratch?: Float32Array,
+  spare?: Float32Array,
 ): Float32Array {
   const n = w * h
   const lum = new Float32Array(n)
@@ -217,7 +220,13 @@ export function groundLuma(
     const a = rgba[o + 3] / 255
     lum[i] = luma(rgba[o], rgba[o + 1], rgba[o + 2]) * a + (1 - a)
   }
-  return blurRadius > 0 ? blurField(lum, w, h, blurRadius) : lum
+  // Blurred where it lies: the luminance is this function's own, so it needs
+  // no copy, only the blur's scratch.
+  if (blurRadius > 0) {
+    const fractional = needsSpare(blurRadius)
+    blurInPlace(lum, w, h, blurRadius, scratch ?? new Float32Array(n), fractional ? (spare ?? new Float32Array(n)) : undefined)
+  }
+  return lum
 }
 
 /**
@@ -234,8 +243,12 @@ export function groundLuma(
 export const SWITCH_BAND = 0.07
 
 /** Turn ground luminance into "light enough for the darker ink", 0..1. */
-export function bandMask(lum: Float32Array, threshold: number, band = SWITCH_BAND): Float32Array {
-  const out = new Float32Array(lum.length)
+export function bandMask(
+  lum: Float32Array,
+  threshold: number,
+  band = SWITCH_BAND,
+  out: Float32Array = new Float32Array(lum.length),
+): Float32Array {
   const lo = threshold - band
   const span = Math.max(1e-6, band * 2)
   for (let i = 0; i < lum.length; i++) {

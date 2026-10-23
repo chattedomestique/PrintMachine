@@ -18,7 +18,8 @@
  * so there are no binary fixtures and the same pixels come back every run.
  */
 
-import { renderPrint, type RenderCache } from '../../src/engine/render.ts'
+import { renderPrint, renderPrintAsync, type RenderCache } from '../../src/engine/render.ts'
+import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
 import type { PrintSettings } from '../../src/engine/types.ts'
 import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
 import plain from './docs/plain.json'
@@ -155,7 +156,9 @@ export interface RenderResult {
 async function render(
   name: string,
   height: number,
-  opts: { photo?: number; png?: boolean } = {},
+  /** `async`: through the export's entry point, renderPrintAsync, instead of
+   *  the preview's (the parity gate renders both). */
+  opts: { photo?: number; png?: boolean; async?: boolean } = {},
 ): Promise<RenderResult> {
   const settings = load(name)
   const media = settings.media
@@ -166,7 +169,8 @@ async function render(
   const cacheRef: { current: RenderCache | null } = { current: null }
 
   const t0 = performance.now()
-  renderPrint(out, scratch, settings, cacheRef, null, height, media)
+  if (opts.async) await renderPrintAsync(out, scratch, settings, height, media)
+  else renderPrint(out, scratch, settings, cacheRef, null, height, media)
   const ms = performance.now() - t0
 
   const { width: w, height: h } = out.canvas
@@ -247,10 +251,43 @@ async function scaleCorrelation(name: string, height: number): Promise<{ corr: n
   return { corr: correlation(down, a), w: small.w, h: small.h }
 }
 
+/**
+ * The real Save, minus the share sheet: `savePrint` at the planned size, with
+ * the test photo at `photo` pixels (the document's own size if omitted, which
+ * then becomes the photo's true size). Returns the plan, the file's size and
+ * the size the file decodes to.
+ */
+async function save(
+  name: string,
+  opts: { photo?: [number, number]; format?: ExportFormat } = {},
+): Promise<{ plan: { width: number; height: number; limit: string }; bytes: number; decoded: [number, number]; ms: number; steps: string[] }> {
+  const settings = load(name)
+  if (settings.media && opts.photo) settings.media = { ...settings.media, width: opts.photo[0], height: opts.photo[1] }
+  const media = settings.media ? await createImageBitmap(photoCanvas(settings.media.width, settings.media.height)) : null
+  const steps: string[] = []
+  const t0 = performance.now()
+  const pressed = await savePrint(context(false), context(true), settings, media, {
+    format: opts.format,
+    onProgress: (p) => steps.push(`${p.step} ${p.pass}/${p.passes}`),
+    onGround: () => media?.close(),
+  })
+  const ms = performance.now() - t0
+  const bmp = await createImageBitmap(pressed.blob)
+  const decoded: [number, number] = [bmp.width, bmp.height]
+  bmp.close()
+  return { plan: pressed.plan, bytes: pressed.blob.size, decoded, ms, steps }
+}
+
 declare global {
   interface Window {
-    H: { docs: string[]; render: typeof render; scaleCorrelation: typeof scaleCorrelation; normalized: boolean }
+    H: {
+      docs: string[]
+      render: typeof render
+      scaleCorrelation: typeof scaleCorrelation
+      save: typeof save
+      normalized: boolean
+    }
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, save, normalized: !!normalizeSettings }

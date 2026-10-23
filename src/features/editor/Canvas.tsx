@@ -27,18 +27,21 @@ const MEDIA_POSITION: readonly [number, number] = [-Infinity, Infinity]
 export default function Canvas({
   media = null,
   mediaMode = false,
+  paused = false,
 }: {
   media?: ImageBitmap | null
   /** Point the sheet's gestures at the photo instead of the type. Driven by
    *  the open tab, so what you are touching is whatever panel you are in — no
    *  second selection model to keep in sync. */
   mediaMode?: boolean
+  /** Hold the preview where it is (a save is pressing the print). */
+  paused?: boolean
 }) {
   const { settings, dispatch, selectedLayerId, selectLayer, selectedLayer } = useSettings()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
 
-  useRenderer(canvasRef, settings, { selectedLayerId }, media)
+  useRenderer(canvasRef, settings, { selectedLayerId }, media, paused)
 
   const layer = selectedLayer ?? settings.layers[0] ?? null
 

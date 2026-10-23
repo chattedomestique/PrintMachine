@@ -44,7 +44,7 @@ import { defaultAngle, screenField, type ScreenOptions } from './screen.ts'
 import { knockoutMask } from './knockout.ts'
 import { bandMask, coverRect, groundLuma, snapRect, splitInks, type DrawRect } from './media.ts'
 import { rasterizeBacking, rasterizeText } from './text.ts'
-import { REFERENCE_HEIGHT } from './limits.ts'
+import { REFERENCE_HEIGHT, passCount } from './limits.ts'
 import { sheetAspect, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
@@ -426,6 +426,25 @@ export interface ToneSource {
 }
 
 /**
+ * Where a render has got to. Reported between its stages, which is where an
+ * export yields to the page (`renderPrintAsync`): before the photo is laid
+ * down, before each pass on the press, and between bands of the final print.
+ */
+export interface RenderProgress {
+  /** `photo`: laying the photo down; `press`: a pass on the press; `print`:
+   *  printing the passes onto the sheet. */
+  step: 'photo' | 'press' | 'print'
+  /** The pass being pressed, from 1, and how many there are (a backing is a
+   *  pass of its own). While printing, `pass` is `passes`. */
+  pass: number
+  passes: number
+}
+
+/** Rows of the sheet printed between two yields: about a million pixels, a
+ *  fraction of a second of compositing on a phone. */
+const PRINT_BAND_PIXELS = 1 << 20
+
+/**
  * Press every plate and print the sheet: everything after the type is
  * rasterised and the photo is blitted, which is everything that decides how
  * the print looks. Pure — no canvas — so the order of passes, the knockouts
@@ -445,11 +464,38 @@ export function printSheet(
   w: number,
   h: number,
 ): CompositeLayer[] {
+  return drain(printSheetSteps(out, s, ground, tones, cache, w, h))
+}
+
+/** Run a staged render to the end, synchronously, and hand back its result. */
+function drain<T>(steps: Generator<RenderProgress, T>): T {
+  for (;;) {
+    const next = steps.next()
+    if (next.done) return next.value
+  }
+}
+
+/**
+ * `printSheet`, in stages: it yields where it has got to between them. The
+ * one implementation both entry points run — the preview drains it at once,
+ * an export yields to the page at every step — so the two cannot print
+ * different pixels.
+ */
+export function* printSheetSteps(
+  out: Uint8ClampedArray,
+  s: PrintSettings,
+  ground: Uint8ClampedArray | undefined,
+  tones: ToneSource,
+  cache: RenderCache,
+  w: number,
+  h: number,
+): Generator<RenderProgress, CompositeLayer[]> {
   // Plate order is print order: a plate's backing goes down before its type,
   // so the type overprints the block into a third colour — what a real second
   // pass does.
   const plates: CompositeLayer[] = []
   let plateIndex = 0
+  const passes = passCount(s)
 
   let groundLum: Float32Array | undefined
   // The screened "ground is light" mask of the plate before, and the switch
@@ -480,6 +526,7 @@ export function printSheet(
     // second ink chosen for a dark patch of photo would land on the block and
     // vanish.
     if (layer.backing) {
+      yield { step: 'press', pass: plateIndex + 1, passes }
       const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, cache, w, h)
       plates.push({ coverage: backing.coverage, rgb: inkById(layer.backing).rgb })
       // The block prints on paper: the photo is cut back under its own torn,
@@ -488,6 +535,7 @@ export function printSheet(
       plateIndex++
     }
 
+    yield { step: 'press', pass: plateIndex + 1, passes }
     const tone = tones.type(layer)
     const pressed = pressPlate(tone, plateIndex, s.press, s.seed, cache, w, h)
     plateIndex++
@@ -579,13 +627,13 @@ export function printSheet(
     }
   }
 
-  compositeLayers(
-    out,
-    w,
-    h,
-    base ? { ...cache.paper, base, paperAmount: s.paperVeil ? 1 : 0 } : cache.paper,
-    plates,
-  )
+  // Printed in bands, so an export can hand the page a moment between them.
+  const paper = base ? { ...cache.paper, base, paperAmount: s.paperVeil ? 1 : 0 } : cache.paper
+  const band = Math.max(1, Math.floor(PRINT_BAND_PIXELS / w))
+  for (let y = 0; y < h; y += band) {
+    yield { step: 'print', pass: passes, passes }
+    compositeLayers(out, w, h, paper, plates, y, Math.min(h, y + band))
+  }
   return plates
 }
 
@@ -604,6 +652,9 @@ export function groundRect(media: MediaLayer, w: number, h: number): DrawRect {
 
 /**
  * Render a full print.
+ *
+ * Synchronous: this is the preview's entry point, run inside one animation
+ * frame. An export runs the same stages through `renderPrintAsync`.
  *
  * @param ctx     the target context. Its canvas is resized to the output size.
  * @param scratch a same-sized scratch context used for glyph rasterisation.
@@ -627,6 +678,69 @@ export function renderPrint(
    *  than holding it through the whole press. */
   onGround?: () => void,
 ): void {
+  drain(renderSteps(ctx, scratch, s, cacheRef, overlay, height, media, onGround))
+}
+
+export interface AsyncRenderOptions {
+  /** Checked at every step; once aborted, the render stops there and rejects
+   *  with an AbortError. */
+  signal?: AbortSignal
+  /** Where the render has got to, at every step. */
+  onProgress?: (progress: RenderProgress) => void
+  /** As renderPrint's `onGround`. */
+  onGround?: () => void
+}
+
+/**
+ * Render a full print for an export: the SAME stages as `renderPrint`, with a
+ * yield to the event loop between them, so a render of many seconds leaves
+ * the page able to paint its progress and take a Cancel. It adds nothing but
+ * the yields, the abort checks and the progress reports, so at one height it
+ * prints exactly the pixels the preview does (harness `--parity`). Never an
+ * overlay, and a cache of its own: the export's noise fields are its size,
+ * not the preview's.
+ */
+export async function renderPrintAsync(
+  ctx: CanvasRenderingContext2D,
+  scratch: CanvasRenderingContext2D,
+  s: PrintSettings,
+  height: number,
+  media: CanvasImageSource | null,
+  opts: AsyncRenderOptions = {},
+): Promise<void> {
+  const steps = renderSteps(ctx, scratch, s, { current: null }, null, height, media, opts.onGround)
+  try {
+    for (;;) {
+      throwIfAborted(opts.signal)
+      const next = steps.next()
+      if (next.done) return
+      opts.onProgress?.(next.value)
+      await yieldToPage()
+    }
+  } finally {
+    // An abandoned render runs its generator's cleanup too.
+    steps.return(undefined)
+  }
+}
+
+/** A macrotask: the page paints and takes input before the render goes on. */
+const yieldToPage = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new DOMException('The save was cancelled.', 'AbortError')
+}
+
+/** Both entry points' one implementation, in stages. */
+function* renderSteps(
+  ctx: CanvasRenderingContext2D,
+  scratch: CanvasRenderingContext2D,
+  s: PrintSettings,
+  cacheRef: { current: RenderCache | null },
+  overlay: OverlaySpec | null,
+  height: number,
+  media: CanvasImageSource | null,
+  onGround: (() => void) | undefined,
+): Generator<RenderProgress, void> {
   const { w, h } = outputSize(sheetAspect(s), height)
 
   if (ctx.canvas.width !== w || ctx.canvas.height !== h) {
@@ -647,6 +761,7 @@ export function renderPrint(
   // immediately after.
   let ground: Uint8ClampedArray | undefined
   if (media && s.media) {
+    yield { step: 'photo', pass: 0, passes: passCount(s) }
     const r = groundRect(s.media, w, h)
     scratch.clearRect(0, 0, w, h)
     scratch.imageSmoothingQuality = 'high'
@@ -656,7 +771,7 @@ export function renderPrint(
   onGround?.()
 
   const image = ctx.createImageData(w, h)
-  printSheet(
+  yield* printSheetSteps(
     image.data,
     s,
     ground,

@@ -7,6 +7,7 @@
  *   node scripts/harness/run.mjs --out t.json --no-hashes --time photo-second-ink@3780 --photo-mp 12 --runs 3
  *   node scripts/harness/run.mjs --out a.json --heights 1000 --png shots/   (also writes each render as a PNG)
  *   node scripts/harness/run.mjs --out s.json --no-hashes --scale default@900,small-2@1800   (h against 2h)
+ *   node scripts/harness/run.mjs --out p.json --no-hashes --parity 1000   (preview and export entry points agree; exits 1 if not)
  *
  * Then `node scripts/harness/compare.mjs a.json b.json`. Hashes of documents
  * with text depend on the installed fonts, so compare runs from ONE machine
@@ -27,7 +28,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 function parseArgs(argv) {
-  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
+  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], parity: null, photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -40,6 +41,7 @@ function parseArgs(argv) {
     else if (a === '--docs') opts.docs = next().split(',')
     else if (a === '--time') opts.time.push(next())
     else if (a === '--scale') opts.scale.push(...next().split(','))
+    else if (a === '--parity') opts.parity = Number(next())
     else if (a === '--photo-mp') opts.photoMp = Number(next())
     else if (a === '--runs') opts.runs = Number(next())
     else if (a === '--no-hashes') opts.hashes = false
@@ -114,7 +116,9 @@ const result = {
   renders: {},
   timings: {},
   scale: {},
+  parity: {},
 }
+let failed = false
 
 try {
   if (opts.hashes) {
@@ -150,6 +154,24 @@ try {
     await page.close()
   }
 
+  if (opts.parity) {
+    // [FR-4] The preview has to stay a true picture of the print: every
+    // document through renderPrint and through renderPrintAsync (the export's
+    // entry point), overlay off, must give the same bytes.
+    const { page, errors } = await openPage()
+    const docs = opts.docs ?? (await page.evaluate(() => window.H.docs))
+    for (const doc of docs) {
+      const a = await page.evaluate(([d, h]) => window.H.render(d, h), [doc, opts.parity])
+      const b = await page.evaluate(([d, h]) => window.H.render(d, h, { async: true }), [doc, opts.parity])
+      const same = a.sha256 === b.sha256 && a.w === b.w && a.h === b.h
+      if (!same) failed = true
+      result.parity[`${doc}@${opts.parity}`] = { sync: a.sha256, async: b.sha256, same }
+      console.log(`parity ${doc}@${opts.parity}`.padEnd(32), same ? 'SAME' : 'DIFFERS', a.sha256.slice(0, 12), b.sha256.slice(0, 12))
+    }
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
   for (const spec of opts.time) {
     const [doc, h] = spec.split('@')
     const height = Number(h)
@@ -174,3 +196,7 @@ try {
 
 writeFileSync(opts.out, JSON.stringify(result, null, 2) + '\n')
 console.log(`wrote ${opts.out}`)
+if (failed) {
+  console.error('the preview and export entry points disagree')
+  process.exit(1)
+}

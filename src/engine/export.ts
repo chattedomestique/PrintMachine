@@ -9,129 +9,219 @@
  *     largely ignores `download` on blob URLs and instead *navigates* to the
  *     image, destroying app state. Inverting these two is the single most
  *     common failure in this class of app.
- *  2. Do the slow work before the share call, not between the gesture and it.
- *     `navigator.share` needs transient activation.
+ *  2. `navigator.share` needs transient activation, and a print pressed at the
+ *     photo's own resolution takes seconds — longer than the activation a tap
+ *     grants. So pressing and sharing are two steps (`savePrint`, then
+ *     `deliverFile`), and the save flow (features/shell/useSave.ts) asks for a
+ *     fresh tap when the press outlasted the tap that started it.
  *  3. AbortError means the user dismissed the sheet. It is not a failure and
  *     must never surface as an error.
- *  4. JPEG by default. A 1800px PNG of a print is multi-megabyte for no
- *     visible gain (N4).
+ *  4. JPEG at 0.95 by default, PNG as the explicit lossless choice.
+ *
+ * The size is planned from the photo (exportPlan.ts): the print is saved at
+ * the height where the photo lands pixel for pixel, never at the preview's,
+ * and never quietly smaller.
  */
 
-import { renderPrint, type RenderCache } from './render.ts'
-import type { PrintSettings } from './types.ts'
+import { planExport, type ExportPlan } from './exportPlan.ts'
+import { renderPrintAsync, type RenderProgress } from './render.ts'
+import { sheetAspect, type MediaLayer, type PrintSettings } from './types.ts'
 
 export type ExportFormat = 'jpeg' | 'png'
 
-export interface SaveResult {
-  status: 'shared' | 'downloaded' | 'cancelled' | 'error'
-  message?: string
+/**
+ * JPEG quality. 0.95 rather than 0.92: on a screened print it is a quarter to
+ * a third more bytes for visibly cleaner dot edges, and still several times
+ * smaller than PNG. Below 1.0 browsers write 4:2:0 chroma (Chromium does,
+ * measured), which halves the colour resolution of saturated ink on paper —
+ * the one loss a quality setting cannot remove, so PNG is offered as the
+ * lossless path rather than this number being pushed to 1.0 (three times the
+ * bytes, and still not lossless).
+ */
+export const JPEG_QUALITY = 0.95
+
+export const ENCODINGS: Record<ExportFormat, { mime: string; ext: string; quality: number | undefined }> = {
+  jpeg: { mime: 'image/jpeg', ext: 'jpg', quality: JPEG_QUALITY },
+  png: { mime: 'image/png', ext: 'png', quality: undefined },
 }
 
-const MIME: Record<ExportFormat, string> = {
-  jpeg: 'image/jpeg',
-  png: 'image/png',
+/** The document has a photo, but no decode of it was handed over: the stored
+ *  image is gone or unreadable. Saving would print the type on bare paper — a
+ *  different print, saved as if it were this one — so it is refused. */
+export class MissingPhotoError extends Error {
+  constructor() {
+    super('This photo could not be loaded. Choose it again.')
+    this.name = 'MissingPhotoError'
+  }
 }
 
-const EXT: Record<ExportFormat, string> = {
-  jpeg: 'jpg',
-  png: 'png',
+/** The size this print saves at: from its sheet and its photo's TRUE size
+ *  (never the preview's working copy), at its zoom. */
+export function planPrint(settings: PrintSettings, opts: { maxHeight?: number } = {}): ExportPlan {
+  const m = settings.media
+  return planExport(sheetAspect(settings), m ? { width: m.width, height: m.height, scale: m.scale } : null, opts)
 }
 
-function encode(canvas: HTMLCanvasElement, format: ExportFormat): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error('The image could not be encoded.'))),
-      MIME[format],
-      // 0.92 is the quality/size knee for photographic content; flat ink areas
-      // survive it without visible blocking.
-      format === 'png' ? undefined : 0.92,
-    )
-  })
+export interface PressedPrint {
+  blob: Blob
+  plan: ExportPlan
+  format: ExportFormat
+}
+
+export interface SaveOptions {
+  format?: ExportFormat
+  signal?: AbortSignal
+  onProgress?: (progress: RenderProgress) => void
+  /** Called once the photo is in the ground: the caller frees its decode. */
+  onGround?: () => void
 }
 
 /**
- * Render a fresh, overlay-free frame and hand it to the share sheet.
+ * Press the print at its planned size and encode it.
  *
  * The export never reads back the on-screen canvas — that canvas may carry a
- * selection crosshair. Re-rendering with `overlay = null` makes an
- * editing aid in a saved file structurally impossible rather than something we
- * remember to avoid (N8).
+ * selection crosshair. Re-rendering with no overlay makes an editing aid in a
+ * saved file structurally impossible rather than something we remember to
+ * avoid (N8). Both canvases are let go (width 0) once the file exists, or the
+ * press fails: tens of megabytes on a phone.
+ *
+ * @param media the photo decoded from its ORIGINAL bytes (not the preview's
+ *   working copy), so the print is drawn from the original's pixels.
+ * @param render the renderer; a test hands in a spy.
  */
 export async function savePrint(
   exportCtx: CanvasRenderingContext2D,
   scratchCtx: CanvasRenderingContext2D,
   settings: PrintSettings,
-  format: ExportFormat = 'jpeg',
-  name = 'print-machine',
-  /** The photo, decoded from its ORIGINAL bytes (not the preview's working
-   *  copy), so the print is drawn from the original's pixels. */
-  media: CanvasImageSource | null = null,
-  /** Called once the photo is in the ground: the caller frees its decode. */
-  onGround?: () => void,
-): Promise<SaveResult> {
-  // A document with a photo and no decode of it would print the type on bare
-  // paper — a different print, saved as if it were this one. Refused instead.
-  if (settings.media && !media) {
-    return { status: 'error', message: 'The photo is not loaded, so this print cannot be saved yet.' }
-  }
-  let blob: Blob
+  media: CanvasImageSource | null,
+  opts: SaveOptions = {},
+  render: typeof renderPrintAsync = renderPrintAsync,
+): Promise<PressedPrint> {
+  if (settings.media && !media) throw new MissingPhotoError()
+  const format = opts.format ?? 'jpeg'
+  const plan = planPrint(settings)
   try {
-    // A cache of its own: the export renders at REFERENCE_HEIGHT while the
-    // preview renders smaller, so sharing one would make each thrash the
-    // other's noise fields on every save.
-    const cacheRef: { current: RenderCache | null } = { current: null }
-    // Synchronous CPU work — does not consume the user gesture.
-    renderPrint(exportCtx, scratchCtx, settings, cacheRef, null, undefined, media, onGround)
-    blob = await encode(exportCtx.canvas, format)
-  } catch (err) {
-    return { status: 'error', message: err instanceof Error ? err.message : 'Export failed.' }
-  }
-
-  const filename = `${name}.${EXT[format]}`
-  const file = new File([blob], filename, { type: MIME[format] })
-
-  // 1. iOS and modern Android: the native share sheet → Save Image / Files.
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: name })
-      return { status: 'shared' }
-    } catch (err) {
-      // The user dismissed the sheet. Not an error — swallow it silently.
-      if (err instanceof Error && err.name === 'AbortError') return { status: 'cancelled' }
-      // Anything else: fall through to the download path.
+    await render(exportCtx, scratchCtx, settings, plan.height, media, {
+      signal: opts.signal,
+      onProgress: opts.onProgress,
+      onGround: opts.onGround,
+    })
+    const { width, height } = exportCtx.canvas
+    // The renderer makes the width from the same aspect; a canvas of any other
+    // size is not the print the caption promised.
+    if (width !== plan.width || height !== plan.height) {
+      throw new Error(`The print came out ${width}×${height}, not the planned ${plan.width}×${plan.height}.`)
     }
-  }
-
-  // 2. Desktop fallback.
-  try {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    // Not synchronous — some browsers need the URL alive briefly past .click().
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-    return { status: 'downloaded' }
-  } catch (err) {
-    return { status: 'error', message: err instanceof Error ? err.message : 'Save failed.' }
+    const blob = await encode(exportCtx.canvas, format)
+    return { blob, plan, format }
+  } finally {
+    exportCtx.canvas.width = 0
+    scratchCtx.canvas.width = 0
   }
 }
 
-/** Human-readable confirmation. Deliberately does not claim the file reached
+function encode(canvas: HTMLCanvasElement, format: ExportFormat): Promise<Blob> {
+  const { mime, quality } = ENCODINGS[format]
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('The image could not be encoded.'))), mime, quality)
+  })
+}
+
+/** The pressed print as a named file. */
+export function printFile(pressed: PressedPrint, name = 'print-machine'): File {
+  const { mime, ext } = ENCODINGS[pressed.format]
+  return new File([pressed.blob], `${name}.${ext}`, { type: mime })
+}
+
+export type Delivery = 'shared' | 'downloaded' | 'cancelled'
+
+/** Whether this browser can hand the file to a share sheet. */
+export function canShareFile(file: File): boolean {
+  return typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] }) === true
+}
+
+/**
+ * Hand the file over: the share sheet where there is one, a download where
+ * there is not.
+ *
+ * A share that fails (anything but the person dismissing it) falls back to a
+ * download only where `allowDownload` says that is safe. In an iOS home-screen
+ * app it is not — `<a download>` navigates to the image and takes the app
+ * with it — so the error is thrown and the caller keeps the file and the
+ * "Save to Photos" button for another tap.
+ */
+export async function deliverFile(file: File, opts: { allowDownload: boolean }): Promise<Delivery> {
+  if (canShareFile(file)) {
+    try {
+      await navigator.share({ files: [file], title: file.name })
+      return 'shared'
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return 'cancelled'
+      // An expired activation is the save flow's to handle: another tap.
+      if (!opts.allowDownload || (err instanceof Error && err.name === 'NotAllowedError')) throw err
+    }
+  }
+  download(file)
+  return 'downloaded'
+}
+
+function download(file: File): void {
+  const url = URL.createObjectURL(file)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file.name
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // Not synchronous — some browsers need the URL alive briefly past .click().
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** Pixel dimensions as a person reads them. */
+export const dims = (w: number, h: number): string => `${w}×${h}`
+
+/** A file size as a person reads it: "6.2 MB", "840 KB". */
+export function fileSize(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(bytes / 1000))} KB`
+}
+
+const times = (k: number): string => `${Number(k.toFixed(2))}x`
+
+/**
+ * What Save says about the size: the pixel size, and, when the print is not
+ * at the photo's own pixels, why — in numbers, never quietly.
+ */
+export function describePlan(plan: ExportPlan, media: Pick<MediaLayer, 'width' | 'height' | 'scale'> | null): {
+  size: string
+  reason: string | null
+} {
+  const size = dims(plan.width, plan.height)
+  const photo = media ? `${dims(media.width, media.height)}${media.scale > 1 ? ` at ${Math.round(media.scale * 100)}% zoom` : ''}` : ''
+  switch (plan.limit) {
+    case 'native':
+    case 'none':
+      return { size, reason: null }
+    case 'floor':
+      return { size, reason: `photo is ${photo}: upscaled ${times(plan.upscale ?? 1)}` }
+    case 'ceiling':
+      return { size, reason: `capped at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is ${photo}` }
+    case 'smaller':
+      return { size, reason: 'a smaller copy, as asked' }
+  }
+}
+
+/** The confirmation after a save. Deliberately does not claim the file reached
  *  Photos — the share promise resolving only means the sheet was dismissed
  *  (§6.3). "Saved" is honest shorthand; "saved to your camera roll" is not. */
-export function saveMessage(result: SaveResult): string | null {
-  switch (result.status) {
+export function saveMessage(delivery: Delivery, plan: ExportPlan): string | null {
+  switch (delivery) {
     case 'shared':
-      return 'Saved'
+      return `Saved ${dims(plan.width, plan.height)}`
     case 'downloaded':
-      return 'Downloaded'
+      return `Downloaded ${dims(plan.width, plan.height)}`
     case 'cancelled':
       return null
-    case 'error':
-      return result.message ?? 'Save failed.'
   }
 }

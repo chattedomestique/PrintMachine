@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import Canvas from '../editor/Canvas.tsx'
 import Controls, { TABS, type TabId } from '../controls/Controls.tsx'
 import { IconButton } from '../../ui/controls.tsx'
 import { RedoIcon, UndoIcon } from '../../ui/icons.tsx'
-import { savePrint, saveMessage } from '../../engine/export.ts'
+import { describePlan, planPrint } from '../../engine/export.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, subscribeSW } from '../../state/swStatus.ts'
 import { useMediaBitmap } from '../media/useMediaBitmap.ts'
-import { decodeOriginal } from '../media/decode.ts'
+import { canStart, pressInProgress, progressText, saveButton, useSave } from './useSave.ts'
 import './AppShell.css'
 
 export default function AppShell() {
@@ -18,7 +18,6 @@ export default function AppShell() {
   const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tab, setTab] = useState<TabId | null>(null)
-  const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [hintDismissed, setHintDismissed] = useState(() => loadPrefs().hintDismissed)
 
@@ -75,40 +74,24 @@ export default function AppShell() {
     return () => cancelAnimationFrame(frame)
   }, [tab])
 
-  const onSave = useCallback(async () => {
-    if (busy) return
-    setBusy(true)
-    let photo: ImageBitmap | null = null
-    try {
-      // Fresh offscreen surfaces so the export can never read back the visible
-      // canvas, which carries the selection crosshair (N8).
-      const out = document.createElement('canvas').getContext('2d')
-      const scratch = document
-        .createElement('canvas')
-        .getContext('2d', { willReadFrequently: true })
-      if (!out || !scratch) {
-        announce('Could not open a canvas to export.')
-        return
-      }
-      // The ORIGINAL, decoded now and in full (4 bytes a pixel of the photo,
-      // 98 MB for a 24 MP one), and let go the moment the ground is drawn. A
-      // photo that cannot be loaded stops the save with the reason; it never
-      // falls back to bare paper.
-      if (settings.media) photo = await decodeOriginal(settings.media.id)
-      const decoded = photo
-      const result = await savePrint(out, scratch, settings, 'jpeg', 'print-machine', decoded, () => decoded?.close())
-      announce(saveMessage(result))
-    } catch (err) {
-      announce(err instanceof Error ? err.message : 'Save failed.')
-    } finally {
-      photo?.close()
-      setBusy(false)
-    }
-  }, [busy, settings, announce])
+  const save = useSave(settings, mediaState, announce)
+  const pressing = pressInProgress(save.state)
+  // What Save will make, said before the tap: the pixel size, and why when it
+  // is not the photo's own pixels.
+  const caption = useMemo(() => describePlan(planPrint(settings), settings.media), [settings])
+  const button = saveButton(save.state, mediaState)
+  const status = progressText(save.state)
+  const onSave = () => {
+    if (pressing) save.cancel()
+    else if (save.state.kind === 'ready') save.share()
+    else void save.start('jpeg')
+  }
 
   return (
     <div className="app" ref={appRef}>
-      <header className="header">
+      {/* While the print is pressed, everything but the progress and Cancel
+          is inert: the document cannot change under the press. */}
+      <header className="header" inert={pressing || undefined}>
         <h1 className="wordmark">
           Print<span>Machine</span>
         </h1>
@@ -145,9 +128,11 @@ export default function AppShell() {
         </div>
       </header>
 
-      <main className="app__main">
+      <main className="app__main" inert={pressing || undefined}>
         <div className="app__canvas-wrap">
-          <Canvas media={media} mediaMode={tab === 'media'} />
+          {/* Paused while pressing, so a full-size press and a preview frame
+              never hold their buffers at once. */}
+          <Canvas media={media} mediaMode={tab === 'media'} paused={pressing} />
           {!hintDismissed && (
             <button type="button" className="hint" onClick={dismissHint}>
               Drag the sheet to move type · double-tap to centre
@@ -166,14 +151,43 @@ export default function AppShell() {
             id={tab ? `panel-${tab}` : undefined}
             role="tabpanel"
             aria-labelledby={tab ? `tab-${tab}` : undefined}
-            inert={tab === null ? true : undefined}
+            inert={tab === null || pressing ? true : undefined}
           >
             <Controls tab={tab} mediaState={mediaState} />
           </div>
         </div>
 
+        {/* What Save makes, and while it works, how far it has got. */}
+        <div className="control-group">
+          <div className="field-head">
+            {status === null ? (
+              <span className="field-label">
+                Saves {caption.size}
+                {caption.reason ? `: ${caption.reason}` : ''}
+              </span>
+            ) : (
+              <span className="field-label" role={save.state.kind === 'error' ? 'alert' : 'status'}>
+                {status}
+              </span>
+            )}
+            {/* The lossless file: JPEG halves the colour resolution below
+                quality 1.0, so PNG is the one save that loses nothing. */}
+            {(save.state.kind === 'idle' || save.state.kind === 'error' || save.state.kind === 'ready') && (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Save lossless PNG"
+                disabled={!canStart(save.state, mediaState)}
+                onClick={() => void save.start('png')}
+              >
+                PNG
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="toolbar">
-          <div className="tabs" role="tablist" aria-label="Control groups">
+          <div className="tabs" role="tablist" aria-label="Control groups" inert={pressing || undefined}>
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -190,8 +204,13 @@ export default function AppShell() {
               </button>
             ))}
           </div>
-          <IconButton label="Save this print" variant="primary" onClick={onSave} disabled={busy}>
-            {busy ? 'Printing…' : 'Save'}
+          <IconButton
+            label={pressing ? 'Cancel the save' : save.state.kind === 'ready' ? button.text : `${button.text}: ${caption.size} JPEG`}
+            variant="primary"
+            onClick={onSave}
+            disabled={button.disabled}
+          >
+            {button.text}
           </IconButton>
         </div>
       </div>

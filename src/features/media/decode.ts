@@ -17,6 +17,7 @@
  * stores and every bitmap drawn from it agree on which way up it is.
  */
 
+import { MissingPhotoError } from '../../engine/export.ts'
 import { getMedia } from '../../state/mediaStore.ts'
 
 /**
@@ -51,14 +52,6 @@ export async function decodeOriented(blob: Blob, size?: { width: number; height:
   } catch (err) {
     if (!(err instanceof TypeError)) throw err
     return createImageBitmap(blob)
-  }
-}
-
-/** The stored photo is gone (cleared site data, another device's document). */
-export class MissingPhotoError extends Error {
-  constructor() {
-    super('This photo could not be loaded. Choose it again.')
-    this.name = 'MissingPhotoError'
   }
 }
 

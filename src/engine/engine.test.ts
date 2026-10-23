@@ -36,7 +36,7 @@ import {
   type ToneSource,
 } from './render.ts'
 import { knockoutMask } from './knockout.ts'
-import { savePrint } from './export.ts'
+import { MissingPhotoError, planPrint, savePrint } from './export.ts'
 import {
   bandMask,
   clampPan,
@@ -1102,9 +1102,7 @@ describe('Save never prints a photo as bare paper', () => {
     const s = { ...defaultSettings(), media: makeMedia({ id: 'p', width: 100, height: 100 }) }
     // Refused before any canvas is touched.
     const untouched = {} as CanvasRenderingContext2D
-    const result = await savePrint(untouched, untouched, s, 'jpeg', 'x', null)
-    expect(result.status).toBe('error')
-    expect(result.message).toMatch(/photo/)
+    await expect(savePrint(untouched, untouched, s, null)).rejects.toBeInstanceOf(MissingPhotoError)
   })
 })
 
@@ -1454,10 +1452,13 @@ describe('draft rendering', () => {
     }
   })
 
-  it('never reaches the export, which renders at reference height', () => {
-    const exported = outputSize(4 / 5)
-    expect(exported.h).toBe(REFERENCE_HEIGHT)
-    expect(exported.h).toBeGreaterThan(PREVIEW_HEIGHT)
+  it('never reaches the export, which is planned from the photo and never below the reference height', () => {
+    // (export.test.ts holds the rule on the real savePrint.)
+    for (const s of [defaultSettings(), { ...defaultSettings(), media: makeMedia({ id: 'p', width: 400, height: 300 }) }]) {
+      const plan = planPrint(s)
+      expect(plan.height).toBeGreaterThanOrEqual(REFERENCE_HEIGHT)
+      expect(plan.height).toBeGreaterThan(PREVIEW_HEIGHT)
+    }
   })
 })
 

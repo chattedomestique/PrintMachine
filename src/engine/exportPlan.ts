@@ -19,8 +19,7 @@
  * most: the photo is never sampled down. Pan moves the photo without changing
  * its density, so it never enters.
  *
- * Not wired yet: Save still renders at REFERENCE_HEIGHT until the save flow
- * that survives a long render exists (WP2.6).
+ * Save presses at `height` (export.ts `savePrint`, through `planPrint`).
  */
 
 import { MAX_AREA, NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'

@@ -41,6 +41,15 @@ export function useRenderer(
   settings: PrintSettings,
   overlay: OverlaySpec,
   media: ImageBitmap | null = null,
+  /**
+   * Render nothing while true: a save is pressing the print at full size, and
+   * a preview frame then would hold its buffers alongside the press's on a
+   * phone that has room for one. The picture stays as it was; un-pausing
+   * schedules one frame of whatever is pending. The preview stays
+   * synchronous, so there is never a stale frame to throw away — the export's
+   * result is never painted here.
+   */
+  paused = false,
 ) {
   const scratchRef = useRef<CanvasRenderingContext2D | null>(null)
   // One cache per resolution. They hold the paper field, the noise fields and
@@ -55,6 +64,7 @@ export function useRenderer(
   const movingRef = useRef(false)
   const settleRef = useRef<number | undefined>(undefined)
   const lastDraftRef = useRef(0)
+  const pausedRef = useRef(paused)
 
   const getScratch = useCallback((): CanvasRenderingContext2D | null => {
     if (!scratchRef.current) {
@@ -70,7 +80,7 @@ export function useRenderer(
       frameRef.current = undefined
       const pending = pendingRef.current
       const canvas = canvasRef.current
-      if (!pending || !canvas || document.visibilityState === 'hidden') return
+      if (!pending || !canvas || pausedRef.current || document.visibilityState === 'hidden') return
       const ctx = canvas.getContext('2d')
       const scratch = getScratch()
       if (!ctx || !scratch) return
@@ -118,6 +128,11 @@ export function useRenderer(
   }, [settings, overlay, media, schedule])
 
   useEffect(() => () => window.clearTimeout(settleRef.current), [])
+
+  useEffect(() => {
+    pausedRef.current = paused
+    if (!paused) schedule()
+  }, [paused, schedule])
 
   // Repaint on becoming visible again — iOS can discard the canvas backing
   // store while the tab is backgrounded, which leaves a blank preview.

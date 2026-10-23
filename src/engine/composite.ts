@@ -47,7 +47,11 @@ export interface PaperInput {
  * because the second ink sits on a darker base — which is exactly the behaviour
  * a real press has.
  *
- * @param out RGBA byte buffer of length w*h*4, written in full (alpha = 255).
+ * @param out RGBA byte buffer of length w*h*4, written in full (alpha = 255)
+ *   — or, given a band of rows, written in that band.
+ * @param y0, y1 the band of rows to print, [y0, y1); the whole sheet by
+ *   default. Every pixel is printed on its own, so printing the sheet in bands
+ *   gives exactly the bytes printing it at once does.
  */
 export function compositeLayers(
   out: Uint8ClampedArray,
@@ -55,8 +59,10 @@ export function compositeLayers(
   h: number,
   paper: PaperInput,
   layers: readonly CompositeLayer[],
+  y0 = 0,
+  y1 = h,
 ): void {
-  const n = w * h
+  const n = y1 * w
   const pr = paper.rgb[0] / 255
   const pg = paper.rgb[1] / 255
   const pb = paper.rgb[2] / 255
@@ -79,7 +85,7 @@ export function compositeLayers(
   // arithmetic below collapses back to exactly `rgb × shade`.
   const amount = base ? Math.max(0, Math.min(1, paper.paperAmount ?? 1)) : 1
 
-  for (let i = 0; i < n; i++) {
+  for (let i = y0 * w; i < n; i++) {
     let r: number
     let g: number
     let b: number

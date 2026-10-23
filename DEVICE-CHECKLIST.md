@@ -91,18 +91,35 @@ So:
 
 ## Save
 
-- [ ] Save → the native share sheet appears → Save Image → the file **is** in Photos
-- [ ] A confirmation appears after saving
+- [ ] The line above the toolbar says the size before the tap ("Saves
+      2419×3024" for a 12 MP photo on 4:5), and why when it is not the photo's
+      own pixels
+- [ ] Tap Save → within a moment the button reads Cancel and the line reads
+      "Pressing 3024×3780, plate 1 of 2" and moves on; the preview holds still
+- [ ] Cancel mid-press → back to Save, no error, nothing saved
+- [ ] A press that takes more than a second → the button reads "Save to
+      Photos (… MB)" → tap it → the native share sheet appears → Save Image →
+      the file **is** in Photos, at the size the line said (check it in Photos'
+      info panel)
+- [ ] A quick press (no photo, or a small one) → the share sheet opens without
+      a second tap
+- [ ] Home-screen app: dismiss or break the share sheet → the "Save to Photos"
+      button is still there; the app never navigates to the image
+- [ ] PNG → the same flow, a .png file in Photos
+- [ ] Right after choosing a photo, Save reads "Loading photo" until the photo
+      is in the preview
+- [ ] A confirmation appears after saving, with the pixel size
 - [ ] Cancel the share sheet → no error toast
 - [ ] The saved file has **no** selection crosshair in it (the thirds guides are
       gone; the crosshair is the one editing aid left, and it must never print)
-<!-- WP2: the export becomes native resolution; this size line changes with it. -->
-- [ ] File size is sane — hundreds of KB, not multi-MB
+- [ ] File size: a few MB, in proportion to the pixels (a 12 MP photo on 4:5:
+      about 2-7 MB as JPEG); PNG several times that
 
-> Expect ~600 KB rather than the ~300 KB the playbook cites for photographs. A
-> halftone screen over paper grain is close to worst-case for JPEG's DCT: it is
-> high-frequency detail everywhere. Dropping quality to compensate smears the
-> dots, which is the one thing this app exists to render, so the size stands.
+> Expect megabytes, not the ~300 KB the playbook cites for photographs: the
+> print is saved at the photo's own pixels, and a halftone screen over paper
+> grain is close to worst-case for JPEG's DCT. Dropping quality to compensate
+> smears the dots, which is the one thing this app exists to render, so the
+> size stands.
 
 ## Both themes
 

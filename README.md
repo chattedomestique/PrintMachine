@@ -544,6 +544,48 @@ against the space the sheet is actually given. The ratio is a number the sheet
 is handed (`--sheet-ratio`, from `sheetAspect`), not one of a list of shapes,
 so an Original sheet of any photo's proportions sizes the same way.
 
+### Saving at the photo's own pixels
+
+Save presses the print at the size the planner gives (`engine/exportPlan.ts`),
+never at the preview's: the height at which the photo lands on the sheet pixel
+for pixel. A 12 MP landscape photo on 4:5 saves at 2419×3024, the same photo
+upright at 3024×3780, a 24 MP iPhone capture on 4:5 at its own 3427×4284. A
+photo with fewer pixels than the reference height is enlarged rather than the
+print made smaller (never under 1800 px tall); a print with no photo saves at
+3600 px tall. The one ceiling is the export canvas's area, 16.7 MP: a 24 MP
+photo on its own Original sheet saves at 4729×3547, and says so.
+
+It says so **before** the tap. The line above the toolbar reads "Saves
+2419×3024", and when the print is not the photo's own pixels, why, in numbers:
+"photo is 1600×1200: upscaled 1.5x", or "capped at 16.7 MP, the most a browser
+canvas is guaranteed to hold; photo is 5712×4284". The confirmation repeats the
+size. Nothing falls back to a smaller file: a press that fails stops, with the
+reason and the numbers.
+
+A print at the photo's own resolution is seconds of work on a phone, so Save
+is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
+
+- **Pressing.** The label changes before any work starts (two painted
+  frames), then "Pressing 3024×3780, plate 2 of 3", with Save turned into
+  **Cancel**. The press runs through `renderPrintAsync`, which runs the very
+  stages the preview runs and yields to the page between them, so the progress
+  paints and Cancel works. The preview stops rendering meanwhile (a full-size
+  press and a preview frame never hold their buffers together), and the rest of
+  the page is inert. The two entry points print the same bytes at the same
+  height: `npm run harness -- --out p.json --no-hashes --parity 1000` renders
+  every harness document through both and fails if any differs.
+- **Sharing.** The share sheet needs the tap that opens it to be recent, and a
+  press outlasts it. A press that finished within a second of the tap shares at
+  once; otherwise Save becomes **Save to Photos (6.2 MB)**, a fresh tap that
+  shares the file already made. A share that fails keeps the file and the
+  button: in a home-screen app it never falls through to a download, which on
+  iOS navigates to the image and takes the app with it. On a desktop with no
+  share sheet the file downloads.
+- **The file.** JPEG at quality 0.95 (measured on the harness fixture: 1.20x
+  to 1.37x the bytes of 0.92, for cleaner dot edges). Below quality 1.0
+  browsers store JPEG colour at half resolution (4:2:0), the one loss a quality
+  setting cannot remove, so **PNG** sits beside Save as the lossless file.
+
 ### The same print at every size
 
 A print is rendered at many heights — the preview, the reference sheet of
@@ -573,7 +615,6 @@ small type correlate at 0.97 or better. Below it the preview is a
 lower-fidelity picture: a halftone for small type is finer than a 900 px
 raster can draw, and a speck or a fibre stops at one pixel.
 
-<!-- WP2: export resolution ("always renders at reference height", below, and the export size in Status) is rewritten in WP2. -->
 ### Why the preview drops resolution while you drag
 
 The press is several full-image passes per plate, so its cost goes with the
@@ -614,7 +655,8 @@ Two things that are easy to get wrong here:
 
 Measured before and after on the same throttled profile, dragging a press
 slider: 90th-percentile frame time went from **595 ms to 41 ms**. The export is
-untouched — it always renders at reference height with its own cache.
+untouched — it presses at the photo's own resolution, through its own entry
+point and with its own cache (see "Saving at the photo's own pixels").
 
 <!-- WP3: Touch and Layout are rewritten for the style guide's dock in WP3. -->
 ### Touch
@@ -708,10 +750,12 @@ a headless browser — but "boots in airplane mode from the home screen" and "th
 share sheet actually puts the file in Photos" are claims only an iPhone can
 settle. See `DEVICE-CHECKLIST.md`.
 
-Export weighs in around 600 KB rather than the ~300 KB the playbook cites for
-photographs. A halftone screen over paper grain is close to worst case for
-JPEG — high-frequency detail in every block. Lowering quality to compensate
-smears the dots, so the size stands as a deliberate trade.
+A saved print is a few megabytes, in proportion to its pixels (on the harness
+fixture: 1.9 MB for 2419×3024, 2.8 MB for 3024×3780, against the ~300 KB the
+playbook cites for a photograph). A halftone screen over paper grain is close
+to worst case for JPEG — high-frequency detail in every block — and lowering
+the quality to compensate smears the dots, so the size stands as a deliberate
+trade. PNG, the lossless choice, is several times larger again.
 
 ## Removed on purpose
 

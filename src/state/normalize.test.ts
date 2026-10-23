@@ -57,7 +57,6 @@ function expectNoExtraKeys(s: PrintSettings) {
   const d = defaultSettings()
   expect(keys(s)).toEqual(keys(d))
   expect(keys(s.press)).toEqual(keys(d.press))
-  expect(keys(s.photoPress)).toEqual(keys(d.photoPress))
   for (const l of s.layers) {
     expect(keys(l)).toEqual(keys(makeLayer()))
     if (l.typewriter) expect(keys(l.typewriter)).toEqual(keys(typewriterTemplate()))
@@ -92,7 +91,9 @@ describe('the schema matches the model', () => {
 /** A document in which every row is reachable: a photo, a typewriter, a box. */
 function reachable(): Doc {
   const d = copy(defaultSettings()) as unknown as Doc
-  d.media = makeMedia({ id: 'photo', width: 4032, height: 3024 })
+  // Zoomed, so the photo can travel on both axes and a valid position is not
+  // pulled back by the cover rule.
+  d.media = makeMedia({ id: 'photo', width: 4032, height: 3024, scale: 4 })
   const layers = d.layers as Doc[]
   layers[0].typewriter = typewriterTemplate()
   layers[0].boxes = [{ id: 'box-1', words: [0], inkId: 'yellow', opacity: 1 }]
@@ -110,7 +111,6 @@ function set(o: Doc, path: Path, value: unknown) {
 const LEVELS: { name: string; path: Path; rows: readonly Row[] }[] = [
   { name: 'settings', path: [], rows: SETTINGS_FIELDS },
   { name: 'press', path: ['press'], rows: PRESS_FIELDS },
-  { name: 'photoPress', path: ['photoPress'], rows: PRESS_FIELDS },
   { name: 'media', path: ['media'], rows: MEDIA_FIELDS },
   { name: 'layer', path: ['layers', 0], rows: LAYER_FIELDS },
   { name: 'typewriter', path: ['layers', 0, 'typewriter'], rows: TYPEWRITER_FIELDS },
@@ -182,7 +182,7 @@ describe('every schema row', () => {
         expectInvalid({})
       })
 
-      if (row.kind === 'number') {
+      if (row.kind === 'number' && row.min !== undefined && row.max !== undefined) {
         it(`${name}: is clamped into [${row.min}, ${row.max}], and non-finite is the default`, () => {
           const lo = row.min ?? -Infinity
           const hi = row.max ?? Infinity
@@ -228,8 +228,6 @@ function defaultsFor(level: string): Doc {
       return d
     case 'press':
       return d.press as Doc
-    case 'photoPress':
-      return d.photoPress as Doc
     case 'media':
       return mediaTemplate()
     case 'layer':
@@ -354,13 +352,52 @@ describe('legacy documents', () => {
     }
   })
 
-  it('legacy-maximal: every stored value survives (all of them are valid today)', () => {
-    const raw = copy(maximal) as unknown as PrintSettings
-    expect(normalizeSettings(copy(maximal))).toEqual(raw)
+  it('no valid stored value is lost: every field that still exists keeps what was saved', () => {
+    // Checked field by field against the raw fixture, for every field the
+    // current schema has and the fixture holds a valid value for — except the
+    // ones a named conversion or the cover rule rewrites, which the verdict
+    // table below checks one by one.
+    const REWRITTEN: Record<string, readonly string[]> = {
+      settings: [],
+      press: [],
+      media: ['scale', 'x', 'y'],
+      layer: [],
+    }
+    const levels = (raw: Doc, out: Doc) => [
+      { level: 'settings', raw, out, rows: SETTINGS_FIELDS },
+      { level: 'press', raw: raw.press as Doc, out: out.press as Doc, rows: PRESS_FIELDS },
+      ...(raw.media ? [{ level: 'media', raw: raw.media as Doc, out: out.media as Doc, rows: MEDIA_FIELDS }] : []),
+      ...(raw.layers as Doc[]).map((l, i) => ({
+        level: 'layer',
+        raw: l,
+        out: (out.layers as Doc[])[i],
+        rows: LAYER_FIELDS,
+      })),
+    ]
+    let checked = 0
+    for (const doc of [defaultDoc, maximal, photoSecondInk, preSplit]) {
+      const raw = copy(doc) as unknown as Doc
+      const out = normalizeSettings(copy(doc)) as unknown as Doc
+      for (const { level, raw: r, out: o, rows } of levels(raw, out)) {
+        if (!r || typeof r !== 'object') continue
+        for (const row of rows) {
+          if (!(row.key in r) || REWRITTEN[level].includes(row.key)) continue
+          if (row.kind === 'object' || row.kind === 'array') continue
+          expect({ at: `${level}.${row.key}`, v: o[row.key] }).toEqual({ at: `${level}.${row.key}`, v: r[row.key] })
+          checked++
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100)
   })
 
-  it('legacy-default and legacy-photo-second-ink come back exactly as stored', () => {
-    for (const doc of [defaultDoc, photoSecondInk]) expect(normalizeSettings(copy(doc))).toEqual(doc)
+  it('every fixture with a photo keeps exactly the placement keys; the others have none', () => {
+    for (const doc of [maximal, photoSecondInk, unknownIds]) {
+      expect(keys(normalizeSettings(copy(doc)).media!)).toEqual(['height', 'id', 'scale', 'width', 'x', 'y'])
+    }
+    for (const doc of [defaultDoc, preSplit, ...(garbage as unknown[])]) {
+      expect(normalizeSettings(copy(doc)).media).toBeNull()
+    }
   })
 
   it('legacy-photo-second-ink: every layer keeps its chosen second ink', () => {
@@ -391,9 +428,59 @@ describe('legacy documents', () => {
   it('legacy-pre-split: opens with the default press (the lift is retired)', () => {
     const s = normalizeSettings(copy(preSplit))
     expect(s.press).toEqual(defaultSettings().press)
-    expect(s.photoPress).toEqual(defaultSettings().photoPress)
     expect(s).not.toHaveProperty('screenPitch')
-    // Everything that was not a press field is still what was saved.
-    expect(withoutIds(s).layers).toEqual(withoutIds({ ...s, layers: (preSplit as unknown as PrintSettings).layers }).layers)
+  })
+})
+
+/* ── Verdict §4.1, one row per line ───────────────────────────────────── */
+
+/**
+ * The verdict's persistence table, as tests: each row a stored shape and what
+ * it becomes. Rows arrive with the commit that removes their field.
+ */
+describe('verdict §4.1: what each removed field becomes', () => {
+  const max = () => normalizeSettings(copy(maximal))
+  const rawMax = maximal as unknown as Doc
+
+  it('media.printed, inkId, contrast, lift, opacity: dropped — the photo shows as shot', () => {
+    const raw = rawMax.media as Doc
+    expect(raw.printed).toBe(true)
+    const m = max().media as unknown as Doc
+    for (const k of ['printed', 'inkId', 'contrast', 'lift', 'opacity']) expect(m).not.toHaveProperty(k)
+    expect(m.id).toBe(raw.id)
+  })
+
+  it('media.scale below 1: 1, and the centre is pulled inside the cover travel', () => {
+    expect((rawMax.media as Doc).scale).toBe(0.5)
+    const m = max().media!
+    expect(m.scale).toBe(1)
+    // 4032x3024 on a 3:4 sheet at zoom 1 fits the height exactly: no vertical
+    // travel, so the stored 0.62 comes back to the middle; 0.4 across is legal.
+    expect(m.y).toBe(0.5)
+    expect(m.x).toBe(0.4)
+  })
+
+  it('photoPress: dropped', () => {
+    expect(rawMax).toHaveProperty('photoPress')
+    expect(max()).not.toHaveProperty('photoPress')
+  })
+
+  it('paperAmount: the paper veil switch, on above one half', () => {
+    expect(rawMax.paperAmount).toBe(0.3)
+    expect(max().paperVeil).toBe(false)
+    expect(max()).not.toHaveProperty('paperAmount')
+    for (const [amount, veil] of [
+      [1, true],
+      [0.51, true],
+      [0.5, false],
+      [0, false],
+      [undefined, true],
+      ['lots', true],
+    ] as const) {
+      const doc = copy(defaultDoc) as unknown as Doc
+      delete doc.paperVeil
+      doc.paperAmount = amount
+      expect(normalizeSettings(doc).paperVeil).toBe(veil)
+    }
   })
 })

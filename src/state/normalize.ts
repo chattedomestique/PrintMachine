@@ -27,7 +27,8 @@
  * need it keep the stored value.
  */
 
-import type { PrintSettings } from '../engine/types.ts'
+import { clampPan } from '../engine/media.ts'
+import { ASPECTS, type PrintSettings } from '../engine/types.ts'
 import type { FontMeasure } from '../engine/text.ts'
 import { defaultSettings } from './defaults.ts'
 import { SETTINGS_FIELDS, type Row } from './fields.ts'
@@ -42,9 +43,21 @@ type Doc = Record<string, unknown>
 /** A conversion edits the stored copy in place, before the walk. */
 type Conversion = (doc: Doc, env: NormalizeEnv) => void
 
-/** Run in this order. Empty until a build removes a field that has a
- *  replacement; a removed field with none is simply not in the schema. */
-const CONVERSIONS: readonly Conversion[] = []
+const finiteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/**
+ * Run in this order. A removed field with a replacement is converted here; a
+ * removed field with none (the printed photo's ink, contrast and lift, its
+ * opacity, the photo's own press) is simply not in the schema, so it goes.
+ */
+const CONVERSIONS: readonly Conversion[] = [
+  // The paper veil was an amount, 0..1, and is now a switch. More than half
+  // reads as "on"; a document that never had the field had it fully on.
+  function paperVeil(doc) {
+    if ('paperVeil' in doc) return
+    doc.paperVeil = (finiteNumber(doc.paperAmount) ? doc.paperAmount : 1) > 0.5
+  },
+]
 
 const isPlainObject = (v: unknown): v is Doc =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -132,5 +145,10 @@ export function normalizeSettings(raw: unknown, env: NormalizeEnv = {}): PrintSe
   if (!isPlainObject(raw)) return defaults
   const doc = clone(raw) as Doc
   for (const convert of CONVERSIONS) convert(doc, env)
-  return object(SETTINGS_FIELDS, doc, defaults as unknown as Doc) as unknown as PrintSettings
+  const s = object(SETTINGS_FIELDS, doc, defaults as unknown as Doc) as unknown as PrintSettings
+  // Cross-field invariant, once every field is valid on its own: the photo
+  // covers the sheet. A pan that was legal on another sheet shape is pulled
+  // back to the nearest placement that leaves no bare strip.
+  if (s.media) s.media = clampPan(s.media, ASPECTS[s.aspect], 1)
+  return s
 }

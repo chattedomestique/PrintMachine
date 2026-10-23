@@ -26,20 +26,23 @@ import {
 } from './render.ts'
 import {
   bandMask,
+  clampPan,
   coverRect,
+  fromPanFraction,
   groundLuma,
   type InkRgb,
-  separateLuminance,
+  panBounds,
+  panFraction,
   splitInks,
 } from './media.ts'
 import { scribbleField, woodcutField } from './carve.ts'
 import { ribbonInk, strikeFor } from './typewriter.ts'
-import { defaultSettings, makeLayer, pressProfile } from '../state/defaults.ts'
+import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
-import type { MediaLayer, TextLayer } from './types.ts'
+import { ASPECTS, type PrintSettings, type TextLayer } from './types.ts'
 
 const W = 24
 const H = 24
@@ -908,21 +911,23 @@ describe('detail scaling', () => {
 
 describe('photo placement', () => {
   const SHEET = { w: 800, h: 1000 }
+  const SOURCES = [
+    { width: 4032, height: 3024 }, // landscape phone photo
+    { width: 3024, height: 4032 }, // portrait
+    { width: 1000, height: 1000 }, // square
+    { width: 6000, height: 1200 }, // panorama
+    { width: 40, height: 900 }, // absurdly tall
+  ]
+  const covers = (r: { dx: number; dy: number; dw: number; dh: number }, w: number, h: number) =>
+    r.dx <= 1e-9 && r.dx + r.dw >= w - 1e-9 && r.dy <= 1e-9 && r.dy + r.dh >= h - 1e-9
 
-  it('never stretches, at any scale, position or source aspect', () => {
+  it('never stretches, at any zoom, position or source aspect', () => {
     // The guarantee the whole feature rests on. Asserted as "the scale factor
     // is identical on both axes" rather than by eyeballing a render, because
     // a squash of a few percent is invisible in a thumbnail and obvious in a
     // print.
-    const sources = [
-      { width: 4032, height: 3024 }, // landscape phone photo
-      { width: 3024, height: 4032 }, // portrait
-      { width: 1000, height: 1000 }, // square
-      { width: 6000, height: 1200 }, // panorama
-      { width: 40, height: 900 }, // absurdly tall
-    ]
-    for (const src of sources) {
-      for (const scale of [0.2, 1, 2.5, 4]) {
+    for (const src of SOURCES) {
+      for (const scale of [1, 1.7, 2.5, 4]) {
         for (const [x, y] of [[0.5, 0.5], [0, 0], [1, 1], [0.2, 0.8]]) {
           const r = coverRect(src, SHEET.w, SHEET.h, { scale, x, y })
           expect(r.dw / r.dh).toBeCloseTo(src.width / src.height, 6)
@@ -931,60 +936,131 @@ describe('photo placement', () => {
     }
   })
 
-  it('covers the sheet at scale 1, leaving no bare paper', () => {
+  it('covers the sheet at zoom 1, leaving no bare paper', () => {
     // Cover, not contain: a full-bleed print should not have letterbox bars.
-    for (const src of [
-      { width: 4032, height: 3024 },
-      { width: 3024, height: 4032 },
-      { width: 6000, height: 1200 },
-    ]) {
+    for (const src of SOURCES) {
       const r = coverRect(src, SHEET.w, SHEET.h, { scale: 1, x: 0.5, y: 0.5 })
-      expect(r.dw).toBeGreaterThanOrEqual(SHEET.w - 1e-6)
-      expect(r.dh).toBeGreaterThanOrEqual(SHEET.h - 1e-6)
-      expect(r.dx).toBeLessThanOrEqual(1e-6)
-      expect(r.dy).toBeLessThanOrEqual(1e-6)
+      expect(covers(r, SHEET.w, SHEET.h)).toBe(true)
+      // ...and exactly fills one axis: zoom 1 crops only the overflow.
+      expect(Math.min(r.dw - SHEET.w, r.dh - SHEET.h)).toBeCloseTo(0, 6)
     }
   })
 
-  it('centres on the given point and scales about it', () => {
+  it('centres on the given point and zooms about it, inside the travel', () => {
     const src = { width: 2000, height: 1000 }
-    const centred = coverRect(src, SHEET.w, SHEET.h, { scale: 1, x: 0.5, y: 0.5 })
+    const centred = coverRect(src, SHEET.w, SHEET.h, { scale: 2, x: 0.5, y: 0.5 })
     expect(centred.dx + centred.dw / 2).toBeCloseTo(SHEET.w / 2, 6)
     expect(centred.dy + centred.dh / 2).toBeCloseTo(SHEET.h / 2, 6)
 
-    const moved = coverRect(src, SHEET.w, SHEET.h, { scale: 1, x: 0.25, y: 0.75 })
+    const moved = coverRect(src, SHEET.w, SHEET.h, { scale: 2, x: 0.25, y: 0.75 })
     expect(moved.dx + moved.dw / 2).toBeCloseTo(SHEET.w * 0.25, 6)
     expect(moved.dy + moved.dh / 2).toBeCloseTo(SHEET.h * 0.75, 6)
 
-    // Scaling keeps the centre put rather than growing from a corner.
-    const bigger = coverRect(src, SHEET.w, SHEET.h, { scale: 2, x: 0.25, y: 0.75 })
+    // Zooming keeps the centre put rather than growing from a corner.
+    const bigger = coverRect(src, SHEET.w, SHEET.h, { scale: 4, x: 0.25, y: 0.75 })
     expect(bigger.dx + bigger.dw / 2).toBeCloseTo(moved.dx + moved.dw / 2, 6)
     expect(bigger.dw).toBeCloseTo(moved.dw * 2, 6)
   })
 
-  it('separates a photo to ink coverage as darkness, not brightness', () => {
-    // Ink is what gets added to paper: black wants full coverage, white none.
-    // Inverting this is the classic separation bug and it produces a negative.
-    const px = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255, 128, 128, 128, 255])
-    const out = separateLuminance(px, new Float32Array(3), { contrast: 1, lift: 0 })
-    expect(out[0]).toBeCloseTo(1, 2)
-    expect(out[1]).toBeCloseTo(0, 2)
-    expect(out[2]).toBeGreaterThan(0.4)
-    expect(out[2]).toBeLessThan(0.6)
+  it('never uncovers the sheet, whatever placement it is handed', () => {
+    // Cover is enforced where the sheet is drawn, so no stored placement — a
+    // pan that was legal on another sheet shape, a zoom below 1 from an old
+    // build, a garbage position — can print a bare strip.
+    const rnd = mulberry32(2024)
+    for (let i = 0; i < 400; i++) {
+      const src = SOURCES[i % SOURCES.length]
+      const w = 200 + Math.floor(rnd() * 900)
+      const h = 200 + Math.floor(rnd() * 900)
+      const place = { scale: rnd() * 5, x: rnd() * 8 - 4, y: rnd() * 8 - 4 }
+      expect(covers(coverRect(src, w, h, place), w, h)).toBe(true)
+    }
   })
 
-  it('drops highlights out entirely as lift rises, and stays in range', () => {
-    const px = new Uint8ClampedArray([220, 220, 220, 255, 30, 30, 30, 255])
-    const none = separateLuminance(px, new Float32Array(2), { contrast: 1, lift: 0 })
-    const lifted = separateLuminance(px, new Float32Array(2), { contrast: 1, lift: 0.4 })
+  it('clampPan keeps zoom at least 1 and the photo over the whole sheet', () => {
+    const rnd = mulberry32(7)
+    for (let i = 0; i < 200; i++) {
+      const src = SOURCES[i % SOURCES.length]
+      const media = { ...src, scale: rnd() * 5, x: rnd() * 6 - 3, y: rnd() * 6 - 3 }
+      const c = clampPan(media, SHEET.w, SHEET.h)
+      expect(c.scale).toBeGreaterThanOrEqual(1)
+      // Drawn from the clamped placement with NO further correction: the
+      // stored value itself is honest.
+      const { dw, dh } = coverRect(src, SHEET.w, SHEET.h, { scale: c.scale, x: 0.5, y: 0.5 })
+      const dx = c.x * SHEET.w - dw / 2
+      const dy = c.y * SHEET.h - dh / 2
+      expect(dx <= 1e-9 && dx + dw >= SHEET.w - 1e-9).toBe(true)
+      expect(dy <= 1e-9 && dy + dh >= SHEET.h - 1e-9).toBe(true)
+    }
+  })
 
-    expect(none[0]).toBeGreaterThan(0)
-    expect(lifted[0]).toBe(0)
-    // The shadow survives — lift drops highlights, it does not fade the image.
-    expect(lifted[1]).toBeGreaterThan(0.5)
-    for (const v of [...none, ...lifted]) {
-      expect(v).toBeGreaterThanOrEqual(0)
-      expect(v).toBeLessThanOrEqual(1)
+  it('leaves a placement that already covers exactly as it was', () => {
+    const media = { width: 4032, height: 3024, scale: 2, x: 0.41, y: 0.58 }
+    expect(clampPan(media, SHEET.w, SHEET.h)).toEqual(media)
+  })
+
+  it('has no travel on an axis the photo exactly fits', () => {
+    // A landscape photo on a portrait sheet fits the height at zoom 1.
+    const b = panBounds({ width: 4032, height: 3024, scale: 1 }, SHEET.w, SHEET.h)
+    expect(b.yLo).toBe(0.5)
+    expect(b.yHi).toBe(0.5)
+    expect(b.xLo).toBeLessThan(0.5)
+    expect(b.xHi).toBeGreaterThan(0.5)
+  })
+
+  it('states position as a fraction of the travel: 0 shows the left edge, 1 the right', () => {
+    const m = { width: 4032, height: 3024, scale: 1.5 }
+    for (const axis of ['x', 'y'] as const) {
+      const b = panBounds(m, SHEET.w, SHEET.h)
+      const left = fromPanFraction(m, SHEET.w, SHEET.h, axis, 0)
+      const right = fromPanFraction(m, SHEET.w, SHEET.h, axis, 1)
+      // 0: the photo's left (top) edge sits on the trim.
+      const r0 = coverRect(m, SHEET.w, SHEET.h, { scale: m.scale, x: axis === 'x' ? left : 0.5, y: axis === 'y' ? left : 0.5 })
+      expect(axis === 'x' ? r0.dx : r0.dy).toBeCloseTo(0, 6)
+      // 1: its right (bottom) edge does.
+      const r1 = coverRect(m, SHEET.w, SHEET.h, { scale: m.scale, x: axis === 'x' ? right : 0.5, y: axis === 'y' ? right : 0.5 })
+      expect(axis === 'x' ? r1.dx + r1.dw : r1.dy + r1.dh).toBeCloseTo(axis === 'x' ? SHEET.w : SHEET.h, 6)
+      expect(axis === 'x' ? [b.xHi, b.xLo] : [b.yHi, b.yLo]).toEqual([left, right])
+      // Round trip.
+      for (const f of [0, 0.25, 0.5, 0.9, 1]) {
+        const pos = fromPanFraction(m, SHEET.w, SHEET.h, axis, f)
+        expect(panFraction({ ...m, x: pos, y: pos }, SHEET.w, SHEET.h, axis)).toBeCloseTo(f, 9)
+      }
+    }
+    // No travel on an axis: the middle, whatever is asked.
+    const fit = { width: 4032, height: 3024, scale: 1 }
+    expect(panFraction({ ...fit, x: 0.5, y: 0.5 }, SHEET.w, SHEET.h, 'y')).toBe(0.5)
+    expect(fromPanFraction(fit, SHEET.w, SHEET.h, 'y', 0)).toBe(0.5)
+  })
+
+  it('random aspect switches, pans and zooms never leave the stored photo uncovering the sheet', () => {
+    // Through the reducer, because that is what writes the stored placement:
+    // pan to the side on one sheet shape, switch to another, and the value
+    // that was legal before has to be pulled back, not left to the renderer.
+    const rnd = mulberry32(99)
+    const aspects = Object.keys(ASPECTS) as PrintSettings['aspect'][]
+    for (const src of SOURCES) {
+      let s = applySettings(defaultSettings(), {
+        type: 'setMedia',
+        media: makeMedia({ id: 'p', ...src }),
+      })
+      for (let step = 0; step < 60; step++) {
+        const r = rnd()
+        if (r < 0.35) s = applySettings(s, { type: 'patch', patch: { aspect: aspects[Math.floor(rnd() * aspects.length)] } })
+        else if (r < 0.7) s = applySettings(s, { type: 'patchMedia', patch: { x: rnd() * 4 - 1.5, y: rnd() * 4 - 1.5 } })
+        else s = applySettings(s, { type: 'patchMedia', patch: { scale: rnd() * 5 } })
+        const m = s.media!
+        // A fixed point of the clamp, in the units the reducer works in...
+        expect(clampPan(m, ASPECTS[s.aspect], 1)).toEqual(m)
+        // ...and covering a real sheet in pixels.
+        const W = ASPECTS[s.aspect] * 1000
+        const H = 1000
+        expect(m.scale).toBeGreaterThanOrEqual(1)
+        const { dw, dh } = coverRect(m, W, H, { scale: m.scale, x: 0.5, y: 0.5 })
+        expect(m.x * W - dw / 2).toBeLessThanOrEqual(1e-6)
+        expect(m.x * W + dw / 2).toBeGreaterThanOrEqual(W - 1e-6)
+        expect(m.y * H - dh / 2).toBeLessThanOrEqual(1e-6)
+        expect(m.y * H + dh / 2).toBeGreaterThanOrEqual(H - 1e-6)
+      }
     }
   })
 })
@@ -1055,8 +1131,10 @@ describe('a photo that does not cover the sheet', () => {
 
   it('leaves bare paper where the photo has been panned away, not black', () => {
     // getImageData hands back transparent *black* for untouched pixels, so
-    // reading colour without alpha prints a black border round a photo that
-    // has merely been moved. This is the bug that shipped in the first cut.
+    // reading colour without alpha printed a black border round a photo that
+    // had merely been moved — the bug that shipped in the first cut. Panning
+    // is clamped to cover now, but knockouts and transparent PNGs still take
+    // this path.
     const uncovered = new Uint8ClampedArray([0, 0, 0, 0])
     const out = new Uint8ClampedArray(4)
     compositeLayers(out, 1, 1, { ...paper, base: uncovered, paperAmount: 0 }, [])
@@ -1082,7 +1160,9 @@ describe('a photo that does not cover the sheet', () => {
     expect([...withPhoto]).toEqual([...without])
   })
 
-  it('fades a photo back toward paper through its alpha', () => {
+  it('lets paper back through where the ground is part transparent', () => {
+    // The path a knockout takes (the photo's alpha goes down under the second
+    // ink) and the one a transparent PNG's own transparency takes.
     const half = new Uint8ClampedArray([0, 0, 0, 128])
     const full = new Uint8ClampedArray([0, 0, 0, 255])
     const dim = new Uint8ClampedArray(4)
@@ -1246,19 +1326,7 @@ describe('reading type across a photograph', () => {
 })
 
 describe('the first photo', () => {
-  const photoLayer = (): MediaLayer => ({
-    id: 'photo',
-    width: 100,
-    height: 100,
-    scale: 1,
-    x: 0.5,
-    y: 0.5,
-    opacity: 1,
-    printed: false,
-    inkId: 'black',
-    contrast: 1,
-    lift: 0,
-  })
+  const photoLayer = () => makeMedia({ id: 'photo', width: 100, height: 100 })
 
   it('gives every pass a second ink, because one ink cannot cross a photograph', () => {
     const before = applySettings(defaultSettings(), { type: 'setMedia', media: photoLayer() })
@@ -1289,21 +1357,6 @@ describe('the first photo', () => {
     for (const id of ['white', 'black', 'fluorescentpink', 'yellow', 'midnight']) {
       expect(Math.abs(weight(contrastPartner(id)) - weight(id))).toBeGreaterThan(0.4)
     }
-  })
-})
-
-describe('two presses', () => {
-  it('keeps the type and photo presses independent', () => {
-    const a = pressProfile()
-    const b = pressProfile({ screenPitch: 3, misregistration: 0 })
-    expect(b.screenPitch).toBe(3)
-    expect(b.misregistration).toBe(0)
-    // Everything not overridden still matches, so a photo profile is the type
-    // profile plus deliberate differences rather than a separate set of guesses.
-    expect(b.screenShape).toBe(a.screenShape)
-    expect(b.density).toBe(a.density)
-    // And changing one cannot reach the other.
-    expect(a.screenPitch).not.toBe(3)
   })
 })
 

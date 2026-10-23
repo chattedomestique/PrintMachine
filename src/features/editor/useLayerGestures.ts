@@ -18,6 +18,12 @@ const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > 
 export const MIN_SIZE = 0.015
 export const MAX_SIZE = 1.2
 
+/** Type's limits: its size range, and a little past the trim so it can bleed
+ *  off deliberately without being lost off-screen. Module constants, so the
+ *  handlers below are not rebuilt on every render. */
+const TYPE_SIZE: readonly [number, number] = [MIN_SIZE, MAX_SIZE]
+const TYPE_POSITION: readonly [number, number] = [-0.3, 1.3]
+
 interface Pt {
   x: number
   y: number
@@ -47,8 +53,11 @@ export function useLayerGestures(
   patch: (p: Partial<TextLayer>) => void,
   onGestureStart?: () => void,
   /** Pinch limits. Type and photos want very different ranges — a photo starts
-   *  at cover and is scaled around it, not as a fraction of sheet height. */
-  sizeRange: readonly [number, number] = [MIN_SIZE, MAX_SIZE],
+   *  at cover and is zoomed in from it, not sized as a fraction of the sheet. */
+  sizeRange: readonly [number, number] = TYPE_SIZE,
+  /** Pan limits, in sheet fractions. Type may bleed a little off the trim; a
+   *  photo's limit depends on its zoom, so its caller clamps instead. */
+  positionRange: readonly [number, number] = TYPE_POSITION,
 ): LayerGestureHandlers {
   const pointers = useRef(new Map<number, Pt>())
   const gesture = useRef<Gesture | null>(null)
@@ -124,12 +133,12 @@ export function useLayerGestures(
         y: pts.reduce((a, p) => a + p.y, 0) / pts.length,
       }
 
-      // Pan: the centroid's travel, in sheet-relative units. Clamped a little
-      // outside the sheet so type can deliberately bleed off the trim, but
-      // never so far that it is lost off-screen.
+      // Pan: the centroid's travel, in sheet-relative units, clamped to the
+      // caller's range.
+      const [lo, hi] = positionRange
       const next: Partial<TextLayer> = {
-        x: clamp(g.origin.x + (centroid.x - g.startCentroid.x) / rect.width, -0.3, 1.3),
-        y: clamp(g.origin.y + (centroid.y - g.startCentroid.y) / rect.height, -0.3, 1.3),
+        x: clamp(g.origin.x + (centroid.x - g.startCentroid.x) / rect.width, lo, hi),
+        y: clamp(g.origin.y + (centroid.y - g.startCentroid.y) / rect.height, lo, hi),
       }
 
       if (pts.length >= 2 && g.startSpread > 8) {
@@ -151,7 +160,7 @@ export function useLayerGestures(
 
       patch(next)
     },
-    [localPoint, patch, surfaceRef, sizeRange],
+    [localPoint, patch, surfaceRef, sizeRange, positionRange],
   )
 
   const release = useCallback(

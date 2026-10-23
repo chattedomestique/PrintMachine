@@ -1,15 +1,14 @@
-import type {
-  MediaLayer,
-  PressProfile,
-  PrintSettings,
-  TextLayer,
-  WordBox,
+import {
+  ASPECTS,
+  type MediaLayer,
+  type PressProfile,
+  type PrintSettings,
+  type TextLayer,
+  type WordBox,
 } from '../engine/types.ts'
-
-/** Which of the two presses a control is editing. */
-export type PressTarget = 'press' | 'photoPress'
 import { makeLayer } from './defaults.ts'
 import { contrastPartner } from '../engine/inks.ts'
+import { clampPan } from '../engine/media.ts'
 
 /**
  * The document reducer plus an undo/redo history around it.
@@ -34,7 +33,7 @@ export type SettingsAction =
   | { type: 'patchBox'; layerId: string; boxId: string; patch: Partial<WordBox>; coalesce?: boolean }
   | { type: 'toggleBoxWord'; layerId: string; boxId: string; word: number }
   | { type: 'setBoxWords'; layerId: string; boxId: string; words: number[] }
-  | { type: 'patchPress'; target: PressTarget; patch: Partial<PressProfile>; coalesce?: boolean }
+  | { type: 'patchPress'; patch: Partial<PressProfile>; coalesce?: boolean }
   | {
       type: 'setWordPress'
       layerId: string
@@ -69,6 +68,17 @@ const NEXT_INK = ['fluorescentpink', 'blue', 'yellow', 'black', 'green', 'fluore
 let boxSeq = 0
 const nextBoxId = (): string => `box-${Date.now().toString(36)}-${boxSeq++}`
 
+/**
+ * Keep the photo covering the sheet. Re-applied by every action that can move
+ * the photo, zoom it or change the sheet's shape, so the stored placement is
+ * always one that prints with no bare strip — the renderer clamps too, but a
+ * stored value it has to correct would make the next pan start from a
+ * position the picture is not actually at.
+ */
+function withCover(state: PrintSettings): PrintSettings {
+  return state.media ? { ...state, media: clampPan(state.media, ASPECTS[state.aspect], 1) } : state
+}
+
 /** Replace one layer, leaving the rest of the document untouched. */
 function mapLayer(
   state: PrintSettings,
@@ -82,8 +92,10 @@ function mapLayer(
  *  that a word belongs to at most one box — can be tested without React. */
 export function applySettings(state: PrintSettings, action: SettingsAction): PrintSettings {
   switch (action.type) {
-    case 'patch':
-      return { ...state, ...action.patch }
+    case 'patch': {
+      const next = { ...state, ...action.patch }
+      return 'aspect' in action.patch || 'media' in action.patch ? withCover(next) : next
+    }
 
     case 'patchLayer':
       return {
@@ -166,7 +178,7 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       })
 
     case 'patchPress':
-      return { ...state, [action.target]: { ...state[action.target], ...action.patch } }
+      return { ...state, press: { ...state.press, ...action.patch } }
 
     case 'setWordPress':
       return mapLayer(state, action.layerId, (l) => {
@@ -183,7 +195,7 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       })
 
     case 'setMedia': {
-      if (!action.media || state.media) return { ...state, media: action.media }
+      if (!action.media || state.media) return withCover({ ...state, media: action.media })
       // The first photo is the moment a single ink stops being enough. Type
       // that was perfectly readable on paper goes invisible over half of any
       // photograph, and the control that fixes it does not even exist in the
@@ -191,19 +203,19 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       // default means the app's first answer to "put a picture behind this" is
       // an unreadable one. Seeded, not forced: the toggle shows on, it undoes,
       // and turning it off leaves a single ink.
-      return {
+      return withCover({
         ...state,
         media: action.media,
         layers: state.layers.map((l) =>
           l.contrastInkId ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },
         ),
-      }
+      })
     }
 
     case 'patchMedia':
       // A patch with no photo present is a no-op rather than a crash: the
       // gesture layer can fire one as a drag ends just after a clear.
-      return state.media ? { ...state, media: { ...state.media, ...action.patch } } : state
+      return state.media ? withCover({ ...state, media: { ...state.media, ...action.patch } }) : state
 
     case 'reset':
       return action.settings

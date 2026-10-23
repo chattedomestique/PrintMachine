@@ -2,7 +2,8 @@ import { useCallback, useRef } from 'react'
 import { useSettings } from '../../state/settingsStore.ts'
 import { useRenderer } from './useRenderer.ts'
 import { MAX_SIZE, MIN_SIZE, useLayerGestures } from './useLayerGestures.ts'
-import type { MediaLayer, TextLayer } from '../../engine/types.ts'
+import { ASPECTS, type MediaLayer, type TextLayer } from '../../engine/types.ts'
+import { clampPan } from '../../engine/media.ts'
 import './Canvas.css'
 
 /**
@@ -13,9 +14,14 @@ import './Canvas.css'
  * eating my taps" bug, and lets the canvas stay `pointer-events: none`
  * (playbook §7).
  */
-/** Pinch range for a photo. 1 is the cover fit, so this is "a fifth of cover"
- *  to "four times cover" rather than a fraction of the sheet. */
-const MEDIA_SIZE: readonly [number, number] = [0.2, 4]
+/** Pinch range for a photo: a zoom on the cover fit, so 1 exactly fills the
+ *  sheet and nothing below it is allowed — it would leave bare paper. */
+const MEDIA_SIZE: readonly [number, number] = [1, 4]
+
+/** The photo's centre is not limited to the sheet the way type is: how far it
+ *  may travel depends on the zoom and the sheet's shape, and clampPan decides
+ *  that below. Unbounded here so the gesture can reach every edge. */
+const MEDIA_POSITION: readonly [number, number] = [-Infinity, Infinity]
 
 export default function Canvas({
   showGuides,
@@ -62,18 +68,33 @@ export default function Canvas({
 
   const patchMedia = useCallback(
     (p: Partial<TextLayer>) => {
+      if (!mediaTarget) return
       const next: Partial<MediaLayer> = {}
       if (p.x !== undefined) next.x = p.x
       if (p.y !== undefined) next.y = p.y
       if (p.size !== undefined) next.scale = p.size
       if (Object.keys(next).length === 0) return
-      dispatch({ type: 'patchMedia', patch: next, coalesce: true })
+      // Clamped while dragging, so the photo stops at its edge on screen
+      // rather than the stored value running ahead of what is drawn.
+      const placed = clampPan({ ...mediaTarget, ...next }, ASPECTS[settings.aspect], 1)
+      dispatch({
+        type: 'patchMedia',
+        patch: { x: placed.x, y: placed.y, scale: placed.scale },
+        coalesce: true,
+      })
     },
-    [dispatch],
+    [dispatch, mediaTarget, settings.aspect],
   )
 
   const typeGestures = useLayerGestures(surfaceRef, mediaMode ? null : layer, patch, ensureSelected)
-  const photoGestures = useLayerGestures(surfaceRef, mediaAsLayer, patchMedia, undefined, MEDIA_SIZE)
+  const photoGestures = useLayerGestures(
+    surfaceRef,
+    mediaAsLayer,
+    patchMedia,
+    undefined,
+    MEDIA_SIZE,
+    MEDIA_POSITION,
+  )
   const gestures = mediaMode ? photoGestures : typeGestures
 
   const onDoubleClick = useCallback(() => {

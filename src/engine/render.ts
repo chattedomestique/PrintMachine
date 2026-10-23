@@ -45,7 +45,7 @@ import { applyRollerBanding, paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { scribbleField, woodcutField } from './carve.ts'
-import { bandMask, coverRect, groundLuma, separateLuminance, splitInks } from './media.ts'
+import { bandMask, coverRect, groundLuma, splitInks } from './media.ts'
 import { rasterizeBoxes, rasterizeText } from './text.ts'
 import { ribbonInk } from './typewriter.ts'
 import { ASPECTS, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
@@ -275,7 +275,6 @@ export function detailFactor(fontSize: number, canvasHeight: number): number {
 export function pressPlate(
   plate: { field: Float32Array; fontSize: number },
   index: number,
-  /** Which press this pass goes through — the type's or the photo's. */
   s: PressProfile,
   seed: number,
   cache: RenderCache,
@@ -486,12 +485,7 @@ export function renderPrint(
     const r = coverRect({ width: s.media.width, height: s.media.height }, w, h, s.media)
     scratch.clearRect(0, 0, w, h)
     scratch.imageSmoothingQuality = 'high'
-    // Fading the photo is fading how much of it reaches the sheet, so it rides
-    // on alpha and the compositor blends back toward paper. Printed mode keeps
-    // full alpha — there the opacity belongs to the ink plate, not the source.
-    scratch.globalAlpha = s.media.printed ? 1 : s.media.opacity
     scratch.drawImage(media, r.dx, r.dy, r.dw, r.dh)
-    scratch.globalAlpha = 1
     ground = scratch.getImageData(0, 0, w, h).data
   }
 
@@ -709,49 +703,13 @@ export function renderPrint(
     }
   }
 
-  if (ground && s.media) {
-    if (s.media.printed) {
-      // Through its own press — a photograph and a headline want genuinely
-      // different rulings, and one profile for both ruins whichever it was not
-      // tuned for.
-      const photoTone = separateLuminance(ground, new Float32Array(w * h), {
-        contrast: s.media.contrast,
-        lift: s.media.lift,
-      })
-      const photoCoverage = pressPlate(
-        { field: photoTone, fontSize: h * 0.16 },
-        plateIndex,
-        s.photoPress,
-        s.seed,
-        cache,
-        w,
-        h,
-      )
-      // Applied *after* the photo's press, so the hole lands where the type
-      // actually is. Cutting it beforehand let the photo's own roughening,
-      // screening and misregistration carry the hole away from the glyphs it
-      // was meant to clear.
-      if (knockout) for (let i = 0; i < photoCoverage.length; i++) photoCoverage[i] *= 1 - knockout[i]
-      plates.unshift({
-        // Its own plate index, not 0: sharing a seed with the first type plate
-        // would misregister the two identically, which reads as the photo and
-        // the type being in perfect register — the one thing a Riso never is.
-        // A photo is poster-sized by definition, so it takes the full press.
-        coverage: photoCoverage,
-        rgb: inkById(s.media.inkId).rgb,
-        opacity: s.media.opacity,
-      })
-      plateIndex++
-      // Printed means separated *onto* paper, so the photo is no longer the
-      // ground — its ink plate is the whole of its contribution.
-      ground = undefined
-    } else if (knockout) {
-      // Not printed: the photo is the ground, so knocking out means taking its
-      // alpha down and letting the paper underneath come back through.
-      ground = new Uint8ClampedArray(ground)
-      for (let i = 0; i < knockout.length; i++) {
-        ground[i * 4 + 3] = ground[i * 4 + 3] * (1 - knockout[i])
-      }
+  if (ground && knockout) {
+    // The photo is the ground, so knocking out means taking its alpha down and
+    // letting the paper underneath come back through. That alpha path is also
+    // what a transparent PNG's own transparency takes: both read as paper.
+    ground = new Uint8ClampedArray(ground)
+    for (let i = 0; i < knockout.length; i++) {
+      ground[i * 4 + 3] = ground[i * 4 + 3] * (1 - knockout[i])
     }
   }
 
@@ -761,7 +719,7 @@ export function renderPrint(
     w,
     h,
     ground
-      ? { ...cache.paper, base: ground, paperAmount: s.paperAmount }
+      ? { ...cache.paper, base: ground, paperAmount: s.paperVeil ? 1 : 0 }
       : cache.paper,
     plates,
   )

@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react'
-import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
-import { RISO_INKS } from '../../engine/inks.ts'
+import { Slider, Toggle } from '../../ui/controls.tsx'
 import { useSettings } from '../../state/settingsStore.ts'
 import { importMedia } from '../media/importMedia.ts'
 import { deleteMedia } from '../../state/mediaStore.ts'
@@ -47,7 +46,8 @@ export default function MediaPanel() {
     <div className="control-stack">
       <p className="panel-note">
         A photo sits under every plate as the ground the ink prints on, so the type
-        genuinely overprints it. Drag and pinch on the sheet to place it.
+        genuinely overprints it. With this tab open, drag and pinch on the sheet to
+        choose which part of it fills the sheet; double-tap to fit it again.
       </p>
 
       <input
@@ -81,77 +81,26 @@ export default function MediaPanel() {
         <p className="plate-hint">No photo yet — the print is on bare paper.</p>
       ) : (
         <>
+          {/* Zoom in only: at 100% the photo exactly covers the sheet, and
+              below that it would leave bare paper round it. */}
           <Slider
-            label="Size"
+            label="Zoom"
             value={media.scale}
-            min={0.2}
+            min={1}
             max={4}
             step={0.01}
             format={pct}
             onChange={(scale) => patch({ scale }, true)}
           />
-          <Slider
-            label="Opacity"
-            value={media.opacity}
-            min={0}
-            max={1}
-            step={0.01}
-            format={pct}
-            onChange={(opacity) => patch({ opacity }, true)}
-          />
 
-          {/* The control the whole feature hangs on: at 0 the stock stops
-              tinting and texturing the photo, leaving type on the image. */}
-          <Slider
-            label="Paper over the photo"
-            value={settings.paperAmount}
-            min={0}
-            max={1}
-            step={0.01}
-            format={(v) => (v === 0 ? 'off' : pct(v))}
-            onChange={(paperAmount) => dispatch({ type: 'patch', patch: { paperAmount }, coalesce: true })}
-          />
-
+          {/* On, the photo takes the stock's tint and tooth, so it and the
+              type read as one printed sheet. Off, the ink lands straight on
+              the photograph's own colour. */}
           <Toggle
-            label="Print the photo"
-            checked={media.printed}
-            onChange={(printed) => patch({ printed })}
+            label="Paper over the photo"
+            checked={settings.paperVeil}
+            onChange={(paperVeil) => dispatch({ type: 'patch', patch: { paperVeil } })}
           />
-          <p className="panel-note">
-            Off, the photo shows as shot. On, it is separated into a single ink and run
-            through the same press as the type — worn, screened and misregistered.
-          </p>
-
-          {media.printed && (
-            <>
-              <Field label="Photo ink">
-                <Segmented
-                  label="Photo ink"
-                  value={media.inkId}
-                  options={RISO_INKS.slice(0, 12).map((i) => ({ value: i.id, label: i.name }))}
-                  onChange={(inkId) => patch({ inkId })}
-                />
-              </Field>
-              <Slider
-                label="Contrast"
-                value={media.contrast}
-                min={0.2}
-                max={3}
-                step={0.01}
-                format={(v) => v.toFixed(2)}
-                onChange={(contrast) => patch({ contrast }, true)}
-              />
-              <Slider
-                label="Highlight dropout"
-                value={media.lift}
-                min={0}
-                max={0.6}
-                step={0.01}
-                format={pct}
-                onChange={(lift) => patch({ lift }, true)}
-              />
-            </>
-          )}
         </>
       )}
     </div>

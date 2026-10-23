@@ -1,6 +1,5 @@
 import { Slider } from '../../ui/controls.tsx'
 import type { PressProfile } from '../../engine/types.ts'
-import type { PressTarget } from '../../state/settingsReducer.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -12,11 +11,11 @@ const pct = (v: number) => `${Math.round(v * 100)}%`
  * press tab is what you'd dial in deliberately, this is what the drum does to
  * you. Every one of them is off at zero, so a clean pull is still reachable.
  */
-export default function WearPanel({ target }: { target: PressTarget }) {
+export default function WearPanel() {
   const { settings, dispatch } = useSettings()
-  const press = settings[target]
+  const press = settings.press
   const patch = (p: Partial<PressProfile>, coalesce = false) =>
-    dispatch({ type: 'patchPress', target, patch: p, coalesce })
+    dispatch({ type: 'patchPress', patch: p, coalesce })
 
   return (
     <div className="control-stack">

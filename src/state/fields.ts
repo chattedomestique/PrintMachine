@@ -191,14 +191,12 @@ export const MEDIA_FIELDS: readonly Row[] = [
   // cover fit, so any positive size is valid.
   { key: 'width', kind: 'number', min: 1, max: 1e6 },
   { key: 'height', kind: 'number', min: 1, max: 1e6 },
-  { key: 'scale', kind: 'number', min: 0.2, max: 4 },
-  { key: 'x', kind: 'number', ...POSITION },
-  { key: 'y', kind: 'number', ...POSITION },
-  { key: 'opacity', kind: 'number', min: 0, max: 1 },
-  { key: 'printed', kind: 'boolean' },
-  { key: 'inkId', kind: 'enum', values: INK_IDS },
-  { key: 'contrast', kind: 'number', min: 0.2, max: 3 },
-  { key: 'lift', kind: 'number', min: 0, max: 0.6 },
+  // Zoom in only: below 1 the photo stops covering the sheet.
+  { key: 'scale', kind: 'number', min: 1, max: 4 },
+  // Any finite centre: the range that keeps the sheet covered depends on the
+  // sheet's shape and the zoom, so it is applied after the walk (clampPan).
+  { key: 'x', kind: 'number' },
+  { key: 'y', kind: 'number' },
 ]
 
 /** The media placeholder the normaliser fills a stored photo into. Its id and
@@ -216,13 +214,12 @@ export const acceptMedia = (m: Record<string, unknown>): boolean =>
 
 export const SETTINGS_FIELDS: readonly Row[] = [
   { key: 'media', kind: 'object', nullable: true, fields: MEDIA_FIELDS, template: mediaTemplate, accept: acceptMedia },
-  { key: 'paperAmount', kind: 'number', min: 0, max: 1 },
+  { key: 'paperVeil', kind: 'boolean' },
   { key: 'aspect', kind: 'enum', values: ASPECT_KEYS },
   { key: 'paperId', kind: 'enum', values: PAPER_IDS },
   { key: 'paperTexture', kind: 'number', min: 0, max: 1 },
   { key: 'paperBlotch', kind: 'number', min: 0, max: 1 },
   { key: 'press', kind: 'object', fields: PRESS_FIELDS },
-  { key: 'photoPress', kind: 'object', fields: PRESS_FIELDS },
   { key: 'seed', kind: 'number', min: 0, max: 0xffffffff, int: true },
   {
     key: 'layers',

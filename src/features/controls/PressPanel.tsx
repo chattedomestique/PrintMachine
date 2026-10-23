@@ -2,7 +2,6 @@ import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import { DITHER_TYPES } from '../../engine/dither.ts'
 import type { ScreenShape } from '../../engine/screen.ts'
 import type { PressProfile, ScreenMethod } from '../../engine/types.ts'
-import type { PressTarget } from '../../state/settingsReducer.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const METHODS: readonly { value: ScreenMethod; label: string }[] = [
@@ -27,11 +26,11 @@ const pct = (v: number) => `${Math.round(v * 100)}%`
 const px = (v: number) => `${v.toFixed(1)}px`
 
 /** The machine, not the artwork. Everything here applies to every plate. */
-export default function PressPanel({ target }: { target: PressTarget }) {
+export default function PressPanel() {
   const { settings, dispatch } = useSettings()
-  const press = settings[target]
+  const press = settings.press
   const patch = (p: Partial<PressProfile>, coalesce = false) =>
-    dispatch({ type: 'patchPress', target, patch: p, coalesce })
+    dispatch({ type: 'patchPress', patch: p, coalesce })
 
   return (
     <div className="control-stack">

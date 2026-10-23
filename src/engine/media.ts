@@ -20,7 +20,7 @@ export interface MediaSize {
 }
 
 export interface MediaPlacement {
-  /** Multiplier on the cover fit. 1 exactly fills the sheet. */
+  /** Zoom on the cover fit, at least 1: 1 exactly fills the sheet. */
   scale: number
   /** Centre of the media, in sheet fractions. 0.5, 0.5 is the middle. */
   x: number
@@ -34,6 +34,86 @@ export interface DrawRect {
   dh: number
 }
 
+/** Where the photo's centre may sit, in sheet fractions, and still cover. */
+export interface PanBounds {
+  xLo: number
+  xHi: number
+  yLo: number
+  yHi: number
+}
+
+/** The drawn size at a zoom: the cover fit, the same factor on both axes. */
+function coverSize(media: MediaSize, sheetW: number, sheetH: number, scale: number) {
+  const mw = Math.max(1, media.width)
+  const mh = Math.max(1, media.height)
+  // Never below the cover fit. Zooming out below it has no sane native export
+  // size and leaves bare sheet, so the placement cannot ask for it.
+  const s = Math.max(sheetW / mw, sheetH / mh) * Math.max(1, scale)
+  return { dw: mw * s, dh: mh * s }
+}
+
+/**
+ * How far the photo can travel and still cover the sheet.
+ *
+ * A covering photo is at least as large as the sheet on both axes, so its
+ * centre may move until one of its edges reaches the trim: `[1 - d/2, d/2]`
+ * per axis, with `d` the drawn size over the sheet's. On an axis where the
+ * photo exactly fits, the range closes to the middle and there is no travel.
+ */
+export function panBounds(
+  media: MediaSize & { scale: number },
+  sheetW: number,
+  sheetH: number,
+): PanBounds {
+  const { dw, dh } = coverSize(media, sheetW, sheetH, media.scale)
+  // max() guards the float case where an exact fit computes a hair under half.
+  const hx = Math.max(0.5, dw / (2 * sheetW))
+  const hy = Math.max(0.5, dh / (2 * sheetH))
+  return { xLo: 1 - hx, xHi: hx, yLo: 1 - hy, yHi: hy }
+}
+
+const clampTo = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
+
+/**
+ * The placement with its zoom at least 1 and its centre inside the pan
+ * bounds, so the photo covers the sheet. Everything else is returned as given.
+ */
+export function clampPan<T extends MediaSize & MediaPlacement>(media: T, sheetW: number, sheetH: number): T {
+  const scale = Math.max(1, media.scale)
+  const b = panBounds({ ...media, scale }, sheetW, sheetH)
+  return { ...media, scale, x: clampTo(media.x, b.xLo, b.xHi), y: clampTo(media.y, b.yLo, b.yHi) }
+}
+
+/**
+ * The photo's position as a fraction of the travel it has: 0 shows its left
+ * (or top) edge, 1 its right (or bottom) edge. 0.5 when it cannot travel.
+ */
+export function panFraction(
+  media: MediaSize & MediaPlacement,
+  sheetW: number,
+  sheetH: number,
+  axis: 'x' | 'y',
+): number {
+  const b = panBounds(media, sheetW, sheetH)
+  const [lo, hi] = axis === 'x' ? [b.xLo, b.xHi] : [b.yLo, b.yHi]
+  if (hi - lo <= 1e-9) return 0.5
+  // The centre sits at `hi` when the photo's left edge is on the trim.
+  return clampTo((hi - media[axis]) / (hi - lo), 0, 1)
+}
+
+/** The centre, in sheet fractions, for a fraction of the travel. */
+export function fromPanFraction(
+  media: MediaSize & { scale: number },
+  sheetW: number,
+  sheetH: number,
+  axis: 'x' | 'y',
+  fraction: number,
+): number {
+  const b = panBounds(media, sheetW, sheetH)
+  const [lo, hi] = axis === 'x' ? [b.xLo, b.xHi] : [b.yLo, b.yHi]
+  return hi - clampTo(fraction, 0, 1) * (hi - lo)
+}
+
 /**
  * Where to draw the media so it covers the sheet without ever distorting.
  *
@@ -42,6 +122,13 @@ export interface DrawRect {
  * than inferred from how the output looks. `max` of the two ratios gives cover
  * (fills the sheet, crops the overflow); `min` would give contain and leave
  * bars, which is not what a full-bleed print wants.
+ *
+ * Cover is enforced HERE, where the sheet is drawn, not only where the photo
+ * is edited: the placement is clamped to `panBounds` (and the zoom to at least
+ * 1) before the rectangle is computed. A pan that was legal on one sheet shape
+ * can uncover another — pan a landscape photo to the side on a square sheet,
+ * switch to 4:5, and without this a strip of bare sheet prints. No stored
+ * placement can produce that, in the preview or in the export.
  */
 export function coverRect(
   media: MediaSize,
@@ -49,15 +136,11 @@ export function coverRect(
   sheetH: number,
   place: MediaPlacement,
 ): DrawRect {
-  const mw = Math.max(1, media.width)
-  const mh = Math.max(1, media.height)
-  const cover = Math.max(sheetW / mw, sheetH / mh)
-  const s = cover * Math.max(0.01, place.scale)
-  const dw = mw * s
-  const dh = mh * s
+  const p = clampPan({ ...media, ...place }, sheetW, sheetH)
+  const { dw, dh } = coverSize(media, sheetW, sheetH, p.scale)
   return {
-    dx: place.x * sheetW - dw / 2,
-    dy: place.y * sheetH - dh / 2,
+    dx: p.x * sheetW - dw / 2,
+    dy: p.y * sheetH - dh / 2,
     dw,
     dh,
   }
@@ -66,42 +149,6 @@ export function coverRect(
 /** Rec. 709 luma, 0..1. The channel weights a print separation actually uses. */
 export function luma(r: number, g: number, b: number): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-}
-
-/**
- * Turn the photo into ink coverage for a single plate.
- *
- * Coverage is darkness, because ink is what gets *added* to paper: a black
- * pixel wants full ink, a white one wants none. `contrast` pivots around mid
- * grey so pushing it changes the slope rather than the average density.
- *
- * `lift` drops the highlights out — a real duotone almost never runs ink into
- * its brightest areas. It is a *rescale*, not a subtraction: everything below
- * the threshold goes to bare paper and what remains is stretched back over the
- * full range, so the shadows stay as black as they were. Subtracting instead
- * dims the whole image, which is the same "turned the opacity down" mistake
- * the wear passes exist to avoid.
- */
-export function separateLuminance(
-  rgba: Uint8ClampedArray,
-  out: Float32Array,
-  opts: { contrast: number; lift: number },
-): Float32Array {
-  const n = out.length
-  const c = Math.max(0.05, opts.contrast)
-  const lift = Math.max(0, Math.min(0.95, opts.lift))
-  const span = 1 - lift
-  for (let i = 0; i < n; i++) {
-    const o = i * 4
-    const dark = 1 - luma(rgba[o], rgba[o + 1], rgba[o + 2])
-    // Pivot at 0.5 so contrast changes the slope, not the average.
-    const contrasted = (dark - 0.5) * c + 0.5
-    let v = (contrasted - lift) / span
-    if (v < 0) v = 0
-    else if (v > 1) v = 1
-    out[i] = v
-  }
-  return out
 }
 
 /**

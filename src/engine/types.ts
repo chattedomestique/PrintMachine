@@ -31,17 +31,12 @@ export interface MediaLayer {
   /** Intrinsic pixel size of the decoded image, for the cover fit. */
   width: number
   height: number
-  /** Multiplier on the cover fit; 1 exactly fills the sheet. */
+  /** Zoom on the cover fit, at least 1: 1 exactly fills the sheet. */
   scale: number
+  /** Centre of the photo in sheet fractions, kept inside the range where the
+   *  photo still covers the sheet (media.ts `panBounds`). */
   x: number
   y: number
-  opacity: number
-  /** Run the photo through the press — separated, worn, screened, misregistered. */
-  printed: boolean
-  /** Ink for the separated plate. Only read when `printed`. */
-  inkId: string
-  contrast: number
-  lift: number
 }
 
 export type JustifyBy = 'words' | 'letters'
@@ -185,17 +180,12 @@ export interface TextLayer {
 }
 
 /**
- * Everything about how one pass is pulled.
- *
- * Two of these exist per document — one for the type, one for the photo —
- * because a photo and a headline want genuinely different presses. A screen
- * coarse enough to read as print on a poster word turns a photograph into
- * mud, and wear tuned to tear a letterform pleasantly just reads as damage
- * across a face. Sharing one profile means every change to one ruins the
- * other, which is what the first cut of the photo layer did.
+ * Everything about how one pass is pulled. One per document: the photo is the
+ * ground the type prints on, not a pass of its own, so the press is the
+ * type's.
  *
  * The seed is deliberately *not* here: it is one sheet of paper going through
- * one machine, so both passes vary together.
+ * one machine, so every pass on it varies together.
  */
 export interface PressProfile {
   method: ScreenMethod
@@ -253,11 +243,12 @@ export interface PrintSettings {
   /** The photo behind everything, or null for bare paper. */
   media: MediaLayer | null
   /**
-   * How much of the paper's colour and tooth veils the photo. 0 prints
-   * straight onto it; 1 is full stock character. No effect without a photo,
-   * where the paper is the ground by definition.
+   * Whether the paper's colour and tooth veil the photo. On, the photo looks
+   * printed on the same stock as the type; off, the ink lands straight on the
+   * photograph's own colour. No effect without a photo, where the paper is the
+   * ground by definition.
    */
-  paperAmount: number
+  paperVeil: boolean
 
   /** Output aspect. The render resolution is fixed in render.ts and does not
    *  depend on the display size (playbook §5.2). */
@@ -269,8 +260,6 @@ export interface PrintSettings {
 
   /** How the type is pulled. */
   press: PressProfile
-  /** How the photo is pulled, when it is printed rather than shown as shot. */
-  photoPress: PressProfile
 
   seed: number
   layers: TextLayer[]

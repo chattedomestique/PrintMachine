@@ -107,41 +107,15 @@ falls out of the compositor already reading paper as `rgb × shade`, and it is
 why type genuinely overprints a photo rather than sitting on top of it: pink
 over a white highlight goes bright, pink over a dark area goes deep.
 
-"Paper over the photo" is how much of the stock's colour and tooth veils the
-image. At 0 the print lands straight on the photo; at 1 the photo takes on the
-paper's tint and grain the way printing on toned stock actually does. With no
-photo the control is inert and the arithmetic collapses back to exactly what
-the app drew before.
+"Paper over the photo" is a switch. On, the photo takes on the stock's tint
+and grain the way printing on toned paper actually does, so the photo and the
+type read as one printed sheet; off, the ink lands straight on the photograph's
+own colour. With no photo the switch is inert and the arithmetic collapses back
+to exactly what the app draws on bare paper.
 
-**Print the photo** runs it through the same press as the type — separated to
-one ink by luminance, then roughened, worn, screened and misregistered. It gets
-its own plate index rather than reusing the first: sharing a seed would
-misregister the photo and the type *identically*, which reads as perfect
-register, the one thing a Riso never has.
-
-Separation is darkness, not brightness — ink is what gets added to paper, so
-black wants full coverage and white none. Highlight dropout is a *rescale*
-rather than a subtraction, so lifting the highlights out leaves the shadows as
-black as they were; subtracting dims the whole image, which is the same "turned
-the opacity down" mistake the wear passes exist to avoid.
-
-#### Two presses, because a photo and a headline want different ones
-
-The press settings are a `PressProfile`, and a document holds two — one for the
-type, one for the photo. A screen coarse enough to read as *print* on a poster
-word turns a photograph into mud; wear tuned to tear a letterform pleasantly
-just reads as damage across a face. The first cut shared one profile, and every
-change made for one ruined the other.
-
-The Press and Wear tabs carry a **Type / Photo** switch, shared between them so
-that moving from one tab to the other does not silently drop a photo edit onto
-the type's pass. The seed is deliberately *not* per-profile: it is one sheet
-going through one machine, so both passes vary together.
-
-Documents written before the split (#9) carried the press fields at the top
-level. They now open with the default press: the one-off lift that carried them
-across was retired when loading moved to the single normaliser (see "Saved
-prints keep opening").
+The photo is never printed itself — no separation, no screen, no second press.
+Halftoning the photograph is a different job ("riso a photo"); here it is the
+ground, shown as shot, and the type is what goes through the press.
 
 #### Type that reads across the whole photograph
 
@@ -174,16 +148,13 @@ Three things make it actually work:
   light ink over solid black is still solid black, so without this the second
   ink buys nothing.
 
-Two things about that knockout took a second pass to get right, and both
-turned reversed type to mush in the first cut:
+One thing about that knockout took a second pass to get right, and it turned
+reversed type to mush in the first cut:
 
 - It is cut from the **unpressed tone**, not from the screened coverage.
   Knocking out with the halftone leaves the photo standing in every gap between
   the type's own dots, so the light ink prints onto a still-black ground. A
   stencil has a solid hole in it.
-- It is applied **after the photo's press**, not before. Cutting it beforehand
-  let the photo's own roughening, screening and misregistration carry the hole
-  away from the glyphs it was meant to clear.
 
 The hole is also **trapped** — spread a couple of pixels past the glyph, then
 cut back to hard. Nothing on a press lands twice in the same place, so a
@@ -278,18 +249,29 @@ rectangle's aspect must equal the source's — rather than inferred from how a
 render looks, because a squash of a few percent is invisible in a thumbnail and
 obvious in a print.
 
-It is *cover*, not contain: at 1 the photo fills the sheet and the overflow is
-cropped, so a full-bleed print has no letterbox bars.
+It is *cover*, not contain: at zoom 1 the photo fills the sheet and the
+overflow is cropped, so a full-bleed print has no letterbox bars. Zoom only goes
+in, 100–400%: below the cover fit there would be bare sheet round the photo,
+and no sensible size to export it at.
 
-#### Bare sheet is paper, not black
+#### The photo always covers the sheet
 
-Pan a photo off the trim and the uncovered strip has to print as paper. The
-first cut printed it **black**, because `getImageData` hands untouched pixels
-back as transparent *black* and reading the colour without the alpha takes the
-zeros at face value. The ground is now the photo composited over white with the
-veil forced fully on where there is no photo, which is bit-for-bit the paper
-the app draws with no photo at all — there is a test asserting exactly that
-equality.
+Panning is limited to where the photo still covers the sheet: its centre can
+move until one of its edges reaches the trim, and no further. That limit is
+enforced **where the sheet is drawn** (`coverRect` clamps whatever placement it
+is handed), and again by every edit that moves the photo, zooms it or changes
+the sheet's shape, so the stored value is honest too. The second place matters
+because a pan that is legal on one sheet is not on another: push a landscape
+photo to one side on a square sheet, switch to 4:5, and without it a strip of
+bare sheet would print. A property test throws random sheet changes, pans and
+zooms at the document and checks the sheet stays covered after every one.
+
+The compositor still treats a transparent ground pixel as paper rather than
+black — `getImageData` hands untouched pixels back as transparent *black*, and
+the first cut printed exactly that. Panning can no longer uncover the sheet, but
+the same path carries the knockout under the second ink (the photo's alpha goes
+down there) and a transparent PNG's own transparency, and there is a test that
+uncovered ground is bit-for-bit the paper the app draws with no photo at all.
 
 #### Why the bytes are not in localStorage
 
@@ -540,7 +522,8 @@ cannot drift into a vertical scroll; the scrolling panel takes `pan-y` with
 contained overscroll so a flick off its end never bounces the page behind it.
 
 On the sheet: drag to move, two-finger pinch to scale and rotate, double-tap to
-centre. A finger lifting mid-pinch re-seeds the gesture from the remaining one,
+centre. With the Photo tab open the same gestures pan and zoom the photo
+instead (100–400%, never off the sheet), and double-tap fits it again. A finger lifting mid-pinch re-seeds the gesture from the remaining one,
 so the layer keeps panning instead of jumping. Every gesture writes the same
 layer fields the sliders write, and arrow keys / +- / brackets mirror all of it
 for keyboards.
@@ -589,15 +572,12 @@ same code the preview uses.
 
 Working: multi-plate type, the full press and wear model, forced paragraph
 justification, letter and word tracking, word-selectable background boxes, an
-imported photo as the printing ground (plain or run through the press),
-undo/redo, persistence, and save via the share sheet.
+imported photo as the printing ground (shown as shot, zoomed and panned within
+the sheet), undo/redo, persistence, and save via the share sheet.
 
 Photos only — **video is not in yet**. A JPEG cannot hold one, so it needs a
 decision about what Save produces, and `MediaRecorder` on iOS Safari is limited
 enough that it would have to be proven on a device rather than assumed.
-
-Photo separation is currently to a **single ink**. Multi-ink colour separation —
-the two- and three-colour Riso photo — is the obvious next step.
 
 Lines break where you break them. There is no automatic wrapping yet, so a long
 paragraph typed as one line stays one line and runs off the sheet unless

@@ -62,18 +62,12 @@ export function makeMedia({
     scale: 1,
     x: 0.5,
     y: 0.5,
-    opacity: 1,
-    printed: false,
-    inkId: 'black',
-    contrast: 1,
-    lift: 0.1,
     ...over,
   }
 }
 
-/** One pass's worth of press settings. Overrides let the photo start from a
- *  different, gentler place than the type without duplicating the whole list. */
-export function pressProfile(over: Partial<PressProfile> = {}): PressProfile {
+/** The press a new document pulls with. */
+export function pressProfile(): PressProfile {
   return {
     method: 'halftone',
     screenShape: 'circle',
@@ -112,8 +106,6 @@ export function pressProfile(over: Partial<PressProfile> = {}): PressProfile {
     // ~5px at the 1800px reference — clearly visible without looking broken.
     misregistration: 5,
     detailScaling: true,
-
-    ...over,
   }
 }
 
@@ -123,27 +115,15 @@ export function defaultSettings(): PrintSettings {
 
     media: null,
     // Full stock character by default — with no photo this is what the paper
-    // has always done, and with one it is the sane starting point to dial back.
-    paperAmount: 1,
+    // has always done, and with one it is what makes the photo and the type
+    // read as printed on the same sheet.
+    paperVeil: true,
 
     paperId: 'natural',
     paperTexture: 0.4,
     paperBlotch: 0.5,
 
     press: pressProfile(),
-    // The photo starts finer and calmer than the type: a screen coarse enough
-    // to read as print on a headline turns a photograph into mud.
-    photoPress: pressProfile({
-      screenPitch: 5,
-      screenSoftness: 0.5,
-      roughness: 0.25,
-      bleed: 0.1,
-      streaks: 0.15,
-      smear: 0.08,
-      patches: 0.08,
-      misregistration: 3,
-      detailScaling: false,
-    }),
 
     seed: 12345,
     layers: [

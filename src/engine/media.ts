@@ -146,6 +146,17 @@ export function coverRect(
   }
 }
 
+/**
+ * A photo a build before full-resolution imports saved: those cut every import
+ * to a 2048 px long edge and re-encoded it, and that copy is all the store
+ * has. It cannot be recovered, only chosen again. The exact legacy signature:
+ * no `native` flag (every import since sets it) and a long edge of exactly
+ * 2048.
+ */
+export function isReducedCopy(media: { width: number; height: number; native?: boolean }): boolean {
+  return media.native !== true && Math.max(media.width, media.height) === 2048
+}
+
 /** Rec. 709 luma, 0..1. The channel weights a print separation actually uses. */
 export function luma(r: number, g: number, b: number): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255

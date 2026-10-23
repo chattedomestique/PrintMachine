@@ -293,11 +293,12 @@ function field(row: Row, raw: unknown, fallback: unknown): unknown {
 }
 
 /** One level: built from the schema, so unknown keys cannot get in. A field the
- *  template does not have and the store does not validly hold is left out. */
+ *  template does not have (an `optional` row) and the store does not validly
+ *  hold is left out. */
 function object(rows: readonly Row[], raw: Doc, template: Doc): Doc {
   const out: Doc = {}
   for (const row of rows) {
-    const v = field(row, raw[row.key], template[row.key])
+    const v = field(row, raw[row.key], row.optional ? undefined : template[row.key])
     if (v !== undefined) out[row.key] = v
   }
   return out

@@ -42,10 +42,10 @@ import { paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { knockoutMask } from './knockout.ts'
-import { bandMask, coverRect, groundLuma, splitInks } from './media.ts'
+import { bandMask, coverRect, groundLuma, splitInks, type DrawRect } from './media.ts'
 import { rasterizeBacking, rasterizeText } from './text.ts'
 import { REFERENCE_HEIGHT } from './limits.ts'
-import { ASPECTS, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
+import { ASPECTS, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
  * The preview renders smaller than the export so a slider drag stays smooth on
@@ -546,6 +546,16 @@ export function printSheet(
 }
 
 /**
+ * Where the photo is drawn on a w x h sheet: from the document's placement and
+ * the photo's TRUE size, and nothing else. Whatever bitmap is drawn — the
+ * preview's reduced working copy or the full original at Save — fills this
+ * same rectangle, so the preview and the print place the photo identically.
+ */
+export function groundRect(media: MediaLayer, w: number, h: number): DrawRect {
+  return coverRect({ width: media.width, height: media.height }, w, h, media)
+}
+
+/**
  * Render a full print.
  *
  * @param ctx     the target context. Its canvas is resized to the output size.
@@ -560,8 +570,15 @@ export function renderPrint(
   overlay: OverlaySpec | null,
   height: number = REFERENCE_HEIGHT,
   /** The decoded photo, or null. Drawn with drawImage rather than sampled in
-   *  JS: four million bilinear samples per frame is not a phone budget. */
+   *  JS: four million bilinear samples per frame is not a phone budget. Any
+   *  decode of it will do — the preview's working copy or the original — as it
+   *  is drawn scaled into the rectangle the photo's TRUE size (`s.media`)
+   *  gives, never one its own size gives. */
   media: CanvasImageSource | null = null,
+  /** Called once the photo has been copied into the ground, when nothing
+   *  further reads `media`: an export closes its full-size decode here rather
+   *  than holding it through the whole press. */
+  onGround?: () => void,
 ): void {
   const { w, h } = outputSize(s.aspect, height)
 
@@ -583,12 +600,13 @@ export function renderPrint(
   // immediately after.
   let ground: Uint8ClampedArray | undefined
   if (media && s.media) {
-    const r = coverRect({ width: s.media.width, height: s.media.height }, w, h, s.media)
+    const r = groundRect(s.media, w, h)
     scratch.clearRect(0, 0, w, h)
     scratch.imageSmoothingQuality = 'high'
     scratch.drawImage(media, r.dx, r.dy, r.dw, r.dh)
     ground = scratch.getImageData(0, 0, w, h).data
   }
+  onGround?.()
 
   const image = ctx.createImageData(w, h)
   printSheet(

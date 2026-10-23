@@ -263,16 +263,61 @@ the same path carries the knockout under the second ink (the photo's alpha goes
 down there) and a transparent PNG's own transparency, and there is a test that
 uncovered ground is bit-for-bit the paper the app draws with no photo at all.
 
-<!-- WP2: import resolution (the 2048 px downscale below) is rewritten in WP2. -->
+#### The photo is stored exactly as it came
+
+An import keeps the picked file's **bytes**: never resampled, never re-encoded,
+at any size — a 24 MP iPhone capture is stored at 5712x4284, a transparent PNG
+keeps its alpha. (Before this, every import was cut to a 2048 px long edge and
+re-encoded as a JPEG, which is a down-rez of every photo, and a transparent PNG
+came out black.) The one decode at import is to learn the photo's true size the
+right way up (its EXIF orientation applied) and that the browser can read it at
+all; there is no HEIC decoder, so a format the browser cannot open is refused
+with "That image could not be read." A test holds the stored bytes equal to
+the file's at every size, from 12 MP to 48 MP.
+
+The size limits belong to canvases, not to a stored file, so they live where
+canvases are made:
+
+- **The preview** decodes a *working copy* of at most 4 MP (2048 x 2048 by
+  area, so its long edge is never under 2048 px: never smaller than the copy the
+  app used to keep). A 24 MP photo held decoded for a one-megapixel preview would
+  be 98 MB of a phone's memory for pixels nobody sees. Nothing reads the copy's
+  size: the cover fit, the pan and the export all use the photo's true size from
+  the document, and the copy is drawn scaled into the same rectangle, so the
+  preview places the photo exactly where the print does. Zoomed far in, the
+  preview is softer than the print.
+- **Save** decodes the *original*, in full (4 bytes a pixel of the photo, about
+  98 MB for 24 MP), and closes it the moment the photo is in the ground, so the
+  print is drawn from the original's pixels, never from the preview's copy.
+- **The export canvas** is the one ceiling a photo can meet: 16.7 MP of area
+  (`MAX_AREA`, `engine/exportPlan.ts`), the most a browser canvas is guaranteed
+  to hold, and no edge cap. Saving above it would need tiled rendering and a
+  JavaScript encoder, which are not built.
+
+Photos saved by an older build are the 2048 px copies it made; the originals
+are gone. Such a photo (no `native` flag, a long edge of exactly 2048) carries
+a note in the Photo panel: "This photo was saved at reduced size by an older
+version. Choose it again for full resolution."
+
+**A photo cannot silently drop out of a print.** If the stored image is missing
+or cannot be decoded, the Photo panel says so ("This photo could not be loaded.
+Choose it again.") for as long as it is true, and Save refuses with the reason
+instead of saving the type on bare paper.
+
 #### Why the bytes are not in localStorage
 
 Its quota is about 5 MB of *string*, and base64 inflates binary by a third; one
 phone photo blows it and the throw takes the whole save with it. Photos live in
 IndexedDB as Blobs, and the document keeps only the id and placement, so the two
 stores can be written independently and a torn write costs a photo rather than
-the print. Imports are downscaled to a 2048px long edge first — a 12-megapixel
-photo decoded at full size is ~48 MB of RGBA, and holding two of those is the
-iOS eviction path §4.2 exists to prevent.
+the print.
+
+Remove and Replace do not delete a photo's bytes: Undo can bring the old photo
+back and must find it there. Once per launch a sweep deletes the stored photos
+the saved document does not reference — history does not outlive the page, so
+nothing else can — but only those imported more than a day ago, so an import
+landing mid-sweep, or another tab's not yet saved, is never taken. Storage is
+bounded by a day's worth of replaced photos.
 
 ### Backing, and why it knocks out
 
@@ -567,8 +612,8 @@ Working: up to three plates of type (face, Bold, size with a one-shot Fit, line
 height, tracking, rotation, alignment with per-line justify), each in a real
 Riso ink with an optional second ink or backing over the photo; the press
 (halftone or grain, screen size, ink, misregistration, Edge, Wear, Re-roll,
-stock); an imported photo as the printing ground (shown as shot, zoomed and
-panned within the sheet, paper over it or not); undo/redo, persistence that
+stock); an imported photo as the printing ground (stored exactly as imported,
+shown as shot, zoomed and panned within the sheet, paper over it or not); undo/redo, persistence that
 opens every older save, and save via the share sheet. Four tabs: Type, Ink,
 Photo, Press.
 

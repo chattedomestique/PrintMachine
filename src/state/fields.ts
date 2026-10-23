@@ -57,6 +57,9 @@ export interface Row {
   uniqueId?: () => string
   /** object: a stored object failing this is not one at all (null, or the default). */
   accept?: (raw: Record<string, unknown>) => boolean
+  /** A field the template does not carry: kept when stored and valid,
+   *  otherwise left out (never filled in from a default). */
+  optional?: boolean
 }
 
 const ids = (list: readonly { id: string }[]): readonly string[] => list.map((x) => x.id)
@@ -115,6 +118,9 @@ export const MEDIA_FIELDS: readonly Row[] = [
   // sheet's shape and the zoom, so it is applied after the walk (clampPan).
   { key: 'x', kind: 'number' },
   { key: 'y', kind: 'number' },
+  // Stored as imported (original bytes). Optional: a document an older build
+  // saved has none, and that absence is what marks its 2048 px copy.
+  { key: 'native', kind: 'boolean', optional: true },
 ]
 
 /** The media placeholder the normaliser fills a stored photo into. Its id and

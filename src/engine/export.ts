@@ -63,10 +63,17 @@ export async function savePrint(
   settings: PrintSettings,
   format: ExportFormat = 'jpeg',
   name = 'print-machine',
-  /** The decoded photo, so the saved file is the same print as the preview.
-   *  Omitting it would silently export the type on bare paper. */
+  /** The photo, decoded from its ORIGINAL bytes (not the preview's working
+   *  copy), so the print is pressed from every pixel the photo has. */
   media: CanvasImageSource | null = null,
+  /** Called once the photo is in the ground: the caller frees its decode. */
+  onGround?: () => void,
 ): Promise<SaveResult> {
+  // A document with a photo and no decode of it would print the type on bare
+  // paper — a different print, saved as if it were this one. Refused instead.
+  if (settings.media && !media) {
+    return { status: 'error', message: 'The photo is not loaded, so this print cannot be saved yet.' }
+  }
   let blob: Blob
   try {
     // A cache of its own: the export renders at REFERENCE_HEIGHT while the
@@ -74,7 +81,7 @@ export async function savePrint(
     // other's noise fields on every save.
     const cacheRef: { current: RenderCache | null } = { current: null }
     // Synchronous CPU work — does not consume the user gesture.
-    renderPrint(exportCtx, scratchCtx, settings, cacheRef, null, undefined, media)
+    renderPrint(exportCtx, scratchCtx, settings, cacheRef, null, undefined, media, onGround)
     blob = await encode(exportCtx.canvas, format)
   } catch (err) {
     return { status: 'error', message: err instanceof Error ? err.message : 'Export failed.' }

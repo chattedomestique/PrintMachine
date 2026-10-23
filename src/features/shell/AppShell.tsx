@@ -8,13 +8,14 @@ import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, subscribeSW } from '../../state/swStatus.ts'
 import { useMediaBitmap } from '../media/useMediaBitmap.ts'
+import { decodeOriginal } from '../media/decode.ts'
 import './AppShell.css'
 
 export default function AppShell() {
   const { settings, undo, redo, canUndo, canRedo } = useSettings()
-  // One decode, shared by the preview and the save, so the file that lands in
-  // Photos is the print that was on screen.
-  const media = useMediaBitmap(settings.media?.id ?? null)
+  // The preview's working copy of the photo. Save does not use it: it decodes
+  // the original, so the print is drawn from the original's pixels.
+  const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tab, setTab] = useState<TabId | null>(null)
   const [busy, setBusy] = useState(false)
@@ -77,6 +78,7 @@ export default function AppShell() {
   const onSave = useCallback(async () => {
     if (busy) return
     setBusy(true)
+    let photo: ImageBitmap | null = null
     try {
       // Fresh offscreen surfaces so the export can never read back the visible
       // canvas, which carries the selection crosshair (N8).
@@ -88,14 +90,21 @@ export default function AppShell() {
         announce('Could not open a canvas to export.')
         return
       }
-      const result = await savePrint(out, scratch, settings, 'jpeg', 'print-machine', media)
+      // The ORIGINAL, decoded now and in full (4 bytes a pixel of the photo,
+      // 98 MB for a 24 MP one), and let go the moment the ground is drawn. A
+      // photo that cannot be loaded stops the save with the reason; it never
+      // falls back to bare paper.
+      if (settings.media) photo = await decodeOriginal(settings.media.id)
+      const decoded = photo
+      const result = await savePrint(out, scratch, settings, 'jpeg', 'print-machine', decoded, () => decoded?.close())
       announce(saveMessage(result))
     } catch (err) {
       announce(err instanceof Error ? err.message : 'Save failed.')
     } finally {
+      photo?.close()
       setBusy(false)
     }
-  }, [busy, settings, announce, media])
+  }, [busy, settings, announce])
 
   return (
     <div className="app" ref={appRef}>
@@ -159,7 +168,7 @@ export default function AppShell() {
             aria-labelledby={tab ? `tab-${tab}` : undefined}
             inert={tab === null ? true : undefined}
           >
-            <Controls tab={tab} />
+            <Controls tab={tab} mediaState={mediaState} />
           </div>
         </div>
 

@@ -2,7 +2,8 @@ import { useRef, useState } from 'react'
 import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import { useSettings } from '../../state/settingsStore.ts'
 import { importMedia } from '../media/importMedia.ts'
-import { deleteMedia } from '../../state/mediaStore.ts'
+import type { MediaState } from '../media/useMediaBitmap.ts'
+import { isReducedCopy } from '../../engine/media.ts'
 import type { MediaLayer, PrintSettings } from '../../engine/types.ts'
 
 const SHEETS: readonly { value: PrintSettings['aspect']; label: string }[] = [
@@ -14,7 +15,7 @@ const SHEETS: readonly { value: PrintSettings['aspect']; label: string }[] = [
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
-export default function MediaPanel() {
+export default function MediaPanel({ mediaState }: { mediaState: MediaState }) {
   const { settings, dispatch } = useSettings()
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
@@ -24,17 +25,16 @@ export default function MediaPanel() {
   const patch = (p: Partial<MediaLayer>, coalesce = false) =>
     dispatch({ type: 'patchMedia', patch: p, coalesce })
 
+  // Neither Replace nor Remove deletes the old photo's bytes: Undo can bring
+  // it back, and must find it. The launch sweep (mediaStore.ts) clears what
+  // nothing references any more.
   const onPick = async (file: File | undefined) => {
     if (!file) return
     setBusy(true)
     setError(null)
     try {
-      const previous = media?.id
       const { layer } = await importMedia(file)
       dispatch({ type: 'setMedia', media: layer })
-      // Only once the new photo is committed, so a failed import never leaves
-      // the document pointing at bytes that are already gone.
-      if (previous) void deleteMedia(previous)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That image could not be read.')
     } finally {
@@ -43,11 +43,7 @@ export default function MediaPanel() {
     }
   }
 
-  const onClear = () => {
-    const id = media?.id
-    dispatch({ type: 'setMedia', media: null })
-    if (id) void deleteMedia(id)
-  }
+  const onClear = () => dispatch({ type: 'setMedia', media: null })
 
   return (
     <div className="control-stack">
@@ -83,6 +79,19 @@ export default function MediaPanel() {
       </div>
 
       {error && <p className="panel-note" role="alert">{error}</p>}
+
+      {/* Persistent while it is true: a missing photo is never printed as
+          bare paper, and Save refuses too, with its reason. */}
+      {mediaState === 'failed' && (
+        <p className="panel-note" role="alert">
+          This photo could not be loaded. Choose it again.
+        </p>
+      )}
+      {media && isReducedCopy(media) && (
+        <p className="panel-note">
+          This photo was saved at reduced size by an older version. Choose it again for full resolution.
+        </p>
+      )}
 
       {/* The sheet's shape is a deliverable (a 4:5 feed, a square, a print),
           and it decides which part of the photo survives the crop. */}

@@ -21,9 +21,17 @@ export type TextAlign = 'left' | 'center' | 'right' | 'justify'
  */
 export interface MediaLayer {
   id: string
-  /** Intrinsic pixel size of the decoded image, for the cover fit. */
+  /** The photo's true pixel size, the right way up (EXIF orientation
+   *  applied): the original's, since an import stores the original bytes.
+   *  The cover fit, the pan and the export plan read this, never the size of
+   *  whatever copy the preview decoded. */
   width: number
   height: number
+  /** True for every photo imported since imports stopped resampling: the
+   *  stored bytes are the original's. Absent on a document saved by an older
+   *  build, whose stored copy was cut to a 2048 px long edge (media.ts
+   *  `isReducedCopy`). */
+  native?: boolean
   /** Zoom on the cover fit, at least 1: 1 exactly fills the sheet. */
   scale: number
   /** Centre of the photo in sheet fractions, kept inside the range where the

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { historyReducer, initHistory, type SettingsAction } from './settingsReducer.ts'
 import { loadSettings, saveSettings } from './persist.ts'
+import { sweepMedia } from './mediaStore.ts'
 import { SettingsContext, type SettingsStore } from './settingsStore.ts'
 
 /** Idle gap that ends a coalescing burst. Long enough to span a slider drag's
@@ -11,9 +12,10 @@ const BURST_MS = 450
 const PERSIST_MS = 400
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [history, rawDispatch] = useReducer(historyReducer, undefined, () =>
-    initHistory(loadSettings()),
-  )
+  // The document as it was loaded, kept: the launch sweep reads it, and only
+  // it, so no edit made while the sweep runs can change what it may delete.
+  const [launched] = useState(loadSettings)
+  const [history, rawDispatch] = useReducer(historyReducer, launched, initHistory)
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
 
   const burstTimer = useRef<number | undefined>(undefined)
@@ -56,6 +58,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [present])
 
   useEffect(() => () => window.clearTimeout(burstTimer.current), [])
+
+  // Once per launch, free the stored photos nothing can reach: Remove and
+  // Replace leave the bytes for Undo, and history does not outlive the page.
+  // Best effort — a store that cannot be listed is left as it is.
+  useEffect(() => {
+    void sweepMedia(new Set(launched.media ? [launched.media.id] : [])).catch(() => undefined)
+  }, [launched])
 
   // Keyboard undo/redo.
   useEffect(() => {

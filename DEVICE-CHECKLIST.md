@@ -63,6 +63,22 @@ So:
 - [ ] Background the app for 5 minutes → return → the document is still there
 - [ ] Force-quit and relaunch → the document is still there
 
+## Photo
+
+- [ ] Choose a photo straight from the camera roll (a 24 MP capture): it
+      imports, the right way up, with no "reduced size" note; a HEIC the
+      browser cannot open says "That image could not be read." rather than
+      failing silently
+- [ ] Pan and zoom that 24 MP photo for a minute: no tab reload (the preview
+      holds a 4 MP working copy, not the 98 MB original)
+- [ ] Save it: completes without a tab reload (Save decodes the original,
+      about 98 MB, for the length of the blit) and the file shows the photo,
+      upright
+- [ ] A transparent PNG: paper shows through where it is transparent
+- [ ] Remove the photo → Undo: it comes back (not bare paper, no alert)
+- [ ] A print saved by an older build (its photo cut to 2048 px) shows the
+      "saved at reduced size" note in the Photo tab
+
 ## Save
 
 - [ ] Save → the native share sheet appears → Save Image → the file **is** in Photos

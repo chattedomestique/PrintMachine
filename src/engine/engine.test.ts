@@ -24,12 +24,15 @@ import {
   detailFactor,
   ensureCache,
   grainCell,
+  groundRect,
   outputSize,
   pressPlate,
   printSheet,
+  renderPrint,
   type ToneSource,
 } from './render.ts'
 import { knockoutMask } from './knockout.ts'
+import { savePrint } from './export.ts'
 import {
   bandMask,
   clampPan,
@@ -937,6 +940,67 @@ describe('photo placement', () => {
         expect(m.y * H + dh / 2).toBeGreaterThanOrEqual(H - 1e-6)
       }
     }
+  })
+})
+
+describe('whichever decode of the photo is drawn, it fills the rectangle its true size gives', () => {
+  // A 2D context that records what is drawn and hands back blank pixels: the
+  // sheet below has no type, so nothing else needs a real canvas.
+  const fakeContext = () => {
+    const drawn: unknown[][] = []
+    const canvas = { width: 0, height: 0 }
+    const ctx = {
+      canvas,
+      imageSmoothingQuality: 'low',
+      clearRect: () => {},
+      drawImage: (...args: unknown[]) => void drawn.push(args),
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+      createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+      putImageData: () => {},
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, drawn }
+  }
+  const sheet = (): PrintSettings => ({
+    ...defaultSettings(),
+    layers: [],
+    // The default iPhone capture, zoomed and panned.
+    media: makeMedia({ id: 'p', width: 5712, height: 4284, native: true, scale: 1.7, x: 0.42, y: 0.55 }),
+  })
+
+  it('the preview\'s working copy and the original land in the same place on the sheet', () => {
+    const s = sheet()
+    const working = { width: 2364, height: 1773 } as unknown as CanvasImageSource
+    const original = { width: 5712, height: 4284 } as unknown as CanvasImageSource
+    const draw = (height: number, bitmap: CanvasImageSource) => {
+      const out = fakeContext()
+      const scratch = fakeContext()
+      let grounded = 0
+      renderPrint(out.ctx, scratch.ctx, s, { current: null }, null, height, bitmap, () => grounded++)
+      expect(grounded).toBe(1)
+      expect(scratch.drawn).toHaveLength(1)
+      const [source, dx, dy, dw, dh] = scratch.drawn[0] as [CanvasImageSource, number, number, number, number]
+      expect(source).toBe(bitmap)
+      const { w, h } = outputSize(s.aspect, height)
+      // Exactly the rectangle the document and the sheet give...
+      expect({ dx, dy, dw, dh }).toEqual(groundRect(s.media!, w, h))
+      // ...in sheet fractions:
+      return [dx / w, dy / h, dw / w, dh / h]
+    }
+    const preview = draw(PREVIEW_HEIGHT, working)
+    const exported = draw(REFERENCE_HEIGHT, original)
+    // The width rounds to whole pixels, so the fractions agree to a pixel.
+    preview.forEach((v, i) => expect(Math.abs(v - exported[i])).toBeLessThan(1 / PREVIEW_HEIGHT))
+  })
+})
+
+describe('Save never prints a photo as bare paper', () => {
+  it('refuses a document with a photo when no decode of it was handed over', async () => {
+    const s = { ...defaultSettings(), media: makeMedia({ id: 'p', width: 100, height: 100 }) }
+    // Refused before any canvas is touched.
+    const untouched = {} as CanvasRenderingContext2D
+    const result = await savePrint(untouched, untouched, s, 'jpeg', 'x', null)
+    expect(result.status).toBe('error')
+    expect(result.message).toMatch(/photo/)
   })
 })
 

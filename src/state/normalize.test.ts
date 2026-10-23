@@ -58,7 +58,10 @@ function expectNoExtraKeys(s: PrintSettings) {
   for (const l of s.layers) {
     expect(keys(l)).toEqual(keys(makeLayer()))
   }
-  if (s.media) expect(keys(s.media)).toEqual(keys(makeMedia({ id: 'x', width: 1, height: 1 })))
+  if (s.media) {
+    const optional = MEDIA_FIELDS.filter((r) => r.optional).map((r) => r.key)
+    expect(keys(s.media).filter((k) => !optional.includes(k))).toEqual(keys(makeMedia({ id: 'x', width: 1, height: 1 })))
+  }
 }
 
 describe('the model is locked', () => {
@@ -88,8 +91,11 @@ describe('the model is locked', () => {
     )
   })
 
-  it('a photo has exactly its placement, and the document its seven fields', () => {
+  it('a photo has exactly its placement (and one optional flag), and the document its seven fields', () => {
     expect(keys(makeMedia({ id: 'm', width: 1, height: 1 }))).toEqual(['height', 'id', 'scale', 'width', 'x', 'y'])
+    // `native` marks a photo stored as imported; its absence marks an older
+    // build's 2048 px copy, so no template may fill it in.
+    expect(MEDIA_FIELDS.filter((r) => r.optional).map((r) => r.key)).toEqual(['native'])
     expect(keys(defaultSettings())).toEqual(['aspect', 'layers', 'media', 'paperId', 'paperVeil', 'press', 'seed'])
   })
 })
@@ -97,7 +103,8 @@ describe('the model is locked', () => {
 describe('the schema matches the model', () => {
   it('lists exactly the fields of each template, at every level', () => {
     const d = defaultSettings()
-    const names = (rows: readonly Row[]) => rows.map((r) => r.key).sort()
+    // Optional rows are the fields a template deliberately does not carry.
+    const names = (rows: readonly Row[]) => rows.filter((r) => !r.optional).map((r) => r.key).sort()
     expect(names(SETTINGS_FIELDS)).toEqual(keys(d))
     expect(names(PRESS_FIELDS)).toEqual(keys(d.press))
     expect(names(LAYER_FIELDS)).toEqual(keys(makeLayer()))
@@ -306,6 +313,17 @@ describe('structured fields', () => {
     expect(s.layers[0].backing).toBeNull()
     expect(s.seed).toBe(defaultSettings().seed)
     expect(({} as Record<string, unknown>).caps).toBeUndefined()
+  })
+
+  it('keeps a photo\'s native flag when stored, and never invents one', () => {
+    const doc = reachable()
+    ;(doc.media as Doc).native = true
+    expect(normalizeSettings(doc).media?.native).toBe(true)
+    for (const bad of [undefined, 'yes', 1, null]) {
+      const d = reachable()
+      ;(d.media as Doc).native = bad
+      expect(normalizeSettings(d).media).not.toHaveProperty('native')
+    }
   })
 
   it('drops a photo with no id or no real size, and keeps one that has them', () => {

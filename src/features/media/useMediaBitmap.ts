@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MediaLayer } from '../../engine/types.ts'
-import { decodePreview } from './decode.ts'
+import { decodePreview, previewArea } from './decode.ts'
+
+/** How long a zoom must rest before the photo is decoded again at a new tier:
+ *  a pinch or a slider drag crosses tiers on its way. */
+export const REDECODE_MS = 300
 
 /**
  * Where the preview's photo is:
@@ -41,14 +45,18 @@ export function fromHeld(id: string | null, held: HeldMedia | null): { bitmap: I
 /**
  * The preview's decoded photo for the current document, and where it is.
  *
- * A WORKING copy, sized for the preview (decode.ts `PREVIEW_PHOTO_AREA`), from
- * the photo's true size in the document. It is drawn scaled into the same
- * rectangle the original would fill, so geometry never depends on it; Save
- * decodes the original itself.
+ * A WORKING copy, sized for what the preview shows at the photo's zoom on its
+ * sheet (decode.ts `previewArea`), from the photo's true size in the
+ * document. It is drawn scaled into the same rectangle the original would
+ * fill, so geometry never depends on it; Save decodes the original itself.
  *
  * Decoding is not free and the bytes live in IndexedDB, so this holds one
- * bitmap and swaps it only when the photo changes — moving or zooming it
- * re-renders from the same decode.
+ * bitmap. A new photo is decoded at once. The same photo is decoded again
+ * only when its zoom crosses a tier of `previewArea`, once the zoom has
+ * rested for REDECODE_MS; until the new copy lands the old one is drawn (the
+ * state stays `ready`), and a decode at a new tier that fails keeps the old
+ * copy — it is the same photo, not a missing one. Moving or zooming within a
+ * tier re-renders from the same decode.
  *
  * Everything lands through a promise, including the "no photo" case, so no
  * state is ever set synchronously inside the effect. That is not a lint
@@ -61,7 +69,11 @@ export function fromHeld(id: string | null, held: HeldMedia | null): { bitmap: I
  * the bitmap closes it again on unmount, and a closed ImageBitmap draws
  * nothing.
  */
-export function useMediaBitmap(media: Pick<MediaLayer, 'id' | 'width' | 'height'> | null): {
+export function useMediaBitmap(
+  media: Pick<MediaLayer, 'id' | 'width' | 'height' | 'scale'> | null,
+  /** The sheet's width over its height (`sheetAspect`). */
+  aspect: number,
+): {
   bitmap: ImageBitmap | null
   state: MediaState
 } {
@@ -70,34 +82,51 @@ export function useMediaBitmap(media: Pick<MediaLayer, 'id' | 'width' | 'height'
   // these only ever change together with it.
   const width = media?.width ?? 0
   const height = media?.height ?? 0
+  // The copy's tier: changes with the zoom and the sheet, in coarse steps.
+  const area = media ? previewArea(media, aspect) : 0
   const [held, setHeld] = useState<HeldMedia | null>(null)
   const currentRef = useRef<ImageBitmap | null>(null)
+  // Which photo the held decode is of, read inside the effect without making
+  // it a dependency.
+  const heldIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     let live = true
+    // The photo already held, wanted at another tier: wait for the zoom to
+    // rest, and keep drawing the copy there is.
+    const sameId = id !== null && heldIdRef.current === id
 
-    const load: Promise<HeldMedia> = id
-      ? decodePreview(id, width, height).then(
-          (bitmap) => ({ id, bitmap, failed: false }),
-          () => ({ id, bitmap: null, failed: true }),
-        )
-      : Promise.resolve({ id: null, bitmap: null, failed: false })
+    const timer = window.setTimeout(
+      () => {
+        const load: Promise<HeldMedia | null> = id
+          ? decodePreview(id, width, height, area).then(
+              (bitmap) => ({ id, bitmap, failed: false }),
+              // A new tier that cannot be decoded keeps the copy there is.
+              () => (sameId ? null : { id, bitmap: null, failed: true }),
+            )
+          : Promise.resolve({ id: null, bitmap: null, failed: false })
 
-    void load.then((next) => {
-      if (!live) {
-        next.bitmap?.close()
-        return
-      }
-      const prev = currentRef.current
-      if (prev && prev !== next.bitmap) prev.close()
-      currentRef.current = next.bitmap
-      setHeld(next)
-    })
+        void load.then((next) => {
+          if (!next) return
+          if (!live) {
+            next.bitmap?.close()
+            return
+          }
+          const prev = currentRef.current
+          if (prev && prev !== next.bitmap) prev.close()
+          currentRef.current = next.bitmap
+          heldIdRef.current = next.id
+          setHeld(next)
+        })
+      },
+      sameId ? REDECODE_MS : 0,
+    )
 
     return () => {
       live = false
+      window.clearTimeout(timer)
     }
-  }, [id, width, height])
+  }, [id, width, height, area])
 
   // Unmount only — see above.
   useEffect(

@@ -11,7 +11,12 @@ import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { SWEEP_AFTER_MS, mediaCreatedAt, sweepMedia, type SweepStore } from '../../state/mediaStore.ts'
 import { isReducedCopy } from '../../engine/media.ts'
 import { importMedia, type ImportDeps } from './importMedia.ts'
-import { PREVIEW_PHOTO_AREA, workingSize } from './decode.ts'
+import { PREVIEW_PHOTO_AREA, previewArea, workingSize } from './decode.ts'
+import { MAX_AREA } from '../../engine/limits.ts'
+import { coverRect } from '../../engine/media.ts'
+import { previewSize } from '../../engine/render.ts'
+import { mulberry32 } from '../../engine/rng.ts'
+import { ASPECTS } from '../../engine/types.ts'
 import { fromHeld, mediaState, type HeldMedia } from './useMediaBitmap.ts'
 
 const NOW = Date.UTC(2026, 9, 23, 12)
@@ -118,6 +123,61 @@ describe("the preview's working copy", () => {
       expect(Math.max(s.width, s.height)).toBeGreaterThanOrEqual(2048)
       // The aspect, to within the one pixel the floor can take.
       expect(Math.abs(s.width / s.height - w / h)).toBeLessThan((w / h) * (1 / Math.min(s.width, s.height)) + 1e-9)
+    }
+  })
+})
+
+describe("the preview's working copy follows the zoom", () => {
+  const copyOf = (w: number, h: number, scale: number, aspect: number) => {
+    const area = previewArea({ width: w, height: h, scale }, aspect)
+    return { area, copy: workingSize(w, h, area) ?? { width: w, height: h } }
+  }
+  const sheets = [...Object.values(ASPECTS), 4 / 3, 3, 1 / 3]
+
+  it('at 100% it is the 4 MP copy for a camera photo on any sheet it can have; a panorama on a narrow sheet gets what it is drawn at', () => {
+    // The fixed sheets, and its own (Original).
+    for (const [w, h] of [
+      [4032, 3024], [3024, 4032], [5712, 4284], [8064, 6048], [6000, 4000], [5712, 3213], [3213, 5712], [1600, 1200],
+    ]) {
+      for (const a of [...Object.values(ASPECTS), w / h]) expect(copyOf(w, h, 1, a).area).toBe(PREVIEW_PHOTO_AREA)
+    }
+    // A 5:1 panorama on 4:5 is drawn 5000x1000 by the preview, more than 4 MP:
+    // it is decoded whole (7.2 MP) rather than stretched.
+    expect(copyOf(6000, 1200, 1, 4 / 5).copy).toEqual({ width: 6000, height: 1200 })
+  })
+
+  it('zoomed in, it grows in tiers so the preview stays one copy pixel or more to a preview pixel', () => {
+    // A 12 MP 4:3 photo on 4:5 (an 800x1000 preview): the 4 MP copy is 1:1 at
+    // 177%; past it the copy grows, and from 251% it is the whole photo.
+    const row = (z: number) => copyOf(4032, 3024, z, 4 / 5).copy
+    expect(row(1.77)).toEqual({ width: 2364, height: 1773 })
+    expect(row(1.78)).toEqual({ width: 3344, height: 2508 })
+    expect(row(2.51)).toEqual({ width: 4032, height: 3024 })
+    expect(row(4)).toEqual({ width: 4032, height: 3024 })
+    // A 24 MP one stops at the canvas ceiling, MAX_AREA.
+    expect(copyOf(5712, 4284, 4, 4 / 5).copy).toEqual({ width: 4729, height: 3547 })
+  })
+
+  it('over 3000 random photos, sheets and zooms: 1:1 or better, never past MAX_AREA, never twice what is needed', () => {
+    const rand = mulberry32(0xc8)
+    for (let i = 0; i < 3000; i++) {
+      const w = Math.round(400 + rand() * 11600)
+      const h = Math.round(400 + rand() * 11600)
+      const a = sheets[Math.floor(rand() * sheets.length)]
+      const z = 1 + rand() * 3
+      const { area, copy } = copyOf(w, h, z, a)
+      const p = previewSize(a)
+      const r = coverRect({ width: w, height: h }, p.w, p.h, { scale: z, x: 0.5, y: 0.5 })
+      const needed = r.dw * r.dh
+      expect(area).toBeLessThanOrEqual(MAX_AREA)
+      expect(copy.width * copy.height).toBeLessThanOrEqual(Math.min(MAX_AREA, w * h))
+      if (needed <= MAX_AREA) {
+        // As many pixels as the preview draws the photo at (or all it has),
+        // to the pixel the floor can take.
+        expect(copy.width).toBeGreaterThanOrEqual(Math.min(w, r.dw) - 1)
+        expect(copy.height).toBeGreaterThanOrEqual(Math.min(h, r.dh) - 1)
+      }
+      if (area > PREVIEW_PHOTO_AREA) expect(area).toBeLessThan(2 * needed)
     }
   })
 })

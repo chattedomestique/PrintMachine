@@ -324,14 +324,26 @@ the file's at every size, from 12 MP to 48 MP.
 The size limits belong to canvases, not to a stored file, so they live where
 canvases are made:
 
-- **The preview** decodes a *working copy* of at most 4 MP (2048 x 2048 by
-  area, so its long edge is never under 2048 px: never smaller than the copy the
-  app used to keep). A 24 MP photo held decoded for a one-megapixel preview would
-  be 98 MB of a phone's memory for pixels nobody sees. Nothing reads the copy's
-  size: the cover fit, the pan and the export all use the photo's true size from
-  the document, and the copy is drawn scaled into the same rectangle, so the
-  preview places the photo exactly where the print does. Zoomed far in, the
-  preview is softer than the print.
+- **The preview** decodes a *working copy* sized to what it shows
+  (`previewArea`, `features/media/decode.ts`). At 100% that is 4 MP (2048 x
+  2048 by area, so its long edge is never under 2048 px: never smaller than the
+  copy the app used to keep); a 24 MP photo held decoded for a one-megapixel
+  preview would be 98 MB of a phone's memory for pixels nobody sees. Zoomed in
+  to crop, the copy grows in tiers that double (8.4 MP, then 16.8 MP, the
+  canvas ceiling, or the whole photo if it is smaller), so the preview shows
+  the photo at one copy pixel or more to each of its own pixels at any zoom: a
+  fixed 4 MP copy of a 12 MP photo on 4:5 was stretched past 1:1 from 177% and
+  2.26x at 400%. The photo is decoded again only when the zoom crosses a tier
+  and rests for 300 ms, and the old copy is drawn until the new one lands
+  (measured in the built app: at 300% the preview of a noise photo holds 7.2x
+  the fine detail it did from the fixed copy). The largest copy is 67 MB, held
+  through a save, but a save from that far in is small: the print shrinks with
+  the zoom squared, since fewer of the photo's pixels land on the sheet (a
+  24 MP photo on its own sheet at 400% saves 2400x1800; at 100%, 4729x3547).
+  Nothing reads the copy's size: the cover fit, the pan and the export all use
+  the photo's true size from the document, and the copy is drawn scaled into
+  the same rectangle, so the preview places the photo exactly where the print
+  does.
 - **Save** decodes the *original*, in full (4 bytes a pixel of the photo, about
   98 MB for 24 MP), and closes it the moment the photo is in the ground, so the
   print is drawn from the original's pixels, never from the preview's copy.

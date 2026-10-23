@@ -4,6 +4,7 @@ import Controls, { TABS, type TabId } from '../controls/Controls.tsx'
 import { IconButton } from '../../ui/controls.tsx'
 import { RedoIcon, UndoIcon } from '../../ui/icons.tsx'
 import { PHOTO_MISSING, describePlan, planPrint } from '../../engine/export.ts'
+import { sheetAspect } from '../../engine/types.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, subscribeSW } from '../../state/swStatus.ts'
@@ -15,7 +16,7 @@ export default function AppShell() {
   const { settings, undo, redo, canUndo, canRedo } = useSettings()
   // The preview's working copy of the photo. Save does not use it: it decodes
   // the original, so the print is drawn from the original's pixels.
-  const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media)
+  const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media, sheetAspect(settings))
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tab, setTab] = useState<TabId | null>(null)
   const [toast, setToast] = useState<string | null>(null)

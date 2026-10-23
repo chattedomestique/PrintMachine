@@ -73,7 +73,11 @@ So:
       browser cannot open says "That image could not be read." rather than
       failing silently
 - [ ] Pan and zoom that 24 MP photo for a minute: no tab reload (the preview
-      holds a 4 MP working copy, not the 98 MB original)
+      holds a working copy sized to the zoom: 4 MP at 100%, at most 16.8 MP,
+      67 MB, zoomed far in; never the 98 MB original)
+- [ ] Zoom a 12 MP photo on 4:5 to 300% and let go: within a moment the
+      preview sharpens (the photo is decoded again, whole) and reads as crisp
+      as the photo itself; back at 100% nothing reloads
 - [ ] Save it: completes without a tab reload (Save decodes the original,
       about 98 MB, for the length of the blit) and the file shows the photo,
       upright

@@ -53,7 +53,7 @@ function encode(canvas: HTMLCanvasElement, format: ExportFormat): Promise<Blob> 
  * Render a fresh, overlay-free frame and hand it to the share sheet.
  *
  * The export never reads back the on-screen canvas — that canvas may carry a
- * selection crosshair or guides. Re-rendering with `overlay = null` makes an
+ * selection crosshair. Re-rendering with `overlay = null` makes an
  * editing aid in a saved file structurally impossible rather than something we
  * remember to avoid (N8).
  */

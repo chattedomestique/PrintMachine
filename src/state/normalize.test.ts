@@ -669,5 +669,12 @@ describe('verdict §4.1: what each removed field becomes', () => {
     expect(max()).not.toHaveProperty('paperTexture')
     expect(max()).not.toHaveProperty('paperBlotch')
   })
+
+  /* ── The sheet ── */
+
+  it('aspect: unchanged', () => {
+    expect(rawMax.aspect).toBe('3:4')
+    expect(max().aspect).toBe('3:4')
+  })
 })
 

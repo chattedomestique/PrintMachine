@@ -104,10 +104,11 @@ export function outputSize(
   return { w: Math.round(height * ASPECTS[aspect]), h: height }
 }
 
-/** Editing aids. Never non-null on an export path. */
+/** Editing aids. Never non-null on an export path. The one aid is the
+ *  selected plate's crosshair: the on-sheet sign of which plate the gestures
+ *  will move. */
 export interface OverlaySpec {
   selectedLayerId: string | null
-  showGuides: boolean
 }
 
 /**
@@ -579,23 +580,6 @@ function drawOverlay(
 ): void {
   ctx.save()
   const unit = h / REFERENCE_HEIGHT
-
-  if (overlay.showGuides) {
-    ctx.strokeStyle = 'rgba(0,0,0,0.18)'
-    ctx.lineWidth = Math.max(1, unit)
-    ctx.setLineDash([6 * unit, 6 * unit])
-    for (let i = 1; i < 3; i++) {
-      const x = (w * i) / 3
-      const y = (h * i) / 3
-      ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, h)
-      ctx.moveTo(0, y)
-      ctx.lineTo(w, y)
-      ctx.stroke()
-    }
-    ctx.setLineDash([])
-  }
 
   const selected = s.layers.find((l) => l.id === overlay.selectedLayerId)
   if (selected) {

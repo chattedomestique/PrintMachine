@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import Canvas from '../editor/Canvas.tsx'
 import Controls, { TABS, type TabId } from '../controls/Controls.tsx'
 import { IconButton } from '../../ui/controls.tsx'
-import { GridIcon, RedoIcon, UndoIcon } from '../../ui/icons.tsx'
+import { RedoIcon, UndoIcon } from '../../ui/icons.tsx'
 import { savePrint, saveMessage } from '../../engine/export.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
@@ -16,7 +16,6 @@ export default function AppShell() {
   // Photos is the print that was on screen.
   const media = useMediaBitmap(settings.media?.id ?? null)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
-  const [showGuides, setShowGuides] = useState(false)
   const [tab, setTab] = useState<TabId | null>(null)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -80,7 +79,7 @@ export default function AppShell() {
     setBusy(true)
     try {
       // Fresh offscreen surfaces so the export can never read back the visible
-      // canvas, which carries the selection crosshair and guides (N8).
+      // canvas, which carries the selection crosshair (N8).
       const out = document.createElement('canvas').getContext('2d')
       const scratch = document
         .createElement('canvas')
@@ -134,23 +133,12 @@ export default function AppShell() {
           <IconButton label="Redo" onClick={redo} disabled={!canRedo}>
             <RedoIcon />
           </IconButton>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Alignment guides"
-            aria-pressed={showGuides}
-            title="Alignment guides"
-            onClick={() => setShowGuides((v) => !v)}
-            style={{ color: showGuides ? 'var(--accent)' : undefined }}
-          >
-            <GridIcon />
-          </button>
         </div>
       </header>
 
       <main className="app__main">
         <div className="app__canvas-wrap">
-          <Canvas showGuides={showGuides} media={media} mediaMode={tab === 'media'} />
+          <Canvas media={media} mediaMode={tab === 'media'} />
           {!hintDismissed && (
             <button type="button" className="hint" onClick={dismissHint}>
               Drag the sheet to move type · double-tap to centre

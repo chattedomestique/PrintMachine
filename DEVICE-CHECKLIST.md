@@ -61,7 +61,8 @@ So:
 - [ ] Save → the native share sheet appears → Save Image → the file **is** in Photos
 - [ ] A confirmation appears after saving
 - [ ] Cancel the share sheet → no error toast
-- [ ] The saved file has **no** guides and **no** selection crosshair in it
+- [ ] The saved file has **no** selection crosshair in it (the thirds guides are
+      gone; the crosshair is the one editing aid left, and it must never print)
 - [ ] File size is sane — hundreds of KB, not multi-MB
 
 > Expect ~600 KB rather than the ~300 KB the playbook cites for photographs. A

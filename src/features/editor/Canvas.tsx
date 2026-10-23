@@ -24,11 +24,9 @@ const MEDIA_SIZE: readonly [number, number] = [1, 4]
 const MEDIA_POSITION: readonly [number, number] = [-Infinity, Infinity]
 
 export default function Canvas({
-  showGuides,
   media = null,
   mediaMode = false,
 }: {
-  showGuides: boolean
   media?: ImageBitmap | null
   /** Point the sheet's gestures at the photo instead of the type. Driven by
    *  the open tab, so what you are touching is whatever panel you are in — no
@@ -39,7 +37,7 @@ export default function Canvas({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
 
-  useRenderer(canvasRef, settings, { selectedLayerId, showGuides }, media)
+  useRenderer(canvasRef, settings, { selectedLayerId }, media)
 
   const layer = selectedLayer ?? settings.layers[0] ?? null
 

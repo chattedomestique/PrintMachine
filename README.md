@@ -169,10 +169,8 @@ would fatten it. The cut is only hardened past the anti-aliased skirt.
 **Keep this ink.** The second ink can be the plate's own ink. Then both halves
 print that ink, and the photo is cut back to paper wherever it is darker than
 the ink, so one colour reads across the whole photograph — the riso way, with
-the ink still transparent. (This replaced an "opaque" switch that painted the
-ink over the photo: rendered side by side, the two put the same share of pink
-pixels on a dark ground.) The choice is listed first in the second-ink picker,
-and it follows the plate when its ink changes.
+the ink still transparent. The choice comes first in the second-ink picker, and
+it follows the plate when its ink changes.
 
 ### The press: two screens, two kinds of wear
 
@@ -196,14 +194,6 @@ same failure at two grains, moved together the same way. At their defaults
 both reproduce the shipped amounts exactly. **Ink** is the density ceiling and
 **Misregistration** where each pass lands. **Re-roll** pulls another sheet: a
 different tear, mottle, registration and paper grain from the same settings.
-
-What went, and why: woodcut and scribble (relief printing and pen hatching, not
-riso), eleven more dither algorithms (clustered duplicates the halftone, Bayer is
-a computer pattern), Midtones (type tone is nearly binary; it moved ink pixels by
-a fraction of a level), drum streaks, smear, roller banding and dropout patches
-(measured on the default print they changed between 0.01% and 0.7% of pixels,
-while each cost a full pass per plate at export size), and the paper's tooth
-and cloudiness sliders (the stock keeps its fibre at fixed amounts).
 
 #### Nothing is ever stretched
 
@@ -237,6 +227,7 @@ the same path carries the knockout under the second ink (the photo's alpha goes
 down there) and a transparent PNG's own transparency, and there is a test that
 uncovered ground is bit-for-bit the paper the app draws with no photo at all.
 
+<!-- WP2: import resolution (the 2048 px downscale below) is rewritten in WP2. -->
 #### Why the bytes are not in localStorage
 
 Its quota is about 5 MB of *string*, and base64 inflates binary by a third; one
@@ -423,9 +414,10 @@ aspect ratio, so both constraints hold at once and neither axis is ever clamped
 alone. `container-type: size` on the wrapper is what makes `cqw`/`cqh` resolve
 against the space the sheet is actually given.
 
+<!-- WP2: export resolution ("always renders at reference height", below, and the export size in Status) is rewritten in WP2. -->
 ### Why the preview drops resolution while you drag
 
-The press is a dozen full-image passes per plate, so its cost goes with the
+The press is several full-image passes per plate, so its cost goes with the
 pixel count. A full-height preview frame measured over half a second on a
 throttled phone profile — which meant dragging a slider froze the main thread,
 and a frozen main thread makes *everything* feel broken: the drag, the scroll
@@ -454,6 +446,7 @@ Measured before and after on the same throttled profile, dragging a press
 slider: 90th-percentile frame time went from **595 ms to 41 ms**. The export is
 untouched — it always renders at reference height with its own cache.
 
+<!-- WP3: Touch and Layout are rewritten for the style guide's dock in WP3. -->
 ### Touch
 
 Gestures are scoped per control rather than left to the browser's guess.
@@ -465,10 +458,12 @@ contained overscroll so a flick off its end never bounces the page behind it.
 
 On the sheet: drag to move, two-finger pinch to scale and rotate, double-tap to
 centre. With the Photo tab open the same gestures pan and zoom the photo
-instead (100–400%, never off the sheet), and double-tap fits it again. A finger lifting mid-pinch re-seeds the gesture from the remaining one,
-so the layer keeps panning instead of jumping. Every gesture writes the same
-layer fields the sliders write, and arrow keys / +- / brackets mirror all of it
-for keyboards.
+instead (100–400%, never off the sheet), and double-tap fits it again. A finger
+lifting mid-pinch re-seeds the gesture from the remaining one, so the layer
+keeps panning instead of jumping. Every gesture writes the same layer fields
+the sliders write, and arrow keys / +- / brackets mirror all of it for
+keyboards. The selected plate shows a crosshair on the sheet — the one editing
+aid, and it never reaches a saved file.
 
 ### Layout
 
@@ -483,6 +478,7 @@ touch React or the DOM beyond a canvas context handed to it. That constraint is
 what lets the export path re-render a fresh, overlay-free frame with the exact
 same code the preview uses.
 
+<!-- WP3: this list changes with the move to the style guide in WP3. -->
 ## Deliberate deviations from the playbook
 
 - **TypeScript, not the JS that Borders used.** The playbook makes TS strict the
@@ -512,11 +508,14 @@ same code the preview uses.
 
 ## Status
 
-Working: multi-plate type, the press (halftone or grain, Edge, Wear, ink and
-misregistration, Re-roll), forced paragraph
-justification, letter tracking, a one-shot Fit, a per-line backing, an
-imported photo as the printing ground (shown as shot, zoomed and panned within
-the sheet), undo/redo, persistence, and save via the share sheet.
+Working: up to three plates of type (face, Bold, size with a one-shot Fit, line
+height, tracking, rotation, alignment with per-line justify), each in a real
+Riso ink with an optional second ink or backing over the photo; the press
+(halftone or grain, screen size, ink, misregistration, Edge, Wear, Re-roll,
+stock); an imported photo as the printing ground (shown as shot, zoomed and
+panned within the sheet, paper over it or not); undo/redo, persistence that
+opens every older save, and save via the share sheet. Four tabs: Type, Ink,
+Photo, Press.
 
 Photos only — **video is not in yet**. A JPEG cannot hold one, so it needs a
 decision about what Save produces, and `MediaRecorder` on iOS Safari is limited
@@ -542,3 +541,59 @@ Export weighs in around 600 KB rather than the ~300 KB the playbook cites for
 photographs. A halftone screen over paper grain is close to worst case for
 JPEG — high-frequency detail in every block. Lowering quality to compensate
 smears the dots, so the size stands as a deliberate trade.
+
+## Removed on purpose
+
+The app does one job — risographic type on a photo — and every control left
+earns its place by changing how the type reads or looks on the photo in a way
+nothing else does. These went, and saved prints that used them still open
+(each is converted or dropped by the normaliser, with a test per case):
+
+- **Print the photo** (separating and halftoning the photograph, with its own
+  ink, contrast and highlight dropout, its own second press `photoPress`, and
+  the Type/Photo switch over the press controls). Halftoning the photo is "riso
+  a photo", a different job, and the one feature whose purpose was to destroy
+  the photo's pixels. The photo now shows as shot.
+- **Photo opacity.** Fading the photo is a legibility crutch that degrades it;
+  the second ink and the backing make the type readable without touching it.
+- **Opaque ("Print over the photo").** Painting the ink over the photo broke
+  the transparent-ink model. Rendered side by side, a second ink equal to the
+  plate's own ink put the same share of pink pixels on a dark ground (64% and
+  64%), by knocking the photo back to paper — so Opaque became "Keep this ink".
+- **Word-picked boxes (the Box tab)**, their padding, corners and opacity. A box
+  stored word numbers that silently moved to other words when the text was
+  edited, and each box was another full press pass with no cap. It became the
+  per-line backing.
+- **Per-word misprints (the Words tab).** Misregistration and the edge already
+  carry the second-hit look, and each word group was another full press pass.
+- **The typewriter** and its ribbon: a second type engine for a look that is not
+  riso. Mono plus tracking covers fixed pitch.
+- **Woodcut and scribble**: relief printing and pen hatching, not riso.
+- **Eleven more dither algorithms**, the dither threshold, five dot shapes and
+  dot softness: clustered dither duplicated the halftone, Bayer is a computer
+  pattern, and the rest are research knobs. Halftone and one Atkinson grain
+  remain.
+- **Midtones**: type tone is nearly binary; it moved ink pixels by about a
+  fifth of a level.
+- **Drum streaks, smear, roller banding and dropout patches** (the misprint
+  passes): on the default print they changed between 0.01% and 0.67% of the
+  pixels, while each cost a full pass per plate at export size. Smear also
+  doubled the type over the photo.
+- **Separate tear, bleed, tear scale, mottle and dropout sliders**: now Edge and
+  Wear, two amounts at the ratios the press always shipped with.
+- **The detail-scaling switch**: detail always scales, because off it eats small
+  type.
+- **Paper tooth and cloudiness sliders, and the seed number**: fixed fibre, and
+  a Re-roll button — nobody types 12345.
+- **Caps** (the keyboard already asks for capitals; saved caps text is
+  uppercased once), **Rounded** (a fourth sans with no printed character of its
+  own), the **weight** slider (now Bold), **word spacing** (`wordSpacing`; the
+  justify rule opens word gaps on its own), **Justify by** and **Lines of one
+  word** (now one per-line rule), and the **Fit to width** mode (now a one-shot
+  Fit that stores its size).
+- **Plate opacity** (it thinned ink to grey after the screen — the look the
+  engine exists to avoid) and the **overprint preview chips** (the sheet already
+  shows the overprint).
+- **The thirds guides** and their header toggle: they informed but never acted.
+  The selection crosshair stays.
+

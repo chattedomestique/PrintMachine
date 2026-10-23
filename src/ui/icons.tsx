@@ -29,12 +29,6 @@ export const RedoIcon = ({ size = 20 }: IconProps) => (
   </svg>
 )
 
-export const GridIcon = ({ size = 20 }: IconProps) => (
-  <svg {...base(size)}>
-    <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
-  </svg>
-)
-
 export const PlusIcon = ({ size = 18 }: IconProps) => (
   <svg {...base(size)}>
     <path d="M12 5v14M5 12h14" />

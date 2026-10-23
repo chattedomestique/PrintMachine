@@ -278,6 +278,34 @@ async function save(
   return { plan: pressed.plan, bytes: pressed.blob.size, decoded, ms, steps }
 }
 
+/**
+ * A document and its photo, made ready before a measurement starts, so the
+ * test photo's own canvas and decode are not counted against the press
+ * (scripts/measure-export.mjs).
+ */
+let prepared: { settings: PrintSettings; media: ImageBitmap | null } | null = null
+async function prepare(settings: PrintSettings): Promise<void> {
+  prepared?.media?.close()
+  let media: ImageBitmap | null = null
+  if (settings.media) {
+    const c = photoCanvas(settings.media.width, settings.media.height)
+    media = await createImageBitmap(c)
+    c.width = 0
+  }
+  prepared = { settings, media }
+}
+
+/** Press the prepared document through the real savePrint; the photo is
+ *  closed once it is in the ground, as Save does. */
+async function press(format: ExportFormat = 'jpeg'): Promise<{ w: number; h: number; bytes: number; ms: number }> {
+  if (!prepared) throw new Error('nothing prepared')
+  const { settings, media } = prepared
+  prepared = null
+  const t0 = performance.now()
+  const pressed = await savePrint(context(false), context(true), settings, media, { format, onGround: () => media?.close() })
+  return { w: pressed.plan.width, h: pressed.plan.height, bytes: pressed.blob.size, ms: performance.now() - t0 }
+}
+
 declare global {
   interface Window {
     H: {
@@ -285,9 +313,11 @@ declare global {
       render: typeof render
       scaleCorrelation: typeof scaleCorrelation
       save: typeof save
+      prepare: typeof prepare
+      press: typeof press
       normalized: boolean
     }
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, save, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, save, prepare, press, normalized: !!normalizeSettings }

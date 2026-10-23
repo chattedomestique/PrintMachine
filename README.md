@@ -143,6 +143,9 @@ Three things make it actually work:
   which is an opacity crossfade wearing a print's clothes, and is exactly why
   the switch point read as a fade. Screened, each ink lands at full strength
   and the changeover breaks into dots the way a two-colour job actually does.
+  Each plate switches at its own **Switch point**, because where the change
+  belongs depends on the photo and on the pair of inks; plates that share a
+  point share one mask.
 - **The photo is knocked back to paper under the second ink** — a transparent
   light ink over solid black is still solid black, so without this the second
   ink buys nothing.

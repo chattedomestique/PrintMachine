@@ -380,6 +380,171 @@ function binarise(
   })
 }
 
+/** Where each plate's tone comes from. The renderer rasterises glyphs into a
+ *  canvas (and caches them); a test hands in fields it made itself. */
+export interface ToneSource {
+  type(layer: TextLayer): { field: Float32Array; fontSize: number }
+  backing(layer: TextLayer): { field: Float32Array; fontSize: number }
+}
+
+/**
+ * Press every plate and print the sheet: everything after the type is
+ * rasterised and the photo is blitted, which is everything that decides how
+ * the print looks. Pure — no canvas — so the order of passes, the knockouts
+ * and the second-ink split are tested on the real code rather than on a copy
+ * of it.
+ *
+ * @param out    RGBA bytes, w*h*4, written in full.
+ * @param ground the photo at sheet size (RGBA), or undefined with no photo.
+ * @returns every pass in print order, as composited.
+ */
+export function printSheet(
+  out: Uint8ClampedArray,
+  s: PrintSettings,
+  ground: Uint8ClampedArray | undefined,
+  tones: ToneSource,
+  cache: RenderCache,
+  w: number,
+  h: number,
+): CompositeLayer[] {
+  // Plate order is print order: a plate's backing goes down before its type,
+  // so the type overprints the block into a third colour — what a real second
+  // pass does.
+  const plates: CompositeLayer[] = []
+  let plateIndex = 0
+
+  let groundLum: Float32Array | undefined
+  // The screened "ground is light" mask of the plate before, and the switch
+  // point it was made for. Every plate switches at its own point; plates that
+  // share one (the default: all at 50%) share the mask, so it is built once.
+  let light: { threshold: number; mask: Float32Array } | undefined
+
+  // Where the photo is cut back to paper, accumulated across plates: under
+  // the second ink wherever that ink cannot print on what is there, and under
+  // every backing. A transparent light ink over a solid dark area is still a
+  // solid dark area, so without this neither buys anything.
+  let knockout: Float32Array | undefined
+  const cutOut = (k: Float32Array) => {
+    if (!knockout) knockout = new Float32Array(w * h)
+    for (let i = 0; i < k.length; i++) if (k[i] > knockout[i]) knockout[i] = k[i]
+  }
+
+  for (const layer of s.layers) {
+    // A plate takes a backing OR a second ink, never both, and that is held
+    // in the reducer and the normaliser rather than decided here. The reason:
+    // the second ink picks each glyph's ink from the PHOTO's luminance, but
+    // over a backing the real ground is the block's ink on paper, so a light
+    // second ink chosen for a dark patch of photo would land on the block and
+    // vanish.
+    if (layer.backing) {
+      const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, cache, w, h)
+      plates.push({ coverage: backing.coverage, rgb: inkById(layer.backing).rgb })
+      // The block prints on paper: the photo is cut back under its own torn,
+      // misregistered outline, so a pale block over a dark photo still reads.
+      if (ground) cutOut(knockoutMask(backing.roughened, null, { w, h, dx: backing.dx, dy: backing.dy }))
+      plateIndex++
+    }
+
+    const tone = tones.type(layer)
+    const pressed = pressPlate(tone, plateIndex, s.press, s.seed, cache, w, h)
+    plateIndex++
+    const coverage = pressed.coverage
+
+    if (layer.contrastInkId && ground) {
+      // One pass whose ink changes with what is under it — a split fountain
+      // driven by the image rather than by position across the drum. Pressed
+      // once and then split, so the letterforms stay coherent; pressing twice
+      // would misregister the two halves against each other and tear every
+      // glyph that happens to straddle the boundary.
+      //
+      // Which ink goes where is decided by what the inks *are*, not by which
+      // field they were typed into. Keying it to the slot assumes the first
+      // ink is the dark one, and the moment it isn't — white type over a
+      // photograph, which is the ordinary case — the switch runs and puts
+      // white on the sky and black on the water: both invisible, and worse
+      // than not switching at all. The darker of the pair belongs on light
+      // ground and the lighter on dark ground, whichever way round they were
+      // chosen. The plate's own ink as its second ink is the one-colour case:
+      // both halves print that ink, and the knockout keeps it readable.
+      const split = splitInks(inkById(layer.inkId).rgb, inkById(layer.contrastInkId).rgb)
+
+      if (!groundLum) {
+        // Blurred across roughly a word. Anything finer and the mask reads the
+        // photograph's own grain — the glitter on water is the same value as
+        // white ink and about the size of a letter, so a tighter blur decides
+        // light-or-dark differently inside a single word. A word is the unit
+        // legibility is actually judged in, so it is the unit that commits.
+        groundLum = groundLuma(ground, w, h, Math.max(2, tone.fontSize * 1.5))
+      }
+      if (!light || light.threshold !== layer.contrastThreshold) {
+        // Screened, not left soft. A soft mask makes *both* inks print at
+        // partial coverage through the transition, which is an opacity
+        // crossfade wearing a print's clothes — and it is why the switch point
+        // read as a fade rather than as a switch. Running the mask through the
+        // same screen or dither the press is already using makes the changeover
+        // a real pattern: each ink lands at full strength, and the boundary
+        // breaks up into dots the way a two-colour job actually does.
+        //
+        // Made for THIS plate's switch point. (It used to be made once, from
+        // the first split plate, so every later plate's Switch point did
+        // nothing.) One mask is held at a time: a plate with its own point
+        // costs a rebuild, never a second full-frame buffer.
+        light = {
+          threshold: layer.contrastThreshold,
+          mask: binarise(bandMask(groundLum, layer.contrastThreshold), plateIndex, s.press, s.seed, w, h),
+        }
+      }
+      const mask = light.mask
+      const onLight = new Float32Array(w * h)
+      const onDark = new Float32Array(w * h)
+      for (let i = 0; i < coverage.length; i++) {
+        onLight[i] = coverage[i] * mask[i]
+        onDark[i] = coverage[i] * (1 - mask[i])
+      }
+      plates.push({ coverage: onLight, rgb: split.onLight })
+      plates.push({ coverage: onDark, rgb: split.onDark })
+
+      // Cut from the *same artwork the plate is*, torn by the same stencil and
+      // moved by the same paper feed — the plate's own roughened tone and
+      // offset, so the hole lands exactly where the ink does. Cutting it from
+      // the raw tone instead leaves the hole a couple of pixels off, and the
+      // only way to cover that gap is to spread the hole: on a poster a trap,
+      // at text size a flood that swells every counter shut.
+      cutOut(
+        knockoutMask(pressed.roughened, groundLum, {
+          w,
+          h,
+          dx: pressed.dx,
+          dy: pressed.dy,
+          split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma },
+        }),
+      )
+    } else {
+      plates.push({ coverage, rgb: inkById(layer.inkId).rgb })
+    }
+  }
+
+  let base = ground
+  if (base && knockout) {
+    // The photo is the ground, so knocking out means taking its alpha down and
+    // letting the paper underneath come back through. That alpha path is also
+    // what a transparent PNG's own transparency takes: both read as paper.
+    base = new Uint8ClampedArray(base)
+    for (let i = 0; i < knockout.length; i++) {
+      base[i * 4 + 3] = base[i * 4 + 3] * (1 - knockout[i])
+    }
+  }
+
+  compositeLayers(
+    out,
+    w,
+    h,
+    base ? { ...cache.paper, base, paperAmount: s.paperVeil ? 1 : 0 } : cache.paper,
+    plates,
+  )
+  return plates
+}
+
 /**
  * Render a full print.
  *
@@ -412,19 +577,11 @@ export function renderPrint(
   const cache = ensureCache(cacheRef.current, s, w, h)
   cacheRef.current = cache
 
-  // Plate order is print order: a plate's backing goes down before its type,
-  // so the type overprints the block into a third colour — what a real second
-  // pass does.
-  const plates: CompositeLayer[] = []
-  let plateIndex = 0
-
   // The photo is laid down first — before any type is rasterised — because the
   // type needs to know what is underneath it before it can decide what colour
   // to be. `ground` is a copy, so `scratch` is free for glyph rasterisation
   // immediately after.
   let ground: Uint8ClampedArray | undefined
-  let light: Float32Array | undefined
-  let groundLum: Float32Array | undefined
   if (media && s.media) {
     const r = coverRect({ width: s.media.width, height: s.media.height }, w, h, s.media)
     scratch.clearRect(0, 0, w, h)
@@ -433,136 +590,18 @@ export function renderPrint(
     ground = scratch.getImageData(0, 0, w, h).data
   }
 
-  // Where the photo is cut back to paper, accumulated across plates: under
-  // the second ink wherever that ink cannot print on what is there, and under
-  // every backing. A transparent light ink over a solid dark area is still a
-  // solid dark area, so without this neither buys anything.
-  let knockout: Float32Array | undefined
-  const cutOut = (k: Float32Array) => {
-    if (!knockout) knockout = new Float32Array(w * h)
-    for (let i = 0; i < k.length; i++) if (k[i] > knockout[i]) knockout[i] = k[i]
-  }
-
-  for (const layer of s.layers) {
-    // A plate takes a backing OR a second ink, never both, and that is held
-    // in the reducer and the normaliser rather than decided here. The reason:
-    // the second ink picks each glyph's ink from the PHOTO's luminance, but
-    // over a backing the real ground is the block's ink on paper, so a light
-    // second ink chosen for a dark patch of photo would land on the block and
-    // vanish.
-    if (layer.backing) {
-      const backing = pressPlate(
-        cachedBackingTone(scratch, layer, cache, w, h),
-        plateIndex,
-        s.press,
-        s.seed,
-        cache,
-        w,
-        h,
-      )
-      plates.push({ coverage: backing.coverage, rgb: inkById(layer.backing).rgb })
-      // The block prints on paper: the photo is cut back under its own torn,
-      // misregistered outline, so a pale block over a dark photo still reads.
-      if (ground) cutOut(knockoutMask(backing.roughened, null, { w, h, dx: backing.dx, dy: backing.dy }))
-      plateIndex++
-    }
-
-    const tone = cachedTone(scratch, layer, cache, w, h)
-    const pressed = pressPlate(tone, plateIndex, s.press, s.seed, cache, w, h)
-    plateIndex++
-    const coverage = pressed.coverage
-
-    if (layer.contrastInkId && ground) {
-      // One pass whose ink changes with what is under it — a split fountain
-      // driven by the image rather than by position across the drum. Pressed
-      // once and then split, so the letterforms stay coherent; pressing twice
-      // would misregister the two halves against each other and tear every
-      // glyph that happens to straddle the boundary.
-      //
-      // Which ink goes where is decided by what the inks *are*, not by which
-      // field they were typed into. Keying it to the slot assumes the first
-      // ink is the dark one, and the moment it isn't — white type over a
-      // photograph, which is the ordinary case — the switch runs and puts
-      // white on the sky and black on the water: both invisible, and worse
-      // than not switching at all. The darker of the pair belongs on light
-      // ground and the lighter on dark ground, whichever way round they were
-      // chosen. The plate's own ink as its second ink is the one-colour case:
-      // both halves print that ink, and the knockout keeps it readable.
-      const split = splitInks(inkById(layer.inkId).rgb, inkById(layer.contrastInkId).rgb)
-
-      if (!groundLum) {
-        // Blurred across roughly a word. Anything finer and the mask reads the
-        // photograph's own grain — the glitter on water is the same value as
-        // white ink and about the size of a letter, so a tighter blur decides
-        // light-or-dark differently inside a single word. A word is the unit
-        // legibility is actually judged in, so it is the unit that commits.
-        groundLum = groundLuma(ground, w, h, Math.max(2, tone.fontSize * 1.5))
-      }
-      if (!light) {
-        // Screened, not left soft. A soft mask makes *both* inks print at
-        // partial coverage through the transition, which is an opacity
-        // crossfade wearing a print's clothes — and it is why the switch point
-        // read as a fade rather than as a switch. Running the mask through the
-        // same screen or dither the press is already using makes the changeover
-        // a real pattern: each ink lands at full strength, and the boundary
-        // breaks up into dots the way a two-colour job actually does.
-        light = binarise(
-          bandMask(groundLum, layer.contrastThreshold),
-          plateIndex,
-          s.press,
-          s.seed,
-          w,
-          h,
-        )
-      }
-      const onLight = new Float32Array(w * h)
-      const onDark = new Float32Array(w * h)
-      for (let i = 0; i < coverage.length; i++) {
-        onLight[i] = coverage[i] * light[i]
-        onDark[i] = coverage[i] * (1 - light[i])
-      }
-      plates.push({ coverage: onLight, rgb: split.onLight })
-      plates.push({ coverage: onDark, rgb: split.onDark })
-
-      // Cut from the *same artwork the plate is*, torn by the same stencil and
-      // moved by the same paper feed — the plate's own roughened tone and
-      // offset, so the hole lands exactly where the ink does. Cutting it from
-      // the raw tone instead leaves the hole a couple of pixels off, and the
-      // only way to cover that gap is to spread the hole: on a poster a trap,
-      // at text size a flood that swells every counter shut.
-      cutOut(
-        knockoutMask(pressed.roughened, groundLum, {
-          w,
-          h,
-          dx: pressed.dx,
-          dy: pressed.dy,
-          split: { light, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma },
-        }),
-      )
-    } else {
-      plates.push({ coverage, rgb: inkById(layer.inkId).rgb })
-    }
-  }
-
-  if (ground && knockout) {
-    // The photo is the ground, so knocking out means taking its alpha down and
-    // letting the paper underneath come back through. That alpha path is also
-    // what a transparent PNG's own transparency takes: both read as paper.
-    ground = new Uint8ClampedArray(ground)
-    for (let i = 0; i < knockout.length; i++) {
-      ground[i * 4 + 3] = ground[i * 4 + 3] * (1 - knockout[i])
-    }
-  }
-
   const image = ctx.createImageData(w, h)
-  compositeLayers(
+  printSheet(
     image.data,
+    s,
+    ground,
+    {
+      type: (layer) => cachedTone(scratch, layer, cache, w, h),
+      backing: (layer) => cachedBackingTone(scratch, layer, cache, w, h),
+    },
+    cache,
     w,
     h,
-    ground
-      ? { ...cache.paper, base: ground, paperAmount: s.paperVeil ? 1 : 0 }
-      : cache.paper,
-    plates,
   )
   ctx.putImageData(image, 0, 0)
 

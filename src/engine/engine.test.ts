@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
-import { compositeLayers } from './composite.ts'
+import { compositeLayers, type CompositeLayer } from './composite.ts'
 import { ditherField } from './dither.ts'
 import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftField, wearToMottle } from './ink.ts'
 import { contrastPartner, inkById, paperById, RISO_INKS } from './inks.ts'
@@ -27,6 +27,8 @@ import {
   grainCell,
   outputSize,
   pressPlate,
+  printSheet,
+  type ToneSource,
 } from './render.ts'
 import { knockoutMask } from './knockout.ts'
 import {
@@ -1577,17 +1579,147 @@ describe('backing', () => {
     expect(out[0]).toBe(0)
   })
 
-  it('is overprinted by the type into a third colour', () => {
-    const paper = { shade: new Float32Array(1).fill(1), rgb: [255, 255, 255] as const }
-    const back = inkById('yellow').rgb
-    const type = inkById('fluorescentpink').rgb
-    const out = new Uint8ClampedArray(4)
-    compositeLayers(out, 1, 1, paper, [
-      { coverage: new Float32Array(1).fill(1), rgb: back },
-      { coverage: new Float32Array(1).fill(1), rgb: type },
-    ])
-    const want = expectedOverprint(back, type)
-    for (let c = 0; c < 3; c++) expect(Math.abs(out[c] - want[c])).toBeLessThanOrEqual(2)
+})
+
+describe('printSheet: the passes exactly as the renderer presses them', () => {
+  // The real stage renderPrint runs after the type is rasterised and the photo
+  // blitted, driven here with tone fields made in the test. A clean press (no
+  // edge, no wear, no misregistration, full ink, grain) makes a solid block
+  // print solid, so pixels can be compared exactly; what is under test is the
+  // order of passes, the knockouts and the split, not the texture.
+  const w = 120
+  const h = 80
+  const block = (x0: number, y0: number, x1: number, y1: number) => {
+    const f = new Float32Array(w * h)
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) f[y * w + x] = 1
+    return f
+  }
+  /** A photo: black on the left half, white on the right. */
+  const halves = () => {
+    const g = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) {
+      g.fill(i % w < w / 2 ? 0 : 255, i * 4, i * 4 + 3)
+      g[i * 4 + 3] = 255
+    }
+    return g
+  }
+  /** A photo: black to white, left to right. */
+  const ramp = () => {
+    const g = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) {
+      g.fill(Math.round((255 * (i % w)) / (w - 1)), i * 4, i * 4 + 3)
+      g[i * 4 + 3] = 255
+    }
+    return g
+  }
+  const sheet = (layers: Partial<TextLayer>[]): PrintSettings => {
+    const s = defaultSettings()
+    s.press = { ...s.press, method: 'grain', edge: 0, wear: 0, misregistration: 0, density: 1 }
+    s.paperVeil = true
+    s.media = makeMedia({ id: 'photo', width: w, height: h })
+    s.layers = layers.map((l, i) => makeLayer({ id: `p${i}`, ...l }))
+    return s
+  }
+  const fields = (type: Float32Array[], backing: Float32Array[] = []): ToneSource => ({
+    // A small rendered size, so the ground's blur stays well inside a half.
+    type: (l) => ({ field: type[Number(l.id.slice(1))], fontSize: 4 }),
+    backing: (l) => ({ field: backing[Number(l.id.slice(1))], fontSize: 4 }),
+  })
+  const print = (s: PrintSettings, ground: Uint8ClampedArray | undefined, tones: ToneSource) => {
+    const out = new Uint8ClampedArray(w * h * 4)
+    const plates = printSheet(out, s, ground, tones, ensureCache(null, s, w, h), w, h)
+    return { out, plates }
+  }
+  const px = (img: Uint8ClampedArray, x: number, y: number) => {
+    const o = (y * w + x) * 4
+    return [img[o], img[o + 1], img[o + 2]]
+  }
+  const each = (x0: number, y0: number, x1: number, y1: number, f: (x: number, y: number) => void) => {
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) f(x, y)
+  }
+  const pink = inkById('fluorescentpink').rgb
+  const yellow = inkById('yellow').rgb
+
+  it('a backing is the first pass, prints on paper over a black photo, and the type overprints it into a third colour', () => {
+    const s = sheet([{ inkId: 'fluorescentpink', backing: 'yellow', contrastInkId: null }])
+    // The block and the type sit in the black half.
+    const tones = fields([block(30, 30, 45, 50)], [block(10, 10, 58, 70)])
+    const onPhoto = print(s, halves(), tones)
+    const onPaper = print(s, undefined, tones)
+
+    // Plate order is print order: the block goes down before its type.
+    expect(onPhoto.plates.map((p) => p.rgb)).toEqual([yellow, pink])
+
+    const paper = ensureCache(null, s, w, h).paper
+    const near = (a: number[], b: number[], tol: number) =>
+      a.forEach((v, c) => expect(Math.abs(v - b[c])).toBeLessThanOrEqual(tol))
+    const under = (x: number, y: number) =>
+      paper.rgb.map((v) => v * paper.shade[y * w + x]) as unknown as [number, number, number]
+
+    // Inside the block, away from the type: yellow on paper, not on black.
+    each(14, 14, 26, 26, (x, y) => {
+      near(px(onPhoto.out, x, y), px(onPaper.out, x, y), 1)
+      near(px(onPhoto.out, x, y), expectedOverprint(under(x, y), yellow), 2)
+    })
+    // Where the type crosses it: the type overprints the block.
+    each(33, 33, 42, 47, (x, y) => {
+      near(px(onPhoto.out, x, y), px(onPaper.out, x, y), 1)
+      near(px(onPhoto.out, x, y), expectedOverprint(expectedOverprint(under(x, y), yellow), pink), 2)
+    })
+    // Outside the block the photo is untouched: still black.
+    each(0, 0, 6, h, (x, y) => expect(px(onPhoto.out, x, y)).toEqual([0, 0, 0]))
+  })
+
+  it("the plate's own ink as its second ink keeps the ink over a black photo, and is plain ink over a light one", () => {
+    const keep = sheet([{ inkId: 'fluorescentpink', contrastInkId: 'fluorescentpink' }])
+    const plain = sheet([{ inkId: 'fluorescentpink', contrastInkId: null }])
+    const tones = fields([block(4, 20, 116, 60)])
+    const kept = print(keep, halves(), tones)
+    // Pressed once, split in two, both halves the plate's own ink.
+    expect(kept.plates.map((p) => p.rgb)).toEqual([pink, pink])
+
+    const onPaper = print(keep, undefined, tones).out
+    const transparent = print(plain, halves(), tones).out
+    each(10, 26, 46, 54, (x, y) => {
+      // Over black: pink on paper. Plain transparent pink there is black.
+      expect(px(kept.out, x, y).map((v, c) => Math.abs(v - px(onPaper, x, y)[c]) <= 1)).toEqual([true, true, true])
+      expect(px(transparent, x, y)).toEqual([0, 0, 0])
+    })
+    // Over white: exactly the ordinary transparent overprint.
+    each(74, 20, 116, 60, (x, y) => expect(px(kept.out, x, y)).toEqual(px(transparent, x, y)))
+  })
+
+  it("so with the plate's own ink the Switch point changes nothing, which is why it is not offered", () => {
+    const tones = fields([block(4, 20, 116, 60)])
+    const at = (t: number) =>
+      print(sheet([{ inkId: 'fluorescentpink', contrastInkId: 'fluorescentpink', contrastThreshold: t }]), ramp(), tones).out
+    expect(at(0.2)).toEqual(at(0.8))
+  })
+
+  it('every plate switches at its own Switch point, whatever the plate before it does', () => {
+    const tones = fields([block(0, 4, w, 36), block(0, 44, w, 76)])
+    const two = (t1: number | null, t2: number) =>
+      print(
+        sheet([
+          t1 === null
+            ? { inkId: 'black', contrastInkId: null }
+            : { inkId: 'black', contrastInkId: 'white', contrastThreshold: t1 },
+          { inkId: 'black', contrastInkId: 'white', contrastThreshold: t2 },
+        ]),
+        ramp(),
+        tones,
+      ).plates
+    const low = two(0.5, 0.2)
+    const high = two(0.5, 0.8)
+    const lit = (p: CompositeLayer) => p.coverage.reduce((a, v) => a + v, 0)
+    // The first plate's split is the same in both...
+    expect(low[0].coverage).toEqual(high[0].coverage)
+    // ...and the second plate's follows its own point: more of the ramp reads
+    // as light at a 20% switch than at 80%.
+    expect(lit(low[2])).toBeGreaterThan(lit(high[2]) * 1.5)
+    // It is exactly the split it would have alone.
+    expect(low[2].coverage).toEqual(two(null, 0.2)[1].coverage)
+    expect(high[2].coverage).toEqual(two(null, 0.8)[1].coverage)
   })
 })
 

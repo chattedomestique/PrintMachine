@@ -32,18 +32,30 @@ function boxH(src: Float32Array, dst: Float32Array, w: number, h: number, r: num
   }
 }
 
-/** One vertical box pass. Same seeding rule, striding by w. */
-function boxV(src: Float32Array, dst: Float32Array, w: number, h: number, r: number): void {
+/**
+ * One vertical box pass. Same seeding rule, striding by w.
+ *
+ * Walked row by row with a running sum per column, not column by column: the
+ * field is stored by rows, and a column walk touches one value per row — a
+ * cache miss each on a sheet thousands of pixels wide (it was most of the
+ * press's time on a 16 MP export). Each column's sum takes exactly the same
+ * additions in the same order (held in float64, as the single sum was), so
+ * the result is the same to the bit.
+ */
+function boxV(src: Float32Array, dst: Float32Array, w: number, h: number, r: number, sums: Float64Array): void {
   const norm = 1 / (2 * r + 1)
-  for (let x = 0; x < w; x++) {
-    let sum = src[x] * (r + 1)
-    for (let i = 1; i <= r; i++) sum += src[Math.min(i, h - 1) * w + x]
-
-    for (let y = 0; y < h; y++) {
-      dst[y * w + x] = sum * norm
-      const add = src[Math.min(y + r + 1, h - 1) * w + x]
-      const drop = src[Math.max(y - r, 0) * w + x]
-      sum += add - drop
+  for (let x = 0; x < w; x++) sums[x] = src[x] * (r + 1)
+  for (let i = 1; i <= r; i++) {
+    const row = Math.min(i, h - 1) * w
+    for (let x = 0; x < w; x++) sums[x] += src[row + x]
+  }
+  for (let y = 0; y < h; y++) {
+    const out = y * w
+    const add = Math.min(y + r + 1, h - 1) * w
+    const drop = Math.max(y - r, 0) * w
+    for (let x = 0; x < w; x++) {
+      dst[out + x] = sums[x] * norm
+      sums[x] += src[add + x] - src[drop + x]
     }
   }
 }
@@ -51,9 +63,10 @@ function boxV(src: Float32Array, dst: Float32Array, w: number, h: number, r: num
 /** Three box passes at an integer radius, on `a` in place, with `b` as the
  *  other half of the ping-pong. */
 function boxesInPlace(a: Float32Array, b: Float32Array, w: number, h: number, r: number): void {
+  const sums = new Float64Array(w)
   for (let pass = 0; pass < 3; pass++) {
     boxH(a, b, w, h, r)
-    boxV(b, a, w, h, r)
+    boxV(b, a, w, h, r, sums)
   }
 }
 

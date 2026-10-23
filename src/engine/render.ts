@@ -397,6 +397,26 @@ export function pressPlate(
    *  default. */
   ws: Workspace = makeWorkspace(w * h),
 ): PressedPlate {
+  return drain(pressPlateSteps(plate, index, s, seed, noise, w, h, ws, { step: 'press', pass: index + 1, passes: index + 1 }))
+}
+
+/**
+ * `pressPlate`, in stages: it yields `at` after the tear and after the wear,
+ * so an export hands the page a moment inside a pass as well as between them
+ * (a pass on a 12 MP sheet is seconds of work on a phone, and a Cancel tapped
+ * meanwhile waits for the next yield).
+ */
+function* pressPlateSteps(
+  plate: { field: ToneField; fontSize: number },
+  index: number,
+  s: PressProfile,
+  seed: number,
+  noise: SheetNoise,
+  w: number,
+  h: number,
+  ws: Workspace,
+  at: RenderProgress,
+): Generator<RenderProgress, PressedPlate> {
   const rough = toneAsFloat(plate.field, ws.rough)
   const scale = h / REFERENCE_HEIGHT
   const detail = detailFactor(plate.fontSize, h)
@@ -439,6 +459,7 @@ export function pressPlate(
   // scaling reaches the wear as well as the screen: on body copy a sheet-sized
   // blotch cell is about the height of a letter, so unscaled wear stops
   // texturing the ink and starts eating the letterform.
+  yield at
   const worn = applyDensity(rough, s.density, ws.work)
   applyMottle(worn, noise.mottle, noise.speckle, wear.mottle * detail, wear.dropout * detail, w, h, detail, worn)
 
@@ -448,6 +469,7 @@ export function pressPlate(
   const { dx, dy } = registrationOffset(seed, index, s.misregistration * scale * Math.sqrt(detail))
   shiftInPlace(worn, w, h, dx, dy)
   const shifted = worn
+  yield at
 
   // Screened straight into bytes: the dot's soft edge is kept to half a
   // level, and every pass held until the print costs a quarter of a float.
@@ -628,7 +650,7 @@ export function* printSheetSteps(
 
   // Each pass is pressed in a function of its own, so that what it holds — its
   // tone, its coverage before the split, the luminance it read back — is let
-  // go when it returns. A generator's own locals would stay held, in its
+  // go when it returns. This generator's own locals would stay held, in its
   // suspended frame, through every later plate and the print.
 
   // A plate takes a backing OR a second ink, never both, and that is held in
@@ -636,8 +658,12 @@ export function* printSheetSteps(
   // second ink picks each glyph's ink from the PHOTO's luminance, but over a
   // backing the real ground is the block's ink on paper, so a light second
   // ink chosen for a dark patch of photo would land on the block and vanish.
-  const pressBacking = (layer: TextLayer, ink: string) => {
-    const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h, ws)
+  // (Generators themselves, so a pass can yield inside; each finishes, and
+  // lets go of what it held, before the next pass starts.)
+  function* pressBacking(layer: TextLayer, ink: string): Generator<RenderProgress, void> {
+    const at: RenderProgress = { step: 'press', pass: plateIndex + 1, passes }
+    yield at
+    const backing = yield* pressPlateSteps(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h, ws, at)
     plates.push({ coverage: backing.coverage, rgb: inkById(ink).rgb })
     // The block prints on paper: the photo is cut back under its own torn,
     // misregistered outline, so a pale block over a dark photo still reads.
@@ -645,9 +671,11 @@ export function* printSheetSteps(
     plateIndex++
   }
 
-  const pressType = (layer: TextLayer) => {
+  function* pressType(layer: TextLayer): Generator<RenderProgress, void> {
+    const at: RenderProgress = { step: 'press', pass: plateIndex + 1, passes }
+    yield at
     const tone = tones.type(layer)
-    const pressed = pressPlate(tone, plateIndex, s.press, s.seed, noise, w, h, ws)
+    const pressed = yield* pressPlateSteps(tone, plateIndex, s.press, s.seed, noise, w, h, ws, at)
     plateIndex++
     const coverage = pressed.coverage
 
@@ -687,6 +715,7 @@ export function* printSheetSteps(
     // the plate is pressed; it stays there through this plate's mask and
     // knockout.
     const groundLum = sampleLuma(lumaGrid, ws.scratch)
+    yield at
     if (!light || light.threshold !== layer.contrastThreshold) {
       // Screened, not left soft. A soft mask makes *both* inks print at
       // partial coverage through the transition, which is an opacity
@@ -734,12 +763,8 @@ export function* printSheetSteps(
   }
 
   for (const layer of s.layers) {
-    if (layer.backing) {
-      yield { step: 'press', pass: plateIndex + 1, passes }
-      pressBacking(layer, layer.backing)
-    }
-    yield { step: 'press', pass: plateIndex + 1, passes }
-    pressType(layer)
+    if (layer.backing) yield* pressBacking(layer, layer.backing)
+    yield* pressType(layer)
   }
 
   // Pressed: the working buffers, the ground's luminance and the switch mask

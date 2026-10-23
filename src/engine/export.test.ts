@@ -205,10 +205,11 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
     })
     expect(grounded).toBe(1)
     const steps = seen.map((p) => `${p.step} ${p.pass}/${p.passes}`)
-    // Two plates, one with a backing: three passes on the press.
-    expect(steps.slice(0, 4)).toEqual(['photo 0/3', 'press 1/3', 'press 2/3', 'press 3/3'])
-    expect(steps.slice(4).every((t) => t === 'print 3/3')).toBe(true)
-    expect(steps.length).toBeGreaterThan(4)
+    // Two plates, one with a backing: three passes on the press, in order,
+    // then the print.
+    expect(steps.filter((t, i) => t !== steps[i - 1])).toEqual(['photo 0/3', 'press 1/3', 'press 2/3', 'press 3/3', 'print 3/3'])
+    // A pass yields inside as well as before it (after the tear and the wear).
+    for (const pass of ['press 1/3', 'press 2/3', 'press 3/3']) expect(steps.filter((t) => t === pass).length).toBeGreaterThanOrEqual(3)
 
     // The same pixels as renderPrint at the same height (the harness checks
     // this on real glyphs and a real photo).

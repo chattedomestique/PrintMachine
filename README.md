@@ -635,6 +635,29 @@ output pixel.
   pixels and nothing else moves. Under Grain the switch is error diffusion,
   which re-dithers its whole mixing band at any change in its input: the same
   ink density (to 0.1%), a different arrangement of the grains there.
+- **Faster, and it never stops the page for long.** The vertical blur now
+  walks the sheet by rows with a running sum per column (a column walk was a
+  cache miss per pixel, most of the press's time on a wide sheet; the sums are
+  the same additions in the same order, so the bytes are too), and the press
+  yields to the page inside each pass as well as between them, so the progress
+  keeps painting and Cancel is taken within a stage.
+
+Measured (`node scripts/measure-alloc.mjs`, `node scripts/measure-export.mjs`;
+before the diet -> after):
+
+| Case | Sheet | Typed arrays, peak | With canvases and the decoded photo | Chromium time | Chromium RSS |
+|---|---|---|---|---|---|
+| 1. 12 MP portrait, 4:5, second ink | 3024x3780 | 68.4 -> 23.4 B/px | 76 -> 31 B/px (359 MB) | 12.5 -> 5.8 s | +707 -> +311 MB |
+| 2. 3 plates, 4 passes, 4096x4096 | 16.8 MP | 92.7 -> 25.3 | 101 -> 33 (558 MB) | 39.2 -> 11.9 s | +1094 -> +491 MB |
+| 3. No photo | 2880x3600 | 44.5 -> 15.4 | 53 -> 23 (243 MB) | 7.8 -> 3.8 s | +388 -> +278 MB |
+| 4. Grain, 4096x4096 | 16.8 MP | 68.1 -> 23.3 | 76 -> 31 (524 MB) | 21.7 -> 8.0 s | +1104 -> +394 MB |
+| 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 | 120 -> 37 (625 MB) | 65.6 -> 18.7 s | +1484 -> +445 MB |
+
+The gate is the typed-array column (35 B/px, cases 1-4); desktop Chromium's
+memory is informational (V8 frees short-lived buffers far more eagerly than an
+iPhone's JavaScriptCore), and the phone's own is a DEVICE-CHECKLIST item. The
+legacy five-plate print (kept whole: see "The plate budget") costs 16% more
+than the worst print the budget allows, well inside the margin.
 
 ### The same print at every size
 

@@ -114,6 +114,15 @@ So:
       gone; the crosshair is the one editing aid left, and it must never print)
 - [ ] File size: a few MB, in proportion to the pixels (a 12 MP photo on 4:5:
       about 2-7 MB as JPEG); PNG several times that
+- [ ] Memory, the hard gate a desktop cannot give (`measure-alloc.mjs` counts
+      it; desktop memory is not a phone's): with Safari's Web Inspector
+      attached (Timelines > Memory), Save a 12 MP portrait on 4:5 with the
+      second ink on — the page's peak stays under about 450 MB (the count is
+      359 MB: typed arrays, both canvases and the decoded photo), and the tab
+      is not reloaded
+- [ ] The heaviest print the budget allows: a 4096x4096 photo on 1:1, three
+      plates, two with a second ink and one with a backing — Save completes
+      without a tab reload (counted: 558 MB at peak)
 
 > Expect megabytes, not the ~300 KB the playbook cites for photographs: the
 > print is saved at the photo's own pixels, and a halftone screen over paper

@@ -3,7 +3,14 @@ import { PlusIcon, TrashIcon } from '../../ui/icons.tsx'
 import { contrastPartner, cssRgb, inkById, RISO_INKS } from '../../engine/inks.ts'
 import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES } from '../../engine/limits.ts'
 import type { TextLayer } from '../../engine/types.ts'
-import { atPassLimit, atPlateLimit, overPhotoOf, overPhotoPatch, type OverPhoto } from '../../state/settingsReducer.ts'
+import {
+  atPassLimit,
+  atPlateLimit,
+  hasSwitchPoint,
+  overPhotoOf,
+  overPhotoPatch,
+  type OverPhoto,
+} from '../../state/settingsReducer.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -97,11 +104,13 @@ export default function InkPanel() {
           {overPhotoOf(layer) === 'second' && layer.contrastInkId && (
             <>
               <p className="panel-note">
-                Type in one ink cannot read across a whole photograph. The pass is pressed once and
-                split between two inks by what is behind it, and the photo is knocked back to paper
-                wherever the ink is lighter than what it lands on — a transparent light ink over
-                solid black is still solid black. Keep this ink to stay in one colour: the photo is
-                cut back wherever it is darker than the ink, so the colour reads everywhere.
+                {hasSwitchPoint(layer)
+                  ? 'Type in one ink cannot read across a whole photograph. The pass is pressed once ' +
+                    'and split between two inks by what is behind it, and the photo is knocked back ' +
+                    'to paper wherever the ink is lighter than what it lands on — a transparent light ' +
+                    'ink over solid black is still solid black. Keep this ink to stay in one colour.'
+                  : 'One colour across the whole photograph: the photo is cut back to paper wherever ' +
+                    'it is darker than the ink, so the ink prints on paper there and reads everywhere.'}
                 {settings.media ? '' : ' It shows once there is a photo behind the type.'}
               </p>
               <Toggle
@@ -119,15 +128,19 @@ export default function InkPanel() {
                   onChange={(contrastInkId) => patch({ contrastInkId })}
                 />
               </Field>
-              <Slider
-                label="Switch point"
-                value={layer.contrastThreshold}
-                min={0.1}
-                max={0.9}
-                step={0.01}
-                format={pct}
-                onChange={(contrastThreshold) => patch({ contrastThreshold }, true)}
-              />
+              {/* Only between two different inks: with the plate's own ink
+                  both halves print the same colour, so it would move nothing. */}
+              {hasSwitchPoint(layer) && (
+                <Slider
+                  label="Switch point"
+                  value={layer.contrastThreshold}
+                  min={0.1}
+                  max={0.9}
+                  step={0.01}
+                  format={pct}
+                  onChange={(contrastThreshold) => patch({ contrastThreshold }, true)}
+                />
+              )}
             </>
           )}
 

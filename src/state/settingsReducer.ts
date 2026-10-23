@@ -81,6 +81,15 @@ export const overPhotoOf = (l: TextLayer): OverPhoto =>
   l.backing ? 'backing' : l.contrastInkId ? 'second' : 'off'
 
 /**
+ * Whether the plate's Switch point does anything: only when the pass splits
+ * between two DIFFERENT inks. With the plate's own ink as its second ink
+ * ("Keep this ink") both halves print that ink, so the switch point changes
+ * no pixel (engine test), and a control that does nothing is not offered.
+ */
+export const hasSwitchPoint = (l: TextLayer): boolean =>
+  !l.backing && l.contrastInkId !== null && l.contrastInkId !== l.inkId
+
+/**
  * The layer patch for choosing what a plate does over the photo. The second
  * ink starts at the automatic partner, exactly as the first photo seeds it; a
  * backing starts in an ink the type will visibly overprint, never its own.

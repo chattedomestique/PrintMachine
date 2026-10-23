@@ -9,7 +9,7 @@ import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits
 import { contrastPartner } from '../engine/inks.ts'
 import type { PrintSettings, TextLayer } from '../engine/types.ts'
 import { defaultSettings, makeLayer, makeMedia } from './defaults.ts'
-import { applySettings, overPhotoOf, overPhotoPatch } from './settingsReducer.ts'
+import { applySettings, hasSwitchPoint, overPhotoOf, overPhotoPatch } from './settingsReducer.ts'
 
 const doc = (layers: TextLayer[]): PrintSettings => ({ ...defaultSettings(), layers })
 const patch = (s: PrintSettings, id: string, p: Partial<TextLayer>) =>
@@ -58,6 +58,15 @@ describe('"Keep this ink"', () => {
 
   it('reads as Second ink in the over-the-photo choice', () => {
     expect(overPhotoOf(makeLayer({ contrastInkId: 'fluorescentpink' }))).toBe('second')
+  })
+
+  it('has no Switch point: both halves print the same ink, so it would change nothing', () => {
+    expect(hasSwitchPoint(makeLayer({ inkId: 'fluorescentpink', contrastInkId: 'fluorescentpink' }))).toBe(false)
+    // Two different inks: the switch point is where one hands over to the other.
+    expect(hasSwitchPoint(makeLayer({ inkId: 'fluorescentpink', contrastInkId: 'white' }))).toBe(true)
+    // No second ink, or a backing: nothing to switch.
+    expect(hasSwitchPoint(makeLayer({ contrastInkId: null }))).toBe(false)
+    expect(hasSwitchPoint(makeLayer({ backing: 'yellow', contrastInkId: null }))).toBe(false)
   })
 })
 

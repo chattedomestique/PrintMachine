@@ -173,7 +173,9 @@ would fatten it. The cut is only hardened past the anti-aliased skirt.
 print that ink, and the photo is cut back to paper wherever it is darker than
 the ink, so one colour reads across the whole photograph — the riso way, with
 the ink still transparent. The choice comes first in the second-ink picker, and
-it follows the plate when its ink changes.
+it follows the plate when its ink changes. It has no Switch point: both halves
+print the same ink, so moving the switch would change nothing, and the panel
+does not offer it.
 
 ### The press: two screens, two kinds of wear
 

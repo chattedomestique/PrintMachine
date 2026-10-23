@@ -45,12 +45,16 @@ export const ENCODINGS: Record<ExportFormat, { mime: string; ext: string; qualit
   png: { mime: 'image/png', ext: 'png', quality: undefined },
 }
 
+/** What the app says wherever a document's stored photo is gone or cannot be
+ *  decoded: the Photo panel, the line above Save, Save's label, this error. */
+export const PHOTO_MISSING = 'This photo could not be loaded. Choose it again.'
+
 /** The document has a photo, but no decode of it was handed over: the stored
  *  image is gone or unreadable. Saving would print the type on bare paper — a
  *  different print, saved as if it were this one — so it is refused. */
 export class MissingPhotoError extends Error {
   constructor() {
-    super('This photo could not be loaded. Choose it again.')
+    super(PHOTO_MISSING)
     this.name = 'MissingPhotoError'
   }
 }

@@ -3,6 +3,7 @@ import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import { useSettings } from '../../state/settingsStore.ts'
 import { importMedia } from '../media/importMedia.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
+import { PHOTO_MISSING } from '../../engine/export.ts'
 import { isReducedCopy } from '../../engine/media.ts'
 import type { MediaLayer, PrintSettings } from '../../engine/types.ts'
 
@@ -84,10 +85,10 @@ export default function MediaPanel({ mediaState }: { mediaState: MediaState }) {
       {error && <p className="panel-note" role="alert">{error}</p>}
 
       {/* Persistent while it is true: a missing photo is never printed as
-          bare paper, and Save refuses too, with its reason. */}
+          bare paper, and Save refuses too, saying the same beside it. */}
       {mediaState === 'failed' && (
         <p className="panel-note" role="alert">
-          This photo could not be loaded. Choose it again.
+          {PHOTO_MISSING}
         </p>
       )}
       {media && isReducedCopy(media) && (

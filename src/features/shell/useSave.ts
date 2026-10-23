@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import {
   CanvasLimitError,
+  PHOTO_MISSING,
   SMALLER_STEP,
   SMALLEST_COPY_HEIGHT,
   canShareFile,
@@ -144,8 +145,10 @@ export function canStart(state: SaveState, media: MediaState): boolean {
   return startsFrom(state) && media !== 'loading' && media !== 'failed'
 }
 
-/** What the Save button says, and whether it can be pressed. */
-export function saveButton(state: SaveState, media: MediaState): { text: string; disabled: boolean } {
+/** What the Save button says, whether it can be pressed, and, when it cannot
+ *  for a reason the person has to act on, `why` (said beside it and in its
+ *  label: a bare disabled Save explains nothing). */
+export function saveButton(state: SaveState, media: MediaState): { text: string; disabled: boolean; why?: string } {
   switch (state.kind) {
     case 'loadingPhoto':
     case 'pressing':
@@ -159,8 +162,23 @@ export function saveButton(state: SaveState, media: MediaState): { text: string;
     case 'tooBig':
     case 'interrupted':
       if (media === 'loading') return { text: 'Loading photo', disabled: true }
-      return { text: 'Save', disabled: media === 'failed' }
+      // The document's photo is gone: no size is promised and nothing can be
+      // pressed until it is chosen again (never the type on bare paper).
+      if (media === 'failed') return { text: 'Save', disabled: true, why: PHOTO_MISSING }
+      return { text: 'Save', disabled: false }
   }
+}
+
+/**
+ * The line above Save, when it has something to say other than the size Save
+ * makes: why Save cannot be pressed, an error (both alerts), or how far the
+ * press has got. Null: show the caption (`describePlan`).
+ */
+export function saveLine(state: SaveState, media: MediaState): { text: string; alert: boolean } | null {
+  const why = saveButton(state, media).why
+  if (why) return { text: why, alert: true }
+  const text = progressText(state)
+  return text === null ? null : { text, alert: state.kind === 'error' }
 }
 
 /** A way to answer a save question: a save no taller than `height`. */

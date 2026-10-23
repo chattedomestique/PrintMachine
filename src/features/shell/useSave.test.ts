@@ -16,6 +16,7 @@ import {
   pressInProgress,
   progressText,
   saveButton,
+  saveLine,
   saveQuestion,
   saveReducer,
   type SaveEvent,
@@ -116,9 +117,37 @@ describe('the save flow', () => {
     expect(canStart(IDLE, 'loading')).toBe(false)
     expect(saveButton(IDLE, 'loading')).toEqual({ text: 'Loading photo', disabled: true })
     expect(canStart(IDLE, 'failed')).toBe(false)
-    expect(saveButton(IDLE, 'failed')).toEqual({ text: 'Save', disabled: true })
     expect(canStart(IDLE, 'ready')).toBe(true)
     expect(canStart(IDLE, 'none')).toBe(true)
+    // While loading, the line keeps the caption: the size is true once it is back.
+    expect(saveLine(IDLE, 'loading')).toBeNull()
+    expect(saveLine(IDLE, 'ready')).toBeNull()
+  })
+
+  it('a photo that could not be loaded: Save says why, beside it and in its label, and promises no size', () => {
+    const why = 'This photo could not be loaded. Choose it again.'
+    expect(saveButton(IDLE, 'failed')).toStrictEqual({ text: 'Save', disabled: true, why })
+    // The line above Save is the alert, in place of the caption's size.
+    expect(saveLine(IDLE, 'failed')).toEqual({ text: why, alert: true })
+    // Over an old error, a question, or an unfinished save's notice too.
+    const error: SaveState = { kind: 'error', message: 'Could not press 2419×3024: x' }
+    for (const s of [error, saveReducer(IDLE, { type: 'interrupted', format: 'jpeg', height: 3780 })]) {
+      expect(saveButton(s, 'failed').why).toBe(why)
+      expect(saveLine(s, 'failed')).toEqual({ text: why, alert: true })
+    }
+    // A file already pressed is still the print it was: it can be shared.
+    const ready = run([{ type: 'start', format: 'jpeg', plan, photo: true }, { type: 'photoLoaded' }, { type: 'pressed', file, now: false }])
+    expect(saveButton(ready, 'failed')).toStrictEqual({ text: 'Save to Photos (6.2 MB)', disabled: false })
+    expect(saveLine(ready, 'failed')).toEqual({ text: '3024×3780 is ready.', alert: false })
+  })
+
+  it('the line: an error is an alert, progress is not', () => {
+    expect(saveLine({ kind: 'error', message: 'Could not press: x' }, 'ready')).toEqual({ text: 'Could not press: x', alert: true })
+    const pressing = run([
+      { type: 'start', format: 'jpeg', plan, photo: false },
+      { type: 'progress', progress: { step: 'press', pass: 1, passes: 2 } },
+    ])
+    expect(saveLine(pressing, 'none')).toEqual({ text: 'Pressing 3024×3780, plate 1 of 2', alert: false })
   })
 
   it('says how far the press has got, in pixels and plates', () => {

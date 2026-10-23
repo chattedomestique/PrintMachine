@@ -18,8 +18,10 @@
  *  3. The tab closed mid-press: the next launch says the last save did not
  *     finish, with Try again and a smaller copy; Escape dismisses it, the
  *     launch after says nothing, and the smaller copy saves.
- *  4. The stored photo deleted: the Photo panel says so, Save cannot be
- *     tapped, and no file appears.
+ *  4. The stored photo deleted: with the Photo tab closed, the line above
+ *     Save says so (an alert, in place of the size) and so does Save's
+ *     label; the Photo panel says so; Save cannot be tapped, and no file
+ *     appears.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -279,8 +281,24 @@ try {
     )
     await page.reload()
     await page.waitForSelector('.sheet canvas')
-    await page.getByRole('tab', { name: 'Photo' }).click()
     await page.waitForTimeout(1500)
+    // Every tool closed: Save itself has to say why.
+    const closed = await page.evaluate(
+      ([SAVE, LINE]) => ({
+        line: document.querySelector(LINE)?.textContent ?? null,
+        role: document.querySelector(LINE)?.getAttribute('role') ?? null,
+        label: document.querySelector(SAVE)?.getAttribute('aria-label') ?? null,
+        panelOpen: !!document.querySelector('.drawer[data-open=true]'),
+      }),
+      [SAVE, LINE],
+    )
+    const why = 'This photo could not be loaded. Choose it again.'
+    check(
+      !closed.panelOpen && closed.line === why && closed.role === 'alert' && closed.label === `Save: ${why}`,
+      `tools closed, the line above Save: "${closed.line}" (${closed.role}); Save's label: "${closed.label}"`,
+    )
+    await page.getByRole('tab', { name: 'Photo' }).click()
+    await page.waitForTimeout(300)
     const alerts = await page.getByRole('alert').allTextContents()
     let downloaded = false
     page.on('download', () => (downloaded = true))

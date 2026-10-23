@@ -351,8 +351,10 @@ version. Choose it again for full resolution."
 
 **A photo cannot silently drop out of a print.** If the stored image is missing
 or cannot be decoded, the Photo panel says so ("This photo could not be loaded.
-Choose it again.") for as long as it is true, and Save refuses with the reason
-instead of saving the type on bare paper.
+Choose it again.") for as long as it is true, and so does Save, whichever tool
+is open: Save cannot be pressed, its label carries the sentence, and the line
+above it shows the same sentence as an alert in place of the size it would
+save. Nothing is ever saved as the type on bare paper.
 
 #### Why the bytes are not in localStorage
 

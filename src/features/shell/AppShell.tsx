@@ -3,12 +3,12 @@ import Canvas from '../editor/Canvas.tsx'
 import Controls, { TABS, type TabId } from '../controls/Controls.tsx'
 import { IconButton } from '../../ui/controls.tsx'
 import { RedoIcon, UndoIcon } from '../../ui/icons.tsx'
-import { describePlan, planPrint } from '../../engine/export.ts'
+import { PHOTO_MISSING, describePlan, planPrint } from '../../engine/export.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, subscribeSW } from '../../state/swStatus.ts'
 import { useMediaBitmap } from '../media/useMediaBitmap.ts'
-import { canStart, pressInProgress, progressText, saveButton, saveQuestion, useSave } from './useSave.ts'
+import { canStart, pressInProgress, saveButton, saveLine, saveQuestion, useSave } from './useSave.ts'
 import './AppShell.css'
 
 export default function AppShell() {
@@ -80,7 +80,9 @@ export default function AppShell() {
   // is not the photo's own pixels.
   const caption = useMemo(() => describePlan(planPrint(settings), settings.media), [settings])
   const button = saveButton(save.state, mediaState)
-  const status = progressText(save.state)
+  // How far the press has got, an error, or why Save cannot be pressed; the
+  // caption otherwise.
+  const line = saveLine(save.state, mediaState)
   // A save that cannot go on unasked: a print too big for this device, or one
   // that did not finish last time. A plain dialog (restyled in WP3).
   const question = saveQuestion(save.state, (maxHeight) => planPrint(settings, { maxHeight }))
@@ -167,17 +169,18 @@ export default function AppShell() {
           </div>
         </div>
 
-        {/* What Save makes, and while it works, how far it has got. */}
+        {/* What Save makes, while it works how far it has got, and when it
+            cannot be pressed, why. */}
         <div className="control-group">
           <div className="field-head">
-            {status === null ? (
+            {line === null ? (
               <span className="field-label">
                 Saves {caption.size}
                 {caption.reason ? `: ${caption.reason}` : ''}
               </span>
             ) : (
-              <span className="field-label" role={save.state.kind === 'error' ? 'alert' : 'status'}>
-                {status}
+              <span className="field-label" role={line.alert ? 'alert' : 'status'}>
+                {line.text}
               </span>
             )}
             {/* The lossless file: JPEG halves the colour resolution below
@@ -215,7 +218,13 @@ export default function AppShell() {
             ))}
           </div>
           <IconButton
-            label={pressing ? 'Cancel the save' : save.state.kind === 'ready' ? button.text : `${button.text}: ${caption.size} JPEG`}
+            label={
+              pressing
+                ? 'Cancel the save'
+                : save.state.kind === 'ready'
+                  ? button.text
+                  : `${button.text}: ${button.why ?? `${caption.size} JPEG`}`
+            }
             variant="primary"
             onClick={onSave}
             disabled={button.disabled}
@@ -240,7 +249,7 @@ export default function AppShell() {
             )}
             {question.choices.length > 0 && mediaState === 'failed' && (
               <p className="panel-note" role="alert">
-                This photo could not be loaded. Choose it again.
+                {PHOTO_MISSING}
               </p>
             )}
             <div className="media-actions">

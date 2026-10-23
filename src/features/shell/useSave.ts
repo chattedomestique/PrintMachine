@@ -230,7 +230,10 @@ export function progressText(state: SaveState): string | null {
     case 'pressing': {
       const p = state.progress
       const size = dims(state.plan.width, state.plan.height)
-      if (!p || p.step === 'photo') return `Pressing ${size}: laying down the photo`
+      // Before the first step the press has said nothing yet: a print with no
+      // photo never lays one down.
+      if (!p) return `Pressing ${size}`
+      if (p.step === 'photo') return `Pressing ${size}: laying down the photo`
       if (p.step === 'print') return `Pressing ${size}: printing the sheet`
       return `Pressing ${size}, plate ${p.pass} of ${p.passes}`
     }

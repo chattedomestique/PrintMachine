@@ -153,6 +153,12 @@ describe('the save flow', () => {
   it('says how far the press has got, in pixels and plates', () => {
     const start = run([{ type: 'start', format: 'jpeg', plan, photo: true }])
     expect(progressText(start)).toBe('Pressing 3024×3780: loading the photo')
+    // Before its first step a press claims nothing (a print with no photo lays
+    // none down); then the photo, the plates and the sheet.
+    expect(progressText(run([{ type: 'start', format: 'jpeg', plan, photo: false }]))).toBe('Pressing 3024×3780')
+    expect(progressText(run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'photo', pass: 0, passes: 3 } }], start))).toBe(
+      'Pressing 3024×3780: laying down the photo',
+    )
     const pressing = run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'press', pass: 2, passes: 3 } }], start)
     expect(progressText(pressing)).toBe('Pressing 3024×3780, plate 2 of 3')
     expect(saveButton(pressing, 'ready')).toEqual({ text: 'Cancel', disabled: false })

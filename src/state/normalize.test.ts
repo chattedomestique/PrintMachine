@@ -294,6 +294,18 @@ describe('structured fields', () => {
     for (const id of ids) expect(id.length).toBeGreaterThan(0)
   })
 
+  it('treats a stored "__proto__" key as data: nothing is inherited from it', () => {
+    const doc = JSON.parse(
+      '{"layers":[{"__proto__":{"caps":true,"text":"from the prototype","backing":"yellow"},"text":"kept"}],' +
+        '"__proto__":{"seed":7}}',
+    )
+    const s = normalizeSettings(doc)
+    expect(s.layers[0].text).toBe('kept')
+    expect(s.layers[0].backing).toBeNull()
+    expect(s.seed).toBe(defaultSettings().seed)
+    expect(({} as Record<string, unknown>).caps).toBeUndefined()
+  })
+
   it('drops a photo with no id or no real size, and keeps one that has them', () => {
     for (const media of [{ id: '', width: 10, height: 10 }, { id: 'm', width: 0, height: 10 }, { width: 10, height: 10 }, 'photo']) {
       const doc = reachable()

@@ -24,6 +24,7 @@ import {
   REFERENCE_HEIGHT,
   detailFactor,
   ensureCache,
+  grainCell,
   outputSize,
   pressPlate,
 } from './render.ts'
@@ -179,6 +180,18 @@ describe('grain (Atkinson)', () => {
     expect(at(0.3)).toBeGreaterThan(0.15)
     expect(at(0.3)).toBeLessThan(0.4)
     expect(at(0.3)).toBeLessThan(at(0.6))
+  })
+
+  it('rides the screen size: a third of it, so a converted dither keeps its exact cell', () => {
+    // A saved dither of cell c is stored as a screen size of 3c. Its grain must
+    // come out the size the dither did, at every height the app renders at.
+    expect(grainCell(9, 1)).toBe(3)
+    for (let cell = 1; cell <= 8; cell++) {
+      for (const h of [DRAFT_HEIGHT, PREVIEW_HEIGHT, 1500, REFERENCE_HEIGHT, 3780]) {
+        const scale = h / REFERENCE_HEIGHT
+        expect(grainCell(cell * 3, scale)).toBe(Math.max(1, Math.round(cell * scale)))
+      }
+    }
   })
 
   it('makes cells of the asked size: a cell is one value throughout', () => {

@@ -43,6 +43,9 @@ type Doc = Record<string, unknown>
 /** A conversion edits the stored copy in place, before the walk. */
 type Conversion = (doc: Doc, env: NormalizeEnv) => void
 
+const isPlainObject = (v: unknown): v is Doc =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
+
 const finiteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
 /** The stored layers that are objects — the only ones the walk will keep. */
@@ -51,7 +54,8 @@ const layersOf = (doc: Doc): Doc[] => (Array.isArray(doc.layers) ? doc.layers.fi
 /** The sheet's width over its height, as the walk will resolve the aspect. */
 function sheetAspect(doc: Doc): number {
   const key = doc.aspect
-  return typeof key === 'string' && Object.hasOwn(ASPECTS, key)
+  // hasOwnProperty, not `in`: 'toString' is "in" every object.
+  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(ASPECTS, key)
     ? ASPECTS[key as keyof typeof ASPECTS]
     : ASPECTS[defaultSettings().aspect]
 }
@@ -182,15 +186,14 @@ const CONVERSIONS: readonly Conversion[] = [
   },
 ]
 
-const isPlainObject = (v: unknown): v is Doc =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
-
-/** Deep copy of plain data, so a conversion can never edit what was passed in. */
+/** Deep copy of plain data, so a conversion can never edit what was passed in.
+ *  A stored "__proto__" key is data, not a prototype: assigning it would give
+ *  the copy an inherited field the walk could then read, so it is skipped. */
 function clone(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(clone)
   if (isPlainObject(v)) {
     const out: Doc = {}
-    for (const [k, x] of Object.entries(v)) out[k] = clone(x)
+    for (const [k, x] of Object.entries(v)) if (k !== '__proto__') out[k] = clone(x)
     return out
   }
   return v
@@ -246,7 +249,6 @@ function field(row: Row, raw: unknown, fallback: unknown): unknown {
       }
       return items
     }
-
   }
 }
 

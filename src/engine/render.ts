@@ -93,8 +93,12 @@ const PAPER_TOOTH = 0.4
 const PAPER_CLOUD = 0.5
 
 /** The grain cell rides the screen size, a third of it, so the default 9 px
- *  screen gives the 3 px grain the press always shipped with. */
-const GRAIN_PER_PITCH = 1 / 3
+ *  screen gives the 3 px grain the press always shipped with. A division, not
+ *  a multiplication by 1/3, so a converted dither's cell (stored as cell x 3)
+ *  comes back exactly. */
+const PITCH_PER_GRAIN = 3
+export const grainCell = (screenPitch: number, scale: number): number =>
+  Math.max(1, Math.round((screenPitch / PITCH_PER_GRAIN) * scale))
 
 /** Output pixel dimensions for an aspect at a given render height. */
 export function outputSize(
@@ -334,7 +338,7 @@ export function pressPlate(
       ? // The grain cell rides the render scale like every other spatial
         // quantity, so the preview and the export show the same texture rather
         // than the same pixel count.
-        ditherField(shifted, w, h, { scale: Math.max(1, Math.round(s.screenPitch * GRAIN_PER_PITCH * scale)) })
+        ditherField(shifted, w, h, { scale: grainCell(s.screenPitch, scale) })
       : screenField(shifted, w, h, {
           pitch: Math.max(1.2, s.screenPitch * scale * detail),
           // Each plate gets its own angle; the beat between them is the rosette.
@@ -365,7 +369,7 @@ function binarise(
 ): Float32Array {
   const scale = h / REFERENCE_HEIGHT
   if (press.method === 'grain') {
-    return ditherField(mask, w, h, { scale: Math.max(1, Math.round(press.screenPitch * GRAIN_PER_PITCH * scale)) })
+    return ditherField(mask, w, h, { scale: grainCell(press.screenPitch, scale) })
   }
   return screenField(mask, w, h, {
     pitch: Math.max(1.2, press.screenPitch * scale),

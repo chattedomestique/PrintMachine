@@ -45,6 +45,9 @@ So:
 
 - [ ] Dragging the sheet moves the selected plate; nothing eats the taps
 - [ ] Double-tap re-centres
+- [ ] Photo tab open: drag and pinch the photo — it zooms 100–400% and stops at
+      its edges, never showing bare paper round it; switch the sheet shape on
+      the Photo tab and it still covers the sheet
 - [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac)
 - [ ] Type a long string → tap Fit → it sits on the sheet, and the next pinch
       or slider touch starts from that size (no jump)
@@ -63,6 +66,7 @@ So:
 - [ ] Cancel the share sheet → no error toast
 - [ ] The saved file has **no** selection crosshair in it (the thirds guides are
       gone; the crosshair is the one editing aid left, and it must never print)
+<!-- WP2: the export becomes native resolution; this size line changes with it. -->
 - [ ] File size is sane — hundreds of KB, not multi-MB
 
 > Expect ~600 KB rather than the ~300 KB the playbook cites for photographs. A

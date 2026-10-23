@@ -25,10 +25,10 @@ import {
   outputSize,
 } from './render.ts'
 import {
+  bandMask,
   coverRect,
   groundLuma,
   type InkRgb,
-  lightMask,
   separateLuminance,
   splitInks,
 } from './media.ts'
@@ -36,7 +36,6 @@ import { scribbleField, woodcutField } from './carve.ts'
 import { ribbonInk, strikeFor } from './typewriter.ts'
 import { defaultSettings, makeLayer, pressProfile } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
-import { seedSecondInk } from '../state/persist.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
@@ -146,7 +145,7 @@ describe('screen', () => {
 
 describe('dither', () => {
   it('produces a strictly binary field for every diffusing algorithm', () => {
-    for (const type of DITHER_TYPES.map((d) => d.id).filter((d) => d !== 'none')) {
+    for (const type of DITHER_TYPES.map((d) => d.id)) {
       const out = ditherField(ramp(), W, H, type, { threshold: 0.5 })
       for (const v of out) expect(v === 0 || v === 1).toBe(true)
     }
@@ -1119,7 +1118,7 @@ describe('reading type across a photograph', () => {
   }
 
   it('marks light ground as light and dark ground as dark', () => {
-    const m = lightMask(splitPhoto(), W, H, 0.5, 0)
+    const m = bandMask(groundLuma(splitPhoto(), W, H, 0), 0.5)
     // Sampled away from the boundary, where the soft band deliberately blends.
     expect(m[0]).toBe(0)
     expect(m[W - 1]).toBe(1)
@@ -1129,7 +1128,7 @@ describe('reading type across a photograph', () => {
     // Transparent ground is uncovered sheet. Reading it as dark would flip the
     // ink to the contrast colour over plain paper, which is backwards.
     const px = new Uint8ClampedArray(W * H * 4) // all zero: transparent black
-    const m = lightMask(px, W, H, 0.5, 0)
+    const m = bandMask(groundLuma(px, W, H, 0), 0.5)
     for (let i = 0; i < W * H; i++) expect(m[i]).toBe(1)
   })
 
@@ -1141,7 +1140,7 @@ describe('reading type across a photograph', () => {
     // put every line of type over water in the mixed zone at once. So the
     // property is that a wider blur buys a wider transition.
     const width = (radius: number) =>
-      [...lightMask(splitPhoto(), W, H, 0.5, radius)].slice(0, W).filter((v) => v > 0.02 && v < 0.98)
+      [...bandMask(groundLuma(splitPhoto(), W, H, radius), 0.5)].slice(0, W).filter((v) => v > 0.02 && v < 0.98)
         .length
     expect(width(0)).toBe(0)
     expect(width(3)).toBeGreaterThan(width(0))
@@ -1218,7 +1217,7 @@ describe('reading type across a photograph', () => {
   it('splits one pass into two inks that sum back to the original coverage', () => {
     // The split is a partition, not a duplication: doubling the ink laid down
     // would darken every glyph the moment the second ink was switched on.
-    const mask = lightMask(splitPhoto(), W, H, 0.5, 2)
+    const mask = bandMask(groundLuma(splitPhoto(), W, H, 2), 0.5)
     const coverage = new Float32Array(W * H).fill(0.8)
     for (let i = 0; i < coverage.length; i++) {
       const onLight = coverage[i] * mask[i]
@@ -1280,17 +1279,6 @@ describe('the first photo', () => {
     const off = { ...one, layers: one.layers.map((l) => ({ ...l, contrastInkId: null })) }
     const two = applySettings(off, { type: 'setMedia', media: photoLayer() })
     for (const l of two.layers) expect(l.contrastInkId).toBeNull()
-  })
-
-  it('repairs a print that was saved with a photo and one ink', () => {
-    const saved = { ...defaultSettings(), media: photoLayer() }
-    const fixed = seedSecondInk(saved)
-    for (const l of fixed.layers) expect(l.contrastInkId).not.toBeNull()
-  })
-
-  it('leaves a print with no photo exactly as it was', () => {
-    const saved = defaultSettings()
-    expect(seedSecondInk(saved)).toBe(saved)
   })
 
   it('picks a partner that actually differs in weight from the ink', () => {

@@ -164,17 +164,6 @@ export function bandMask(lum: Float32Array, threshold: number, band = SWITCH_BAN
   return out
 }
 
-/** A mask of where the photo is light enough for dark ink to read on it. */
-export function lightMask(
-  rgba: Uint8ClampedArray,
-  w: number,
-  h: number,
-  threshold: number,
-  blurRadius: number,
-): Float32Array {
-  return bandMask(groundLuma(rgba, w, h, blurRadius), threshold)
-}
-
 export type InkRgb = readonly [number, number, number]
 
 export interface InkSplit {

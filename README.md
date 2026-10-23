@@ -57,6 +57,23 @@ src/
   styles/    tokens.css (the design system) + index.css.
 ```
 
+### Saved prints keep opening
+
+Every stored document, whichever build wrote it, goes through one whitelist
+normaliser (`state/normalize.ts`) driven by a schema (`state/fields.ts`). The
+result is *built* from the defaults, copying across only fields the schema
+lists, each checked against its own rule — a number finite and inside the
+range any control could set, an ink, face or paper one that exists, a nullable
+field null or valid. So a field a build removed leaves the document instead of
+riding along forever, and every valid value a person chose survives. Spreading
+the stored document over the defaults, which this replaced, kept every removed
+field, and a `typeof`-of-the-default check would reset any field whose default
+is null (a chosen second ink is a string, its default `null`).
+
+Frozen documents written by older builds live in `state/__fixtures__/`, and the
+tests load each one: it opens, normalising it twice changes nothing, no key
+survives that the current model does not have, and no valid value is lost.
+
 ### Offline, and why it is checked rather than inspected
 
 N2 says "works offline" is a claim you must verify. It was previously verified
@@ -121,9 +138,10 @@ that moving from one tab to the other does not silently drop a photo edit onto
 the type's pass. The seed is deliberately *not* per-profile: it is one sheet
 going through one machine, so both passes vary together.
 
-Documents written before the split carried the press fields at the top level.
-They are lifted into both profiles on load, so a saved print reopens looking
-exactly as it did and can be dialled apart from there.
+Documents written before the split (#9) carried the press fields at the top
+level. They now open with the default press: the one-off lift that carried them
+across was retired when loading moved to the single normaliser (see "Saved
+prints keep opening").
 
 #### Type that reads across the whole photograph
 
@@ -226,7 +244,7 @@ and without it.
 
 ### Dithering as a real choice
 
-Thirteen algorithms, because they are genuinely different textures rather than
+Twelve algorithms, because they are genuinely different textures rather than
 one slider: Jarvis is smooth and slow, Burkes fast and contrasty, Sierra-Lite
 coarse and cheap, and clustered-dot the only ordered pattern that still reads
 as a *printing* screen rather than a computer effect — it grows one blob per

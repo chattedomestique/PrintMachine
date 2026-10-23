@@ -20,7 +20,7 @@
 import { renderPrint, type RenderCache } from './render.ts'
 import type { PrintSettings } from './types.ts'
 
-export type ExportFormat = 'jpeg' | 'png' | 'webp'
+export type ExportFormat = 'jpeg' | 'png'
 
 export interface SaveResult {
   status: 'shared' | 'downloaded' | 'cancelled' | 'error'
@@ -30,13 +30,11 @@ export interface SaveResult {
 const MIME: Record<ExportFormat, string> = {
   jpeg: 'image/jpeg',
   png: 'image/png',
-  webp: 'image/webp',
 }
 
 const EXT: Record<ExportFormat, string> = {
   jpeg: 'jpg',
   png: 'png',
-  webp: 'webp',
 }
 
 function encode(canvas: HTMLCanvasElement, format: ExportFormat): Promise<Blob> {

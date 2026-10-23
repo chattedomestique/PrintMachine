@@ -11,6 +11,7 @@
  */
 
 import { MAX_EDGE, putMedia } from '../../state/mediaStore.ts'
+import { makeMedia } from '../../state/defaults.ts'
 import type { MediaLayer } from '../../engine/types.ts'
 
 export interface ImportedMedia {
@@ -56,19 +57,7 @@ export async function importMedia(file: File): Promise<ImportedMedia> {
   await putMedia(id, blob)
 
   return {
-    layer: {
-      id,
-      width: size.w,
-      height: size.h,
-      scale: 1,
-      x: 0.5,
-      y: 0.5,
-      opacity: 1,
-      printed: false,
-      inkId: 'black',
-      contrast: 1,
-      lift: 0.1,
-    },
+    layer: makeMedia({ id, width: size.w, height: size.h }),
     bitmap: await createImageBitmap(blob),
   }
 }

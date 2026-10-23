@@ -63,6 +63,25 @@ export interface TextLayout {
 
 export type MeasureFn = (text: string, fontSize: number) => number
 
+/** A face at a size: everything a 2D context needs to measure or draw it. */
+export interface FontSpec {
+  /** CSS font-family stack, from FONTS. */
+  stack: string
+  /** CSS font-weight. */
+  weight: number
+  /** Font size in pixels. */
+  px: number
+}
+
+/** The natural advance width of `text` set in `font`, in pixels. Injected
+ *  wherever text has to be measured outside a render, so the measuring code
+ *  stays pure and runs in node tests with a stub. */
+export type FontMeasure = (font: FontSpec, text: string) => number
+
+/** The CSS font shorthand for a FontSpec. One spelling, shared by the renderer
+ *  and anything that measures, so the two can never set different fonts. */
+export const cssFont = (f: FontSpec): string => `${f.weight} ${f.px}px ${f.stack}`
+
 const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t'
 
 /**
@@ -379,7 +398,7 @@ function prepare(
 ): Prepared {
   const font = fontById(layer.fontId)
   const setFont = (size: number) => {
-    ctx.font = `${layer.weight} ${size}px ${font.stack}`
+    ctx.font = cssFont({ stack: font.stack, weight: layer.weight, px: size })
   }
 
   setFont(Math.max(1, layer.size * h))
@@ -588,14 +607,4 @@ function alphaToTone(ctx: CanvasRenderingContext2D, w: number, h: number): Float
   const tone = new Float32Array(w * h)
   for (let i = 0, p = 3; i < tone.length; i++, p += 4) tone[i] = data[p] / 255
   return tone
-}
-
-/** The layer's words, without needing a canvas — for the selection UI. */
-export function layoutWords(
-  layer: TextLayer,
-  canvasHeight: number,
-  maxWidth: number,
-  measure: MeasureFn,
-): PlacedWord[] {
-  return wordsOf(layoutText(layer, canvasHeight, maxWidth, measure))
 }

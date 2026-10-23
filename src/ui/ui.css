@@ -200,20 +200,6 @@
   transform: scale(0.94);
 }
 
-/* ── Panel (animates to auto height, no JS measurement) ──────────────── */
-.panel {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows var(--dur) var(--ease);
-}
-.panel[data-open='true'] {
-  grid-template-rows: 1fr;
-}
-.panel-inner {
-  overflow: hidden;
-  min-height: 0;
-}
-
 /* ── Icon button ─────────────────────────────────────────────────────── */
 .icon-button {
   touch-action: manipulation;

@@ -20,7 +20,8 @@ import maximal from './__fixtures__/legacy-maximal.json'
 import photoSecondInk from './__fixtures__/legacy-photo-second-ink.json'
 import preSplit from './__fixtures__/legacy-pre-split.json'
 import unknownIds from './__fixtures__/legacy-unknown-ids.json'
-import { loadSettings } from './persist.ts'
+import { defaultSettings } from './defaults.ts'
+import { loadPrefs, loadSettings, savePrefs } from './persist.ts'
 
 const KEY = 'printmachine:settings:v1'
 
@@ -89,3 +90,35 @@ describe('old saved prints', () => {
     expect(s.layers.map((l) => l.contrastInkId)).toEqual(['yellow', 'midnight'])
   })
 })
+
+describe('the storage path', () => {
+  const withoutIds = (s: ReturnType<typeof loadSettings>) => ({ ...s, layers: s.layers.map((l) => ({ ...l, id: '' })) })
+
+  it('opens the defaults when nothing is stored, or what is stored is not JSON', () => {
+    expect(withoutIds(loadSettings())).toEqual(withoutIds(defaultSettings()))
+    store.set(KEY, '{not json')
+    expect(withoutIds(loadSettings())).toEqual(withoutIds(defaultSettings()))
+  })
+
+  it('no longer writes or reads the one-shot repair marker', () => {
+    load(photoSecondInk)
+    expect(store.has('printmachine:migrated:v1')).toBe(false)
+  })
+})
+
+describe('preferences', () => {
+  it('drops the export format an older build stored, and keeps the hint flag', () => {
+    store.set('printmachine:prefs:v1', JSON.stringify({ hintDismissed: true, format: 'png' }))
+    expect(loadPrefs()).toEqual({ hintDismissed: true })
+    savePrefs(loadPrefs())
+    expect(JSON.parse(store.get('printmachine:prefs:v1') ?? '{}')).toEqual({ hintDismissed: true })
+  })
+
+  it('treats anything but a stored true as not dismissed', () => {
+    for (const raw of ['', 'null', '"yes"', '{"hintDismissed":"true"}', '[]']) {
+      store.set('printmachine:prefs:v1', raw)
+      expect(loadPrefs()).toEqual({ hintDismissed: false })
+    }
+  })
+})
+

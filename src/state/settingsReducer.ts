@@ -29,7 +29,6 @@ export type SettingsAction =
   | { type: 'patchLayer'; id: string; patch: Partial<TextLayer>; coalesce?: boolean }
   | { type: 'addLayer' }
   | { type: 'removeLayer'; id: string }
-  | { type: 'moveLayer'; id: string; direction: -1 | 1 }
   | { type: 'addBox'; layerId: string }
   | { type: 'removeBox'; layerId: string; boxId: string }
   | { type: 'patchBox'; layerId: string; boxId: string; patch: Partial<WordBox>; coalesce?: boolean }
@@ -105,15 +104,6 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       // Never leave the document with nothing to print.
       if (state.layers.length <= 1) return state
       return { ...state, layers: state.layers.filter((l) => l.id !== action.id) }
-
-    case 'moveLayer': {
-      const i = state.layers.findIndex((l) => l.id === action.id)
-      const j = i + action.direction
-      if (i < 0 || j < 0 || j >= state.layers.length) return state
-      const layers = [...state.layers]
-      ;[layers[i], layers[j]] = [layers[j], layers[i]]
-      return { ...state, layers }
-    }
 
     case 'addBox': {
       // Each box gets the first ink not already spoken for on this layer, so a

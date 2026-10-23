@@ -227,15 +227,3 @@ export function IconButton({
     </button>
   )
 }
-
-/* ── Panel ────────────────────────────────────────────────────────────── */
-
-export function Panel({ open, children }: { open: boolean; children: ReactNode }) {
-  return (
-    <div className="panel" data-open={open} aria-hidden={!open}>
-      <div className="panel-inner" inert={!open ? true : undefined}>
-        {children}
-      </div>
-    </div>
-  )
-}

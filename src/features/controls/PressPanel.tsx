@@ -80,7 +80,7 @@ export default function PressPanel({ target }: { target: PressTarget }) {
           <Field label="Dither" value={DITHER_TYPES.find((d) => d.id === press.ditherType)?.name}>
             <Segmented
               label="Dither algorithm"
-              value={press.ditherType === 'none' ? 'atkinson' : press.ditherType}
+              value={press.ditherType}
               options={DITHER_TYPES.map((d) => ({ value: d.id, label: d.name }))}
               onChange={(ditherType) => patch({ ditherType })}
             />

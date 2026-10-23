@@ -1,4 +1,4 @@
-import type { PressProfile, PrintSettings, TextLayer } from '../engine/types.ts'
+import type { MediaLayer, PressProfile, PrintSettings, TextLayer } from '../engine/types.ts'
 
 /**
  * Opinionated defaults. Every one of these is a decision made once here so it
@@ -41,6 +41,33 @@ export function makeLayer(overrides: Partial<TextLayer> = {}): TextLayer {
     boxPadding: 0.12,
     boxRadius: 0,
     ...overrides,
+  }
+}
+
+/**
+ * A photo's placement, as an import creates it: as shot, filling the sheet,
+ * centred. The one shape of a media layer — the importer builds from it and
+ * the normaliser checks a stored one against it.
+ */
+export function makeMedia({
+  id,
+  width,
+  height,
+  ...over
+}: Partial<MediaLayer> & Pick<MediaLayer, 'id' | 'width' | 'height'>): MediaLayer {
+  return {
+    id,
+    width,
+    height,
+    scale: 1,
+    x: 0.5,
+    y: 0.5,
+    opacity: 1,
+    printed: false,
+    inkId: 'black',
+    contrast: 1,
+    lift: 0.1,
+    ...over,
   }
 }
 

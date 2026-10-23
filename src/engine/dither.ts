@@ -17,7 +17,6 @@
  */
 
 export type DitherType =
-  | 'none'
   | 'threshold'
   | 'bayer2'
   | 'bayer4'
@@ -32,7 +31,6 @@ export type DitherType =
   | 'sierralite'
 
 export const DITHER_TYPES: readonly { id: DitherType; name: string }[] = [
-  { id: 'none', name: 'None' },
   { id: 'threshold', name: 'Hard' },
   { id: 'bayer2', name: 'Bayer 2' },
   { id: 'bayer4', name: 'Bayer 4' },
@@ -167,8 +165,7 @@ export interface DitherOptions {
 /**
  * Dither a tone field into a coverage field.
  *
- * @returns a new w*h field of 0s and 1s (except `none`, which passes the tone
- *          through unchanged).
+ * @returns a new w*h field of 0s and 1s.
  */
 export function ditherField(
   tone: Float32Array,
@@ -177,8 +174,6 @@ export function ditherField(
   type: DitherType,
   opts: DitherOptions = {},
 ): Float32Array {
-  if (type === 'none') return tone.slice()
-
   const threshold = opts.threshold ?? 0.5
   const scale = Math.max(1, Math.round(opts.scale ?? 1))
 

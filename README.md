@@ -168,8 +168,10 @@ Three things make it actually work:
   the switch point read as a fade. Screened, each ink lands at full strength
   and the changeover breaks into dots the way a two-colour job actually does.
   Each plate switches at its own **Switch point**, because where the change
-  belongs depends on the photo and on the pair of inks; plates that share a
-  point share one mask.
+  belongs depends on the photo and on the pair of inks. Every switch mask is
+  screened at one angle, so a mask depends on its point alone: plates that
+  share a point get the same mask, and moving one plate's point never moves
+  another plate's dots.
 - **The photo is knocked back to paper under the second ink** — a transparent
   light ink over solid black is still solid black, so without this the second
   ink buys nothing.

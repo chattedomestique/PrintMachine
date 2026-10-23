@@ -1722,6 +1722,36 @@ describe('printSheet: the passes exactly as the renderer presses them', () => {
     expect(low[2].coverage).toEqual(two(null, 0.2)[1].coverage)
     expect(high[2].coverage).toEqual(two(null, 0.8)[1].coverage)
   })
+
+  it("under halftone too, a plate's split does not move when another plate's Switch point does", () => {
+    // Grain has no angle, so the test above cannot see this. A halftone mask
+    // is screened at an angle; if a rebuilt mask took the rebuilding plate's
+    // angle, plate 2's dots would turn whenever plate 1's point happened to
+    // stop matching its own. Every switch mask is screened at one index.
+    const halftone = (layers: Partial<TextLayer>[]) => {
+      const s = sheet(layers)
+      s.press = { ...s.press, method: 'halftone' }
+      return s
+    }
+    const tones = fields([block(0, 4, w, 28), block(0, 30, w, 54), block(0, 56, w, 78)])
+    const split = (t: number) => ({ inkId: 'black', contrastInkId: 'white', contrastThreshold: t })
+    const press = (...ts: number[]) => print(halftone(ts.map(split)), ramp(), tones).plates
+    const same = (a: CompositeLayer[], b: CompositeLayer[], from: number) => {
+      expect(a[from].coverage).toEqual(b[from].coverage)
+      expect(a[from + 1].coverage).toEqual(b[from + 1].coverage)
+    }
+
+    // Two plates: plate 2 at 50% splits identically with plate 1 at 50% (the
+    // shared mask) and at 60% or 40% (a rebuilt one).
+    const base = press(0.5, 0.5)
+    same(base, press(0.6, 0.5), 2)
+    same(base, press(0.4, 0.5), 2)
+    // Three plates at 50% / x / 50%: plate 3 never sees plate 2's point.
+    const three = press(0.5, 0.5, 0.5)
+    for (const x of [0.51, 0.3]) same(three, press(0.5, x, 0.5), 4)
+    // ...while each plate still follows its own point.
+    expect(press(0.5, 0.2)[2].coverage).not.toEqual(base[2].coverage)
+  })
 })
 
 /** Pinned hashes of knockoutMask on the synthetic case above. */

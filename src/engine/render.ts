@@ -418,6 +418,11 @@ export function printSheet(
   // point it was made for. Every plate switches at its own point; plates that
   // share one (the default: all at 50%) share the mask, so it is built once.
   let light: { threshold: number; mask: Float32Array } | undefined
+  // The screen index every switch mask is made at: the first one's. A mask
+  // is then a function of its switch point alone, so moving one plate's point
+  // can never turn another plate's dots — which it did while a rebuilt mask
+  // took the rebuilding plate's angle, and a shared one the first plate's.
+  let switchIndex: number | undefined
 
   // Where the photo is cut back to paper, accumulated across plates: under
   // the second ink wherever that ink cannot print on what is there, and under
@@ -488,11 +493,12 @@ export function printSheet(
         // Made for THIS plate's switch point. (It used to be made once, from
         // the first split plate, so every later plate's Switch point did
         // nothing.) One mask is held at a time: a plate with its own point
-        // costs a rebuild, never a second full-frame buffer.
-        light = {
-          threshold: layer.contrastThreshold,
-          mask: binarise(bandMask(groundLum, layer.contrastThreshold), plateIndex, s.press, s.seed, w, h),
-        }
+        // costs a rebuild, and the old mask is let go before the new one is
+        // made, so two masks are never held together.
+        light = undefined
+        switchIndex ??= plateIndex
+        const threshold = layer.contrastThreshold
+        light = { threshold, mask: binarise(bandMask(groundLum, threshold), switchIndex, s.press, s.seed, w, h) }
       }
       const mask = light.mask
       const onLight = new Float32Array(w * h)

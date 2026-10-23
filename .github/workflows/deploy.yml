@@ -65,6 +65,12 @@ jobs:
         env:
           PAGES: '1' # serve dist/ at the base it was built for
           CHROMIUM_PATH: /usr/bin/google-chrome
+      # The preview is a true picture of the print: every harness document
+      # through the preview's entry point and the export's, at one height,
+      # must give the same bytes (it fails if any differs).
+      - run: node scripts/harness/run.mjs --out "$RUNNER_TEMP/parity.json" --no-hashes --parity 1000
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
       # Time and resident memory of an export in desktop Chrome. Informational:
       # V8 frees what JavaScriptCore keeps, so measure-alloc is the gate.
       - run: node scripts/measure-export.mjs

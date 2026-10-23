@@ -43,9 +43,11 @@ npm run measure:export    # export time and desktop memory (informational)
 npm run build && npm run check:save  # the save flow in the built app, tapped
 ```
 
-The three that can fail run in CI after `verify`; `measure:export` runs there
-too, for the record (see "Every pixel of the photo, measured" and "What an
-export holds").
+The three that can fail run in CI after `verify`, with the harness's parity
+gate (`npm run harness -- --out p.json --no-hashes --parity 1000`: the
+preview's entry point and the export's give the same bytes); `measure:export`
+runs there too, for the record (see "Every pixel of the photo, measured" and
+"What an export holds").
 
 `verify` is one script rather than four commands so that "it's green" means the
 same thing locally as it does in CI. Running the steps by hand once let a

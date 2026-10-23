@@ -29,8 +29,9 @@ export interface KnockoutParams {
    * paper everywhere so the type can overprint it into a third colour.
    */
   split?: {
-    /** The screened "ground is light" mask the split used, 0..1. */
-    light: Float32Array
+    /** The screened "ground is light" mask the split used: 0..1 as floats,
+     *  or 0..255 in bytes (what the press keeps). */
+    light: Float32Array | Uint8ClampedArray
     /** Luminance of the ink laid where the ground is light, and where dark. */
     onLightLuma: number
     onDarkLuma: number
@@ -71,6 +72,7 @@ export function knockoutMask(
   const { w, h, split } = p
   const moved = shiftField(roughened, w, h, p.dx, p.dy)
   const out = new Float32Array(w * h)
+  const unit = split?.light instanceof Uint8ClampedArray ? 255 : 1
   for (let i = 0; i < out.length; i++) {
     const solid = moved[i] > HOLE ? 1 : moved[i]
     if (!split || !groundLum) {
@@ -78,8 +80,8 @@ export function knockoutMask(
       continue
     }
     const g = groundLum[i]
-    const need =
-      (split.onLightLuma > g ? split.light[i] : 0) + (split.onDarkLuma > g ? 1 - split.light[i] : 0)
+    const light = split.light[i] / unit
+    const need = (split.onLightLuma > g ? light : 0) + (split.onDarkLuma > g ? 1 - light : 0)
     out[i] = solid * need
   }
   return out

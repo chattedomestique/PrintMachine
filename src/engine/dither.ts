@@ -42,17 +42,21 @@ export interface DitherOptions {
 /**
  * Grain a tone field into a coverage field.
  *
- * @returns a new w*h field of 0s and 1s.
+ * @param out where to write: a new float field of 0s and 1s by default, or a
+ *            byte field of 0s and 255s.
+ * @returns the w*h field.
  */
-export function ditherField(
+export function ditherField<T extends Float32Array | Uint8ClampedArray = Float32Array>(
   tone: Float32Array,
   w: number,
   h: number,
   opts: DitherOptions = {},
-): Float32Array {
+  out: T = new Float32Array(w * h) as T,
+): T {
   const cell = Math.max(1, opts.scale ?? 1)
+  const unit = out instanceof Uint8ClampedArray ? 255 : 1
 
-  if (cell === 1) return ditherAt(tone, w, h)
+  if (cell === 1) return ditherAt(tone, w, h, out, unit)
 
   // Reduce, dither, expand. Averaging on the way down matters: sampling one
   // pixel per cell would dither the noise rather than the tone, and the result
@@ -78,12 +82,11 @@ export function ditherField(
     }
   }
 
-  const dithered = ditherAt(small, sw, sh)
-  const out = new Float32Array(w * h)
+  const dithered = ditherAt(small, sw, sh, new Float32Array(sw * sh), 1)
   for (let y = 0; y < sh; y++) {
     for (let sy = rows[y]; sy < rows[y + 1]; sy++) {
       for (let x = 0; x < sw; x++) {
-        const v = dithered[y * sw + x]
+        const v = dithered[y * sw + x] * unit
         for (let sx = cols[x]; sx < cols[x + 1]; sx++) out[sy * w + sx] = v
       }
     }
@@ -109,8 +112,7 @@ function cellStarts(n: number, cell: number): Int32Array {
   return starts
 }
 
-function ditherAt(tone: Float32Array, w: number, h: number): Float32Array {
-  const out = new Float32Array(w * h)
+function ditherAt<T extends Float32Array | Uint8ClampedArray>(tone: Float32Array, w: number, h: number, out: T, unit: number): T {
   // Work on a scratch copy so the input field is not mutated — the caller may
   // still need it (and shared engine inputs must stay pure).
   const buf = Float32Array.from(tone)
@@ -120,7 +122,7 @@ function ditherAt(tone: Float32Array, w: number, h: number): Float32Array {
       const i = y * w + x
       const old = buf[i]
       const next = old >= THRESHOLD ? 1 : 0
-      out[i] = next
+      out[i] = next * unit
       const err = old - next
       if (err === 0) continue
 

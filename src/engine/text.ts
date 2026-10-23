@@ -363,7 +363,7 @@ export function rasterizeText(
   layer: TextLayer,
   w: number,
   h: number,
-): { tone: Float32Array; fontSize: number } {
+): { tone: Uint8Array; fontSize: number } {
   ctx.clearRect(0, 0, w, h)
   const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, h)
 
@@ -448,7 +448,7 @@ export function rasterizeBacking(
   layer: TextLayer,
   w: number,
   h: number,
-): { tone: Float32Array; fontSize: number } {
+): { tone: Uint8Array; fontSize: number } {
   ctx.clearRect(0, 0, w, h)
   const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, h)
 
@@ -460,10 +460,22 @@ export function rasterizeBacking(
   return { tone: alphaToTone(ctx, w, h), fontSize: layout.fontSize }
 }
 
-/** Read the context's alpha channel as a tone field. */
-function alphaToTone(ctx: CanvasRenderingContext2D, w: number, h: number): Float32Array {
-  const { data } = ctx.getImageData(0, 0, w, h)
-  const tone = new Float32Array(w * h)
-  for (let i = 0, p = 3; i < tone.length; i++, p += 4) tone[i] = data[p] / 255
+/**
+ * Read the context's alpha channel as a tone field: the alpha bytes
+ * themselves, 0..255 — exactly what was drawn, in a quarter of the memory a
+ * float field takes. Read in bands, so the canvas's RGBA is never copied out
+ * whole (4 bytes a pixel, for one byte of it).
+ */
+function alphaToTone(ctx: CanvasRenderingContext2D, w: number, h: number): Uint8Array {
+  const tone = new Uint8Array(w * h)
+  const band = Math.max(1, Math.floor(TONE_BAND_PIXELS / w))
+  for (let y = 0; y < h; y += band) {
+    const rows = Math.min(band, h - y)
+    const { data } = ctx.getImageData(0, y, w, rows)
+    for (let i = y * w, p = 3, end = (y + rows) * w; i < end; i++, p += 4) tone[i] = data[p]
+  }
   return tone
 }
+
+/** Pixels of RGBA read from the glyph canvas at a time. */
+const TONE_BAND_PIXELS = 1 << 18

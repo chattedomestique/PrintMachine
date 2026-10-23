@@ -37,6 +37,10 @@ function falloff(d: number, edge: number, width: number): number {
   return t * t * (3 - 2 * t)
 }
 
+/** A coverage field: 0..1 as floats, or 0..255 in bytes (what the press keeps:
+ *  a quarter of the memory, and within half a level of the float). */
+export type CoverageField = Float32Array | Uint8ClampedArray
+
 /**
  * Screen a tone field into a coverage field with round dots.
  *
@@ -47,17 +51,20 @@ function falloff(d: number, edge: number, width: number): number {
  * looking like inkjet.
  *
  * @param tone  w*h values in [0,1] — 0 is bare paper, 1 is solid ink.
- * @returns     a new w*h coverage field in [0,1].
+ * @param out   where to write: a new float field in [0,1] by default, or a
+ *              byte field, written 0..255 (rounded).
+ * @returns     the w*h coverage field.
  */
-export function screenField(
+export function screenField<T extends CoverageField = Float32Array>(
   tone: Float32Array,
   w: number,
   h: number,
   opts: ScreenOptions,
-): Float32Array {
+  out: T = new Float32Array(w * h) as T,
+): T {
   const { angle, softness, originX, originY } = opts
   const pitch = Math.max(1.2, opts.pitch)
-  const out = new Float32Array(w * h)
+  const unit = out instanceof Uint8ClampedArray ? 255 : 1
 
   const a = (angle * Math.PI) / 180
   const cos = Math.cos(a)
@@ -71,7 +78,7 @@ export function screenField(
       const t = tone[i]
       if (t <= 0) continue
       if (t >= 1) {
-        out[i] = 1
+        out[i] = unit
         continue
       }
 
@@ -88,7 +95,7 @@ export function screenField(
       const r = Math.sqrt(t) * pitch * 0.72
 
       const cov = falloff(d, r, softness)
-      out[i] = cov > 1 ? 1 : cov
+      out[i] = (cov > 1 ? 1 : cov) * unit
     }
   }
 

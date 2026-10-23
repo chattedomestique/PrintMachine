@@ -603,6 +603,13 @@ output pixel.
   time, the mottle only on inked pixels, the tear's wander only on the edge.
   The numbers are the arrays' to the last bit (tested), so the preview and the
   print still agree byte for byte (`--parity`).
+- **Bytes where a byte holds the value.** A glyph raster's tone is its alpha
+  byte, kept as the byte (a quarter of a float, exactly the same value). A
+  plate's screened coverage, the second ink's switch mask and the knockout are
+  kept in bytes too: the mask is hard (0 or 255), and coverage rounds to
+  within half a level, which moves the printed sheet by at most one level
+  (mean 0.002 on the harness documents). That rounding is in the stages the
+  preview shares, so the preview shows it too.
 
 ### The same print at every size
 

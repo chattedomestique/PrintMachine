@@ -291,8 +291,12 @@ describe('at the reference height, nothing but the speckle moved', () => {
       for (let y = y0; y < y1; y++) for (let x = 8; x < w - 8; x++) f[y * w + x] = 1
       return f
     }
+    // Recorded on f04ac1b, before the scale fixes. The halftone was re-pinned
+    // once since, on purpose: the press keeps coverage in bytes (WP2.7 step
+    // 2), which moved this sheet by at most one level (mean 0.004) — was
+    // 4cf552fa5d93... The grain is binary, so its bytes did not move.
     const golden = {
-      halftone: '4cf552fa5d931c5b1a014f98dffc85de60e8fb8521aa6a20610d66f96135f64a',
+      halftone: '91ec7d3c70ac5cde27ea1a80d06002e79cf03e1fcda84e4cc8eb2081b4b380a1',
       grain: '6190f55942d116efead1494017261ce42834634cba4d4fcdf35bad0ea163b947',
     }
     for (const method of ['halftone', 'grain'] as const) {

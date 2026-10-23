@@ -202,7 +202,7 @@ export interface RenderCache extends SheetNoise {
   /** Rasterised tone per plate, keyed on the properties that affect it.
    *  Dragging a press slider must not re-run getImageData for every plate.
    *  A backing is keyed separately from its glyphs under the same layer id. */
-  tone: Map<string, { key: string; field: Float32Array; fontSize: number }>
+  tone: Map<string, { key: string; field: ToneField; fontSize: number }>
 }
 
 function cacheKey(s: PrintSettings, w: number, h: number): string {
@@ -249,7 +249,7 @@ function cachedTone(
   cache: RenderCache,
   w: number,
   h: number,
-): { field: Float32Array; fontSize: number } {
+): { field: ToneField; fontSize: number } {
   const slot = layer.id
   const key = toneKey(layer) + '|' + slot
   const hit = cache.tone.get(slot)
@@ -267,7 +267,7 @@ function cachedBackingTone(
   cache: RenderCache,
   w: number,
   h: number,
-): { field: Float32Array; fontSize: number } {
+): { field: ToneField; fontSize: number } {
   const slot = `${layer.id}:backing`
   const key = toneKey(layer) + '|' + slot
   const hit = cache.tone.get(slot)
@@ -280,7 +280,7 @@ function cachedBackingTone(
   return entry
 }
 
-const toneOf = (r: { tone: Float32Array; fontSize: number }) => ({ field: r.tone, fontSize: r.fontSize })
+const toneOf = (r: { tone: ToneField; fontSize: number }) => ({ field: r.tone, fontSize: r.fontSize })
 
 /** Get a valid cache for these settings, rebuilding only when the inputs move. */
 export function ensureCache(
@@ -318,9 +318,27 @@ export function detailFactor(fontSize: number, canvasHeight: number): number {
   return Math.max(0.22, Math.sqrt(relative))
 }
 
+/**
+ * A plate's tone: how much ink the artwork asks for, per pixel. The glyph
+ * raster's alpha bytes as they come off the canvas (0..255), or floats in
+ * 0..1 (a test's hand-made field). The press reads both the same way.
+ */
+export type ToneField = Uint8Array | Float32Array
+
+/** The tone as floats in 0..1, for the passes that need fractions: a byte
+ *  field is converted (b / 255, as float32), a float field is used as is. */
+export function toneAsFloat(tone: ToneField): Float32Array {
+  if (tone instanceof Float32Array) return tone
+  const out = new Float32Array(tone.length)
+  for (let i = 0; i < tone.length; i++) out[i] = tone[i] / 255
+  return out
+}
+
 /** A plate after the press, and what a knockout under it has to match. */
 export interface PressedPlate {
-  coverage: Float32Array
+  /** Screened coverage in bytes, 0..255: a quarter of a float field, held for
+   *  every pass until the sheet is printed. */
+  coverage: Uint8ClampedArray
   roughened: Float32Array
   dx: number
   dy: number
@@ -340,7 +358,7 @@ export interface PressedPlate {
  * Exported so tests can drive it without a canvas.
  */
 export function pressPlate(
-  plate: { field: Float32Array; fontSize: number },
+  plate: { field: ToneField; fontSize: number },
   index: number,
   s: PressProfile,
   seed: number,
@@ -348,7 +366,7 @@ export function pressPlate(
   w: number,
   h: number,
 ): PressedPlate {
-  const tone = plate.field
+  const tone = toneAsFloat(plate.field)
   const scale = h / REFERENCE_HEIGHT
   const detail = detailFactor(plate.fontSize, h)
   const edge = edgeToRough(s.edge)
@@ -399,20 +417,30 @@ export function pressPlate(
   const { dx, dy } = registrationOffset(seed, index, s.misregistration * scale * Math.sqrt(detail))
   const shifted = shiftField(worn, w, h, dx, dy)
 
-  const coverage =
-    s.method === 'grain'
-      ? // The grain cell rides the render scale like every other spatial
-        // quantity, so the preview and the export show the same texture rather
-        // than the same pixel count.
-        ditherField(shifted, w, h, { scale: grainCell(s.screenPitch, scale) })
-      : screenField(shifted, w, h, {
-          pitch: Math.max(1.2, s.screenPitch * scale * detail),
-          // Each plate gets its own angle; the beat between them is the rosette.
-          angle: defaultAngle(index),
-          softness: DOT_SOFTNESS * scale * detail,
-          originX: dx,
-          originY: dy,
-        })
+  // Screened straight into bytes: the dot's soft edge is kept to half a
+  // level, and every pass held until the print costs a quarter of a float.
+  const coverage = new Uint8ClampedArray(w * h)
+  if (s.method === 'grain') {
+    // The grain cell rides the render scale like every other spatial
+    // quantity, so the preview and the export show the same texture rather
+    // than the same pixel count.
+    ditherField(shifted, w, h, { scale: grainCell(s.screenPitch, scale) }, coverage)
+  } else {
+    screenField(
+      shifted,
+      w,
+      h,
+      {
+        pitch: Math.max(1.2, s.screenPitch * scale * detail),
+        // Each plate gets its own angle; the beat between them is the rosette.
+        angle: defaultAngle(index),
+        softness: DOT_SOFTNESS * scale * detail,
+        originX: dx,
+        originY: dy,
+      },
+      coverage,
+    )
+  }
   return { coverage, roughened: rough, dx, dy }
 }
 
@@ -432,12 +460,13 @@ function binarise(
   seed: number,
   w: number,
   h: number,
-): Float32Array {
+): Uint8ClampedArray {
   const scale = h / REFERENCE_HEIGHT
-  if (press.method === 'grain') {
-    return ditherField(mask, w, h, { scale: grainCell(press.screenPitch, scale) })
-  }
-  return screenField(mask, w, h, switchScreen(index, press, seed, scale))
+  // Hard either way (0 or 255): a dither is binary, and the switch screen has
+  // no softness.
+  const out = new Uint8ClampedArray(w * h)
+  if (press.method === 'grain') return ditherField(mask, w, h, { scale: grainCell(press.screenPitch, scale) }, out)
+  return screenField(mask, w, h, switchScreen(index, press, seed, scale), out)
 }
 
 /**
@@ -460,8 +489,8 @@ export function switchScreen(index: number, press: PressProfile, seed: number, s
 /** Where each plate's tone comes from. The renderer rasterises glyphs into a
  *  canvas (and caches them); a test hands in fields it made itself. */
 export interface ToneSource {
-  type(layer: TextLayer): { field: Float32Array; fontSize: number }
-  backing(layer: TextLayer): { field: Float32Array; fontSize: number }
+  type(layer: TextLayer): { field: ToneField; fontSize: number }
+  backing(layer: TextLayer): { field: ToneField; fontSize: number }
 }
 
 /**
@@ -540,7 +569,7 @@ export function* printSheetSteps(
   // The screened "ground is light" mask of the plate before, and the switch
   // point it was made for. Every plate switches at its own point; plates that
   // share one (the default: all at 50%) share the mask, so it is built once.
-  let light: { threshold: number; mask: Float32Array } | undefined
+  let light: { threshold: number; mask: Uint8ClampedArray } | undefined
   // The screen index every switch mask is made at: the first one's. A mask
   // is then a function of its switch point alone, so moving one plate's point
   // can never turn another plate's dots — which it did while a rebuilt mask
@@ -551,10 +580,14 @@ export function* printSheetSteps(
   // the second ink wherever that ink cannot print on what is there, and under
   // every backing. A transparent light ink over a solid dark area is still a
   // solid dark area, so without this neither buys anything.
-  let knockout: Float32Array | undefined
+  // Held in bytes (0..255): only the anti-aliased skirt of a hole is between.
+  let knockout: Uint8ClampedArray | undefined
   const cutOut = (k: Float32Array) => {
-    if (!knockout) knockout = new Float32Array(w * h)
-    for (let i = 0; i < k.length; i++) if (k[i] > knockout[i]) knockout[i] = k[i]
+    if (!knockout) knockout = new Uint8ClampedArray(w * h)
+    for (let i = 0; i < k.length; i++) {
+      const v = k[i] * 255
+      if (v > knockout[i]) knockout[i] = v
+    }
   }
 
   for (const layer of s.layers) {
@@ -626,11 +659,12 @@ export function* printSheetSteps(
         light = { threshold, mask: binarise(bandMask(groundLum, threshold), switchIndex, s.press, s.seed, w, h) }
       }
       const mask = light.mask
-      const onLight = new Float32Array(w * h)
-      const onDark = new Float32Array(w * h)
+      // The mask is hard (0 or 255), so each half is the coverage or nothing.
+      const onLight = new Uint8ClampedArray(w * h)
+      const onDark = new Uint8ClampedArray(w * h)
       for (let i = 0; i < coverage.length; i++) {
-        onLight[i] = coverage[i] * mask[i]
-        onDark[i] = coverage[i] * (1 - mask[i])
+        onLight[i] = (coverage[i] * mask[i]) / 255
+        onDark[i] = (coverage[i] * (255 - mask[i])) / 255
       }
       plates.push({ coverage: onLight, rgb: split.onLight })
       plates.push({ coverage: onDark, rgb: split.onDark })
@@ -662,7 +696,7 @@ export function* printSheetSteps(
     // what a transparent PNG's own transparency takes: both read as paper.
     base = new Uint8ClampedArray(base)
     for (let i = 0; i < knockout.length; i++) {
-      base[i * 4 + 3] = base[i * 4 + 3] * (1 - knockout[i])
+      base[i * 4 + 3] = base[i * 4 + 3] * (1 - knockout[i] / 255)
     }
   }
 

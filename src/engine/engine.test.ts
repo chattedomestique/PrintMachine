@@ -1941,7 +1941,11 @@ describe('printSheet: the passes exactly as the renderer presses them', () => {
       ).plates
     const low = two(0.5, 0.2)
     const high = two(0.5, 0.8)
-    const lit = (p: CompositeLayer) => p.coverage.reduce((a, v) => a + v, 0)
+    const lit = (p: CompositeLayer) => {
+      let n = 0
+      for (const v of p.coverage) n += v
+      return n
+    }
     // The first plate's split is the same in both...
     expect(low[0].coverage).toEqual(high[0].coverage)
     // ...and the second plate's follows its own point: more of the ramp reads

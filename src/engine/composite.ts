@@ -15,11 +15,12 @@
  */
 
 export interface CompositeLayer {
-  /** w*h coverage in [0,1]. Ink is always transparent: a plate multiplies
-   *  into what it lands on, never covers it — keeping a colour readable over
-   *  dark ground is done the riso way, by knocking the ground back to paper
-   *  (knockout.ts), not by painting over it. */
-  coverage: Float32Array
+  /** w*h coverage: 0..1 as floats, or 0..255 in bytes (what the press keeps).
+   *  Ink is always transparent: a plate multiplies into what it lands on,
+   *  never covers it — keeping a colour readable over dark ground is done the
+   *  riso way, by knocking the ground back to paper (knockout.ts), not by
+   *  painting over it. */
+  coverage: Float32Array | Uint8ClampedArray
   /** The ink's printed colour at full coverage on white. */
   rgb: readonly [number, number, number]
 }
@@ -77,6 +78,7 @@ export function compositeLayers(
   const absR = new Float32Array(count)
   const absG = new Float32Array(count)
   const absB = new Float32Array(count)
+  const bytes = layers.map((layer) => layer.coverage instanceof Uint8ClampedArray)
   for (let l = 0; l < count; l++) {
     const { rgb } = layers[l]
     absR[l] = 1 - rgb[0] / 255
@@ -118,8 +120,9 @@ export function compositeLayers(
     }
 
     for (let l = 0; l < count; l++) {
-      const c = layers[l].coverage[i]
+      let c = layers[l].coverage[i]
       if (c <= 0) continue
+      if (bytes[l]) c /= 255
       r *= 1 - c * absR[l]
       g *= 1 - c * absG[l]
       b *= 1 - c * absB[l]

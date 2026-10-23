@@ -17,7 +17,9 @@
  *     it says this device cannot save the print.
  *  3. The tab closed mid-press: the next launch says the last save did not
  *     finish, with Try again and a smaller copy; Escape dismisses it, the
- *     launch after says nothing, and the smaller copy saves.
+ *     launch after says nothing. Killed again, and the photo's preview
+ *     decode held back: the question waits for the photo (its choices
+ *     disabled, "Loading the photo…"), then the smaller copy saves.
  *  4. The stored photo deleted: with the Photo tab closed, the line above
  *     Save says so (an alert, in place of the size) and so does Save's
  *     label; the Photo panel says so; Save cannot be tapped, and no file
@@ -250,20 +252,33 @@ try {
     await third.locator(SAVE).click()
     await pressing(third)
     await third.close({ runBeforeUnload: false })
-    const { page: fourth } = await open(ctx)
+    // The preview's decode of the photo (the one call with a resize) held
+    // back 2 s, so the question is always asked before the photo is back.
+    const slowPreviewDecode = `
+      const real = window.createImageBitmap
+      window.createImageBitmap = (src, ...rest) =>
+        rest.some((o) => o && typeof o === 'object' && 'resizeWidth' in o)
+          ? new Promise((r) => setTimeout(r, 2000)).then(() => real(src, ...rest))
+          : real(src, ...rest)
+    `
+    const { page: fourth, errors: later } = await open(ctx, slowPreviewDecode)
     await waitForQuestion(fourth)
-    // Asked at launch, before the photo is back: its saves wait for it.
+    // Asked at launch, before the photo is back: its saves wait for it, and
+    // say so (E21).
     const early = await fourth.evaluate(() => ({
       disabled: [...document.querySelectorAll('dialog button')].filter((b) => b.disabled).map((b) => b.textContent),
       note: document.querySelector('dialog .panel-note')?.textContent ?? null,
     }))
+    check(
+      early.disabled.join('|') === 'Try again|Save smaller (1814×2268)' && early.note === 'Loading the photo…',
+      `asked before the photo is back: disabled ${early.disabled.join(', ') || 'none'}; note "${early.note ?? ''}"`,
+    )
     const [download] = await Promise.all([
       fourth.waitForEvent('download', { timeout: 120_000 }),
       fourth.getByRole('button', { name: 'Save smaller (1814×2268)' }).click(),
     ])
-    check((await saved(download)) === '1814x2268', 'killed again and answered Save smaller: a 1814x2268 file')
-    console.log(`       (at launch: disabled ${early.disabled.join(', ') || 'none'}; note "${early.note ?? ''}")`)
-    check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+    check((await saved(download)) === '1814x2268', 'killed again and answered Save smaller once the photo was back: a 1814x2268 file')
+    check(errors.length + later.length === 0, `no page errors ${[...errors, ...later].join(' | ')}`)
     await ctx.close()
   }
 

@@ -678,7 +678,8 @@ and two documents of small type correlate with themselves at twice the height
 4:5 (the button reads Cancel within 100 ms, the line counts the press, the file
 is the size the caption promised), a device whose canvases come back blank
 above 5 MP (the smaller-copy question before anything is pressed, then that
-file), a tab closed mid-press (the notice at the next launch), a stored photo
+file), a tab closed mid-press (the notice at the next launch, its choices
+waiting, and saying so, until the photo is back), a stored photo
 deleted (Save says so, and no file), a Cancel tapped while the file is
 encoded (no file, with a share sheet or without) and Ctrl+Z pressed during a
 press (the document stays as it was, and the file is that print).

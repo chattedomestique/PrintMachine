@@ -204,7 +204,7 @@ turned reversed type to mush in the first cut:
   stencil has a solid hole in it.
 - It is cut from the **same pressed outline** the ink lands on: the plate's own
   torn, bled tone and its own registration offset, which `pressPlate` hands to
-  `knockoutMask` (`engine/knockout.ts`) rather than the knockout roughening the
+  `cutKnockout` (`engine/knockout.ts`) rather than the knockout roughening the
   tone a second time. A hole a couple of pixels off the ink could only be
   covered by spreading it, which at text size swells every counter shut.
 
@@ -390,7 +390,7 @@ pink type on a yellow backing comes out red-orange. That is what a real second
 pass does.
 
 The photo is **knocked back to paper under the block's own pressed outline**,
-by the same `knockoutMask` the second ink uses. Without it a pale block over a
+by the same `cutKnockout` the second ink uses. Without it a pale block over a
 dark part of the photo would be invisible — a transparent yellow over black is
 black — so the block prints on paper wherever it is, and reads the same over any
 part of the picture.

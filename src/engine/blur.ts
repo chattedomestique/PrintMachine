@@ -76,9 +76,20 @@ function boxesInPlace(a: Float32Array, b: Float32Array, w: number, h: number, r:
  */
 const FRACTIONAL_BELOW = 4
 
+/** Whether `blurInPlace` at this radius needs its `spare` buffer: only to mix
+ *  two blurs, for a fraction of a pixel below FRACTIONAL_BELOW. */
+export function needsSpare(radius: number): boolean {
+  if (radius <= 0.01) return false
+  const lo = Math.floor(radius)
+  return !(radius - lo < 0.01 || lo >= FRACTIONAL_BELOW)
+}
+
 /**
- * Blur a field by `radius` pixels. Returns a new array; the input is untouched.
- * A radius of effectively zero is a no-op copy.
+ * Blur a field by `radius` pixels, in place, with caller-owned buffers (an
+ * export reuses one workspace for every plate): `scratch` is the box blur's
+ * other half; `spare` holds the source for the second of two mixed blurs, and
+ * is needed only when `needsSpare`. A radius of effectively zero leaves the
+ * field as it is.
  *
  * Fractional radii are honoured by mixing the two neighbouring integer blurs.
  * Rounding instead is what made the preview and the saved file different
@@ -94,26 +105,6 @@ const FRACTIONAL_BELOW = 4
  * it, so a two-thirds-pixel radius still blurs like three-quarters of one, and
  * the clamped reads it needs in the inner loop cost more than the second blur
  * they were meant to save. Both were measured.
- */
-export function blurField(src: Float32Array, w: number, h: number, radius: number): Float32Array {
-  const out = src.slice()
-  blurInPlace(out, w, h, radius, new Float32Array(src.length), needsSpare(radius) ? new Float32Array(src.length) : undefined)
-  return out
-}
-
-/** Whether `blurInPlace` at this radius needs its `spare` buffer: only to mix
- *  two blurs, for a fraction of a pixel below FRACTIONAL_BELOW. */
-export function needsSpare(radius: number): boolean {
-  if (radius <= 0.01) return false
-  const lo = Math.floor(radius)
-  return !(radius - lo < 0.01 || lo >= FRACTIONAL_BELOW)
-}
-
-/**
- * `blurField`, on `field` itself: the same numbers, with caller-owned
- * buffers instead of fresh ones (an export reuses one workspace for every
- * plate). `scratch` is the box blur's other half; `spare` holds the source
- * for the second of two mixed blurs, and is needed only when `needsSpare`.
  */
 export function blurInPlace(
   field: Float32Array,

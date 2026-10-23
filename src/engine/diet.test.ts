@@ -16,10 +16,11 @@ import { bandMask, groundLuma, groundLumaGrid, lumaCell, sampleLuma, splitInks }
 import { inkById, paperById } from './inks.ts'
 import { screenField } from './screen.ts'
 import { ditherField } from './dither.ts'
-import { cutKnockout, knockoutMask } from './knockout.ts'
-import { applyDensity, applyMottle, shiftField, shiftInPlace } from './ink.ts'
-import { blurField, blurInPlace } from './blur.ts'
-import { roughenEdges, roughenInPlace } from './rough.ts'
+import { cutKnockout } from './knockout.ts'
+import { knockoutMask, shiftField } from './__tests__/reference.ts'
+import { applyDensity, applyMottle, shiftInPlace } from './ink.ts'
+import { blurInPlace } from './blur.ts'
+import { roughenInPlace } from './rough.ts'
 import { clampByte, compositeLayers } from './composite.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import type { PrintSettings } from './types.ts'
@@ -249,23 +250,33 @@ describe('step 3: every pass in place, in one workspace, to the same numbers', (
     }
   })
 
-  it('the blur, the tear, density and wear in place give the fresh-array numbers', () => {
+  it('the blur and the tear give the same numbers whatever their reused buffers held, and density and wear in place give the fresh-array numbers', () => {
+    // One workspace serves every plate, so the blur's scratch and spare come
+    // to it holding the last plate's numbers. (Their exactness against the
+    // fresh-array passes they replaced is the 48-plate golden below, pinned
+    // before the change.)
     const w = 64
     const h = 48
     const tone = field(w, h)
+    const fresh = () => [new Float32Array(w * h), new Float32Array(w * h)] as const
+    const dirty = () => [field(w, h, 7), field(w, h, -3)] as const
     for (const r of [0, 0.005, 0.4, 1, 1.5, 2.25, 3.99, 4, 6.5, 12]) {
-      const inPlace = tone.slice()
-      blurInPlace(inPlace, w, h, r, new Float32Array(w * h), new Float32Array(w * h))
-      expect(sha(inPlace)).toBe(sha(blurField(tone, w, h, r)))
+      const a = tone.slice()
+      const b = tone.slice()
+      blurInPlace(a, w, h, r, ...fresh())
+      blurInPlace(b, w, h, r, ...dirty())
+      expect(sha(b)).toBe(sha(a))
     }
     for (const opts of [
       { roughness: 0.55, scale: 1.3, bleed: 0.35, seed: 4 },
       { roughness: 1, scale: 5.5, bleed: 0, seed: 9 },
       { roughness: 0, scale: 2, bleed: 0.6, seed: 2 },
     ]) {
-      const inPlace = tone.slice()
-      roughenInPlace(inPlace, w, h, opts, new Float32Array(w * h), new Float32Array(w * h))
-      expect(sha(inPlace)).toBe(sha(roughenEdges(tone, w, h, opts)))
+      const a = tone.slice()
+      const b = tone.slice()
+      roughenInPlace(a, w, h, opts, ...fresh())
+      roughenInPlace(b, w, h, opts, ...dirty())
+      expect(sha(b)).toBe(sha(a))
     }
     const d = tone.slice()
     expect(sha(applyDensity(d, 0.84, d))).toBe(sha(applyDensity(tone, 0.84)))

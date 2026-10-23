@@ -138,52 +138,15 @@ export function applyMottle(
  * shift uncovers, which shows up as a hard band along the edge of any artwork
  * that runs to the trim. A plate that slides down should reveal unprinted
  * paper at the top, because that is what it does.
- */
-export function shiftField(
-  src: Float32Array,
-  w: number,
-  h: number,
-  dx: number,
-  dy: number,
-): Float32Array {
-  if (dx === 0 && dy === 0) return src.slice()
-
-  const out = new Float32Array(w * h)
-  const at = (x: number, y: number): number =>
-    x < 0 || x >= w || y < 0 || y >= h ? 0 : src[y * w + x]
-
-  for (let y = 0; y < h; y++) {
-    const sy = y - dy
-    const y0 = Math.floor(sy)
-    const fy = sy - y0
-
-    for (let x = 0; x < w; x++) {
-      const sx = x - dx
-      const x0 = Math.floor(sx)
-      const fx = sx - x0
-
-      const a = at(x0, y0)
-      const b = at(x0 + 1, y0)
-      const c = at(x0, y0 + 1)
-      const d = at(x0 + 1, y0 + 1)
-
-      const top = a + (b - a) * fx
-      const bot = c + (d - c) * fx
-      out[y * w + x] = top + (bot - top) * fy
-    }
-  }
-  return out
-}
-
-/**
- * `shiftField` on `field` itself: the same numbers, no second field.
  *
- * Every output pixel reads the source a fraction of a pixel or more AGAINST
- * the shift (at x - dx, y - dy). So walking the rows and columns in the
- * direction of the shift — from the far end towards the near one — reaches
- * every pixel's sources before it overwrites them: a pixel is only ever
- * overwritten after the last pixel that reads it. The one pixel read from its
- * own row and column is read before it is written.
+ * In place, with no second field. Every output pixel reads the source a
+ * fraction of a pixel or more AGAINST the shift (at x - dx, y - dy). So
+ * walking the rows and columns in the direction of the shift — from the far
+ * end towards the near one — reaches every pixel's sources before it
+ * overwrites them: a pixel is only ever overwritten after the last pixel that
+ * reads it. The one pixel read from its own row and column is read before it
+ * is written. (Checked against a plain shift into a new field: the tests'
+ * `shiftField`, engine/__tests__/reference.ts.)
  */
 export function shiftInPlace(field: Float32Array, w: number, h: number, dx: number, dy: number): void {
   if (dx === 0 && dy === 0) return

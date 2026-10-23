@@ -15,7 +15,7 @@
  * already sitting in memory, byte for byte the same.
  */
 
-import { shiftField, shiftInPlace } from './ink.ts'
+import { shiftInPlace } from './ink.ts'
 
 export interface KnockoutParams {
   w: number
@@ -42,7 +42,11 @@ export interface KnockoutParams {
 const HOLE = 0.14
 
 /**
- * How much of the ground to take away under one plate, 0..1 per pixel.
+ * How much of the ground to take away under one plate, cut straight into the
+ * sheet's running knockout: bytes, 0..255 (0 keeps the photo, 255 is bare
+ * paper), each pixel keeping the deepest cut any plate made there. Shifts
+ * `roughened` IN PLACE to the plate's offset, so the caller hands over a
+ * buffer it is done with.
  *
  * The hole is cut from the plate's roughened TONE, not from its screened
  * coverage: knocking out with the halftone would leave the photo standing in
@@ -64,27 +68,6 @@ const HOLE = 0.14
  * second ink this reduces to "the photo is darker than the ink", which is how
  * one colour stays readable over a whole photograph the riso way.
  */
-export function knockoutMask(
-  roughened: Float32Array,
-  groundLum: Float32Array | null,
-  p: KnockoutParams,
-): Float32Array {
-  const { w, h } = p
-  const moved = shiftField(roughened, w, h, p.dx, p.dy)
-  const out = new Float32Array(w * h)
-  const split = groundLum ? p.split : undefined
-  const unit = split?.light instanceof Uint8ClampedArray ? 255 : 1
-  for (let i = 0; i < out.length; i++) out[i] = holeAt(moved[i], groundLum, split, unit, i)
-  return out
-}
-
-/**
- * `knockoutMask`, cut straight into the sheet's running knockout (bytes,
- * 0..255; each pixel keeps the deepest cut any plate made there) instead of
- * into a new field. Shifts `roughened` IN PLACE to the plate's offset, so the
- * caller hands over a buffer it is done with. The same values as
- * `knockoutMask` (as float32), times 255, rounded.
- */
 export function cutKnockout(
   into: Uint8ClampedArray,
   roughened: Float32Array,
@@ -101,8 +84,9 @@ export function cutKnockout(
   }
 }
 
-/** How much of the ground one pixel of a plate takes away (see knockoutMask). */
-function holeAt(
+/** How much of the ground one pixel of a plate takes away, 0..1, from the
+ *  plate's tone at that pixel once moved to its offset (see cutKnockout). */
+export function holeAt(
   moved: number,
   groundLum: Float32Array | null,
   split: KnockoutParams['split'],

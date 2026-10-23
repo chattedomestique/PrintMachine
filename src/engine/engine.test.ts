@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 
 import { compositeLayers, type CompositeLayer } from './composite.ts'
 import { ditherField } from './dither.ts'
-import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftField, wearToMottle } from './ink.ts'
+import { applyDensity, applyMottle, edgeToRough, registrationOffset, wearToMottle } from './ink.ts'
 import { contrastPartner, inkById, paperById, RISO_INKS } from './inks.ts'
 import { paperField } from './paper.ts'
 import { mulberry32, valueNoise2D, type CellNoise } from './rng.ts'
@@ -35,7 +35,7 @@ import {
   renderPrint,
   type ToneSource,
 } from './render.ts'
-import { knockoutMask } from './knockout.ts'
+import { knockoutMask, shiftField } from './__tests__/reference.ts'
 import { MissingPhotoError, planPrint, savePrint } from './export.ts'
 import {
   bandMask,
@@ -53,12 +53,26 @@ import {
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
 import { REFERENCE_HEIGHT, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from './limits.ts'
-import { blurField } from './blur.ts'
-import { roughenEdges } from './rough.ts'
+import { blurInPlace } from './blur.ts'
+import { roughenInPlace, type RoughOptions } from './rough.ts'
 import { ASPECTS, FONTS, sheetAspect, type PrintSettings, type TextLayer } from './types.ts'
 
 const W = 24
 const H = 24
+
+/** The press's blur, run in place on a copy of `src` with fresh buffers. */
+function blurred(src: Float32Array, w: number, h: number, radius: number): Float32Array {
+  const out = src.slice()
+  blurInPlace(out, w, h, radius, new Float32Array(src.length), new Float32Array(src.length))
+  return out
+}
+
+/** The press's tear, run in place on a copy of `src` with fresh buffers. */
+function torn(src: Float32Array, w: number, h: number, opts: RoughOptions): Float32Array {
+  const out = src.slice()
+  roughenInPlace(out, w, h, opts, new Float32Array(src.length), new Float32Array(src.length))
+  return out
+}
 
 /**
  * The compositor's documented model, as a test-local oracle: transparent ink
@@ -488,23 +502,23 @@ describe('blur', () => {
     // double-counts the edge sample, which shows up as a bright rim. On a
     // constant field any such error is immediately visible.
     const flat = new Float32Array(W * H).fill(0.4)
-    const out = blurField(flat, W, H, 3)
+    const out = blurred(flat, W, H, 3)
     for (const v of out) expect(v).toBeCloseTo(0.4, 5)
   })
 
   it('conserves total mass to within rounding', () => {
     const f = ramp()
     const before = f.reduce((a, b) => a + b, 0)
-    const after = blurField(f, W, H, 2).reduce((a, b) => a + b, 0)
+    const after = blurred(f, W, H, 2).reduce((a, b) => a + b, 0)
     // Edge clamping redistributes slightly; a gross mismatch means a bug.
     expect(after / before).toBeGreaterThan(0.95)
     expect(after / before).toBeLessThan(1.05)
   })
 
-  it('is a copy, not a reference, at radius 0', () => {
+  it('leaves the field as it is at radius 0', () => {
     const f = ramp()
-    const out = blurField(f, W, H, 0)
-    expect(out).not.toBe(f)
+    const out = f.slice()
+    blurInPlace(out, W, H, 0, new Float32Array(W * H))
     expect(Array.from(out)).toEqual(Array.from(f))
   })
 
@@ -514,7 +528,7 @@ describe('blur', () => {
     // the same rim as the classic seeding bug, just harder to spot.
     const flat = new Float32Array(W * H).fill(0.4)
     for (const r of [0.35, 0.5, 1.2, 1.75, 2.5, 3.9]) {
-      for (const v of blurField(flat, W, H, r)) expect(v).toBeCloseTo(0.4, 5)
+      for (const v of blurred(flat, W, H, r)) expect(v).toBeCloseTo(0.4, 5)
     }
   })
 
@@ -526,7 +540,7 @@ describe('blur', () => {
     const step = new Float32Array(W * H)
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) step[y * W + x] = x < W / 2 ? 0 : 1
     const spread = (r: number) => {
-      const b = blurField(step, W, H, r)
+      const b = blurred(step, W, H, r)
       let n = 0
       for (let x = 0; x < W; x++) if (b[(H >> 1) * W + x] > 0.02 && b[(H >> 1) * W + x] < 0.98) n++
       return n
@@ -540,8 +554,8 @@ describe('blur', () => {
     // The fractional path must be a generalisation, not a replacement — an
     // integer radius has to come out exactly as it always did.
     const f = ramp()
-    const a = blurField(f, W, H, 2)
-    const b = blurField(f, W, H, 2.0)
+    const a = blurred(f, W, H, 2)
+    const b = blurred(f, W, H, 2.0)
     expect(Array.from(a)).toEqual(Array.from(b))
   })
 })
@@ -555,11 +569,13 @@ describe('rough edges', () => {
 
   it('is a no-op when both roughness and bleed are zero', () => {
     const f = solidSquare()
-    expect(roughenEdges(f, W, H, { roughness: 0, scale: 3, bleed: 0, seed: 1 })).toBe(f)
+    const out = f.slice()
+    roughenInPlace(out, W, H, { roughness: 0, scale: 3, bleed: 0, seed: 1 }, new Float32Array(W * H))
+    expect(Array.from(out)).toEqual(Array.from(f))
   })
 
   it('never punches holes in the middle of a solid', () => {
-    const out = roughenEdges(solidSquare(), W, H, { roughness: 1, scale: 3, bleed: 0, seed: 5 })
+    const out = torn(solidSquare(), W, H, { roughness: 1, scale: 3, bleed: 0, seed: 5 })
     // Well inside the square, ink must still be solid however torn the edge is.
     for (let y = 11; y < H - 11; y++) {
       for (let x = 11; x < W - 11; x++) expect(out[y * W + x]).toBe(1)
@@ -567,7 +583,7 @@ describe('rough edges', () => {
   })
 
   it('leaves bare paper bare', () => {
-    const out = roughenEdges(new Float32Array(W * H), W, H, {
+    const out = torn(new Float32Array(W * H), W, H, {
       roughness: 1,
       scale: 3,
       bleed: 1,
@@ -578,7 +594,7 @@ describe('rough edges', () => {
 
   it('stays in range and actually moves the edge', () => {
     const src = solidSquare()
-    const out = roughenEdges(src, W, H, { roughness: 0.8, scale: 3, bleed: 0.5, seed: 9 })
+    const out = torn(src, W, H, { roughness: 0.8, scale: 3, bleed: 0.5, seed: 9 })
     for (const v of out) {
       expect(v).toBeGreaterThanOrEqual(0)
       expect(v).toBeLessThanOrEqual(1)
@@ -589,7 +605,7 @@ describe('rough edges', () => {
   it('bleed grows the shape rather than shrinking it', () => {
     const src = solidSquare()
     const sum = (f: Float32Array) => f.reduce((a, b) => a + b, 0)
-    const bled = roughenEdges(src, W, H, { roughness: 0, scale: 2, bleed: 1, seed: 3 })
+    const bled = torn(src, W, H, { roughness: 0, scale: 2, bleed: 1, seed: 3 })
     expect(sum(bled)).toBeGreaterThan(sum(src))
   })
 })
@@ -1577,7 +1593,7 @@ describe('the press hands its outline to the knockout', () => {
     const scale = h / REFERENCE_HEIGHT
     const detail = detailFactor(fontSize, h)
     const edge = edgeToRough(s.press.edge)
-    const own = roughenEdges(tone, w, h, {
+    const own = torn(tone, w, h, {
       roughness: edge.roughness,
       // The fixed tear scale, 3 px at the reference height.
       scale: 3 * scale * detail,

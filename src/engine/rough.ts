@@ -17,7 +17,7 @@
  * exactly what a burned stencil gives you.
  */
 
-import { blurInPlace, needsSpare } from './blur.ts'
+import { blurInPlace } from './blur.ts'
 import { FbmSampler } from './rng.ts'
 
 export interface RoughOptions {
@@ -46,28 +46,14 @@ export function tearNoise(w: number, scale: number, seed: number): FbmSampler {
 }
 
 /**
- * Roughen and bleed a tone field.
+ * Roughen and bleed a tone field, in place: the tone in, the torn tone out.
+ * Nothing to do (no roughness, no bleed) leaves it as it is.
  *
  * Runs on the *tone*, before screening, so the screen bites on the ragged
  * outline rather than a clean one — ordering matters here as much as anywhere
- * else in the pipeline.
- */
-export function roughenEdges(
-  tone: Float32Array,
-  w: number,
-  h: number,
-  opts: RoughOptions,
-): Float32Array {
-  if (opts.roughness <= 0 && opts.bleed <= 0) return tone
-  const out = tone.slice()
-  roughenInPlace(out, w, h, opts, new Float32Array(tone.length), needsSpare(Math.max(0, opts.scale)) ? new Float32Array(tone.length) : undefined)
-  return out
-}
-
-/**
- * `roughenEdges` on `field` itself (the tone in, the torn tone out), with
- * caller-owned buffers for the blur (see blur.ts `blurInPlace`): the same
- * numbers, and no sheet-sized allocation of its own.
+ * else in the pipeline. The blur's buffers are the caller's (see blur.ts
+ * `blurInPlace`; `needsSpare` says when `spare` is needed), so a press makes
+ * no sheet-sized allocation here.
  */
 export function roughenInPlace(
   field: Float32Array,

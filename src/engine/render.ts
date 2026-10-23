@@ -432,7 +432,7 @@ function* pressPlateSteps(
     h,
     {
     roughness: edge.roughness,
-    // Unfloored: roughenEdges needs the size that was actually asked for,
+    // Unfloored: roughenInPlace needs the size that was actually asked for,
     // not a whole number, or it cannot tell a fine tear from a clamped one.
     scale: TEAR_SCALE * scale * detail,
     // Bleed is a threshold offset, so at small sizes it eats the counters —

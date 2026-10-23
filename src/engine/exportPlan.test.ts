@@ -8,8 +8,10 @@ import { describe, expect, it } from 'vitest'
 
 import { planExport, type PlanPhoto } from './exportPlan.ts'
 import { MAX_AREA, NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'
-import { coverRect } from './media.ts'
+import { SNAP_PX, coverRect } from './media.ts'
+import { groundRect } from './render.ts'
 import { mulberry32 } from './rng.ts'
+import { ASPECTS, sheetAspect, type PrintSettings } from './types.ts'
 
 const SHEETS = { '1:1': 1, '4:5': 4 / 5, '3:4': 3 / 4, '2:3': 2 / 3 } as const
 const photo = (width: number, height: number, scale = 1): PlanPhoto => ({ width, height, scale })
@@ -183,5 +185,67 @@ describe('every plan, over 2000 random photos, sheets and zooms', () => {
         expect(below).toBeLessThan(1)
       }
     }
+  })
+})
+
+describe('every native plan is drawn at the photo\'s own pixels (the snap covers the planner)', () => {
+  // The sheets the app makes: the four fixed ones and the photo's own.
+  const KEYS: PrintSettings['aspect'][] = [...(Object.keys(ASPECTS) as PrintSettings['aspect'][]), 'original']
+
+  /** Plan the photo on the sheet and draw it as the press does: a native
+   *  plan must put the photo at its own size, at a whole-pixel offset,
+   *  covering the sheet. Returns whether the plan was native. */
+  function drawnNative(mw: number, mh: number, key: PrintSettings['aspect'], zoom: number, x: number, y: number): boolean {
+    const media = { id: 'p', width: mw, height: mh, scale: zoom, x, y, native: true }
+    const plan = planExport(sheetAspect({ aspect: key, media }), media)
+    if (plan.limit !== 'native') return false
+    const r = groundRect(media, plan.width, plan.height)
+    const where = `${mw}x${mh} on ${key} at ${zoom} -> ${dims(plan)}`
+    expect([r.dw, r.dh], where).toEqual([mw, mh])
+    expect(Number.isInteger(r.dx) && Number.isInteger(r.dy), where).toBe(true)
+    expect(r.dx <= 0 && r.dy <= 0 && r.dx + mw >= plan.width && r.dy + mh >= plan.height, where).toBe(true)
+    return true
+  }
+
+  it('for real camera, phone and screen sizes, either way up, at every zoom from 100% to 400% in 1% steps', () => {
+    const sizes = [
+      [4032, 3024], [5712, 4284], [8064, 6048], [4032, 2268], [5712, 3213], [6000, 4000], [3024, 3024],
+      [1920, 1080], [1179, 2556], [1290, 2796], [3840, 2160], [8000, 3000],
+    ]
+    let native = 0
+    for (const [w, h] of sizes) {
+      for (const [mw, mh] of w === h ? [[w, h]] : [[w, h], [h, w]]) {
+        for (const key of KEYS) {
+          for (let z = 100; z <= 400; z++) if (drawnNative(mw, mh, key, z / 100, 0.5, 0.5)) native++
+        }
+      }
+    }
+    // Before SNAP_PX took the sheet's short side, 85 of these were planned
+    // native and drawn resampled (a 2268x4032 photo on its own sheet at 113%
+    // among them: 1.0005, a third of its finest detail lost).
+    expect(native).toBeGreaterThan(9000)
+  })
+
+  it('for 4000 random photos, sheets, zooms and pans', () => {
+    const rand = mulberry32(0x5eed)
+    let native = 0
+    for (let i = 0; i < 4000; i++) {
+      const mw = Math.round(600 + rand() * 11400)
+      const mh = Math.round(600 + rand() * 11400)
+      const key = KEYS[Math.floor(rand() * KEYS.length)]
+      const zoom = rand() < 0.3 ? 1 : 1 + rand() * 3
+      if (drawnNative(mw, mh, key, zoom, rand(), rand())) native++
+    }
+    expect(native).toBeGreaterThan(1000)
+  })
+
+  it('needs the short side: the 2268x4032 case lands outside a tolerance taken over the height', () => {
+    const media = { id: 'p', width: 2268, height: 4032, scale: 1.13, x: 0.5, y: 0.5 }
+    const plan = planExport(sheetAspect({ aspect: 'original', media }), media)
+    expect(plan).toMatchObject({ width: 2008, height: 3569, limit: 'native' })
+    const over = plan.upscale! - 1
+    expect(over).toBeGreaterThan(1.5 / plan.height)
+    expect(over).toBeLessThan(SNAP_PX / Math.min(plan.width, plan.height))
+    expect(groundRect(media, plan.width, plan.height)).toEqual({ dx: -131, dy: -232, dw: 2268, dh: 4032 })
   })
 })

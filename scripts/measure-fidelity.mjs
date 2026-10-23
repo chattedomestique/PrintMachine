@@ -15,9 +15,10 @@
  *    the picked file byte for byte. A 12 MP zone plate on its own sheet and
  *    on 4:5; a 6000x4500 one on 4:5 (above the old 4096 cap: native,
  *    3600x4500); a 24 MP iPhone-sized 5712x4284 one on 4:5 (native,
- *    3427x4284). Two controls prove the gate can fail: the same photo drawn
- *    half a pixel off its grid, and from a 2048 px copy (the old import),
- *    must both fall below it.
+ *    3427x4284); a 2268x4032 one zoomed to 113% on its own sheet (native,
+ *    2008x3569, a tall sheet whose width binds). Two controls prove the
+ *    gate can fail: the same photo drawn half a pixel off its grid, and from
+ *    a 2048 px copy (the old import), must both fall below it.
  *  - the one ceiling: that 5712x4284 photo on its own sheet saves at the
  *    canvas area limit, 4729x3547, and Save says so in numbers.
  *  - a JPEG whose EXIF says rotate 90 saves upright; a PNG's transparent hole
@@ -76,17 +77,20 @@ try {
   const p = await page('fidelity.html', 'F')
 
   console.log('Native prints: the photo pixel for pixel (Laplacian ratio >= 0.98, correlation >= 0.999)')
-  for (const [w, h, aspect, plan] of [
+  for (const [w, h, aspect, plan, zoom = 1] of [
     [4032, 3024, 'original', '4032x3024'],
     [4032, 3024, '4:5', '2419x3024'],
     [6000, 4500, '4:5', '3600x4500'],
     [5712, 4284, '4:5', '3427x4284'],
+    // A tall photo cropped by zooming on its own sheet: the width binds, and
+    // the native height lands over 1:1 by more than 1.5 px over the height.
+    [2268, 4032, 'original', '2008x3569', 1.13],
   ]) {
-    const r = await p.evaluate(([w, h, a]) => window.F.zone(w, h, a), [w, h, aspect])
-    const name = `${r.photo} on ${aspect}`
+    const r = await p.evaluate(([w, h, a, z]) => window.F.zone(w, h, a, 'png', z), [w, h, aspect, zoom])
+    const name = `${r.photo} on ${aspect}${zoom !== 1 ? ` at ${Math.round(zoom * 100)}%` : ''}`
     const size = `${r.plan.width}x${r.plan.height}`
     console.log(
-      `  ${name.padEnd(22)} -> ${size} ${r.plan.limit}, file ${r.file}: Laplacian ${f4(r.lapRatio)} ${gate(r.lapRatio >= LAPLACIAN, `${name}: Laplacian ${r.lapRatio}`)}, ` +
+      `  ${name.padEnd(30)} -> ${size} ${r.plan.limit}, file ${r.file}: Laplacian ${f4(r.lapRatio)} ${gate(r.lapRatio >= LAPLACIAN, `${name}: Laplacian ${r.lapRatio}`)}, ` +
         `corr ${f4(r.corr)} ${gate(r.corr >= CORRELATION, `${name}: correlation ${r.corr}`)}, largest difference ${r.maxDiff}/255; ` +
         `stored byte for byte ${gate(r.stored.byteForByte, `${name}: not stored byte for byte`)} (${(r.stored.fileBytes / 1e6).toFixed(1)} MB, ${r.stored.layer}); ${(r.ms / 1000).toFixed(1)} s`,
     )

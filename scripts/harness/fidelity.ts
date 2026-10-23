@@ -142,10 +142,13 @@ async function pixelsOf(blob: Blob): Promise<{ data: Uint8ClampedArray; w: numbe
 
 /** Import `file` for real, then save `settings` (built from the imported
  *  layer) for real, as Save does. */
-async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format: ExportFormat) {
-  const { layer } = await importMedia(file)
-  const stored = await getMedia(layer.id)
+async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format: ExportFormat, zoom = 1) {
+  const imported = (await importMedia(file)).layer
+  const stored = await getMedia(imported.id)
   const byteForByte = !!stored && stored.size === file.size && (await sha256(stored)) === (await sha256(file))
+  // Zoomed (to crop) as the Photo tool would: centred, at `zoom` on the cover
+  // fit.
+  const layer = { ...imported, scale: zoom }
   const s = photoOnly(layer, aspect)
   const plan = planPrint(s)
   const original = await decodeOriginal(layer.id)
@@ -157,12 +160,13 @@ async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format
 }
 
 /**
- * A zone plate of w x h through import and Save on `aspect`, compared with
- * the part of the original the sheet shows, drawn at its own pixels.
+ * A zone plate of w x h through import and Save on `aspect`, at `zoom`,
+ * compared with the part of the original the sheet shows, drawn at its own
+ * pixels.
  */
-async function zone(w: number, h: number, aspect: PrintSettings['aspect'], format: ExportFormat = 'png') {
+async function zone(w: number, h: number, aspect: PrintSettings['aspect'], format: ExportFormat = 'png', zoom = 1) {
   const file = await encode(zonePlate(w, h), 'image/jpeg', 0.92)
-  const { layer, byteForByte, s, plan, pressed, ms } = await importAndSave(file, aspect, format)
+  const { layer, byteForByte, s, plan, pressed, ms } = await importAndSave(file, aspect, format, zoom)
   const out = await pixelsOf(pressed.blob)
   const r = groundRect(layer, plan.width, plan.height)
   const aligned = r.dw === layer.width && r.dh === layer.height && Number.isInteger(r.dx) && Number.isInteger(r.dy)
@@ -187,6 +191,7 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
   return {
     photo: `${w}x${h}`,
     aspect,
+    zoom,
     format,
     stored: { byteForByte, fileBytes: file.size, layer: `${layer.width}x${layer.height}` },
     plan: { width: plan.width, height: plan.height, limit: plan.limit },

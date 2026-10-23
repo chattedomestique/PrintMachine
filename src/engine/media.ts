@@ -158,21 +158,43 @@ export function isReducedCopy(media: { width: number; height: number; native?: b
 }
 
 /**
+ * How near 1:1 a blit must be to be drawn at the photo's own pixels: within
+ * this many pixels over the sheet's shorter side.
+ *
+ * It has to cover every height the export planner calls native
+ * (exportPlan.ts): the smallest height at which the photo lands at least 1:1,
+ * so over it by at most a row on the binding side plus half a pixel of the
+ * width's rounding. Over the sheet's short side that is under
+ * 1.5 x (1 + 1/H): 1 + 0.5/a on a sheet a = w/h at or over 1, a + 0.5 under
+ * it (the worst is an Original sheet of about 1:1, whose two sides bind
+ * together). A tolerance of 1.5 over the sheet's HEIGHT missed every tall
+ * sheet whose width binds — a 2268x4032 photo on its own sheet at 113% was
+ * planned native and resampled by 1.0005, losing a third of its finest
+ * detail. 2 holds the bound with room, and exportPlan.test.ts checks every
+ * native plan of its sweeps is drawn at the photo's own pixels.
+ *
+ * Snapping a little early costs nothing visible: a snap only ever draws the
+ * photo at its own size, still covering the sheet, and the crop moves by
+ * (scale - 1) x the photo's size — a few pixels at most.
+ */
+export const SNAP_PX = 2
+
+/**
  * The blit, made pixel-exact when the sheet holds the photo at its own pixels.
  *
  * At the native export height the cover fit lands within a hair of 1:1, but
  * the centred placement puts the photo half a pixel off the grid, and a
  * bilinear blit at a half-pixel offset blurs every pixel into its neighbour
  * (measured: Laplacian energy 0.753 of the original at native height; 1.000
- * snapped). So when the scale is within 1.5 px of 1 over the sheet's height,
- * draw the photo at exactly its own size, at a whole-pixel offset, kept inside
- * the travel that still covers the sheet — zoomed or not, since a zoomed photo
- * lands 1:1 at its own (smaller) native height. Anything that is not 1:1 — the
- * preview, a zoom at another height — or a photo smaller than the sheet is
- * returned untouched.
+ * snapped). So when the scale is within SNAP_PX of 1 over the sheet's SHORTER
+ * side, draw the photo at exactly its own size, at a whole-pixel offset, kept
+ * inside the travel that still covers the sheet — zoomed or not, since a
+ * zoomed photo lands 1:1 at its own (smaller) native height. Anything that is
+ * not 1:1 — the preview of a large photo, a zoom at another height — or a
+ * photo smaller than the sheet is returned untouched.
  */
 export function snapRect(r: DrawRect, mw: number, mh: number, sheetW: number, sheetH: number): DrawRect {
-  if (Math.abs(r.dw / mw - 1) >= 1.5 / sheetH) return r
+  if (Math.abs(r.dw / mw - 1) >= SNAP_PX / Math.min(sheetW, sheetH)) return r
   // Snapped to its own size the photo would not cover the sheet: leave it.
   if (mw < sheetW || mh < sheetH) return r
   return {

@@ -41,6 +41,7 @@ import {
   bandMask,
   clampPan,
   coverRect,
+  SNAP_PX,
   snapRect,
   fromPanFraction,
   groundLuma,
@@ -1037,7 +1038,7 @@ describe('the blit is pixel-exact when the sheet holds the photo at its own pixe
     // A photo a pixel narrower than the sheet: snapped to its own size it
     // would leave a bare column, so the blit keeps its (enlarged) rect.
     const narrow = coverRect({ width: 1000, height: 2000 }, 1001, 1000, { scale: 1, x: 0.5, y: 0.5 })
-    expect(Math.abs(narrow.dw / 1000 - 1)).toBeLessThan(1.5 / 1000)
+    expect(Math.abs(narrow.dw / 1000 - 1)).toBeLessThan(SNAP_PX / 1000)
     expect(snapRect(narrow, 1000, 2000, 1001, 1000)).toBe(narrow)
     // groundRect applies it: the native export of a 4:5 crop is snapped.
     const m = makeMedia({ id: 'p', width: 4032, height: 3024 })

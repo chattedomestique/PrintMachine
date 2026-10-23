@@ -22,6 +22,9 @@
  *     Save says so (an alert, in place of the size) and so does Save's
  *     label; the Photo panel says so; Save cannot be tapped, and no file
  *     appears.
+ *  5. Cancel tapped while the file is encoded (an encoder slowed to 1.5 s,
+ *     as a phone's is): no file, no toast, Save again, with a share sheet
+ *     and without one.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -308,6 +311,47 @@ try {
     check(alerts.includes('This photo could not be loaded. Choose it again.'), `the Photo panel: "${alerts.join(' | ')}"`)
     check(disabled && !downloaded, 'Save cannot be tapped, and no file appears (never the type on bare paper)')
     await ctx.close()
+  }
+
+  console.log('\n5. Cancel tapped while the file is encoded')
+  {
+    // The press's encoder (a detached canvas over 1 MP) answers 1.5 s late,
+    // as a phone's does; the time it started is recorded.
+    const slowEncoder = `
+      window.__encodeStarted = null
+      const real = HTMLCanvasElement.prototype.toBlob
+      HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) {
+        if (!this.isConnected && this.width * this.height > 1e6) window.__encodeStarted = performance.now()
+        return real.call(this, (b) => setTimeout(() => cb(b), 1500), ...rest)
+      }
+    `
+    const shareSheet = `window.__shared = 0; navigator.canShare = () => true; navigator.share = async () => { window.__shared++ }`
+    for (const share of [false, true]) {
+      const ctx = await newContext()
+      const { page, errors } = await open(ctx, slowEncoder + (share ? shareSheet : ''))
+      await page.waitForTimeout(600)
+      const caption = await page.locator(LINE).textContent()
+      let downloaded = 0
+      page.on('download', () => downloaded++)
+      await page.locator(SAVE).click()
+      await page.waitForFunction(() => window.__encodeStarted !== null, null, { timeout: 120_000 })
+      const during = await page.locator(SAVE).textContent()
+      await page.locator(SAVE).click()
+      await page.waitForTimeout(2500)
+      const end = {
+        button: await page.locator(SAVE).textContent(),
+        line: await page.locator(LINE).textContent(),
+        toast: (await page.locator('.toast').allTextContents()).join(''),
+        shared: await page.evaluate(() => window.__shared ?? 0),
+      }
+      check(
+        during === 'Cancel' && end.button === 'Save' && end.line === caption && !end.toast && downloaded === 0 && end.shared === 0,
+        `${share ? 'with a share sheet' : 'no share sheet'}: "${during}" tapped during the encode -> "${end.button}", "${end.line}", ` +
+          `toast "${end.toast}", ${downloaded} downloads, ${end.shared} shares`,
+      )
+      check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+      await ctx.close()
+    }
   }
 } finally {
   await browser.close()

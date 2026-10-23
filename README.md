@@ -596,7 +596,8 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   frames), then "Pressing 3024×3780, plate 2 of 3", with Save turned into
   **Cancel**. The press runs through `renderPrintAsync`, which runs the very
   stages the preview runs and yields to the page between them, so the progress
-  paints and Cancel works. The preview stops rendering meanwhile (a full-size
+  paints and Cancel works, up to the file itself: a Cancel tapped while the
+  file is being encoded (a second or more on a phone) leaves no file. The preview stops rendering meanwhile (a full-size
   press and a preview frame never hold their buffers together), and the rest of
   the page is inert. The two entry points print the same bytes at the same
   height: `npm run harness -- --out p.json --no-hashes --parity 1000` renders
@@ -674,8 +675,9 @@ and two documents of small type correlate with themselves at twice the height
 4:5 (the button reads Cancel within 100 ms, the line counts the press, the file
 is the size the caption promised), a device whose canvases come back blank
 above 5 MP (the smaller-copy question before anything is pressed, then that
-file), a tab closed mid-press (the notice at the next launch) and a stored
-photo deleted (no file).
+file), a tab closed mid-press (the notice at the next launch), a stored photo
+deleted (Save says so, and no file) and a Cancel tapped while the file is
+encoded (no file, with a share sheet or without).
 
 ### What an export holds
 

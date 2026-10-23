@@ -35,9 +35,10 @@ import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
  * pixels: enough for renderPrint's glyph and photo calls. A 1x1 sentinel
  * rectangle reads back as drawn, as on a real canvas, unless the canvas is
  * over `maxArea`: then, as an iOS canvas over its limit does, it reads back
- * blank. With `encodes: false` the encoder hands back null.
+ * blank. With `encodes: false` the encoder hands back null; `onEncode` runs
+ * while it encodes (before the blob is handed back).
  */
-function fakeContext(opts: { maxArea?: number; encodes?: boolean } = {}) {
+function fakeContext(opts: { maxArea?: number; encodes?: boolean; onEncode?: () => void } = {}) {
   const sizes: [number, number][] = []
   const blobs: { mime: string; quality: number | undefined }[] = []
   let width = 0
@@ -63,7 +64,8 @@ function fakeContext(opts: { maxArea?: number; encodes?: boolean } = {}) {
     },
     toBlob(cb: (b: Blob | null) => void, mime: string, quality?: number) {
       blobs.push({ mime, quality })
-      cb(opts.encodes === false ? null : new Blob([new Uint8Array(1234)], { type: mime }))
+      opts.onEncode?.()
+      setTimeout(() => cb(opts.encodes === false ? null : new Blob([new Uint8Array(1234)], { type: mime })))
     },
   }
   const ctx = {
@@ -375,6 +377,17 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
     })
     await expect(run).rejects.toMatchObject({ name: 'AbortError' })
     expect(presses).toBe(1)
+  })
+
+  it('a Cancel tapped while the file is encoded: no file, an AbortError, both canvases let go', async () => {
+    const controller = new AbortController()
+    const out = fakeContext({ onEncode: () => controller.abort() })
+    const scratch = fakeContext()
+    const run = savePrint(out.ctx, scratch.ctx, defaultSettings(), null, { signal: controller.signal }, spyRender().render)
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    expect(out.blobs).toHaveLength(1)
+    expect(out.ctx.canvas.width).toBe(0)
+    expect(scratch.ctx.canvas.width).toBe(0)
   })
 })
 

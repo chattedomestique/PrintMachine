@@ -24,7 +24,7 @@
  */
 
 import { planExport, type ExportPlan } from './exportPlan.ts'
-import { renderPrintAsync, type RenderProgress } from './render.ts'
+import { renderPrintAsync, throwIfAborted, type RenderProgress } from './render.ts'
 import { sheetAspect, type MediaLayer, type PrintSettings } from './types.ts'
 
 export type ExportFormat = 'jpeg' | 'png'
@@ -77,6 +77,8 @@ export interface SaveOptions {
   /** Press no taller than this: a smaller copy the person chose (never
    *  automatic: see CanvasLimitError). */
   maxHeight?: number
+  /** Cancel: checked at every step of the press, and once more after the
+   *  encode, so a cancelled save never returns a file. */
   signal?: AbortSignal
   onProgress?: (progress: RenderProgress) => void
   /** Called once the photo is in the ground: the caller frees its decode. */
@@ -126,6 +128,9 @@ export async function savePrint(
       throw new Error(`The print came out ${width}×${height}, not the planned ${plan.width}×${plan.height}.`)
     }
     const blob = await encode(exportCtx.canvas, format)
+    // Cancel stays live while the file is encoded (up to a second on a
+    // desktop, longer on a phone): tapped then, there is no file.
+    throwIfAborted(opts.signal)
     if (!blob) throw new CanvasLimitError(plan, 'the image could not be encoded')
     return { blob, plan, format }
   } catch (err) {

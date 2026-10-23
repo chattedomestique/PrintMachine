@@ -906,7 +906,9 @@ export async function renderPrintAsync(
 /** A macrotask: the page paints and takes input before the render goes on. */
 const yieldToPage = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
-function throwIfAborted(signal: AbortSignal | undefined): void {
+/** Stop, with an AbortError, once the save is cancelled (export.ts checks it
+ *  after encoding too). */
+export function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw new DOMException('The save was cancelled.', 'AbortError')
 }
 

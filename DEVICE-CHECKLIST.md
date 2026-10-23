@@ -101,8 +101,11 @@ So:
       Photos (… MB)" → tap it → the native share sheet appears → Save Image →
       the file **is** in Photos, at the size the line said (check it in Photos'
       info panel)
-- [ ] A quick press (no photo, or a small one) → the share sheet opens without
-      a second tap
+- [ ] Expect that second tap on every save: no press at a photo's own
+      resolution finishes within the second that would share at once (even a
+      print with no photo is 2880×3600; it takes over 4 s on a desktop). A
+      save that ends on "Save to Photos" is not a bug; one whose share sheet
+      does not open from that tap is
 - [ ] Home-screen app: dismiss or break the share sheet → the "Save to Photos"
       button is still there; the app never navigates to the image
 - [ ] PNG → the same flow, a .png file in Photos

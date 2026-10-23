@@ -605,9 +605,10 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   at the same height: `npm run harness -- --out p.json --no-hashes --parity
   1000` renders every harness document through both and fails if any differs.
 - **Sharing.** The share sheet needs the tap that opens it to be recent, and a
-  press outlasts it. A press that finished within a second of the tap shares at
-  once; otherwise Save becomes **Save to Photos (6.2 MB)**, a fresh tap that
-  shares the file already made. A share that fails keeps the file and the
+  press outlasts it. A press that finished within a second of the tap would
+  share at once, but at a photo's own resolution none does (a print with no
+  photo, 2880×3600, takes over 4 s on a desktop): Save becomes **Save to
+  Photos (6.2 MB)**, a fresh tap that shares the file already made. A share that fails keeps the file and the
   button: in a home-screen app it never falls through to a download, which on
   iOS navigates to the image and takes the app with it. On a desktop with no
   share sheet the file downloads.

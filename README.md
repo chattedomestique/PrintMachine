@@ -98,8 +98,8 @@ opens changed (each has a test that says so):
   (fading the photo is the one thing it did), and the photo is the ground;
   remove it if it should go.
 - **Word-picked boxes become one backing** behind every line of the plate, in
-  the ink of the first box that printed (a box hidden at opacity 0 becomes
-  nothing). A plate takes a backing or a second ink, so a plate that had both
+  the ink of the first box that printed (a box hidden at opacity 0, or whose
+  word numbers the text no longer has, never printed and becomes nothing). A plate takes a backing or a second ink, so a plate that had both
   keeps the backing and stops switching ink over the photo.
 
 ### Offline, and why it is checked rather than inspected

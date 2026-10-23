@@ -48,6 +48,28 @@ const isPlainObject = (v: unknown): v is Doc =>
 
 const finiteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
+/**
+ * How many words the build that had boxes numbered in this text: runs of
+ * anything but a space or a tab, line by line, counted on across lines from
+ * 0 (8d17b48's `placeLine`). The caps conversion runs first and changes no
+ * whitespace, so the count is the one the box was drawn against.
+ */
+function wordCount(text: unknown): number {
+  if (typeof text !== 'string') return 0
+  let n = 0
+  for (const line of text.split('\n')) {
+    let inWord = false
+    for (const ch of line) {
+      if (ch === ' ' || ch === '\t') inWord = false
+      else if (!inWord) {
+        inWord = true
+        n++
+      }
+    }
+  }
+  return n
+}
+
 /** The stored layers that are objects — the only ones the walk will keep. */
 const layersOf = (doc: Doc): Doc[] => (Array.isArray(doc.layers) ? doc.layers.filter(isPlainObject) : [])
 
@@ -147,21 +169,28 @@ const CONVERSIONS: readonly Conversion[] = [
   // box was an explicit act where the second ink may only have been seeded, so
   // the backing wins.
   //
-  // "Printed" is the old renderer's own test: a box with words, not hidden by
-  // its opacity, on a plate not hidden by ITS opacity (`opacity <= 0` skipped
-  // either, coercions and all). A hidden box never reached the sheet, so it
-  // becomes nothing: turning it into a backing would print a block the saved
-  // print never had, and take the plate's second ink away for it.
+  // "Printed" is the old renderer's own test: a box behind at least one word
+  // the text still has, not hidden by its opacity, on a plate not hidden by
+  // ITS opacity (`opacity <= 0` skipped either, coercions and all). A box that
+  // never reached the sheet becomes nothing: turning it into a backing would
+  // print a block the saved print never had, and take the plate's second ink
+  // away for it.
   function boxes(doc) {
     const hidden = (opacity: unknown) => Number(opacity) <= 0
     for (const l of layersOf(doc)) {
       if (Array.isArray(l.boxes) && !('backing' in l)) {
+        const count = wordCount(l.text)
+        // The old renderer drew a box behind a placed word only if the box
+        // held that word's number (`Set.has`, so a number, exactly). Word
+        // numbers never followed text edits, so a box can hold only numbers
+        // the text no longer has, and then it printed nothing.
+        const printsAWord = (words: unknown) =>
+          Array.isArray(words) && words.some((n) => Number.isInteger(n) && (n as number) >= 0 && (n as number) < count)
         const first = hidden(l.opacity)
           ? undefined
-          : (l.boxes.find(
-              (b: unknown) =>
-                isPlainObject(b) && Array.isArray(b.words) && b.words.length > 0 && !hidden(b.opacity),
-            ) as Doc | undefined)
+          : (l.boxes.find((b: unknown) => isPlainObject(b) && printsAWord(b.words) && !hidden(b.opacity)) as
+              | Doc
+              | undefined)
         // A box in an ink no build knows is no backing (the field's default),
         // and then it does not displace the plate's second ink either.
         if (first && typeof first.inkId === 'string' && INK_IDS.includes(first.inkId)) {

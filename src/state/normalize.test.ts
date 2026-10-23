@@ -648,6 +648,44 @@ describe('verdict §4.1: what each removed field becomes', () => {
     expect([s.layers[0].backing, s.layers[0].contrastInkId]).toEqual([null, 'white'])
   })
 
+  it('a box whose word numbers the text no longer has never printed: no backing, and the second ink stays', () => {
+    // The old renderer drew a box behind a placed word only if the box held
+    // that word's number, and word numbers never followed text edits. A box
+    // on word 5 of "PRINT" (one word) drew nothing.
+    const onText = (text: string, words: unknown[]) => {
+      const d = copy(defaultDoc) as unknown as Doc
+      Object.assign((d.layers as Doc[])[0], {
+        text,
+        contrastInkId: 'white',
+        boxes: [{ id: 'b', words, inkId: 'yellow', opacity: 1 }],
+      })
+      const l = normalizeSettings(d).layers[0]
+      return [l.backing, l.contrastInkId]
+    }
+    expect(onText('PRINT', [5])).toEqual([null, 'white'])
+    // Not numbers at all, or not whole, or negative: nothing matched them.
+    expect(onText('PRINT', ['x'])).toEqual([null, 'white'])
+    expect(onText('PRINT', ['0'])).toEqual([null, 'white'])
+    expect(onText('PRINT', [0.5, -1])).toEqual([null, 'white'])
+    // One number that still exists is enough.
+    expect(onText('PRINT', [0, 9])).toEqual(['yellow', null])
+    // Words are numbered on across lines, split at spaces and tabs only.
+    expect(onText('PRINT\nMACHINE', [1])).toEqual(['yellow', null])
+    expect(onText('PRINT\nMACHINE', [2])).toEqual([null, 'white'])
+    expect(onText('A  B\tC\n\nD', [3])).toEqual(['yellow', null])
+    expect(onText('A  B\tC\n\nD', [4])).toEqual([null, 'white'])
+    // A box that did not print does not hide a later one that did.
+    const d = copy(defaultDoc) as unknown as Doc
+    Object.assign((d.layers as Doc[])[0], {
+      text: 'PRINT',
+      boxes: [
+        { id: 'b', words: [7], inkId: 'yellow', opacity: 1 },
+        { id: 'c', words: [0], inkId: 'teal', opacity: 1 },
+      ],
+    })
+    expect(normalizeSettings(d).layers[0].backing).toBe('teal')
+  })
+
   it('layer.opacity 0: plate opacity is cut, so a hidden plate prints at full strength', () => {
     // Stated, not fixed: the verdict cut plate opacity (#17) and there is no
     // other way to hide a plate, while dropping it would destroy work. The

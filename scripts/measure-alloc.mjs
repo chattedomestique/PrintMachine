@@ -4,16 +4,21 @@
  *   node scripts/measure-alloc.mjs            (all cases; exits 1 over a gate)
  *   node scripts/measure-alloc.mjs 1 3        (just cases 1 and 3)
  *
+ * Each case runs in a process of its own, so nothing one case left behind is
+ * counted in, or freed during, the next.
+ *
  * Desktop Chromium's resident memory is not a faithful stand-in for an
  * iPhone's: V8 frees short-lived buffers eagerly where JavaScriptCore keeps
  * them. So this runs the REAL export path (`renderPrintAsync`, the function
  * Save calls) in node, where every typed array is counted: each constructor
  * is wrapped, and at every allocation of a full-sheet-sized buffer a full
  * garbage collection runs and the bytes still live are read back
- * (`process.memoryUsage().arrayBuffers`); runs agree to about 0.1 B/px. A
- * buffer is live while anything can
+ * (`process.memoryUsage().arrayBuffers`). A buffer is live while anything can
  * still reach it — a local not yet out of scope included, which is how a
- * conservative collector like JavaScriptCore's sees it too. The peak of that,
+ * conservative collector like JavaScriptCore's sees it too. V8 runs
+ * single-threaded here, so when a function is optimised (which can end a dead
+ * local's life early) cannot vary between runs: every run gives the same
+ * numbers. The peak of that,
  * over the output's pixel count, is the gate: <= 35 bytes per pixel for cases
  * 1-4 (plan WP2.7; case 5 is recorded, not gated).
  *
@@ -31,10 +36,19 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { exportCases } from './export-cases.mjs'
 
-if (typeof globalThis.gc !== 'function') {
-  // Re-run with the collector exposed; the accounting needs it.
-  const r = spawnSync(process.execPath, ['--expose-gc', fileURLToPath(import.meta.url), ...process.argv.slice(2)], { stdio: 'inherit' })
-  process.exit(r.status ?? 1)
+const args = process.argv.slice(2)
+const child = args[0] === '--case'
+if (!child) {
+  // One process per case, with the collector exposed (the accounting needs
+  // it); the gate fails if any case does.
+  const ids = args.map(Number).filter(Boolean)
+  console.log(`Peak live typed-array bytes per output pixel; gate 35 B/px (cases 1-4).\n`)
+  let status = 0
+  for (const id of ids.length ? ids : [1, 2, 3, 4, 5]) {
+    const r = spawnSync(process.execPath, ['--expose-gc', '--single-threaded', fileURLToPath(import.meta.url), '--case', String(id)], { stdio: 'inherit' })
+    if (r.status !== 0) status = 1
+  }
+  process.exit(status)
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -166,11 +180,10 @@ track()
 
 const CASES = exportCases({ defaultSettings, makeLayer, makeMedia, contrastPartner })
 
-const only = process.argv.slice(2).map(Number).filter(Boolean)
+const only = Number(args[1])
 const fmt = (v) => v.toFixed(1)
 let failed = false
-console.log(`Peak live typed-array bytes per output pixel; gate ${GATE} B/px (cases 1-4).\n`)
-for (const c of CASES.filter((k) => only.length === 0 || only.includes(k.id))) {
+for (const c of CASES.filter((k) => k.id === only)) {
   const s = c.doc()
   const plan = planPrint(s)
   const n = plan.width * plan.height
@@ -189,14 +202,14 @@ for (const c of CASES.filter((k) => only.length === 0 || only.includes(k.id))) {
       meter.phase = 'press'
     },
     onProgress: (p) => {
+      // What the print holds, read as it starts.
       if (p.step === 'print' && meter.phase !== 'print') {
-        sample()
         meter.phase = 'print'
+        sample()
       }
     },
   })
   const ms = performance.now() - t0
-  sample()
   meter.on = false
 
   // The export's two canvases, 4 B/px each, until the plates are pressed;

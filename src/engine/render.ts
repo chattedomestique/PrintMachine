@@ -42,7 +42,7 @@ import { PaperSampler, paperField, type PaperField, type PaperOptions, type Pape
 import { FbmSampler, fbm2D, type CellNoise } from './rng.ts'
 import { defaultAngle, screenField, type ScreenOptions } from './screen.ts'
 import { cutKnockout } from './knockout.ts'
-import { SWITCH_BAND, bandMask, coverRect, groundLuma, snapRect, splitInks, type DrawRect } from './media.ts'
+import { SWITCH_BAND, bandMask, coverRect, groundLumaGrid, sampleLuma, snapRect, splitInks, type DrawRect, type LumaGrid } from './media.ts'
 import { rasterizeBacking, rasterizeText } from './text.ts'
 import { REFERENCE_HEIGHT, passCount } from './limits.ts'
 import { sheetAspect, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
@@ -600,7 +600,10 @@ export function* printSheetSteps(
   let plateIndex = 0
   const passes = passCount(s)
 
-  let groundLum: Float32Array | undefined
+  // The ground's blurred luminance, held as a small grid (media.ts LumaGrid)
+  // and read back at full resolution into the workspace for each plate that
+  // switches.
+  let lumaGrid: LumaGrid | undefined
   // The screened "ground is light" mask of the plate before, and the switch
   // point it was made for. Every plate switches at its own point; plates that
   // share one (the default: all at 50%) share the mask, so it is built once.
@@ -623,111 +626,127 @@ export function* printSheetSteps(
   // everything else only the plates needed, before the sheet is printed.
   let ws = makeWorkspace(w * h)
 
-  for (const layer of s.layers) {
-    // A plate takes a backing OR a second ink, never both, and that is held
-    // in the reducer and the normaliser rather than decided here. The reason:
-    // the second ink picks each glyph's ink from the PHOTO's luminance, but
-    // over a backing the real ground is the block's ink on paper, so a light
-    // second ink chosen for a dark patch of photo would land on the block and
-    // vanish.
-    if (layer.backing) {
-      yield { step: 'press', pass: plateIndex + 1, passes }
-      const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h, ws)
-      plates.push({ coverage: backing.coverage, rgb: inkById(layer.backing).rgb })
-      // The block prints on paper: the photo is cut back under its own torn,
-      // misregistered outline, so a pale block over a dark photo still reads.
-      if (ground) cutKnockout(knock(), backing.roughened, null, { w, h, dx: backing.dx, dy: backing.dy })
-      plateIndex++
-    }
+  // Each pass is pressed in a function of its own, so that what it holds — its
+  // tone, its coverage before the split, the luminance it read back — is let
+  // go when it returns. A generator's own locals would stay held, in its
+  // suspended frame, through every later plate and the print.
 
-    yield { step: 'press', pass: plateIndex + 1, passes }
+  // A plate takes a backing OR a second ink, never both, and that is held in
+  // the reducer and the normaliser rather than decided here. The reason: the
+  // second ink picks each glyph's ink from the PHOTO's luminance, but over a
+  // backing the real ground is the block's ink on paper, so a light second
+  // ink chosen for a dark patch of photo would land on the block and vanish.
+  const pressBacking = (layer: TextLayer, ink: string) => {
+    const backing = pressPlate(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h, ws)
+    plates.push({ coverage: backing.coverage, rgb: inkById(ink).rgb })
+    // The block prints on paper: the photo is cut back under its own torn,
+    // misregistered outline, so a pale block over a dark photo still reads.
+    if (ground) cutKnockout(knock(), backing.roughened, null, { w, h, dx: backing.dx, dy: backing.dy })
+    plateIndex++
+  }
+
+  const pressType = (layer: TextLayer) => {
     const tone = tones.type(layer)
     const pressed = pressPlate(tone, plateIndex, s.press, s.seed, noise, w, h, ws)
     plateIndex++
     const coverage = pressed.coverage
 
-    if (layer.contrastInkId && ground) {
-      // One pass whose ink changes with what is under it — a split fountain
-      // driven by the image rather than by position across the drum. Pressed
-      // once and then split, so the letterforms stay coherent; pressing twice
-      // would misregister the two halves against each other and tear every
-      // glyph that happens to straddle the boundary.
-      //
-      // Which ink goes where is decided by what the inks *are*, not by which
-      // field they were typed into. Keying it to the slot assumes the first
-      // ink is the dark one, and the moment it isn't — white type over a
-      // photograph, which is the ordinary case — the switch runs and puts
-      // white on the sky and black on the water: both invisible, and worse
-      // than not switching at all. The darker of the pair belongs on light
-      // ground and the lighter on dark ground, whichever way round they were
-      // chosen. The plate's own ink as its second ink is the one-colour case:
-      // both halves print that ink, and the knockout keeps it readable.
-      const split = splitInks(inkById(layer.inkId).rgb, inkById(layer.contrastInkId).rgb)
-
-      if (!groundLum) {
-        // Blurred across roughly a word. Anything finer and the mask reads the
-        // photograph's own grain — the glitter on water is the same value as
-        // white ink and about the size of a letter, so a tighter blur decides
-        // light-or-dark differently inside a single word. A word is the unit
-        // legibility is actually judged in, so it is the unit that commits.
-        // (The workspace's spare buffers do the blur: the plate is screened.)
-        groundLum = groundLuma(ground, w, h, Math.max(2, tone.fontSize * 1.5), ws.scratch, ws.work)
-      }
-      if (!light || light.threshold !== layer.contrastThreshold) {
-        // Screened, not left soft. A soft mask makes *both* inks print at
-        // partial coverage through the transition, which is an opacity
-        // crossfade wearing a print's clothes — and it is why the switch point
-        // read as a fade rather than as a switch. Running the mask through the
-        // same screen or dither the press is already using makes the changeover
-        // a real pattern: each ink lands at full strength, and the boundary
-        // breaks up into dots the way a two-colour job actually does.
-        //
-        // Made for THIS plate's switch point. (It used to be made once, from
-        // the first split plate, so every later plate's Switch point did
-        // nothing.) One mask is held at a time: a plate with its own point
-        // costs a rebuild, and the old mask is let go before the new one is
-        // made, so two masks are never held together.
-        light = undefined
-        switchIndex ??= plateIndex
-        const threshold = layer.contrastThreshold
-        const soft = bandMask(groundLum, threshold, SWITCH_BAND, ws.work)
-        light = { threshold, mask: binarise(soft, switchIndex, s.press, s.seed, w, h) }
-      }
-      const mask = light.mask
-      // The mask is hard (0 or 255), so each half is the coverage or nothing.
-      // The light half takes the coverage's own buffer.
-      const onDark = new Uint8ClampedArray(w * h)
-      for (let i = 0; i < coverage.length; i++) {
-        onDark[i] = (coverage[i] * (255 - mask[i])) / 255
-        coverage[i] = (coverage[i] * mask[i]) / 255
-      }
-      const onLight = coverage
-      plates.push({ coverage: onLight, rgb: split.onLight })
-      plates.push({ coverage: onDark, rgb: split.onDark })
-
-      // Cut from the *same artwork the plate is*, torn by the same stencil and
-      // moved by the same paper feed — the plate's own roughened tone and
-      // offset, so the hole lands exactly where the ink does. Cutting it from
-      // the raw tone instead leaves the hole a couple of pixels off, and the
-      // only way to cover that gap is to spread the hole: on a poster a trap,
-      // at text size a flood that swells every counter shut.
-      cutKnockout(knock(), pressed.roughened, groundLum, {
-        w,
-        h,
-        dx: pressed.dx,
-        dy: pressed.dy,
-        split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma },
-      })
-    } else {
+    if (!layer.contrastInkId || !ground) {
       plates.push({ coverage, rgb: inkById(layer.inkId).rgb })
+      return
     }
+
+    // One pass whose ink changes with what is under it — a split fountain
+    // driven by the image rather than by position across the drum. Pressed
+    // once and then split, so the letterforms stay coherent; pressing twice
+    // would misregister the two halves against each other and tear every
+    // glyph that happens to straddle the boundary.
+    //
+    // Which ink goes where is decided by what the inks *are*, not by which
+    // field they were typed into. Keying it to the slot assumes the first
+    // ink is the dark one, and the moment it isn't — white type over a
+    // photograph, which is the ordinary case — the switch runs and puts
+    // white on the sky and black on the water: both invisible, and worse
+    // than not switching at all. The darker of the pair belongs on light
+    // ground and the lighter on dark ground, whichever way round they were
+    // chosen. The plate's own ink as its second ink is the one-colour case:
+    // both halves print that ink, and the knockout keeps it readable.
+    const split = splitInks(inkById(layer.inkId).rgb, inkById(layer.contrastInkId).rgb)
+
+    if (!lumaGrid) {
+      // Blurred across roughly a word. Anything finer and the mask reads the
+      // photograph's own grain — the glitter on water is the same value as
+      // white ink and about the size of a letter, so a tighter blur decides
+      // light-or-dark differently inside a single word. A word is the unit
+      // legibility is actually judged in, so it is the unit that commits.
+      // (The workspace's spare buffers do a full-size blur: the plate is
+      // screened.)
+      lumaGrid = groundLumaGrid(ground, w, h, Math.max(2, tone.fontSize * 1.5), ws.scratch, ws.work)
+    }
+    // Read back at every pixel into the workspace's scratch, free now that
+    // the plate is pressed; it stays there through this plate's mask and
+    // knockout.
+    const groundLum = sampleLuma(lumaGrid, ws.scratch)
+    if (!light || light.threshold !== layer.contrastThreshold) {
+      // Screened, not left soft. A soft mask makes *both* inks print at
+      // partial coverage through the transition, which is an opacity
+      // crossfade wearing a print's clothes — and it is why the switch point
+      // read as a fade rather than as a switch. Running the mask through the
+      // same screen or dither the press is already using makes the changeover
+      // a real pattern: each ink lands at full strength, and the boundary
+      // breaks up into dots the way a two-colour job actually does.
+      //
+      // Made for THIS plate's switch point. (It used to be made once, from
+      // the first split plate, so every later plate's Switch point did
+      // nothing.) One mask is held at a time: a plate with its own point
+      // costs a rebuild, and the old mask is let go before the new one is
+      // made, so two masks are never held together.
+      light = undefined
+      switchIndex ??= plateIndex
+      const threshold = layer.contrastThreshold
+      const soft = bandMask(groundLum, threshold, SWITCH_BAND, ws.work)
+      light = { threshold, mask: binarise(soft, switchIndex, s.press, s.seed, w, h) }
+    }
+    const mask = light.mask
+    // The mask is hard (0 or 255), so each half is the coverage or nothing.
+    // The light half takes the coverage's own buffer.
+    const onDark = new Uint8ClampedArray(w * h)
+    for (let i = 0; i < coverage.length; i++) {
+      onDark[i] = (coverage[i] * (255 - mask[i])) / 255
+      coverage[i] = (coverage[i] * mask[i]) / 255
+    }
+    plates.push({ coverage, rgb: split.onLight })
+    plates.push({ coverage: onDark, rgb: split.onDark })
+
+    // Cut from the *same artwork the plate is*, torn by the same stencil and
+    // moved by the same paper feed — the plate's own roughened tone and
+    // offset, so the hole lands exactly where the ink does. Cutting it from
+    // the raw tone instead leaves the hole a couple of pixels off, and the
+    // only way to cover that gap is to spread the hole: on a poster a trap,
+    // at text size a flood that swells every counter shut.
+    cutKnockout(knock(), pressed.roughened, groundLum, {
+      w,
+      h,
+      dx: pressed.dx,
+      dy: pressed.dy,
+      split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma },
+    })
+  }
+
+  for (const layer of s.layers) {
+    if (layer.backing) {
+      yield { step: 'press', pass: plateIndex + 1, passes }
+      pressBacking(layer, layer.backing)
+    }
+    yield { step: 'press', pass: plateIndex + 1, passes }
+    pressType(layer)
   }
 
   // Pressed: the working buffers, the ground's luminance and the switch mask
   // are let go (a suspended generator would otherwise hold them through the
   // print), and the caller may let go of whatever it pressed with.
   ws = RELEASED
-  groundLum = undefined
+  lumaGrid = undefined
   light = undefined
   onPressed?.()
 

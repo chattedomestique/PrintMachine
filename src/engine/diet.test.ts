@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest'
 
 import { FbmSampler, ValueNoiseSampler, fbm2D, mulberry32, mulberryAt, valueNoise2D } from './rng.ts'
 import { PaperSampler, paperField } from './paper.ts'
-import { ensureCache, makeWorkspace, pressPlate, printSheet, printSheetSteps, sampledNoise, toneAsFloat, type ToneSource } from './render.ts'
+import { ensureCache, grainCell, makeWorkspace, pressPlate, printSheet, printSheetSteps, sampledNoise, switchScreen, toneAsFloat, type ToneSource } from './render.ts'
+import { bandMask, groundLuma, groundLumaGrid, lumaCell, sampleLuma, splitInks } from './media.ts'
 import { inkById, paperById } from './inks.ts'
 import { screenField } from './screen.ts'
 import { ditherField } from './dither.ts'
@@ -390,5 +391,122 @@ describe('step 4: nothing the canvas holds is held twice', () => {
     const again = new Uint8ClampedArray(w * h * 4)
     for (let i = 0; i < w * h; i++) again.set([(i * 5) % 256, (i * 9) % 256, (i * 2) % 256, 255], i * 4)
     expect(ground).toEqual(again)
+  })
+})
+
+describe('step 6: the ground\'s luminance on a small grid', () => {
+  /** The harness's test photo (a ramp with a zone plate in it), at sheet size. */
+  const photo = (w: number, h: number) => {
+    const d = new Uint8ClampedArray(w * h * 4)
+    const cx = w / 2
+    const cy = h / 2
+    const k = Math.PI / (2 * Math.max(w, h))
+    for (let y = 0; y < h; y++) {
+      const v = y / (h - 1)
+      for (let x = 0; x < w; x++) {
+        const u = x / (w - 1)
+        const r2 = (x - cx) ** 2 + (y - cy) ** 2
+        const zone = r2 < (0.3 * h) ** 2 ? 0.5 + 0.5 * Math.cos(k * r2) : 0.5
+        const l = Math.min(1, Math.max(0, 0.06 + 0.88 * u + (zone - 0.5) * 0.5))
+        d.set([255 * Math.min(1, l * (0.9 + 0.2 * v)), 255 * l, 255 * Math.min(1, l * (1.1 - 0.2 * v)), 255], (y * w + x) * 4)
+      }
+    }
+    return d
+  }
+
+  it('is groundLuma exactly where the blur is small (one-pixel cells)', () => {
+    const w = 90
+    const h = 70
+    const g = photo(w, h)
+    for (const r of [2, 15.5, 31.9]) {
+      expect(lumaCell(r)).toBe(1)
+      expect(sampleLuma(groundLumaGrid(g, w, h, r), new Float32Array(w * h))).toEqual(groundLuma(g, w, h, r))
+    }
+    expect(lumaCell(32)).toBe(2)
+    expect(lumaCell(510)).toBe(31)
+  })
+
+  it('moves the switch and the knockout on under 1% of the pixels, and nothing else (the three conditions)', () => {
+    // The default headline (90%) and the band captions live in (40%), on a
+    // 1440x1800 sheet. For each: the luminance at full resolution and on the
+    // grid; the second ink's split and knockout made from each, exactly as
+    // printSheet makes them; the sheet printed from each.
+    const w = 1440
+    const h = 1800
+    const ground = photo(w, h)
+    const s = defaultSettings()
+    const scale = h / 1800
+    const words = new Float32Array(w * h)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) words[y * w + x] = x % 41 < 30 && y % 53 < 36 ? 0.84 : 0
+    const coverage = screenField(words, w, h, { pitch: 9, angle: 75, softness: 0.7, originX: 0, originY: 0 }, new Uint8ClampedArray(w * h))
+    const paper = paperField(w, h, { rgb: paperById('natural').rgb, texture: 0.4, blotch: 0.5, seed: 1 })
+    const split = splitInks(inkById('black').rgb, inkById('white').rgb)
+    const sheet = (lum: Float32Array, threshold: number) => {
+      const mask = screenField(bandMask(lum, threshold), w, h, switchScreen(1, s.press, s.seed, scale), new Uint8ClampedArray(w * h))
+      const onDark = new Uint8ClampedArray(w * h)
+      const onLight = new Uint8ClampedArray(w * h)
+      for (let i = 0; i < w * h; i++) {
+        onDark[i] = (coverage[i] * (255 - mask[i])) / 255
+        onLight[i] = (coverage[i] * mask[i]) / 255
+      }
+      const knockout = new Uint8ClampedArray(w * h)
+      cutKnockout(knockout, words.slice(), lum, { w, h, dx: 1.4, dy: -2.2, split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma } })
+      const out = new Uint8ClampedArray(w * h * 4)
+      compositeLayers(out, w, h, { ...paper, base: ground, knockout, paperAmount: 1 }, [
+        { coverage: onLight, rgb: split.onLight },
+        { coverage: onDark, rgb: split.onDark },
+      ])
+      return { mask, knockout, out }
+    }
+    for (const size of [0.09, 0.04]) {
+      const r = size * h * 1.5
+      const full = groundLuma(ground, w, h, r)
+      const grid = groundLumaGrid(ground, w, h, r)
+      expect(grid.cell).toBeGreaterThan(1)
+      expect(grid.grid.length).toBeLessThanOrEqual((w * h) / 16)
+      const reduced = sampleLuma(grid, new Float32Array(w * h))
+      let worst = 0
+      for (let i = 0; i < w * h; i++) worst = Math.max(worst, Math.abs(full[i] - reduced[i]))
+      expect(worst).toBeLessThan(0.01)
+      for (const threshold of [0.35, 0.5, 0.65]) {
+        const a = sheet(full, threshold)
+        const b = sheet(reduced, threshold)
+        let flips = 0
+        let elsewhere = 0
+        for (let i = 0; i < w * h; i++) {
+          const flipped = a.mask[i] !== b.mask[i] || a.knockout[i] !== b.knockout[i]
+          if (flipped) {
+            flips++
+            continue
+          }
+          // (a) identical where neither the switch nor the knockout moved...
+          for (let c = 0; c < 4; c++) elsewhere = Math.max(elsewhere, Math.abs(a.out[i * 4 + c] - b.out[i * 4 + c]))
+        }
+        expect(elsewhere).toBe(0) // ...(b) within 2 levels a fortiori
+        // (c) and they move on under 1% of the pixels.
+        expect(flips / (w * h)).toBeLessThan(0.01)
+      }
+    }
+  }, 30_000)
+
+  it('a grain switch mask keeps its ink density (error diffusion re-dithers the band where the inks mix)', () => {
+    const w = 800
+    const h = 1000
+    const ground = photo(w, h)
+    const r = 0.09 * h * 1.5
+    const full = groundLuma(ground, w, h, r)
+    const reduced = sampleLuma(groundLumaGrid(ground, w, h, r), new Float32Array(w * h))
+    const cell = grainCell(9, h / 1800)
+    for (const threshold of [0.35, 0.5, 0.65]) {
+      const a = ditherField(bandMask(full, threshold), w, h, { scale: cell }, new Uint8ClampedArray(w * h))
+      const b = ditherField(bandMask(reduced, threshold), w, h, { scale: cell }, new Uint8ClampedArray(w * h))
+      let ia = 0
+      let ib = 0
+      for (let i = 0; i < w * h; i++) {
+        ia += a[i]
+        ib += b[i]
+      }
+      expect(Math.abs(ib / ia - 1)).toBeLessThan(0.002)
+    }
   })
 })

@@ -254,7 +254,7 @@ describe('the grain: an exact cell, the same density at every size', () => {
   })
 })
 
-describe('at the reference height, nothing but the speckle moved', () => {
+describe('at the reference height, nothing but the speckle moved (pins re-recorded on purpose since, see below)', () => {
   // Recorded from the build before these fixes (f04ac1b).
   const ramp = (w: number, h: number) => {
     const f = new Float32Array(w * h)
@@ -291,13 +291,21 @@ describe('at the reference height, nothing but the speckle moved', () => {
       for (let y = y0; y < y1; y++) for (let x = 8; x < w - 8; x++) f[y * w + x] = 1
       return f
     }
-    // Recorded on f04ac1b, before the scale fixes. The halftone was re-pinned
-    // once since, on purpose: the press keeps coverage in bytes (WP2.7 step
-    // 2), which moved this sheet by at most one level (mean 0.004) — was
-    // 4cf552fa5d93... The grain is binary, so its bytes did not move.
+    // Recorded on f04ac1b, before the scale fixes, and re-pinned since on
+    // purpose, twice (WP2.7):
+    //  - step 2, coverage in bytes: the halftone moved by at most one level
+    //    (mean 0.004; was 4cf552fa5d93...), the binary grain not at all;
+    //  - step 6, the ground's luminance on a grid (cell 11 px here): the
+    //    second ink's switch and knockout moved where the blurred luminance
+    //    sits on a threshold — on this ramp a 96 px slice is near one across
+    //    its whole width, so the halftone moved on its switch line (mean 0.86
+    //    levels; was 91ec7d3c70ac...) and the grain, whose switch is error
+    //    diffusion, re-dithered its mixing band (mean 26 levels; was
+    //    6190f55942d1...). diet.test.ts holds the change to under 1% of the
+    //    pixels on a photo.
     const golden = {
-      halftone: '91ec7d3c70ac5cde27ea1a80d06002e79cf03e1fcda84e4cc8eb2081b4b380a1',
-      grain: '6190f55942d116efead1494017261ce42834634cba4d4fcdf35bad0ea163b947',
+      halftone: '752362932025fa77362061bcf991e6af0d01776be5cf5779714a3f678b2cc12d',
+      grain: 'b3743f23fe93a28ab4df05bb855c8a5b8435f921630118e4ac76ac808351b456',
     }
     for (const method of ['halftone', 'grain'] as const) {
       const s = defaultSettings()

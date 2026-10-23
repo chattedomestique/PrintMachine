@@ -625,6 +625,16 @@ output pixel.
 - **Let go as soon as done.** Once the plates are pressed the workspace, the
   ground's luminance and the switch mask are dropped, and an export's glyph
   canvas is emptied (its width set to 0), before the print and the encode.
+- **The ground's luminance on a small grid.** The second ink decides each
+  glyph's ink from the photo's luminance blurred across about a word — a
+  radius of 500 px on a 12 MP export, the press's slowest pass and a
+  sheet-sized float held through every plate, for a field with nothing finer
+  than a few hundred pixels in it. It is now blurred on a grid of cells a
+  sixteenth of the radius across and read back bilinearly. Measured on the
+  harness photo: the switch and the knockout move on under 0.12% of the
+  pixels and nothing else moves. Under Grain the switch is error diffusion,
+  which re-dithers its whole mixing band at any change in its input: the same
+  ink density (to 0.1%), a different arrangement of the grains there.
 
 ### The same print at every size
 

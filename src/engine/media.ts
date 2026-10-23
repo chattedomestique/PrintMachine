@@ -230,6 +230,108 @@ export function groundLuma(
 }
 
 /**
+ * The ground's blurred luminance, held small: `groundLuma` computed on a grid
+ * of `cell`-pixel squares (each the mean of its pixels' luminance), blurred
+ * there by radius / cell, and read back at full resolution by bilinear
+ * sampling (`sampleLuma`).
+ *
+ * The blur runs across roughly a word (radius 1.5 em: about 500 px on a 12 MP
+ * export), so the field has nothing finer than a few hundred pixels in it, and
+ * blurring it at full resolution — the press's single slowest pass, and a
+ * sheet-sized float held through every plate — paid for detail the blur then
+ * throws away. The grid is LUMA_GRID_SPAN cells of blur radius across, so it
+ * keeps the field's shape: the switch and the knockout move on under 1% of the
+ * pixels (diet.test.ts), and only there.
+ *
+ * Where the radius is small (small type at preview size), the cell is one
+ * pixel and this is `groundLuma` exactly.
+ */
+export interface LumaGrid {
+  /** Blurred luminance per cell, gw * gh. */
+  grid: Float32Array
+  gw: number
+  gh: number
+  cell: number
+  w: number
+  h: number
+}
+
+/** The blur radius, in cells, the grid is made fine enough to hold. */
+export const LUMA_GRID_SPAN = 16
+
+/** The grid's cell, in pixels, for a blur of this radius. */
+export const lumaCell = (blurRadius: number): number => Math.max(1, Math.floor(blurRadius / LUMA_GRID_SPAN))
+
+export function groundLumaGrid(
+  rgba: Uint8ClampedArray,
+  w: number,
+  h: number,
+  blurRadius: number,
+  /** Buffers for a full-resolution blur (cell 1), if the caller has them. */
+  scratch?: Float32Array,
+  spare?: Float32Array,
+): LumaGrid {
+  const cell = lumaCell(blurRadius)
+  if (cell === 1) return { grid: groundLuma(rgba, w, h, blurRadius, scratch, spare), gw: w, gh: h, cell, w, h }
+  const gw = Math.ceil(w / cell)
+  const gh = Math.ceil(h / cell)
+  const sum = new Float64Array(gw * gh)
+  for (let y = 0; y < h; y++) {
+    const row = Math.floor(y / cell) * gw
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4
+      const a = rgba[o + 3] / 255
+      sum[row + Math.floor(x / cell)] += luma(rgba[o], rgba[o + 1], rgba[o + 2]) * a + (1 - a)
+    }
+  }
+  const grid = new Float32Array(gw * gh)
+  for (let j = 0; j < gh; j++) {
+    const rows = Math.min(h, (j + 1) * cell) - j * cell
+    for (let i = 0; i < gw; i++) {
+      const cols = Math.min(w, (i + 1) * cell) - i * cell
+      grid[j * gw + i] = sum[j * gw + i] / (rows * cols)
+    }
+  }
+  const r = blurRadius / cell
+  blurInPlace(grid, gw, gh, r, new Float32Array(gw * gh), needsSpare(r) ? new Float32Array(gw * gh) : undefined)
+  return { grid, gw, gh, cell, w, h }
+}
+
+/** The grid read back at every pixel of the sheet, into `out` (w * h):
+ *  bilinear between cell centres, held at the edge cells beyond them. */
+export function sampleLuma(g: LumaGrid, out: Float32Array): Float32Array {
+  const { grid, gw, gh, cell, w, h } = g
+  if (cell === 1) {
+    out.set(grid)
+    return out
+  }
+  const xs0 = new Int32Array(w)
+  const xs1 = new Int32Array(w)
+  const fxs = new Float64Array(w)
+  for (let x = 0; x < w; x++) {
+    const u = Math.min(gw - 1, Math.max(0, (x + 0.5) / cell - 0.5))
+    xs0[x] = Math.floor(u)
+    xs1[x] = Math.min(gw - 1, xs0[x] + 1)
+    fxs[x] = u - xs0[x]
+  }
+  for (let y = 0; y < h; y++) {
+    const v = Math.min(gh - 1, Math.max(0, (y + 0.5) / cell - 0.5))
+    const y0 = Math.floor(v)
+    const y1 = Math.min(gh - 1, y0 + 1)
+    const fy = v - y0
+    const r0 = y0 * gw
+    const r1 = y1 * gw
+    for (let x = 0; x < w; x++) {
+      const fx = fxs[x]
+      const top = grid[r0 + xs0[x]] + (grid[r0 + xs1[x]] - grid[r0 + xs0[x]]) * fx
+      const bot = grid[r1 + xs0[x]] + (grid[r1 + xs1[x]] - grid[r1 + xs0[x]]) * fx
+      out[y * w + x] = top + (bot - top) * fy
+    }
+  }
+  return out
+}
+
+/**
  * How far past the switch point the blend runs, in luminance.
  *
  * Deliberately narrow. The band is there so a stroke crossing the boundary

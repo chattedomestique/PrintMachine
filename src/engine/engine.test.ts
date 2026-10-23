@@ -1069,7 +1069,9 @@ describe('whichever decode of the photo is drawn, it fills the rectangle its tru
 
   it('the preview\'s working copy and the original land in the same place on the sheet', () => {
     const s = sheet()
-    const working = { width: 2364, height: 1773 } as unknown as CanvasImageSource
+    // A working copy whose floored size is a hair off the photo's shape, so a
+    // rect taken from the copy's own size would land elsewhere.
+    const working = { width: 2365, height: 1772 } as unknown as CanvasImageSource
     const original = { width: 5712, height: 4284 } as unknown as CanvasImageSource
     const draw = (height: number, bitmap: CanvasImageSource) => {
       const out = fakeContext()

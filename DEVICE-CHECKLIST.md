@@ -82,6 +82,13 @@ So:
 - [ ] A print saved by an older build (its photo cut to 2048 px) shows the
       "saved at reduced size" note in the Photo tab
 
+> The photo is stored and decoded whole, at any size: nothing here should ever
+> show a photo cut down on import. What bounds a saved print is the export
+> canvas, by area (16.7 MP, `MAX_AREA`, the most a browser canvas is
+> guaranteed to hold; WebKit's limit is an area, and there is no edge cap).
+> Saving above it would need tiled rendering and a JavaScript encoder, which
+> are not built.
+
 ## Save
 
 - [ ] Save → the native share sheet appears → Save Image → the file **is** in Photos

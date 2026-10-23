@@ -29,15 +29,6 @@ export const RedoIcon = ({ size = 20 }: IconProps) => (
   </svg>
 )
 
-export const ShuffleIcon = ({ size = 20 }: IconProps) => (
-  <svg {...base(size)}>
-    <path d="M3 7h4l3 5 3 5h4" />
-    <path d="M3 17h4l3-5" />
-    <path d="m17 4 4 3-4 3" />
-    <path d="m17 14 4 3-4 3" />
-  </svg>
-)
-
 export const GridIcon = ({ size = 20 }: IconProps) => (
   <svg {...base(size)}>
     <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />

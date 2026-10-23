@@ -51,32 +51,3 @@ export function paperField(w: number, h: number, opts: PaperOptions): PaperField
 
   return { shade, rgb: opts.rgb }
 }
-
-/**
- * Faint horizontal banding from the feed rollers, applied to a coverage field.
- *
- * Very subtle by design — at more than a few percent it stops reading as a
- * print artefact and starts reading as a broken gradient.
- */
-export function applyRollerBanding(
-  coverage: Float32Array,
-  w: number,
-  h: number,
-  amount: number,
-  seed: number,
-): Float32Array {
-  if (amount <= 0) return coverage
-  const out = new Float32Array(coverage.length)
-  // One noise value per scanline, smoothed — banding runs across the sheet in
-  // the feed direction, so it varies in y and is constant in x.
-  const band = valueNoise2D(1, h, Math.max(8, h / 40), seed)
-  for (let y = 0; y < h; y++) {
-    const m = 1 + amount * 0.18 * (band[y] * 2 - 1)
-    const row = y * w
-    for (let x = 0; x < w; x++) {
-      const v = coverage[row + x] * m
-      out[row + x] = v < 0 ? 0 : v > 1 ? 1 : v
-    }
-  }
-  return out
-}

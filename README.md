@@ -17,11 +17,10 @@ printed, all of which this engine models:
 | Angled screens     | Each ink gets its own screen angle. The interference between them is the rosette your eye reads as "printed". |
 | Misregistration    | A real Riso pulls each colour on a separate pass and the paper never lands twice in the same place. This is the single biggest tell. |
 | Subtractive overprint | Riso ink is transparent. Pink over blue is purple, not pink. Alpha compositing gets this wrong. |
-| Ink mottle         | Drum ink lays down unevenly — low-frequency blotch plus speckle dropout.                          |
+| Wear (ink mottle)  | Drum ink lays down unevenly — low-frequency blotch plus speckle dropout, on one control.           |
 | Paper tooth        | The stock is not white and not smooth.                                                            |
 | Density ceiling    | Riso ink never reaches full black. Capping density is what keeps it from looking like inkjet.      |
-| Torn edges         | The master is a thermal stencil burned as a coarse raster, then ink is forced through it into paper fibre. Nothing in that chain makes a clean curve. |
-| Misprints          | Drum streaks, ink drag along the feed direction, and patches where ink never transferred at all.  |
+| Edge (torn edges)  | The master is a thermal stencil burned as a coarse raster, then ink is forced through it into paper fibre. Nothing in that chain makes a clean curve: the tear and the ink's bleed, on one control. |
 | Backing as a plate | A block behind the type is its own plate in its own ink, so it screens, misregisters and wears like everything else — and the type overprints it into a third colour. |
 
 ## Running it
@@ -139,7 +138,7 @@ Three things make it actually work:
   large shapes the eye is judging against.
 - **The switch is screened, not faded.** The mask starts soft so a glyph
   crossing the boundary does not change colour mid-stem, and is then run
-  through the *same screen or dither the press is already using*. A soft mask
+  through the *same screen or grain the press is already using*. A soft mask
   left soft makes both inks print at partial coverage through the transition —
   which is an opacity crossfade wearing a print's clothes, and is exactly why
   the switch point read as a fade. Screened, each ink lands at full strength
@@ -175,59 +174,36 @@ ink over the photo: rendered side by side, the two put the same share of pink
 pixels on a dark ground.) The choice is listed first in the second-ink picker,
 and it follows the plate when its ink changes.
 
-### Four ways to lay ink, not two
+### The press: two screens, two kinds of wear
 
-A halftone breaks tone into dots and a dither scatters it. Neither is how a cut
-block or a drawn mark behaves, and both of those are printmaking too.
+A Riso driver screens with dots or with grain, so the Press tab offers exactly
+those: **Halftone** (round dots on an angled lattice, a different angle per
+plate so the screens beat into a rosette) and **Grain** (Atkinson error
+diffusion, which carries only 6/8 of the error and so blows out highlights and
+crushes shadows — the crunchy duplicator look). One **Screen size** drives both:
+the halftone's dot pitch, and a grain cell a third of it, so the 9 px default
+screen gives the 3 px grain the press always shipped with. The grain is made by
+dithering a reduced grid and expanding it, and the reduction *averages* rather
+than samples, or the grain tracks the noise instead of the artwork. Dot shape
+(round), dot softness (0.7 px) and the grain threshold (one half) are fixed:
+research knobs, not choices a print needs.
 
-**Woodcut** is ink carried by whatever the blade left standing. Three things
-have to happen at once or it reads as a filter: grooves cut *across* the shape
-that wander the way a blade pushed through timber does, the block's own grain
-showing through what remains, and a groove that narrows as the tone darkens
-because a darker area is one the carver left more of.
+The wear is the two things a person can name. **Edge** is "the letters are
+ragged": the burned stencil's tear and the ink's bleed past it, which are the
+same threshold pass, moved together at the ratio the press always shipped
+with. **Wear** is "the ink is blotchy": drum mottle and speckle dropout, the
+same failure at two grains, moved together the same way. At their defaults
+both reproduce the shipped amounts exactly. **Ink** is the density ceiling and
+**Misregistration** where each pass lands. **Re-roll** pulls another sheet: a
+different tear, mottle, registration and paper grain from the same settings.
 
-**Scribble** is a shape hatched rather than flooded. Strokes bow away from
-straight, darker tone means a fatter stroke rather than more strokes — which is
-what a pen actually gives you — and a second pass crosses the first only where
-the shape wants to be darker. The technique follows
-[p5.scribble.js](https://github.com/generative-light/p5.scribble.js), itself a
-port of Jo Wood's *handy* for Processing. As with p5.riso it is reimplemented
-rather than depended on: p5.scribble needs all of p5.js, and it draws
-primitives, not text. What this app needs is a *fill rule for an arbitrary tone
-field*, which is a different problem and is expressed here as pure typed-array
-maths with no canvas involved.
-
-Both run in the same place as the screen — after the wear and the plate shift —
-so a carved block still tears and misregisters like everything else.
-
-#### The mistake both of them made first
-
-Each has to reach **nothing at nothing**. The first cut of both left a constant
-term in the mark width, so the faint tone a smear leaves behind printed as
-crisp full-strength lines trailing off the bottom of every letter. A block
-either carries ink or it is bare; a pen either touched the paper or it did not.
-
-The reverse matters too and is the other easy mistake: at full tone neither may
-close up into a flood, because the solid areas of a woodcut are exactly where
-the gouge marks show, and the white between hatch strokes is what makes them
-read as drawn. There are tests for both ends — a solid field must come back
-broken up, and the mark must track the artwork rather than sit on top of it.
-
-### Dithering as a real choice
-
-Twelve algorithms, because they are genuinely different textures rather than
-one slider: Jarvis is smooth and slow, Burkes fast and contrasty, Sierra-Lite
-coarse and cheap, and clustered-dot the only ordered pattern that still reads
-as a *printing* screen rather than a computer effect — it grows one blob per
-cell the way a real screen does instead of scattering isolated pixels.
-
-**Dot size** matters as much as the algorithm. At one pixel per cell any of
-these is invisible at export resolution and reads as flat tone; the chunky
-duplicator look lives at several pixels per cell. It is implemented by
-dithering a reduced grid and expanding the result, so every algorithm coarsens
-the same way rather than each needing its own notion of size — and the
-reduction *averages* rather than samples, or the dither tracks the noise
-instead of the artwork.
+What went, and why: woodcut and scribble (relief printing and pen hatching, not
+riso), eleven more dither algorithms (clustered duplicates the halftone, Bayer is
+a computer pattern), Midtones (type tone is nearly binary; it moved ink pixels by
+a fraction of a level), drum streaks, smear, roller banding and dropout patches
+(measured on the default print they changed between 0.01% and 0.7% of pixels,
+while each cost a full pass per plate at export size), and the paper's tooth
+and cloudiness sliders (the stock keeps its fibre at fixed amounts).
 
 #### Nothing is ever stretched
 
@@ -382,10 +358,9 @@ gentle near poster size and steep where it matters.
 
 It has to reach the **wear** as well as the screen, and for a long time it did
 not. Tear, bleed, screen pitch and registration all scaled to the type while
-mottle, dropout, patches, streaks, smear and banding stayed sized for the sheet.
-On a poster that is fine. On body copy the blotch cell is about the height of a
-letter and a dropout patch is wider than a whole word, so the wear stops
-texturing the ink and starts eating the letterform.
+the wear stayed sized for the sheet. On a poster that is fine. On body copy the
+blotch cell is about the height of a letter, so the wear stops texturing the
+ink and starts eating the letterform.
 
 That failure is particularly confusing because it looks exactly like a tear that
 will not turn down — and turning the tear down was never going to touch it. It
@@ -398,9 +373,9 @@ same noise faster and so yielding proportionally finer blotch. There are tests
 that finer detail really does raise the spatial frequency, and that full detail
 is byte-identical to the old behaviour, because poster type was right all along.
 
-A real press has one screen ruling per sheet regardless of point size, so
-`detailScaling` can be switched off in the Press panel for that behaviour. It is
-on by default because the honest version mostly looks like a mistake.
+Detail scaling is always on. A real press has one screen ruling per sheet
+regardless of point size, but here the honest version mostly looks like a
+mistake: the coarse screen and the wear eat small type.
 
 ### Why fading is dots, not opacity
 
@@ -410,11 +385,12 @@ half-strength ink, which is grey, and looks exactly like turning an opacity
 slider down. Ink that fails to transfer does not go grey: the dots that print
 are still full-strength pigment, there are simply fewer and smaller of them.
 
-So every wear pass runs on the **tone**, before the screen. A failing region
-then visibly breaks up into halftone rather than dimming. There is a test that
-screens heavily-worn tone at zero dot softness and asserts the result is
-strictly binary — no partial ink film anywhere — plus one that demonstrates the
-opposite ordering producing the mid-tones it must not.
+So the wear runs on the **tone**, before the screen. A failing region then
+visibly breaks up into halftone rather than dimming. There is a test that
+screens heavily-worn tone at zero dot softness and asserts the result is only
+bare paper or solid ink, with fewer dots than the clean tone and never a paler
+one — plus one that demonstrates the opposite ordering producing the mid-tones
+it must not.
 
 ### How the edge tearing works
 
@@ -536,7 +512,8 @@ same code the preview uses.
 
 ## Status
 
-Working: multi-plate type, the full press and wear model, forced paragraph
+Working: multi-plate type, the press (halftone or grain, Edge, Wear, ink and
+misregistration, Re-roll), forced paragraph
 justification, letter tracking, a one-shot Fit, a per-line backing, an
 imported photo as the printing ground (shown as shot, zoomed and panned within
 the sheet), undo/redo, persistence, and save via the share sheet.

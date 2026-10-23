@@ -120,7 +120,7 @@ export default function Canvas({
       const move = big ? 0.05 : 0.005
       const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
-      const patches: Record<string, () => Partial<TextLayer>> = {
+      const keyPatches: Record<string, () => Partial<TextLayer>> = {
         ArrowLeft: () => ({ x: clamp(layer.x - move, -0.3, 1.3) }),
         ArrowRight: () => ({ x: clamp(layer.x + move, -0.3, 1.3) }),
         ArrowUp: () => ({ y: clamp(layer.y - move, -0.3, 1.3) }),
@@ -132,7 +132,7 @@ export default function Canvas({
         ']': () => ({ rotation: clamp(layer.rotation + (big ? 15 : 1), -180, 180) }),
       }
 
-      const build = patches[e.key]
+      const build = keyPatches[e.key]
       if (!build) return
       e.preventDefault()
       dispatch({ type: 'patchLayer', id: layer.id, patch: build(), coalesce: true })

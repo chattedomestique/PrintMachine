@@ -61,7 +61,9 @@ function sheetAspect(doc: Doc): number {
  * removed field with none (the printed photo's ink, contrast and lift, its
  * opacity, the photo's own press, word spacing, justify-by, lines-of-one-word,
  * the typewriter, per-word misprints, plate opacity, box padding and corner
- * radius) is simply not in the schema, so it goes.
+ * radius, dot shape and softness, Midtones, the detail-scaling switch, roughen
+ * scale, streaks, smear, patches, banding, paper tooth and cloud) is simply not
+ * in the schema, so it goes.
  *
  * The type conversions are ordered because the last one measures: the fitted
  * size depends on the text as it will be drawn — its case, its face and its
@@ -155,6 +157,28 @@ const CONVERSIONS: readonly Conversion[] = [
       }
       delete l.boxes
     }
+  },
+
+  // The press: four screening methods become two, and six wear and edge
+  // controls become two amounts.
+  function press(doc) {
+    const p = doc.press
+    if (!isPlainObject(p)) return
+    // Woodcut and scribble are relief printing and pen hatching, not riso: the
+    // halftone. Any dither becomes the one grain, with its cell carried over
+    // as a screen size (the grain cell is a third of it), so the texture's
+    // scale survives.
+    if (p.method === 'woodcut' || p.method === 'scribble') p.method = 'halftone'
+    else if (p.method === 'dither') {
+      p.method = 'grain'
+      const cell = finiteNumber(p.ditherScale) ? p.ditherScale : 3
+      p.screenPitch = Math.min(24, Math.max(2, cell * 3))
+    }
+    // Edge was tear (+ bleed), Wear was mottle (+ dropout): each new amount is
+    // the old lead value, and the engine derives its partner at the shipped
+    // ratio, so a default press converts to exactly the same edge and film.
+    if (!('edge' in p) && finiteNumber(p.roughness)) p.edge = p.roughness
+    if (!('wear' in p) && finiteNumber(p.mottle)) p.wear = p.mottle
   },
 ]
 

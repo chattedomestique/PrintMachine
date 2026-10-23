@@ -61,6 +61,39 @@ function expectNoExtraKeys(s: PrintSettings) {
   if (s.media) expect(keys(s.media)).toEqual(keys(makeMedia({ id: 'x', width: 1, height: 1 })))
 }
 
+describe('the model is locked', () => {
+  it('the press has exactly its six fields', () => {
+    expect(keys(defaultSettings().press)).toEqual(['density', 'edge', 'method', 'misregistration', 'screenPitch', 'wear'])
+  })
+
+  it('a plate has exactly the fields of the model', () => {
+    expect(keys(makeLayer())).toEqual(
+      [
+        'id',
+        'text',
+        'inkId',
+        'fontId',
+        'bold',
+        'size',
+        'lineHeight',
+        'tracking',
+        'rotation',
+        'align',
+        'x',
+        'y',
+        'contrastInkId',
+        'contrastThreshold',
+        'backing',
+      ].sort(),
+    )
+  })
+
+  it('a photo has exactly its placement, and the document its seven fields', () => {
+    expect(keys(makeMedia({ id: 'm', width: 1, height: 1 }))).toEqual(['height', 'id', 'scale', 'width', 'x', 'y'])
+    expect(keys(defaultSettings())).toEqual(['aspect', 'layers', 'media', 'paperId', 'paperVeil', 'press', 'seed'])
+  })
+})
+
 describe('the schema matches the model', () => {
   it('lists exactly the fields of each template, at every level', () => {
     const d = defaultSettings()
@@ -272,11 +305,6 @@ describe('structured fields', () => {
     expect(normalizeSettings(doc).media).toEqual(makeMedia({ id: 'm', width: 300, height: 200 }))
   })
 
-  it('a dither that passed the tone straight through is gone; it dithers', () => {
-    const doc = reachable()
-    ;(doc.press as Doc).ditherType = 'none'
-    expect(normalizeSettings(doc).press.ditherType).toBe(defaultSettings().press.ditherType)
-  })
 })
 
 /* ── The frozen documents ─────────────────────────────────────────────── */
@@ -310,7 +338,8 @@ describe('legacy documents', () => {
     // table below checks one by one.
     const REWRITTEN: Record<string, readonly string[]> = {
       settings: [],
-      press: [],
+      // A dither's cell becomes the grain's screen size.
+      press: ['method', 'screenPitch'],
       media: ['scale', 'x', 'y'],
       // caps uppercases the text, Rounded becomes Grotesk, and a fitted
       // layer's size is re-measured (only with a measure; none here); opaque
@@ -591,6 +620,54 @@ describe('verdict §4.1: what each removed field becomes', () => {
     // Four plates in legacy-maximal, one more than the budget allows to ADD.
     expect(rawLayers).toHaveLength(4)
     expect(max().layers).toHaveLength(4)
+  })
+
+  /* ── Press (1.5) ── */
+
+  const rawPress = rawMax.press as Doc
+
+  it("press.method 'dither' (any algorithm): Grain, its cell carried over as the screen size", () => {
+    expect([rawPress.method, rawPress.ditherType, rawPress.ditherScale]).toEqual(['dither', 'jarvis', 4])
+    expect(max().press.method).toBe('grain')
+    // Grain cell = screen size / 3, so a 4 px dither cell is a 12 px screen.
+    expect(max().press.screenPitch).toBe(12)
+    // A dither cell too big for the range is clamped to the largest screen.
+    const d = copy(defaultDoc) as unknown as Doc
+    Object.assign(d.press as Doc, { method: 'dither', ditherScale: 12 })
+    expect(normalizeSettings(d).press.screenPitch).toBe(24)
+  })
+
+  it("press.method 'woodcut' or 'scribble': Halftone", () => {
+    for (const method of ['woodcut', 'scribble']) {
+      const d = copy(defaultDoc) as unknown as Doc
+      ;(d.press as Doc).method = method
+      const s = normalizeSettings(d)
+      expect(s.press.method).toBe('halftone')
+      // The halftone keeps the screen size it had.
+      expect(s.press.screenPitch).toBe((defaultDoc as unknown as { press: { screenPitch: number } }).press.screenPitch)
+    }
+  })
+
+  it('press.roughness / bleed / mottle / dropout: the Edge and Wear amounts', () => {
+    expect([rawPress.roughness, rawPress.mottle]).toEqual([0.8, 0.4])
+    expect([max().press.edge, max().press.wear]).toEqual([0.8, 0.4])
+    // A shipped default press converts to the shipped edge and film exactly.
+    const d = normalizeSettings(copy(defaultDoc))
+    expect([d.press.edge, d.press.wear]).toEqual([0.55, 0.22])
+    // Wear past its range is clamped.
+    const heavy = copy(defaultDoc) as unknown as Doc
+    ;(heavy.press as Doc).mottle = 1
+    expect(normalizeSettings(heavy).press.wear).toBe(0.8)
+  })
+
+  it('press.density, misregistration and screen size are carried as they were', () => {
+    expect([max().press.density, max().press.misregistration]).toEqual([rawPress.density, rawPress.misregistration])
+  })
+
+  it('every other press field, and paper tooth and cloud: dropped', () => {
+    expect(keys(max().press)).toEqual(['density', 'edge', 'method', 'misregistration', 'screenPitch', 'wear'])
+    expect(max()).not.toHaveProperty('paperTexture')
+    expect(max()).not.toHaveProperty('paperBlotch')
   })
 })
 

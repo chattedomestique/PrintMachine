@@ -1,29 +1,22 @@
-import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
-import { DITHER_TYPES } from '../../engine/dither.ts'
-import type { ScreenShape } from '../../engine/screen.ts'
+import { Field, Segmented, Slider, Swatches } from '../../ui/controls.tsx'
+import { PAPERS, paperById } from '../../engine/inks.ts'
 import type { PressProfile, ScreenMethod } from '../../engine/types.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 
 const METHODS: readonly { value: ScreenMethod; label: string }[] = [
   { value: 'halftone', label: 'Halftone' },
-  { value: 'dither', label: 'Dither' },
-  { value: 'woodcut', label: 'Woodcut' },
-  { value: 'scribble', label: 'Scribble' },
+  { value: 'grain', label: 'Grain' },
 ]
-
-const SHAPES: readonly { value: ScreenShape; label: string }[] = [
-  { value: 'circle', label: 'Dot' },
-  { value: 'line', label: 'Line' },
-  { value: 'square', label: 'Square' },
-  { value: 'ellipse', label: 'Chain' },
-  { value: 'diamond', label: 'Diamond' },
-  { value: 'cross', label: 'Cross' },
-]
-
-
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
-const px = (v: number) => `${v.toFixed(1)}px`
+
+/** A seed other than the current one, so Re-roll always changes the sheet. */
+function newSeed(current: number): number {
+  for (;;) {
+    const seed = Math.floor(Math.random() * 100000)
+    if (seed !== current) return seed
+  }
+}
 
 /** The machine, not the artwork. Everything here applies to every plate. */
 export default function PressPanel() {
@@ -34,121 +27,29 @@ export default function PressPanel() {
 
   return (
     <div className="control-stack">
-      <Field label="Screening">
+      <Field label="Screen">
         <Segmented
-          label="Screening method"
+          label="Screen"
           value={press.method}
           options={METHODS}
           onChange={(method) => patch({ method })}
         />
       </Field>
 
-      {press.method === 'halftone' && (
-        <>
-          <Field label="Dot shape">
-            <Segmented
-              label="Dot shape"
-              value={press.screenShape}
-              options={SHAPES}
-              onChange={(screenShape) => patch({ screenShape })}
-            />
-          </Field>
-          <Slider
-            label="Screen pitch"
-            value={press.screenPitch}
-            min={2}
-            max={24}
-            step={0.5}
-            format={px}
-            onChange={(screenPitch) => patch({ screenPitch }, true)}
-          />
-          <Slider
-            label="Dot softness"
-            value={press.screenSoftness}
-            min={0}
-            max={3}
-            step={0.05}
-            format={px}
-            onChange={(screenSoftness) => patch({ screenSoftness }, true)}
-          />
-        </>
-      )}
-
-      {press.method === 'dither' && (
-        <>
-          <Field label="Dither" value={DITHER_TYPES.find((d) => d.id === press.ditherType)?.name}>
-            <Segmented
-              label="Dither algorithm"
-              value={press.ditherType}
-              options={DITHER_TYPES.map((d) => ({ value: d.id, label: d.name }))}
-              onChange={(ditherType) => patch({ ditherType })}
-            />
-          </Field>
-          <p className="panel-note">
-            These are genuinely different textures, not one slider: Jarvis is smooth and slow,
-            Burkes fast and contrasty, clustered the only one that still reads as a printing
-            screen rather than a computer effect.
-          </p>
-          <Slider
-            label="Dot size"
-            value={press.ditherScale}
-            min={1}
-            max={12}
-            step={1}
-            format={(v) => `${v}px`}
-            onChange={(ditherScale) => patch({ ditherScale }, true)}
-          />
-          <Slider
-            label="Threshold"
-            value={press.ditherThreshold}
-            min={0.1}
-            max={0.9}
-            step={0.01}
-            format={pct}
-            onChange={(ditherThreshold) => patch({ ditherThreshold }, true)}
-          />
-        </>
-      )}
-
-      {(press.method === 'woodcut' || press.method === 'scribble') && (
-        <>
-          <p className="panel-note">
-            {press.method === 'woodcut'
-              ? 'Ink carried by whatever the blade left standing — grooves cut across the shape, and the block’s own grain showing through what remains.'
-              : 'Hatched rather than flooded. Strokes bow instead of ruling straight, and a second pass crosses the first only where the shape wants to be darker.'}
-          </p>
-          <Slider
-            label={press.method === 'woodcut' ? 'Groove spacing' : 'Stroke spacing'}
-            value={press.carvePitch}
-            min={3}
-            max={40}
-            step={1}
-            format={(v) => `${v}px`}
-            onChange={(carvePitch) => patch({ carvePitch }, true)}
-          />
-          <Slider
-            label={press.method === 'woodcut' ? 'Cut direction' : 'Hatch direction'}
-            value={press.carveAngle}
-            min={0}
-            max={180}
-            step={1}
-            format={(v) => `${v}°`}
-            onChange={(carveAngle) => patch({ carveAngle }, true)}
-          />
-          <Slider
-            label="Wander"
-            value={press.carveRoughness}
-            min={0}
-            max={1}
-            step={0.01}
-            format={pct}
-            onChange={(carveRoughness) => patch({ carveRoughness }, true)}
-          />
-        </>
-      )}
+      {/* One texture size for both screens: the halftone's dot pitch, and a
+          grain cell a third of it. */}
+      <Slider
+        label="Screen size"
+        value={press.screenPitch}
+        min={2}
+        max={24}
+        step={0.5}
+        format={(v) => `${v.toFixed(1)}px`}
+        onChange={(screenPitch) => patch({ screenPitch }, true)}
+      />
 
       <Slider
-        label="Ink density"
+        label="Ink"
         value={press.density}
         min={0.3}
         max={1}
@@ -156,27 +57,6 @@ export default function PressPanel() {
         format={pct}
         onChange={(density) => patch({ density }, true)}
       />
-
-      <Slider
-        label="Midtones"
-        value={press.gamma}
-        min={0.4}
-        max={2.4}
-        step={0.02}
-        format={(v) => v.toFixed(2)}
-        onChange={(gamma) => patch({ gamma }, true)}
-      />
-
-      <Toggle
-        label="Scale detail to type size"
-        checked={press.detailScaling}
-        onChange={(detailScaling) => patch({ detailScaling })}
-      />
-      <p className="panel-note">
-        A screen coarse enough to read on a poster is wider than the strokes of small type. With
-        this on, small words get a proportionally finer screen, tear and bleed so they stay
-        legible. Off is the literal behaviour — one ruling for the whole sheet.
-      </p>
 
       <Slider
         label="Misregistration"
@@ -188,35 +68,48 @@ export default function PressPanel() {
         onChange={(misregistration) => patch({ misregistration }, true)}
       />
 
+      {/* The two things a person can name: the letters are ragged (Edge: the
+          stencil's tear and the ink's bleed), the ink is blotchy (Wear: drum
+          mottle and speckle dropout). */}
       <Slider
-        label="Ink mottle"
-        value={press.mottle}
-        min={0}
-        max={0.8}
-        step={0.01}
-        format={pct}
-        onChange={(mottle) => patch({ mottle }, true)}
-      />
-
-      <Slider
-        label="Dropout"
-        value={press.dropout}
-        min={0}
-        max={0.08}
-        step={0.002}
-        format={(v) => `${(v * 100).toFixed(1)}%`}
-        onChange={(dropout) => patch({ dropout }, true)}
-      />
-
-      <Slider
-        label="Roller banding"
-        value={press.banding}
+        label="Edge"
+        value={press.edge}
         min={0}
         max={1}
         step={0.01}
         format={pct}
-        onChange={(banding) => patch({ banding }, true)}
+        onChange={(edge) => patch({ edge }, true)}
       />
+
+      <Slider
+        label="Wear"
+        value={press.wear}
+        min={0}
+        max={0.8}
+        step={0.01}
+        format={pct}
+        onChange={(wear) => patch({ wear }, true)}
+      />
+
+      {/* Pull another sheet: a different tear, mottle, registration and paper
+          grain from the same settings. Its own undo step. */}
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Re-roll: pull another sheet"
+        onClick={() => dispatch({ type: 'patch', patch: { seed: newSeed(settings.seed) } })}
+      >
+        Re-roll
+      </button>
+
+      <Field label="Stock" value={paperById(settings.paperId).name}>
+        <Swatches
+          label="Paper stock"
+          value={settings.paperId}
+          options={PAPERS}
+          onChange={(paperId) => dispatch({ type: 'patch', patch: { paperId } })}
+        />
+      </Field>
     </div>
   )
 }

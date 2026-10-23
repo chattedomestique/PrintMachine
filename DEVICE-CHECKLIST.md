@@ -51,6 +51,8 @@ So:
 - [ ] Drag a press slider → the preview keeps up, and the grain does **not**
       visibly re-randomise
 - [ ] One slider drag is one undo step; adding a plate is its own step
+- [ ] Re-roll → a different sheet (tear, mottle, registration); Undo brings the
+      previous one back
 - [ ] Background the app for 5 minutes → return → the document is still there
 - [ ] Force-quit and relaunch → the document is still there
 

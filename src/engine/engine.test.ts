@@ -11,11 +11,11 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import { compositeLayers } from './composite.ts'
-import { DITHER_TYPES, ditherField } from './dither.ts'
-import { applyDensity, applyMottle, registrationOffset, shiftField } from './ink.ts'
+import { ditherField } from './dither.ts'
+import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftField, wearToMottle } from './ink.ts'
 import { contrastPartner, inkById, paperById, RISO_INKS } from './inks.ts'
 import { paperField } from './paper.ts'
-import { mulberry32, valueNoise2D } from './rng.ts'
+import { mulberry32, valueNoise2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
 import { BACKING_PAD, FIT_WIDTH, alignOffset, fitSize, justifyOffsets, layoutText, lineRects, type FontMeasure } from './text.ts'
 import {
@@ -39,13 +39,11 @@ import {
   panFraction,
   splitInks,
 } from './media.ts'
-import { scribbleField, woodcutField } from './carve.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
 import { SIZE_MAX, SIZE_MIN } from './limits.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
-import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
 import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'
 
 const W = 24
@@ -113,23 +111,19 @@ describe('composite — the subtractive overprint model', () => {
 
 describe('screen', () => {
   it('never produces coverage outside [0,1]', () => {
-    for (const shape of ['circle', 'square', 'line', 'ellipse', 'cross', 'diamond'] as const) {
-      const cov = screenField(ramp(), W, H, {
-        shape,
-        pitch: 5,
-        angle: 37,
-        softness: 0.7,
-        originX: 2.4,
-        originY: -1.1,
-      })
-      for (const v of cov) expect(v).toBeGreaterThanOrEqual(0)
-      for (const v of cov) expect(v).toBeLessThanOrEqual(1)
-    }
+    const cov = screenField(ramp(), W, H, {
+      pitch: 5,
+      angle: 37,
+      softness: 0.7,
+      originX: 2.4,
+      originY: -1.1,
+    })
+    for (const v of cov) expect(v).toBeGreaterThanOrEqual(0)
+    for (const v of cov) expect(v).toBeLessThanOrEqual(1)
   })
 
   it('prints nothing from a zero tone field — the null case is truly null', () => {
     const cov = screenField(new Float32Array(W * H), W, H, {
-      shape: 'circle',
       pitch: 6,
       angle: 45,
       softness: 0.7,
@@ -143,7 +137,6 @@ describe('screen', () => {
     const total = (tone: number) => {
       const f = new Float32Array(W * H).fill(tone)
       return screenField(f, W, H, {
-        shape: 'circle',
         pitch: 6,
         angle: 45,
         softness: 0.7,
@@ -163,10 +156,10 @@ describe('screen', () => {
   })
 })
 
-describe('dither', () => {
-  it('produces a strictly binary field for every diffusing algorithm', () => {
-    for (const type of DITHER_TYPES.map((d) => d.id)) {
-      const out = ditherField(ramp(), W, H, type, { threshold: 0.5 })
+describe('grain (Atkinson)', () => {
+  it('produces a strictly binary field, at any cell size', () => {
+    for (const scale of [1, 2, 3, 5]) {
+      const out = ditherField(ramp(), W, H, { scale })
       for (const v of out) expect(v === 0 || v === 1).toBe(true)
     }
   })
@@ -174,22 +167,46 @@ describe('dither', () => {
   it('does not mutate the tone field it was given', () => {
     const tone = ramp()
     const before = Float32Array.from(tone)
-    ditherField(tone, W, H, 'floydsteinberg', { threshold: 0.5 })
+    ditherField(tone, W, H)
     expect(Array.from(tone)).toEqual(Array.from(before))
   })
 
-  it('tracks the input tone on average', () => {
+  it('tracks the input tone on average, a little light as Atkinson is', () => {
+    // Atkinson diffuses only 6/8 of the error, which is its look: light tone
+    // prints lighter. It still has to follow the tone.
     const mean = (f: Float32Array) => f.reduce((a, b) => a + b, 0) / f.length
-    const tone = new Float32Array(64 * 64).fill(0.3)
-    const out = ditherField(tone, 64, 64, 'floydsteinberg', { threshold: 0.5 })
-    expect(mean(out)).toBeGreaterThan(0.2)
-    expect(mean(out)).toBeLessThan(0.4)
+    const at = (t: number) => mean(ditherField(new Float32Array(64 * 64).fill(t), 64, 64))
+    expect(at(0.3)).toBeGreaterThan(0.15)
+    expect(at(0.3)).toBeLessThan(0.4)
+    expect(at(0.3)).toBeLessThan(at(0.6))
+  })
+
+  it('makes cells of the asked size: a cell is one value throughout', () => {
+    const out = ditherField(ramp(), W, H, { scale: 3 })
+    for (let y = 0; y < H; y += 3) {
+      for (let x = 0; x < W; x += 3) {
+        const v = out[y * W + x]
+        for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) expect(out[(y + dy) * W + x + dx]).toBe(v)
+      }
+    }
   })
 })
 
 describe('ink', () => {
+  it('Edge drives tear and bleed at the shipped 0.55 : 0.35, exactly at the default', () => {
+    expect(edgeToRough(0.55)).toEqual({ roughness: 0.55, bleed: 0.35 })
+    expect(edgeToRough(0)).toEqual({ roughness: 0, bleed: 0 })
+    expect(edgeToRough(1).bleed).toBeCloseTo(0.35 / 0.55, 12)
+  })
+
+  it('Wear drives mottle and dropout at the shipped 0.22 : 0.012, exactly at the default', () => {
+    expect(wearToMottle(0.22)).toEqual({ mottle: 0.22, dropout: 0.012 })
+    expect(wearToMottle(0)).toEqual({ mottle: 0, dropout: 0 })
+    expect(wearToMottle(0.8).dropout).toBeCloseTo((0.8 * 0.012) / 0.22, 12)
+  })
+
   it('caps tone at the density ceiling — riso ink never reaches solid', () => {
-    const out = applyDensity(new Float32Array(8).fill(1), 0.84, 1)
+    const out = applyDensity(new Float32Array(8).fill(1), 0.84)
     for (const v of out) expect(v).toBeCloseTo(0.84, 6)
   })
 
@@ -535,51 +552,6 @@ describe('rough edges', () => {
   })
 })
 
-describe('misprints', () => {
-  const inked = (): Float32Array => new Float32Array(W * H).fill(0.8)
-
-  it('are all no-ops at zero', () => {
-    const f = inked()
-    expect(applyStreaks(f, W, H, 0, 1)).toBe(f)
-    expect(applySmear(f, W, H, 0)).toBe(f)
-    expect(applyDropoutPatches(f, W, H, 0, 1)).toBe(f)
-  })
-
-  it('keep coverage in range', () => {
-    let f = applyStreaks(inked(), W, H, 1, 3)
-    f = applySmear(f, W, H, 1)
-    f = applyDropoutPatches(f, W, H, 1, 3)
-    for (const v of f) {
-      expect(v).toBeGreaterThanOrEqual(0)
-      expect(v).toBeLessThanOrEqual(1)
-    }
-  })
-
-  it('streaks and patches only ever remove ink', () => {
-    const src = inked()
-    const streaked = applyStreaks(src, W, H, 1, 7)
-    for (let i = 0; i < src.length; i++) expect(streaked[i]).toBeLessThanOrEqual(src[i] + 1e-6)
-    const patched = applyDropoutPatches(src, W, H, 1, 7)
-    for (let i = 0; i < src.length; i++) expect(patched[i]).toBeLessThanOrEqual(src[i] + 1e-6)
-  })
-
-  it('smear cannot invent ink on a blank sheet', () => {
-    const out = applySmear(new Float32Array(W * H), W, H, 1)
-    expect(out.every((v) => v === 0)).toBe(true)
-  })
-
-  it('smear trails downward, never upward', () => {
-    // A single inked row: the drag must appear below it and nowhere above.
-    const f = new Float32Array(W * H)
-    for (let x = 0; x < W; x++) f[10 * W + x] = 1
-    const out = applySmear(f, W, H, 1)
-    for (let x = 0; x < W; x++) {
-      expect(out[9 * W + x]).toBe(0)
-      expect(out[12 * W + x]).toBeGreaterThan(0)
-    }
-  })
-})
-
 describe('forced justification', () => {
   it('makes every line exactly the target width', () => {
     const widths = [10, 20, 30]
@@ -627,7 +599,6 @@ describe('fading is dots, not opacity', () => {
   // failure leaves full-strength pigment in fewer, smaller dots.
   const N = 64
   const opts = {
-    shape: 'circle' as const,
     pitch: 6,
     angle: 45,
     // Zero softness makes the assertion exact: a correct pipeline can only
@@ -636,34 +607,31 @@ describe('fading is dots, not opacity', () => {
     originX: 0,
     originY: 0,
   }
+  const mottle = valueNoise2D(N, N, 8, 3)
+  const speckle = whiteNoise2D(N, N, 11)
+  // Heavy wear: a wide mottle swing and a lot of dropout.
+  const wear = (f: Float32Array) => applyMottle(f, mottle, speckle, 0.8, 0.3, N, N)
+  const flat = () => new Float32Array(N * N).fill(0.7)
 
-  it('screens worn tone into strictly binary coverage', () => {
-    // Annotated: `new Float32Array(...)` infers the narrow
-    // `Float32Array<ArrayBuffer>`, while the engine returns the general
-    // `Float32Array<ArrayBufferLike>`, so an inferred `let` cannot be
-    // reassigned from one.
-    let tone: Float32Array = new Float32Array(N * N).fill(0.7)
-    tone = applyDropoutPatches(tone, N, N, 0.9, 3)
-    tone = applyStreaks(tone, N, N, 0.9, 3)
-    tone = applySmear(tone, N, N, 0.6)
-
-    const coverage = screenField(tone, N, N, opts)
-    for (const v of coverage) expect(v === 0 || v === 1).toBe(true)
+  it('screens worn tone into coverage of only bare paper or solid ink', () => {
+    const coverage = screenField(wear(flat()), N, N, opts)
+    expect(new Set(coverage)).toEqual(new Set([0, 1]))
   })
 
-  it('a worn area prints less ink than a clean one', () => {
-    const sum = (f: Float32Array) => f.reduce((a, b) => a + b, 0)
-    const clean = new Float32Array(N * N).fill(0.7)
-    const worn = applyDropoutPatches(clean, N, N, 0.9, 11)
-    expect(sum(screenField(worn, N, N, opts))).toBeLessThan(sum(screenField(clean, N, N, opts)))
+  it('a worn area prints fewer dots, never paler ones', () => {
+    const clean = screenField(flat(), N, N, opts)
+    const worn = screenField(wear(flat()), N, N, opts)
+    const dots = (f: Float32Array) => f.reduce((a, v) => a + (v === 1 ? 1 : 0), 0)
+    expect(dots(worn)).toBeLessThan(dots(clean))
+    // Every pixel that prints at all prints at full strength.
+    for (const v of worn) expect(v === 0 || v === 1).toBe(true)
   })
 
   it('would NOT be binary if wear ran after the screen — the bug, stated', () => {
     // Documents why the order matters rather than trusting a comment: apply
     // the same wear to coverage instead of tone and mid-tones appear, which is
     // precisely the grey the compositor would render as thin ink.
-    const tone = new Float32Array(N * N).fill(0.7)
-    const afterScreen = applyDropoutPatches(screenField(tone, N, N, opts), N, N, 0.9, 3)
+    const afterScreen = wear(screenField(flat(), N, N, opts))
     expect([...afterScreen].some((v) => v > 0.02 && v < 0.98)).toBe(true)
   })
 })
@@ -1195,7 +1163,7 @@ describe('the two-ink switch is a pattern, not a fade', () => {
     const ramp = new Float32Array(n)
     for (let i = 0; i < n; i++) ramp[i] = i / (n - 1)
 
-    const screened = ditherField(ramp, 8, 8, 'bayer4', { threshold: 0.5 })
+    const screened = ditherField(ramp, 8, 8)
     for (const v of screened) expect(v === 0 || v === 1).toBe(true)
 
     // Split by a binary mask, every pixel gets all of one ink or all of the
@@ -1239,65 +1207,6 @@ describe('draft rendering', () => {
   })
 })
 
-describe('woodcut and scribble', () => {
-  const W = 48
-  const H = 48
-  const solid = () => new Float32Array(W * H).fill(1)
-  const ramp = () => {
-    const f = new Float32Array(W * H)
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) f[y * W + x] = x / (W - 1)
-    return f
-  }
-  const opts = { pitch: 8, angle: 30, roughness: 0.5, seed: 7 }
-
-  it('never inks outside the shape', () => {
-    // Both are fills, not effects layered over the sheet. Ink appearing where
-    // the tone was zero would print marks in the margins.
-    const tone = new Float32Array(W * H)
-    for (let i = 0; i < 100; i++) tone[i] = 1
-    for (const f of [woodcutField(tone, W, H, opts), scribbleField(tone, W, H, opts)]) {
-      for (let i = 100; i < f.length; i++) expect(f[i]).toBe(0)
-    }
-  })
-
-  it('stays in range', () => {
-    for (const f of [woodcutField(ramp(), W, H, opts), scribbleField(ramp(), W, H, opts)]) {
-      for (const v of f) {
-        expect(v).toBeGreaterThanOrEqual(0)
-        expect(v).toBeLessThanOrEqual(1)
-      }
-    }
-  })
-
-  it('breaks a solid area up rather than flooding it', () => {
-    // If a solid shape comes back solid, the grooves and strokes are not
-    // happening and the method is a no-op wearing a name.
-    for (const f of [woodcutField(solid(), W, H, opts), scribbleField(solid(), W, H, opts)]) {
-      const inked = [...f].filter((v) => v > 0.5).length
-      expect(inked).toBeGreaterThan(0)
-      expect(inked).toBeLessThan(f.length)
-    }
-  })
-
-  it('lays more ink where the tone is darker', () => {
-    // The mark has to track the artwork, or it is a texture pasted on top.
-    for (const make of [woodcutField, scribbleField]) {
-      const f = make(ramp(), W, H, opts)
-      const left = [...f].filter((_, i) => i % W < W / 4).reduce((a, b) => a + b, 0)
-      const right = [...f].filter((_, i) => i % W >= (W * 3) / 4).reduce((a, b) => a + b, 0)
-      expect(right).toBeGreaterThan(left)
-    }
-  })
-
-  it('is deterministic for a seed, so the export matches the preview', () => {
-    const a = woodcutField(ramp(), W, H, opts)
-    const b = woodcutField(ramp(), W, H, opts)
-    expect([...a]).toEqual([...b])
-    const c = woodcutField(ramp(), W, H, { ...opts, seed: 8 })
-    expect([...a]).not.toEqual([...c])
-  })
-})
-
 describe('detail scaling reaches the wear, not just the screen', () => {
   const W = 64
   const H = 64
@@ -1336,20 +1245,6 @@ describe('detail scaling reaches the wear, not just the screen', () => {
     expect([...a]).toEqual([...b])
   })
 
-  it('shrinks dropout patches with the type as well', () => {
-    // A patch sized for a poster is wider than a whole word of body copy, so
-    // it swallows the line rather than reading as ink that failed.
-    const cov = new Float32Array(W * H).fill(1)
-    const coarse = applyDropoutPatches(cov, W, H, 0.8, 11, 1)
-    const fine = applyDropoutPatches(cov, W, H, 0.8, 11, 0.25)
-    const flips = (f: Float32Array) => {
-      let n = 0
-      for (let x = 1; x < W; x++) if (Math.abs(f[x] - f[x - 1]) > 0.01) n++
-      return n
-    }
-    expect(flips(fine)).toBeGreaterThanOrEqual(flips(coarse))
-  })
-
   it('still leaves bare paper bare at any detail', () => {
     for (const d of [1, 0.5, 0.22]) {
       const out = applyMottle(
@@ -1384,10 +1279,12 @@ describe('the press hands its outline to the knockout', () => {
 
     const scale = h / REFERENCE_HEIGHT
     const detail = detailFactor(fontSize, h)
+    const edge = edgeToRough(s.press.edge)
     const own = roughenEdges(tone, w, h, {
-      roughness: s.press.roughness,
-      scale: s.press.roughScale * scale * detail,
-      bleed: s.press.bleed * detail,
+      roughness: edge.roughness,
+      // The fixed tear scale, 3 px at the reference height.
+      scale: 3 * scale * detail,
+      bleed: edge.bleed * detail,
       seed: s.seed ^ (index * 0x9e3779b9),
     })
     expect([...out.roughened]).toEqual([...own])
@@ -1485,7 +1382,7 @@ describe('the plate\'s own ink as its second ink (what Opaque became)', () => {
   const tone = new Float32Array(w * h)
   for (let y = 15; y < 45; y++) for (let x = 6; x < w - 6; x++) tone[y * w + x] = 0.5
   const screen = (f: Float32Array) =>
-    screenField(f, w, h, { shape: 'circle', pitch: 5, angle: 45, softness: 0, originX: 0, originY: 0 })
+    screenField(f, w, h, { pitch: 5, angle: 45, softness: 0, originX: 0, originY: 0 })
   const coverage = screen(tone)
   const groundLum = groundLuma(ground, w, h, 4)
   const light = screen(bandMask(groundLum, 0.5))

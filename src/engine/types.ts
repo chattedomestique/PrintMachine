@@ -10,15 +10,8 @@
  * here, never the other way round.
  */
 
-import type { DitherType } from './dither.ts'
-import type { ScreenShape } from './screen.ts'
-
 export type TextAlign = 'left' | 'center' | 'right' | 'justify'
 
-/** Where forced justification puts the slack it needs to fill the measure.
- *  'words' keeps the words themselves tight and opens the spaces between them;
- *  'letters' spreads every gap equally for the solid rectangular block. A line
- *  with no spaces has nowhere to put word slack, so it falls back to letters. */
 /**
  * An imported photo, sitting under every plate as the ground the ink prints on.
  *
@@ -40,7 +33,7 @@ export interface MediaLayer {
 }
 
 /** Screening method. A duplicator's RIP does one or the other, not both. */
-export type ScreenMethod = 'halftone' | 'dither' | 'woodcut' | 'scribble'
+export type ScreenMethod = 'halftone' | 'grain'
 
 export interface FontChoice {
   readonly id: string
@@ -129,55 +122,21 @@ export interface TextLayer {
  * one machine, so every pass on it varies together.
  */
 export interface PressProfile {
+  /** Halftone dots, or Atkinson grain. */
   method: ScreenMethod
-  screenShape: ScreenShape
-  /** Lattice pitch in pixels at the reference render size. */
+  /** Halftone lattice pitch in pixels at the reference render size; the grain
+   *  cell is a third of it. */
   screenPitch: number
-  screenSoftness: number
-  ditherType: DitherType
-  ditherThreshold: number
-  /** Dither cell size in pixels at the reference render size. */
-  ditherScale: number
-
-  /** Spacing of woodcut grooves or scribble strokes, in px at reference size. */
-  carvePitch: number
-  /** Direction of the cut or the hatch, in degrees. */
-  carveAngle: number
-  /** 0..1. How far those marks wander from straight. */
-  carveRoughness: number
-
-  /** Ink density ceiling in [0,1]. */
+  /** Ink density ceiling in [0,1] — the "Ink" control. */
   density: number
-  /** Midtone shaping; <1 lays down more ink. */
-  gamma: number
-  mottle: number
-  dropout: number
-  banding: number
-
-  /** Edge raggedness from the burned stencil, 0..1. */
-  roughness: number
-  /** Feature size of that raggedness, in px at the reference height. */
-  roughScale: number
-  /** Ink spread past the artwork edge, 0..1. */
-  bleed: number
-  /** Pale drum streaks running the length of the sheet, 0..1. */
-  streaks: number
-  /** Ink drag along the feed direction, 0..1. */
-  smear: number
-  /** Regions where ink did not transfer at all, 0..1. */
-  patches: number
   /** Max plate offset in pixels at the reference render size. */
   misregistration: number
-
-  /**
-   * Scale the press's detail to the rendered type size.
-   *
-   * On: small type gets a proportionally finer screen, tear and bleed so it
-   * stays legible. Off: one ruling for the whole sheet, which is physically
-   * what a Riso does and what destroys small words.
-   */
-  detailScaling: boolean
-
+  /** 0..1. The burned stencil's edge: tear and bleed together (ink.ts
+   *  `edgeToRough`). */
+  edge: number
+  /** 0..0.8. The drum's uneven ink film: mottle and speckle dropout together
+   *  (ink.ts `wearToMottle`). */
+  wear: number
 }
 
 export interface PrintSettings {
@@ -195,9 +154,8 @@ export interface PrintSettings {
    *  depend on the display size (playbook §5.2). */
   aspect: '1:1' | '4:5' | '3:4' | '2:3'
 
+  /** The stock. Its tooth and cloudiness are fixed (render.ts). */
   paperId: string
-  paperTexture: number
-  paperBlotch: number
 
   /** How the type is pulled. */
   press: PressProfile

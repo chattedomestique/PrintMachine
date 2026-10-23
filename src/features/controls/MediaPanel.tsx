@@ -1,9 +1,16 @@
 import { useRef, useState } from 'react'
-import { Slider, Toggle } from '../../ui/controls.tsx'
+import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
 import { useSettings } from '../../state/settingsStore.ts'
 import { importMedia } from '../media/importMedia.ts'
 import { deleteMedia } from '../../state/mediaStore.ts'
-import type { MediaLayer } from '../../engine/types.ts'
+import type { MediaLayer, PrintSettings } from '../../engine/types.ts'
+
+const SHEETS: readonly { value: PrintSettings['aspect']; label: string }[] = [
+  { value: '1:1', label: '1:1' },
+  { value: '4:5', label: '4:5' },
+  { value: '3:4', label: '3:4' },
+  { value: '2:3', label: '2:3' },
+]
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -76,6 +83,17 @@ export default function MediaPanel() {
       </div>
 
       {error && <p className="panel-note" role="alert">{error}</p>}
+
+      {/* The sheet's shape is a deliverable (a 4:5 feed, a square, a print),
+          and it decides which part of the photo survives the crop. */}
+      <Field label="Sheet">
+        <Segmented
+          label="Sheet proportions"
+          value={settings.aspect}
+          options={SHEETS}
+          onChange={(aspect) => dispatch({ type: 'patch', patch: { aspect } })}
+        />
+      </Field>
 
       {!media ? (
         <p className="plate-hint">No photo yet — the print is on bare paper.</p>

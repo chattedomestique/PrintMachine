@@ -181,12 +181,6 @@
   line-height: 1.35;
 }
 
-.seed-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
 /* ── Photo ───────────────────────────────────────────────────────────── */
 .media-actions {
   display: flex;

@@ -11,27 +11,46 @@
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
 
 /**
- * Apply the ink's density ceiling and midtone shaping to a tone field.
+ * The two wear controls, and what each one drives.
+ *
+ * Edge is the burned stencil's outline: how far it tears, and how far the ink
+ * spreads past it. Bleed is the same threshold pass as the tear, so the two
+ * move together at the ratio the press always shipped with (0.55 : 0.35) —
+ * "fat but clean" against "thin but ragged" is not a decision the job needs.
+ *
+ * Wear is the drum's ink film: blotchy mottle, and the speckle dropout that is
+ * the same failure at a finer grain, together at the shipped 0.22 : 0.012.
+ *
+ * Written as amount / reference x partner so that at the reference amount the
+ * result is the shipped value exactly — the default print does not move.
+ */
+const EDGE_REFERENCE = 0.55
+const BLEED_AT_REFERENCE = 0.35
+const WEAR_REFERENCE = 0.22
+const DROPOUT_AT_REFERENCE = 0.012
+
+/** Edge (0..1) to the stencil's tear and bleed. */
+export function edgeToRough(edge: number): { roughness: number; bleed: number } {
+  return { roughness: edge, bleed: (edge / EDGE_REFERENCE) * BLEED_AT_REFERENCE }
+}
+
+/** Wear (0..0.8) to the ink film's mottle and dropout. */
+export function wearToMottle(wear: number): { mottle: number; dropout: number } {
+  return { mottle: wear, dropout: (wear / WEAR_REFERENCE) * DROPOUT_AT_REFERENCE }
+}
+
+/**
+ * Apply the ink's density ceiling to a tone field.
  *
  * Riso ink at "100%" is not black — it is roughly 85–92% of the pigment's own
  * colour, because the drum only carries so much ink. Capping this is the
  * cheapest single thing that stops output looking like an inkjet print.
  *
  * @param density max coverage in [0,1] — 0.88 is a realistic single pass.
- * @param gamma   <1 lifts midtones (more ink), >1 drops them.
  */
-export function applyDensity(
-  tone: Float32Array,
-  density: number,
-  gamma: number,
-): Float32Array {
+export function applyDensity(tone: Float32Array, density: number): Float32Array {
   const out = new Float32Array(tone.length)
-  const g = Math.max(0.05, gamma)
-  const useGamma = Math.abs(g - 1) > 1e-6
-  for (let i = 0; i < tone.length; i++) {
-    const t = clamp01(tone[i])
-    out[i] = (useGamma ? Math.pow(t, g) : t) * density
-  }
+  for (let i = 0; i < tone.length; i++) out[i] = clamp01(tone[i]) * density
   return out
 }
 

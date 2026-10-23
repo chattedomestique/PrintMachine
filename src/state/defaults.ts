@@ -57,42 +57,22 @@ export function makeMedia({
 export function pressProfile(): PressProfile {
   return {
     method: 'halftone',
-    screenShape: 'circle',
     // Against the 1800px reference sheet. Finer than this and the rosette is
     // there but too small to read as print at phone-screen size.
     screenPitch: 9,
-    screenSoftness: 0.7,
-    ditherType: 'atkinson',
-    ditherThreshold: 0.5,
-    // One pixel per cell is invisible at export size and reads as flat tone;
-    // the chunky duplicator look lives at several pixels per cell.
-    ditherScale: 3,
-
-    carvePitch: 14,
-    carveAngle: 45,
-    carveRoughness: 0.5,
-
     // A realistic single-pass ink film. Pushed a little under the ~0.88 a real
     // drum lays down so the screen stays visible inside solids — at 100% the
     // dots close up and the whole point of the thing disappears.
     density: 0.84,
-    gamma: 1,
-    mottle: 0.22,
-    dropout: 0.012,
-    banding: 0.5,
-
-    // The wear. A Riso that prints perfectly clean is a Riso nobody would
-    // choose over a laser printer, so these are on by default — enough to
-    // read as a real pull without tipping into pastiche.
-    roughness: 0.55,
-    roughScale: 3,
-    bleed: 0.35,
-    streaks: 0.3,
-    smear: 0.18,
-    patches: 0.22,
     // ~5px at the 1800px reference — clearly visible without looking broken.
     misregistration: 5,
-    detailScaling: true,
+    // The wear. A Riso that prints perfectly clean is a Riso nobody would
+    // choose over a laser printer, so it is on by default — enough to read as
+    // a real pull without tipping into pastiche. These are the amounts the
+    // press always shipped with (tear 0.55 and bleed 0.35; mottle 0.22 and
+    // dropout 0.012), so the default print's edge and ink film are unchanged.
+    edge: 0.55,
+    wear: 0.22,
   }
 }
 
@@ -107,8 +87,6 @@ export function defaultSettings(): PrintSettings {
     paperVeil: true,
 
     paperId: 'natural',
-    paperTexture: 0.4,
-    paperBlotch: 0.5,
 
     press: pressProfile(),
 

@@ -1,9 +1,7 @@
 import TypePanel from './TypePanel.tsx'
 import InkPanel from './InkPanel.tsx'
 import PressPanel from './PressPanel.tsx'
-import PaperPanel from './PaperPanel.tsx'
 import MediaPanel from './MediaPanel.tsx'
-import WearPanel from './WearPanel.tsx'
 import './Controls.css'
 
 export const TABS = [
@@ -11,8 +9,6 @@ export const TABS = [
   { id: 'ink', label: 'Ink' },
   { id: 'media', label: 'Photo' },
   { id: 'press', label: 'Press' },
-  { id: 'wear', label: 'Wear' },
-  { id: 'paper', label: 'Paper' },
 ] as const
 
 export type TabId = (typeof TABS)[number]['id']
@@ -32,8 +28,6 @@ export default function Controls({ tab }: { tab: TabId | null }) {
       {tab === 'ink' && <InkPanel />}
       {tab === 'media' && <MediaPanel />}
       {tab === 'press' && <PressPanel />}
-      {tab === 'wear' && <WearPanel />}
-      {tab === 'paper' && <PaperPanel />}
     </div>
   )
 }

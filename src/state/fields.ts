@@ -26,7 +26,6 @@
  * keys), so a value a person could have chosen is never clamped.
  */
 
-import { DITHER_TYPES } from '../engine/dither.ts'
 import { PAPERS, RISO_INKS } from '../engine/inks.ts'
 import { SIZE_MAX, SIZE_MIN } from '../engine/limits.ts'
 import { ASPECTS, FONTS } from '../engine/types.ts'
@@ -63,8 +62,7 @@ export const FONT_IDS = ids(FONTS)
 export const PAPER_IDS = ids(PAPERS)
 export const ASPECT_KEYS = Object.keys(ASPECTS)
 export const ALIGNS = ['left', 'center', 'right', 'justify'] as const
-export const METHODS = ['halftone', 'dither', 'woodcut', 'scribble'] as const
-export const SCREEN_SHAPES = ['circle', 'square', 'line', 'ellipse', 'cross', 'diamond'] as const
+export const METHODS = ['halftone', 'grain'] as const
 
 /** Sheet positions: the drag and the keys let type bleed a little off the trim. */
 const POSITION = { min: -0.3, max: 1.3 }
@@ -91,28 +89,11 @@ export const LAYER_FIELDS: readonly Row[] = [
 
 export const PRESS_FIELDS: readonly Row[] = [
   { key: 'method', kind: 'enum', values: METHODS },
-  { key: 'screenShape', kind: 'enum', values: SCREEN_SHAPES },
   { key: 'screenPitch', kind: 'number', min: 2, max: 24 },
-  { key: 'screenSoftness', kind: 'number', min: 0, max: 3 },
-  { key: 'ditherType', kind: 'enum', values: ids(DITHER_TYPES) },
-  { key: 'ditherThreshold', kind: 'number', min: 0.1, max: 0.9 },
-  { key: 'ditherScale', kind: 'number', min: 1, max: 12, int: true },
-  { key: 'carvePitch', kind: 'number', min: 3, max: 40 },
-  { key: 'carveAngle', kind: 'number', min: 0, max: 180 },
-  { key: 'carveRoughness', kind: 'number', min: 0, max: 1 },
   { key: 'density', kind: 'number', min: 0.3, max: 1 },
-  { key: 'gamma', kind: 'number', min: 0.4, max: 2.4 },
-  { key: 'mottle', kind: 'number', min: 0, max: 0.8 },
-  { key: 'dropout', kind: 'number', min: 0, max: 0.08 },
-  { key: 'banding', kind: 'number', min: 0, max: 1 },
-  { key: 'roughness', kind: 'number', min: 0, max: 1 },
-  { key: 'roughScale', kind: 'number', min: 1, max: 14 },
-  { key: 'bleed', kind: 'number', min: 0, max: 1 },
-  { key: 'streaks', kind: 'number', min: 0, max: 1 },
-  { key: 'smear', kind: 'number', min: 0, max: 1 },
-  { key: 'patches', kind: 'number', min: 0, max: 1 },
   { key: 'misregistration', kind: 'number', min: 0, max: 30 },
-  { key: 'detailScaling', kind: 'boolean' },
+  { key: 'edge', kind: 'number', min: 0, max: 1 },
+  { key: 'wear', kind: 'number', min: 0, max: 0.8 },
 ]
 
 export const MEDIA_FIELDS: readonly Row[] = [
@@ -147,8 +128,6 @@ export const SETTINGS_FIELDS: readonly Row[] = [
   { key: 'paperVeil', kind: 'boolean' },
   { key: 'aspect', kind: 'enum', values: ASPECT_KEYS },
   { key: 'paperId', kind: 'enum', values: PAPER_IDS },
-  { key: 'paperTexture', kind: 'number', min: 0, max: 1 },
-  { key: 'paperBlotch', kind: 'number', min: 0, max: 1 },
   { key: 'press', kind: 'object', fields: PRESS_FIELDS },
   { key: 'seed', kind: 'number', min: 0, max: 0xffffffff, int: true },
   {

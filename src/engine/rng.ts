@@ -20,16 +20,6 @@ export function mulberry32(seed: number): () => number {
   }
 }
 
-/** Hash a string to a 32-bit seed, so a text string can drive its own texture. */
-export function hashSeed(str: string): number {
-  let h = 2166136261 >>> 0
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return h >>> 0
-}
-
 const smoothstep = (t: number): number => t * t * (3 - 2 * t)
 
 /**

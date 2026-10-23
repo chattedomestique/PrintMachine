@@ -10,15 +10,14 @@
  * Pass order, and why it is this order:
  *
  *   type → tone      glyph alpha is the tone field
- *   roughen/bleed    the burned stencil's ragged outline and ink spread —
+ *   edge             the burned stencil's ragged outline and ink spread —
  *                    on the tone, so the screen bites on the real edge
- *   density/gamma    ink can't reach full black; cap before screening so the
+ *   density          ink can't reach full black; cap before screening so the
  *                    screen sees the tone that will actually be printed
- *   wear             mottle, dropout patches, drum streaks, smear, banding —
- *                    ALL on the tone, so they change how many dots print
- *                    rather than how transparent the ink is
+ *   wear             mottle and speckle dropout, on the tone, so they change
+ *                    how many dots print rather than how transparent the ink is
  *   plate shift      the artwork moves on the plate...
- *   screen/dither    ...and the lattice moves with it, so dots don't crawl
+ *   screen/grain     ...and the lattice moves with it, so dots don't crawl
  *   composite        subtractive overprint onto textured paper
  *
  * Reordering this is not a refactor, it is a regression:
@@ -36,14 +35,12 @@
 
 import { compositeLayers, type CompositeLayer } from './composite.ts'
 import { ditherField } from './dither.ts'
-import { applyDensity, applyMottle, registrationOffset, shiftField } from './ink.ts'
+import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftField, wearToMottle } from './ink.ts'
 import { inkById, paperById } from './inks.ts'
-import { applyDropoutPatches, applySmear, applyStreaks } from './misprint.ts'
 import { roughenEdges } from './rough.ts'
-import { applyRollerBanding, paperField, type PaperField } from './paper.ts'
+import { paperField, type PaperField } from './paper.ts'
 import { fbm2D, whiteNoise2D } from './rng.ts'
 import { defaultAngle, screenField } from './screen.ts'
-import { scribbleField, woodcutField } from './carve.ts'
 import { knockoutMask } from './knockout.ts'
 import { bandMask, coverRect, groundLuma, splitInks } from './media.ts'
 import { rasterizeBacking, rasterizeText } from './text.ts'
@@ -81,6 +78,24 @@ export const PREVIEW_HEIGHT = 1000
  */
 export const DRAFT_HEIGHT = 280
 
+/**
+ * The press's fixed constants, once settings and now decisions made here:
+ *
+ *  - Dot softness 0.7 px: the halftone dot's edge, at the reference height.
+ *  - Tear scale 3 px: the feature size of the stencil's ragged edge.
+ *  - Paper tooth 0.4 and cloud 0.5: fibre and cloudiness of the stock.
+ *
+ * Each belongs to the look but is not a choice anyone makes per print.
+ */
+const DOT_SOFTNESS = 0.7
+const TEAR_SCALE = 3
+const PAPER_TOOTH = 0.4
+const PAPER_CLOUD = 0.5
+
+/** The grain cell rides the screen size, a third of it, so the default 9 px
+ *  screen gives the 3 px grain the press always shipped with. */
+const GRAIN_PER_PITCH = 1 / 3
+
 /** Output pixel dimensions for an aspect at a given render height. */
 export function outputSize(
   aspect: PrintSettings['aspect'],
@@ -116,7 +131,7 @@ export interface RenderCache {
 }
 
 function cacheKey(s: PrintSettings, w: number, h: number): string {
-  return [w, h, s.seed, s.paperId, s.paperTexture, s.paperBlotch].join('|')
+  return [w, h, s.seed, s.paperId].join('|')
 }
 
 /** Everything about a layer that changes its rasterised glyphs (and so its
@@ -145,8 +160,8 @@ function buildCache(s: PrintSettings, w: number, h: number): RenderCache {
     h,
     paper: paperField(w, h, {
       rgb: paperById(s.paperId).rgb,
-      texture: s.paperTexture,
-      blotch: s.paperBlotch,
+      texture: PAPER_TOOTH,
+      blotch: PAPER_CLOUD,
       seed: s.seed,
     }),
     // Mottle cell is tied to the sheet, not to a pixel count, so the blotch
@@ -219,9 +234,8 @@ export function ensureCache(
  * letterform and start replacing it.
  *
  * So detail scales with the rendered type size, floored so small type still
- * reads as printed rather than as clean vector. Off by default it is not —
- * `detailScaling` exists because at some point somebody will want the honest
- * one-ruling-per-sheet behaviour.
+ * reads as printed rather than as clean vector. Always on: it is a fix, not a
+ * preference — off, the coarse screen and the wear eat small type.
  */
 export function detailFactor(fontSize: number, canvasHeight: number): number {
   // 0.16 of the sheet height is the poster size the wear defaults were tuned
@@ -265,22 +279,22 @@ export function pressPlate(
 ): PressedPlate {
   const tone = plate.field
   const scale = h / REFERENCE_HEIGHT
-  const detail = s.detailScaling ? detailFactor(plate.fontSize, h) : 1
+  const detail = detailFactor(plate.fontSize, h)
+  const edge = edgeToRough(s.edge)
+  const wear = wearToMottle(s.wear)
 
   // Ragged stencil edge + ink spread, before anything downstream sees the
   // outline. Seeded per plate so two plates don't tear identically.
   const rough = roughenEdges(tone, w, h, {
-    roughness: s.roughness,
+    roughness: edge.roughness,
     // Unfloored: roughenEdges needs the size that was actually asked for,
     // not a whole number, or it cannot tell a fine tear from a clamped one.
-    scale: s.roughScale * scale * detail,
+    scale: TEAR_SCALE * scale * detail,
     // Bleed is a threshold offset, so at small sizes it eats the counters —
     // the holes in a, e, o fill and the word turns into a row of blobs.
-    bleed: s.bleed * detail,
+    bleed: edge.bleed * detail,
     seed: seed ^ (index * 0x9e3779b9),
   })
-
-  let tone2 = applyDensity(rough, s.density, s.gamma)
 
   // ── Wear, applied to TONE and therefore before the screen ───────────
   //
@@ -293,89 +307,42 @@ export function pressPlate(
   // Ink that fails to transfer does not go grey. The dots that do print are
   // still full-strength pigment; there are simply fewer and smaller of them.
   // Modulating tone lets the screen convert a fade into *sparser dots*, so a
-  // failing area visibly breaks up into halftone instead of dimming.
-  // Detail scaling has to reach the wear as well as the screen, and this was
-  // the gap: tear, bleed, screen and registration all scaled to the type while
-  // mottle, dropout, patches, streaks, smear and banding stayed sized for the
-  // sheet. On a poster that is fine. On body copy the blotch cell is about the
-  // height of a letter and a dropout patch is wider than a word, so the wear
-  // stops texturing the ink and starts eating the letterform — which looks
-  // exactly like a tear that will not turn down, because turning the tear down
-  // was never going to touch it.
-  tone2 = applyMottle(
-    tone2,
+  // failing area visibly breaks up into halftone instead of dimming. Detail
+  // scaling reaches the wear as well as the screen: on body copy a sheet-sized
+  // blotch cell is about the height of a letter, so unscaled wear stops
+  // texturing the ink and starts eating the letterform.
+  const worn = applyMottle(
+    applyDensity(rough, s.density),
     cache.mottle,
     cache.speckle,
-    s.mottle * detail,
-    s.dropout * detail,
+    wear.mottle * detail,
+    wear.dropout * detail,
     w,
     h,
     detail,
   )
-  tone2 = applyDropoutPatches(tone2, w, h, s.patches * detail, seed ^ (index * 0x165667b1), detail)
-  tone2 = applyStreaks(tone2, w, h, s.streaks * detail, seed ^ (index * 0x27d4eb2d))
-  tone2 = applySmear(tone2, w, h, s.smear * detail)
-  tone2 = applyRollerBanding(tone2, w, h, s.banding * detail, seed ^ (index * 0x27d4eb2d))
 
   // Misregistration is a paper-feed error, physically the same for the whole
   // sheet — but at 5px it obliterates 20px type while barely showing on a
   // poster. Scaled by sqrt so it stays visible on small type without eating it.
   const { dx, dy } = registrationOffset(seed, index, s.misregistration * scale * Math.sqrt(detail))
-  const shifted = shiftField(tone2, w, h, dx, dy)
-  return { coverage: screenPlate(shifted, index, s, seed, w, h, detail, dx, dy), roughened: rough, dx, dy }
-}
+  const shifted = shiftField(worn, w, h, dx, dy)
 
-/** The screen (or carve, or dither) a pressed, shifted plate goes through. */
-function screenPlate(
-  shifted: Float32Array,
-  index: number,
-  s: PressProfile,
-  seed: number,
-  w: number,
-  h: number,
-  detail: number,
-  dx: number,
-  dy: number,
-): Float32Array {
-  const scale = h / REFERENCE_HEIGHT
-
-  if (s.method === 'woodcut' || s.method === 'scribble') {
-    // Not screens: the ink is carried by what a blade left standing, or laid
-    // by a hand hatching. Both still run *here*, after the wear and the plate
-    // shift, so a carved block still tears and misregisters like everything
-    // else on the sheet.
-    const carve = {
-      pitch: Math.max(2, s.carvePitch * scale * detail),
-      // The cut direction is a deliberate choice, not a screen angle chosen to
-      // dodge moiré — so it is taken as given and only nudged per plate, so two
-      // blocks are not carved identically.
-      angle: s.carveAngle + index * 7,
-      roughness: s.carveRoughness,
-      seed: seed ^ (index * 0x9e3779b9),
-    }
-    return s.method === 'woodcut'
-      ? woodcutField(shifted, w, h, carve)
-      : scribbleField(shifted, w, h, carve)
-  }
-
-  if (s.method === 'dither') {
-    return ditherField(shifted, w, h, s.ditherType, {
-      threshold: s.ditherThreshold,
-      // Cell size rides the render scale like every other spatial quantity, so
-      // the preview and the export show the same texture rather than the same
-      // pixel count.
-      scale: Math.max(1, Math.round(s.ditherScale * scale)),
-    })
-  }
-  return screenField(shifted, w, h, {
-    shape: s.screenShape,
-    pitch: Math.max(1.2, s.screenPitch * scale * detail),
-    // Each plate gets its own angle; the beat between them is the rosette.
-    angle: defaultAngle(index),
-    softness: s.screenSoftness * scale * detail,
-    originX: dx,
-    originY: dy,
-  })
+  const coverage =
+    s.method === 'grain'
+      ? // The grain cell rides the render scale like every other spatial
+        // quantity, so the preview and the export show the same texture rather
+        // than the same pixel count.
+        ditherField(shifted, w, h, { scale: Math.max(1, Math.round(s.screenPitch * GRAIN_PER_PITCH * scale)) })
+      : screenField(shifted, w, h, {
+          pitch: Math.max(1.2, s.screenPitch * scale * detail),
+          // Each plate gets its own angle; the beat between them is the rosette.
+          angle: defaultAngle(index),
+          softness: DOT_SOFTNESS * scale * detail,
+          originX: dx,
+          originY: dy,
+        })
+  return { coverage, roughened: rough, dx, dy }
 }
 
 /**
@@ -396,14 +363,10 @@ function binarise(
   h: number,
 ): Float32Array {
   const scale = h / REFERENCE_HEIGHT
-  if (press.method === 'dither') {
-    return ditherField(mask, w, h, press.ditherType, {
-      threshold: press.ditherThreshold,
-      scale: Math.max(1, Math.round(press.ditherScale * scale)),
-    })
+  if (press.method === 'grain') {
+    return ditherField(mask, w, h, { scale: Math.max(1, Math.round(press.screenPitch * GRAIN_PER_PITCH * scale)) })
   }
   return screenField(mask, w, h, {
-    shape: press.screenShape,
     pitch: Math.max(1.2, press.screenPitch * scale),
     angle: defaultAngle(index),
     softness: 0,

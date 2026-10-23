@@ -21,7 +21,6 @@ import { BACKING_PAD, FIT_WIDTH, alignOffset, fitSize, justifyOffsets, layoutTex
 import {
   DRAFT_HEIGHT,
   PREVIEW_HEIGHT,
-  REFERENCE_HEIGHT,
   detailFactor,
   ensureCache,
   grainCell,
@@ -44,7 +43,7 @@ import {
 } from './media.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 import { applySettings } from '../state/settingsReducer.ts'
-import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from './limits.ts'
+import { REFERENCE_HEIGHT, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from './limits.ts'
 import { blurField } from './blur.ts'
 import { roughenEdges } from './rough.ts'
 import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'

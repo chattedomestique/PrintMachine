@@ -5,8 +5,37 @@
  * needs them too (`fitSize` clamps to the size range) and `engine/` may not
  * import from `features/`. The normaliser reads them from here as well, so a
  * stored value, a fitted value and a gesture can never disagree about what a
- * valid size is.
+ * valid size is. The export's numbers live here for the same reason: the
+ * planner (exportPlan.ts) and the renderer must agree on them.
  */
+
+/**
+ * Every pitch and offset in the settings is expressed against this height, so
+ * the preview and the export produce the same *look* at different resolutions.
+ * It is also the export's floor: a print is never saved smaller than this,
+ * however few pixels its photo has.
+ */
+export const REFERENCE_HEIGHT = 1800
+
+/**
+ * The export canvas's ceiling, by AREA: 16,777,216 px (4096 x 4096), the most
+ * a browser canvas is guaranteed to hold — WebKit's documented limit is an
+ * area. Over it, an iOS canvas does not throw; it hands back a blank one.
+ * There is no separate edge cap: a 3:1 sheet may be 7092 px wide. The photo
+ * itself is never capped (it is stored as imported); only the sheet it is
+ * pressed into is. Exporting above this needs tiled rendering and a JS
+ * encoder, which are not built.
+ */
+export const MAX_AREA = 16_777_216
+
+/**
+ * The export height of a print with no photo: 2 x REFERENCE_HEIGHT (a 4:5
+ * sheet is 2880 x 3600, 10.4 MP). Type is vector and every effect scales, so
+ * a larger sheet is strictly crisper; an integer ratio keeps the grain cells,
+ * one-pixel kernels and misregistration exact; and it stays below a 12 MP
+ * photo's export, so it adds no new memory regime.
+ */
+export const NO_PHOTO_HEIGHT = 3600
 
 /**
  * Type size, as a fraction of the sheet's height: the em, so `fontSize = size

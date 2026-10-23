@@ -44,14 +44,8 @@ import { defaultAngle, screenField } from './screen.ts'
 import { knockoutMask } from './knockout.ts'
 import { bandMask, coverRect, groundLuma, splitInks } from './media.ts'
 import { rasterizeBacking, rasterizeText } from './text.ts'
+import { REFERENCE_HEIGHT } from './limits.ts'
 import { ASPECTS, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
-
-/**
- * Every pitch and offset in the settings is expressed against this height, so
- * the preview and the export produce the same *look* at different resolutions.
- * Named here as a deliberate ceiling rather than rediscovered later as a bug.
- */
-export const REFERENCE_HEIGHT = 1800
 
 /**
  * The preview renders smaller than the export so a slider drag stays smooth on

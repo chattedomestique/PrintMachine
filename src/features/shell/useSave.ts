@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import {
+  CanvasLimitError,
+  SMALLER_STEP,
+  SMALLEST_COPY_HEIGHT,
   canShareFile,
   deliverFile,
   dims,
+  findSmallerPlan,
+  fitsCanvas,
   fileSize,
   planPrint,
   printFile,
@@ -15,6 +20,7 @@ import type { RenderProgress } from '../../engine/render.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { decodeOriginal } from '../media/decode.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
+import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../../state/persist.ts'
 
 /**
  * The save flow, as a state machine with no UI in it (the old chrome and the
@@ -42,6 +48,12 @@ export type SaveState =
   | { kind: 'ready'; file: File; plan: ExportPlan }
   | { kind: 'sharing'; file: File; plan: ExportPlan }
   | { kind: 'error'; message: string }
+  /** This device could not press `failed`; `smaller` is the largest copy it
+   *  can (null: none it can). Asked, never done unasked. */
+  | { kind: 'tooBig'; format: ExportFormat; failed: ExportPlan; smaller: ExportPlan | null }
+  /** A save of `height` was in flight when the app last went away (a killed
+   *  tab, perhaps): said at launch, without claiming why. */
+  | { kind: 'interrupted'; format: ExportFormat; height: number }
 
 export type SaveEvent =
   | { type: 'start'; format: ExportFormat; plan: ExportPlan; photo: boolean }
@@ -55,6 +67,8 @@ export type SaveEvent =
   | { type: 'shareFailed' }
   | { type: 'cancelled' }
   | { type: 'failed'; message: string }
+  | { type: 'tooBig'; failed: ExportPlan; smaller: ExportPlan | null }
+  | { type: 'interrupted'; format: ExportFormat; height: number }
   | { type: 'dismiss' }
   /** The document was edited: a file waiting for its tap is no longer this
    *  print, and an old error is no longer about it. */
@@ -69,7 +83,7 @@ export const SHARE_AT_ONCE_MS = 1000
 export function saveReducer(state: SaveState, event: SaveEvent): SaveState {
   switch (event.type) {
     case 'start':
-      if (state.kind !== 'idle' && state.kind !== 'error' && state.kind !== 'ready') return state
+      if (!startsFrom(state)) return state
       return event.photo
         ? { kind: 'loadingPhoto', format: event.format, plan: event.plan }
         : { kind: 'pressing', format: event.format, plan: event.plan, progress: null }
@@ -93,11 +107,26 @@ export function saveReducer(state: SaveState, event: SaveEvent): SaveState {
       return state.kind === 'loadingPhoto' || state.kind === 'pressing' ? IDLE : state
     case 'failed':
       return { kind: 'error', message: event.message }
+    case 'tooBig':
+      return state.kind === 'loadingPhoto' || state.kind === 'pressing'
+        ? { kind: 'tooBig', format: state.format, failed: event.failed, smaller: event.smaller }
+        : state
+    case 'interrupted':
+      return state.kind === 'idle' ? { kind: 'interrupted', format: event.format, height: event.height } : state
     case 'dismiss':
+      return state.kind === 'error' || state.kind === 'ready' || state.kind === 'tooBig' || state.kind === 'interrupted' ? IDLE : state
     case 'documentChanged':
-      return state.kind === 'error' || state.kind === 'ready' ? IDLE : state
+      // An unfinished save's notice stays: what it offers is worked out from
+      // the document as it is now. A smaller copy offered for a failed press
+      // was worked out from the document as it was, so it goes.
+      return state.kind === 'error' || state.kind === 'ready' || state.kind === 'tooBig' ? IDLE : state
   }
 }
+
+/** The states a new save may start from: anything not already pressing or
+ *  sharing. */
+const startsFrom = (state: SaveState) =>
+  state.kind === 'idle' || state.kind === 'error' || state.kind === 'ready' || state.kind === 'tooBig' || state.kind === 'interrupted'
 
 /** The press is running: the preview stops rendering, so a full-size press
  *  and a preview frame never hold their buffers at once, and the page behind
@@ -110,7 +139,7 @@ export function pressInProgress(state: SaveState): boolean {
  *  document's photo is still loading or failed to load (the Photo panel says
  *  why). */
 export function canStart(state: SaveState, media: MediaState): boolean {
-  return (state.kind === 'idle' || state.kind === 'error' || state.kind === 'ready') && media !== 'loading' && media !== 'failed'
+  return startsFrom(state) && media !== 'loading' && media !== 'failed'
 }
 
 /** What the Save button says, and whether it can be pressed. */
@@ -125,9 +154,49 @@ export function saveButton(state: SaveState, media: MediaState): { text: string;
       return { text: 'Saving…', disabled: true }
     case 'idle':
     case 'error':
+    case 'tooBig':
+    case 'interrupted':
       if (media === 'loading') return { text: 'Loading photo', disabled: true }
       return { text: 'Save', disabled: media === 'failed' }
   }
+}
+
+/** A way to answer a save question: a save no taller than `height`. */
+export interface SaveChoice {
+  label: string
+  height: number
+}
+
+/**
+ * The question the save flow puts when it cannot go on unasked, in numbers,
+ * with the saves it offers (Cancel is always there besides). Null when there
+ * is none.
+ *
+ * @param planAt the current document's plan no taller than a height.
+ */
+export function saveQuestion(state: SaveState, planAt: (maxHeight: number) => ExportPlan): { text: string; choices: SaveChoice[] } | null {
+  const size = (p: ExportPlan) => dims(p.width, p.height)
+  if (state.kind === 'tooBig') {
+    const failed = size(state.failed)
+    if (!state.smaller) return { text: `This device couldn't press ${failed}, nor a copy smaller than it: it cannot save this print.`, choices: [] }
+    return {
+      text: `This device couldn't press ${failed}. Save a smaller ${size(state.smaller)} copy instead?`,
+      choices: [{ label: 'Save smaller', height: state.smaller.height }],
+    }
+  }
+  if (state.kind === 'interrupted') {
+    // Not "the device could not": a killed tab may be anything. The same
+    // save again, or one step smaller.
+    const again = planAt(state.height)
+    const smallerHeight = Math.round(again.height * SMALLER_STEP)
+    const choices = [{ label: 'Try again', height: again.height }]
+    if (smallerHeight >= SMALLEST_COPY_HEIGHT) {
+      const smaller = planAt(smallerHeight)
+      choices.push({ label: `Save smaller (${size(smaller)})`, height: smaller.height })
+    }
+    return { text: `The last save, ${size(again)}, did not finish.`, choices }
+  }
+  return null
 }
 
 /** The line the save flow shows while it works, or null when it has nothing
@@ -149,6 +218,8 @@ export function progressText(state: SaveState): string | null {
       return `Saving ${dims(state.plan.width, state.plan.height)}`
     case 'error':
       return state.message
+    case 'tooBig':
+    case 'interrupted':
     case 'idle':
       return null
   }
@@ -166,6 +237,19 @@ const painted = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
 
 const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError'
+
+/** Whether both of the press's canvases can be this size here (each proved
+ *  by a sentinel pixel), then let go. */
+function canvasesFit(w: number, h: number): boolean {
+  const a = document.createElement('canvas').getContext('2d')
+  const b = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+  try {
+    return !!a && !!b && fitsCanvas(a, w, h) && fitsCanvas(b, w, h)
+  } finally {
+    if (a) a.canvas.width = 0
+    if (b) b.canvas.width = 0
+  }
+}
 
 /**
  * Run the save flow for the current document.
@@ -192,6 +276,13 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
   // press runs the page is inert, so nothing can edit.)
   useEffect(() => dispatch({ type: 'documentChanged' }), [settings])
 
+  // A save that was in flight when the app last went away: said once, at
+  // launch (reading the mark clears it).
+  useEffect(() => {
+    const unfinished = takeExportInFlight()
+    if (unfinished) dispatch({ type: 'interrupted', ...unfinished })
+  }, [])
+
   const deliver = useCallback(
     async (file: File, plan: ExportPlan) => {
       try {
@@ -211,10 +302,10 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
   )
 
   const start = useCallback(
-    async (format: ExportFormat) => {
+    async (format: ExportFormat, maxHeight?: number) => {
       if (runningRef.current || !canStart(stateRef.current, media)) return
       runningRef.current = true
-      const plan = planPrint(settings)
+      const plan = planPrint(settings, { maxHeight })
       const tapped = performance.now()
       const controller = new AbortController()
       abortRef.current = controller
@@ -228,6 +319,9 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
         const out = document.createElement('canvas').getContext('2d')
         const scratch = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
         if (!out || !scratch) throw new Error('Could not open a canvas to press the print.')
+        // Marked for the next launch to find, should the tab die from here
+        // (the original's decode included).
+        markExportInFlight({ height: plan.height, format })
         // The ORIGINAL, decoded now and in full (4 bytes a pixel of the photo,
         // 98 MB for a 24 MP one), and let go the moment the ground is drawn.
         if (settings.media) photo = await decodeOriginal(settings.media.id)
@@ -236,6 +330,7 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
         const decoded = photo
         const pressed = await savePrint(out, scratch, settings, decoded, {
           format,
+          maxHeight,
           signal: controller.signal,
           onProgress: (progress) => dispatch({ type: 'progress', progress }),
           onGround: () => decoded?.close(),
@@ -251,10 +346,19 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
           dispatch({ type: 'cancelled' })
           return
         }
+        if (err instanceof CanvasLimitError) {
+          // Offered, never taken unasked: the largest smaller copy whose
+          // canvases this device proves it can hold.
+          photo?.close()
+          photo = null
+          dispatch({ type: 'tooBig', failed: err.plan, smaller: findSmallerPlan(settings, err.plan.height, canvasesFit) })
+          return
+        }
         // Never a quieter, smaller file: the reason, with the numbers.
         const reason = err instanceof Error ? err.message : String(err)
         dispatch({ type: 'failed', message: `Could not press ${dims(plan.width, plan.height)}: ${reason}` })
       } finally {
+        clearExportInFlight()
         photo?.close()
         if (abortRef.current === controller) abortRef.current = null
         runningRef.current = false
@@ -274,5 +378,15 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
 
   const dismiss = useCallback(() => dispatch({ type: 'dismiss' }), [])
 
-  return { state, start, cancel, share, dismiss }
+  /** Answer the question (saveQuestion) with a height: the smaller copy it
+   *  offers, or, after an unfinished save, that save again. */
+  const answer = useCallback(
+    (height: number) => {
+      const current = stateRef.current
+      if (current.kind === 'tooBig' || current.kind === 'interrupted') void start(current.format, height)
+    },
+    [start],
+  )
+
+  return { state, start, cancel, share, dismiss, answer }
 }

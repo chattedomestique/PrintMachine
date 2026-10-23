@@ -21,7 +21,7 @@ import photoSecondInk from './__fixtures__/legacy-photo-second-ink.json'
 import preSplit from './__fixtures__/legacy-pre-split.json'
 import unknownIds from './__fixtures__/legacy-unknown-ids.json'
 import { defaultSettings } from './defaults.ts'
-import { loadPrefs, loadSettings, savePrefs } from './persist.ts'
+import { clearExportInFlight, loadPrefs, loadSettings, markExportInFlight, savePrefs, takeExportInFlight } from './persist.ts'
 
 const KEY = 'printmachine:settings:v1'
 
@@ -122,3 +122,29 @@ describe('preferences', () => {
   })
 })
 
+
+describe('a save that did not finish', () => {
+  it('is found once at the next launch, with its height and format', () => {
+    expect(takeExportInFlight()).toBeNull()
+    markExportInFlight({ height: 3024, format: 'png' })
+    expect(takeExportInFlight()).toEqual({ height: 3024, format: 'png' })
+    expect(takeExportInFlight()).toBeNull()
+  })
+
+  it('is not found once the save ended, either way', () => {
+    markExportInFlight({ height: 3024, format: 'jpeg' })
+    clearExportInFlight()
+    expect(takeExportInFlight()).toBeNull()
+  })
+
+  it('anything else under its key is not one; no storage is no notice, never an error', () => {
+    for (const raw of ['3024', '{"height":-1}', '{"height":"big"}', 'not json']) {
+      store.set('printmachine:export-in-flight', raw)
+      expect(takeExportInFlight()).toBeNull()
+    }
+    vi.unstubAllGlobals()
+    expect(() => markExportInFlight({ height: 3024, format: 'jpeg' })).not.toThrow()
+    expect(() => clearExportInFlight()).not.toThrow()
+    expect(takeExportInFlight()).toBeNull()
+  })
+})

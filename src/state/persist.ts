@@ -87,3 +87,47 @@ export function savePrefs(prefs: Prefs): void {
     // Same as above.
   }
 }
+
+/**
+ * A save in flight, for a launch to find if the tab was killed mid-press (iOS
+ * evicts a tab that holds too much without a word). Set before the press with
+ * the planned height and format, cleared when it ends either way. Storage
+ * failing only means the notice is not shown; it never stops a save.
+ */
+const IN_FLIGHT_KEY = 'printmachine:export-in-flight'
+
+export interface ExportInFlight {
+  height: number
+  format: 'jpeg' | 'png'
+}
+
+export function markExportInFlight(save: ExportInFlight): void {
+  try {
+    localStorage.setItem(IN_FLIGHT_KEY, JSON.stringify(save))
+  } catch {
+    // No storage: nothing to find after a crash, nothing else lost.
+  }
+}
+
+export function clearExportInFlight(): void {
+  try {
+    localStorage.removeItem(IN_FLIGHT_KEY)
+  } catch {
+    // Same as above.
+  }
+}
+
+/** The save that did not finish, once: reading it clears it. Anything else
+ *  found there (an older build's, hand-edited) is not one. */
+export function takeExportInFlight(): ExportInFlight | null {
+  try {
+    const raw = localStorage.getItem(IN_FLIGHT_KEY)
+    localStorage.removeItem(IN_FLIGHT_KEY)
+    if (raw === null) return null
+    const { height, format } = JSON.parse(raw) as Partial<ExportInFlight>
+    if (typeof height !== 'number' || !Number.isInteger(height) || height <= 0) return null
+    return { height, format: format === 'png' ? 'png' : 'jpeg' }
+  } catch {
+    return null
+  }
+}

@@ -8,12 +8,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  CanvasLimitError,
   ENCODINGS,
   JPEG_QUALITY,
   MissingPhotoError,
+  SMALLER_STEP,
+  SMALLEST_COPY_HEIGHT,
   deliverFile,
   describePlan,
   fileSize,
+  findSmallerPlan,
+  fitsCanvas,
   planPrint,
   printFile,
   saveMessage,
@@ -25,19 +30,27 @@ import { REFERENCE_HEIGHT } from './limits.ts'
 import { sheetAspect, type PrintSettings } from './types.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
 
-/** A canvas and 2D context that record sizes and draws and hand back blank
- *  pixels: enough for renderPrint's glyph and photo calls. */
-function fakeContext() {
+/**
+ * A canvas and 2D context that record sizes and draws and hand back blank
+ * pixels: enough for renderPrint's glyph and photo calls. A 1x1 sentinel
+ * rectangle reads back as drawn, as on a real canvas, unless the canvas is
+ * over `maxArea`: then, as an iOS canvas over its limit does, it reads back
+ * blank. With `encodes: false` the encoder hands back null.
+ */
+function fakeContext(opts: { maxArea?: number; encodes?: boolean } = {}) {
   const sizes: [number, number][] = []
   const blobs: { mime: string; quality: number | undefined }[] = []
   let width = 0
   let height = 0
+  // The one-pixel rectangle drawn since the canvas was last sized or cleared.
+  let drawn: { x: number; y: number; fill: string } | null = null
   const canvas = {
     get width() {
       return width
     },
     set width(v: number) {
       width = v
+      drawn = null
       sizes.push([width, height])
     },
     get height() {
@@ -45,11 +58,12 @@ function fakeContext() {
     },
     set height(v: number) {
       height = v
+      drawn = null
       sizes.push([width, height])
     },
     toBlob(cb: (b: Blob | null) => void, mime: string, quality?: number) {
       blobs.push({ mime, quality })
-      cb(new Blob([new Uint8Array(1234)], { type: mime }))
+      cb(opts.encodes === false ? null : new Blob([new Uint8Array(1234)], { type: mime }))
     },
   }
   const ctx = {
@@ -60,16 +74,25 @@ function fakeContext() {
     textAlign: 'left',
     letterSpacing: '0px',
     imageSmoothingQuality: 'low',
-    clearRect: () => {},
+    clearRect: (x: number, y: number, w: number, h: number) => {
+      if (drawn && drawn.x >= x && drawn.x < x + w && drawn.y >= y && drawn.y < y + h) drawn = null
+    },
     drawImage: () => {},
     save: () => {},
     restore: () => {},
     translate: () => {},
     rotate: () => {},
     fillText: () => {},
-    fillRect: () => {},
+    fillRect: (x: number, y: number, w: number, h: number) => {
+      if (w === 1 && h === 1) drawn = { x, y, fill: ctx.fillStyle }
+    },
     measureText: (t: string) => ({ width: t.length * 10 }),
-    getImageData: (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    getImageData: (x: number, y: number, w: number, h: number) => {
+      const data = new Uint8ClampedArray(w * h * 4)
+      const fits = width * height <= (opts.maxArea ?? Infinity)
+      if (fits && w === 1 && h === 1 && drawn?.x === x && drawn.y === y && drawn.fill === 'rgb(1, 2, 3)') data.set([1, 2, 3, 255])
+      return { data }
+    },
     createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
     putImageData: () => {},
   }
@@ -177,12 +200,111 @@ describe('the file', () => {
     )
   })
 
+  it('presses no taller than a smaller copy asked for, and says so', async () => {
+    const s = withPhoto(4032, 3024)
+    const { render, heights } = spyRender()
+    const pressed = await savePrint(fakeContext().ctx, fakeContext().ctx, s, decoded, { maxHeight: 2268 }, render)
+    expect(heights).toEqual([2268])
+    expect(pressed.plan).toMatchObject({ width: 1814, height: 2268, limit: 'smaller' })
+  })
+
   it('never prints a photo document without its photo', async () => {
     const { render, heights } = spyRender()
     await expect(savePrint(fakeContext().ctx, fakeContext().ctx, withPhoto(100, 100), null, {}, render)).rejects.toBeInstanceOf(
       MissingPhotoError,
     )
     expect(heights).toEqual([])
+  })
+})
+
+describe('a print too big for this device: proved before the work, said in numbers, never quietly smaller', () => {
+  it('a canvas works when its sentinel pixel reads back; blank, clamped or throwing, it does not', () => {
+    const probed = fakeContext()
+    expect(fitsCanvas(probed.ctx, 2419, 3024)).toBe(true)
+    // Left at that size and blank, for the press to draw on.
+    expect([probed.ctx.canvas.width, probed.ctx.canvas.height]).toEqual([2419, 3024])
+    expect([...probed.ctx.getImageData(2418, 3023, 1, 1).data]).toEqual([0, 0, 0, 0])
+    expect(fitsCanvas(fakeContext({ maxArea: 4096 * 4096 }).ctx, 4096, 4096)).toBe(true)
+    expect(fitsCanvas(fakeContext({ maxArea: 4096 * 4096 }).ctx, 4097, 4096)).toBe(false)
+    // A canvas that will not take the size asked (some browsers clamp).
+    const clamped = fakeContext()
+    Object.defineProperty(clamped.ctx.canvas, 'width', { get: () => 0, set: () => {} })
+    expect(fitsCanvas(clamped.ctx, 100, 100)).toBe(false)
+    const throwing = fakeContext()
+    ;(throwing.ctx as unknown as { getImageData: () => never }).getImageData = () => {
+      throw new RangeError('Out of memory')
+    }
+    expect(fitsCanvas(throwing.ctx, 100, 100)).toBe(false)
+  })
+
+  it('probes both canvases at the planned size before pressing anything; either blank stops it, both let go', async () => {
+    const s = withPhoto(4032, 3024)
+    for (const [outArea, scratchArea] of [
+      [5e6, Infinity],
+      [Infinity, 5e6],
+    ]) {
+      const { render, heights } = spyRender()
+      const out = fakeContext({ maxArea: outArea })
+      const scratch = fakeContext({ maxArea: scratchArea })
+      const err = await savePrint(out.ctx, scratch.ctx, s, decoded, {}, render).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(CanvasLimitError)
+      expect((err as CanvasLimitError).plan).toEqual(planPrint(s))
+      expect((err as Error).message).toBe("This device couldn't press 2419×3024 (a canvas that size came back blank).")
+      expect(heights).toEqual([])
+      expect(out.ctx.canvas.width).toBe(0)
+      expect(scratch.ctx.canvas.width).toBe(0)
+    }
+  })
+
+  it('an encoder that hands back nothing, or memory running out, is the same "too big", with the plan', async () => {
+    const s = withPhoto(4032, 3024)
+    const noFile = await savePrint(fakeContext({ encodes: false }).ctx, fakeContext().ctx, s, decoded, {}, spyRender().render).catch(
+      (e: unknown) => e,
+    )
+    expect(noFile).toBeInstanceOf(CanvasLimitError)
+    expect((noFile as Error).message).toBe("This device couldn't press 2419×3024 (the image could not be encoded).")
+
+    const oom: typeof renderPrintAsync = async () => {
+      throw new RangeError('Array buffer allocation failed')
+    }
+    const err = await savePrint(fakeContext().ctx, fakeContext().ctx, s, decoded, {}, oom).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(CanvasLimitError)
+    expect((err as CanvasLimitError).plan.height).toBe(3024)
+    expect((err as Error).message).toMatch(/2419×3024 \(Array buffer allocation failed\)/)
+
+    // Anything else is not dressed up as a size problem.
+    const bug: typeof renderPrintAsync = async () => {
+      throw new TypeError('x is undefined')
+    }
+    const other = await savePrint(fakeContext().ctx, fakeContext().ctx, s, decoded, {}, bug).catch((e: unknown) => e)
+    expect(other).not.toBeInstanceOf(CanvasLimitError)
+  })
+
+  it('the smaller copy offered: three quarters at a time, the sheet kept, the first one that fits', () => {
+    expect(SMALLER_STEP).toBe(0.75)
+    const s = withPhoto(4032, 3024)
+    const tried: [number, number][] = []
+    const fits = (w: number, h: number) => (tried.push([w, h]), w * h <= 2.5e6)
+    const plan = findSmallerPlan(s, 3024, fits)
+    // 3024 -> 2268 (4.1 MP) -> 1701 (2.3 MP): the first under 2.5 MP.
+    expect(tried).toEqual([
+      [1814, 2268],
+      [1361, 1701],
+    ])
+    expect(plan).toMatchObject({ width: 1361, height: 1701, limit: 'smaller' })
+    expect(plan!.width / plan!.height).toBeCloseTo(4 / 5, 3)
+  })
+
+  it('never offers one bigger than what failed, and none below the smallest copy: then, no copy at all', () => {
+    const s = withPhoto(5712, 4284, { aspect: 'original' })
+    const heights: number[] = []
+    const plan = findSmallerPlan(s, 3547, (_w, h) => (heights.push(h), false))
+    expect(plan).toBeNull()
+    expect(SMALLEST_COPY_HEIGHT).toBe(600)
+    expect(heights).toEqual([2660, 1995, 1496, 1122, 842, 632])
+    for (let i = 1; i < heights.length; i++) expect(heights[i]).toBeLessThan(heights[i - 1])
+    // A short sheet steps down from where it failed, never up to the photo.
+    expect(findSmallerPlan(s, 1000, () => true)).toMatchObject({ height: 750 })
   })
 })
 

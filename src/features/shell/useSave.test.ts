@@ -1,7 +1,9 @@
 /**
  * The save flow as a pure state machine: a press that outlasts its tap waits
  * for a fresh one, Cancel works while it presses, a failed share keeps the
- * file, the preview pauses, and Save waits for the document's photo.
+ * file, the preview pauses, Save waits for the document's photo, and a print
+ * too big for the device, or a save the app died during, is put as a question
+ * in numbers.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -14,12 +16,15 @@ import {
   pressInProgress,
   progressText,
   saveButton,
+  saveQuestion,
   saveReducer,
   type SaveEvent,
   type SaveState,
 } from './useSave.ts'
 
-const plan = planExport(4 / 5, { width: 3024, height: 4032, scale: 1 })
+const photo = { width: 3024, height: 4032, scale: 1 }
+const plan = planExport(4 / 5, photo)
+const planAt = (maxHeight: number) => planExport(4 / 5, photo, { maxHeight })
 const file = new File([new Uint8Array(6_200_000)], 'print-machine.jpg', { type: 'image/jpeg' })
 const run = (events: SaveEvent[], from: SaveState = IDLE) => events.reduce(saveReducer, from)
 const kinds = (events: SaveEvent[]) => {
@@ -126,5 +131,64 @@ describe('the save flow', () => {
       'Pressing 3024×3780: printing the sheet',
     )
     expect(progressText(IDLE)).toBeNull()
+  })
+})
+
+describe('a print too big for this device, and a save that did not finish', () => {
+  const smaller = planAt(2835)
+
+  it('a press that fails for size asks about a smaller copy; it never starts one by itself', () => {
+    const pressing = run([{ type: 'start', format: 'png', plan, photo: true }, { type: 'photoLoaded' }])
+    const asked = saveReducer(pressing, { type: 'tooBig', failed: plan, smaller })
+    expect(asked).toEqual({ kind: 'tooBig', format: 'png', failed: plan, smaller })
+    expect(pressInProgress(asked)).toBe(false)
+    expect(saveQuestion(asked, planAt)).toEqual({
+      text: "This device couldn't press 3024×3780. Save a smaller 2268×2835 copy instead?",
+      choices: [{ label: 'Save smaller', height: 2835 }],
+    })
+    // Choosing it starts a press at that size, in the format asked for.
+    expect(saveReducer(asked, { type: 'start', format: 'png', plan: smaller, photo: true })).toEqual({
+      kind: 'loadingPhoto',
+      format: 'png',
+      plan: smaller,
+    })
+    expect(saveReducer(asked, { type: 'dismiss' })).toEqual(IDLE)
+    // Only a press can fail for size.
+    expect(saveReducer(IDLE, { type: 'tooBig', failed: plan, smaller })).toBe(IDLE)
+  })
+
+  it('with no copy this device can press, it says so and offers nothing', () => {
+    const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, smaller: null }])
+    expect(saveQuestion(asked, planAt)).toEqual({
+      text: "This device couldn't press 3024×3780, nor a copy smaller than it: it cannot save this print.",
+      choices: [],
+    })
+  })
+
+  it('a save the app went away during is said at launch: the same again, or a step smaller', () => {
+    const notice = saveReducer(IDLE, { type: 'interrupted', format: 'jpeg', height: 3780 })
+    expect(saveQuestion(notice, planAt)).toEqual({
+      text: 'The last save, 3024×3780, did not finish.',
+      choices: [
+        { label: 'Try again', height: 3780 },
+        { label: 'Save smaller (2268×2835)', height: 2835 },
+      ],
+    })
+    expect(canStart(notice, 'ready')).toBe(true)
+    expect(saveButton(notice, 'ready')).toEqual({ text: 'Save', disabled: false })
+    expect(progressText(notice)).toBeNull()
+    // Its offer is worked out from the document as it is, so an edit keeps it;
+    // a smaller copy worked out for a failed press is dropped.
+    expect(saveReducer(notice, { type: 'documentChanged' })).toBe(notice)
+    const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, smaller }])
+    expect(saveReducer(asked, { type: 'documentChanged' })).toEqual(IDLE)
+    // Never over a save in progress.
+    const pressing = run([{ type: 'start', format: 'jpeg', plan, photo: false }])
+    expect(saveReducer(pressing, { type: 'interrupted', format: 'jpeg', height: 3780 })).toBe(pressing)
+  })
+
+  it('no question otherwise', () => {
+    expect(saveQuestion(IDLE, planAt)).toBeNull()
+    expect(saveQuestion({ kind: 'error', message: 'x' }, planAt)).toBeNull()
   })
 })

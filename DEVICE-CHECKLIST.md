@@ -110,6 +110,14 @@ So:
       is in the preview
 - [ ] A confirmation appears after saving, with the pixel size
 - [ ] Cancel the share sheet → no error toast
+- [ ] Swipe the app away (or let iOS evict it) while it reads "Pressing …" →
+      reopen it → a dialog reads "The last save, 2419×3024, did not finish."
+      with Try again, Save smaller (1814×2268) and Cancel; Try again completes;
+      a launch after that one says nothing
+- [ ] If Save ever says "This device couldn't press W×H. Save a smaller W'×H'
+      copy instead?" (a canvas came back blank, or memory ran out): note the
+      device and both sizes; Save smaller → the file in Photos is W'×H', and the
+      confirmation says so. Nothing is saved until Save smaller is tapped
 - [ ] The saved file has **no** selection crosshair in it (the thirds guides are
       gone; the crosshair is the one editing aid left, and it must never print)
 - [ ] File size: a few MB, in proportion to the pixels (a 12 MP photo on 4:5:

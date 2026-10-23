@@ -560,7 +560,7 @@ It says so **before** the tap. The line above the toolbar reads "Saves
 "photo is 1600×1200: upscaled 1.5x", or "capped at 16.7 MP, the most a browser
 canvas is guaranteed to hold; photo is 5712×4284". The confirmation repeats the
 size. Nothing falls back to a smaller file: a press that fails stops, with the
-reason and the numbers.
+reason and the numbers, and a smaller copy is only ever one the person chose.
 
 A print at the photo's own resolution is seconds of work on a phone, so Save
 is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
@@ -585,6 +585,26 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   to 1.37x the bytes of 0.92, for cleaner dot edges). Below quality 1.0
   browsers store JPEG colour at half resolution (4:2:0), the one loss a quality
   setting cannot remove, so **PNG** sits beside Save as the lossless file.
+- **Too big for this device.** Over its limit an iOS canvas does not throw: it
+  hands back a blank one, and the print would come out as empty paper. So both
+  of the press's canvases are proved at full size before any work — a sentinel
+  pixel (rgb 1, 2, 3) written at the last pixel and read back (`fitsCanvas`,
+  `engine/export.ts`) — and a canvas that fails, an encoder that returns
+  nothing, or memory running out is one error, `CanvasLimitError`, with the
+  plan in it. Save then asks, in numbers: "This device couldn't press
+  2419×3024. Save a smaller 1814×2268 copy instead?" The copy offered is the
+  largest that proves itself here, stepping down by three quarters of the
+  height at a time (the sheet's shape kept) and never under 600 px; when none
+  does, it says this device cannot save the print. Nothing is pressed until the
+  person picks Save smaller, and the file then says what it is ("a smaller
+  copy, as asked").
+- **A save that did not finish.** iOS evicts a tab that holds too much without
+  a word, and the app restarts as if nothing happened. Save marks itself in
+  `localStorage` before it decodes the photo (the height and the format) and
+  clears the mark when it ends either way, so a launch that finds the mark
+  says so: "The last save, 2419×3024, did not finish.", with **Try again**,
+  **Save smaller (1814×2268)** and Cancel. It does not claim the device ran out
+  of memory: a mark only says the save did not end.
 
 ### What an export holds
 

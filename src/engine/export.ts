@@ -70,6 +70,9 @@ export interface PressedPrint {
 
 export interface SaveOptions {
   format?: ExportFormat
+  /** Press no taller than this: a smaller copy the person chose (never
+   *  automatic: see CanvasLimitError). */
+  maxHeight?: number
   signal?: AbortSignal
   onProgress?: (progress: RenderProgress) => void
   /** Called once the photo is in the ground: the caller frees its decode. */
@@ -99,8 +102,14 @@ export async function savePrint(
 ): Promise<PressedPrint> {
   if (settings.media && !media) throw new MissingPhotoError()
   const format = opts.format ?? 'jpeg'
-  const plan = planPrint(settings)
+  const plan = planPrint(settings, { maxHeight: opts.maxHeight })
   try {
+    // Every full-size canvas the press uses, allocated and proved before any
+    // work: over its limit an iOS canvas does not throw, it hands back a
+    // blank one, and the print would come out empty.
+    if (!fitsCanvas(exportCtx, plan.width, plan.height) || !fitsCanvas(scratchCtx, plan.width, plan.height)) {
+      throw new CanvasLimitError(plan, 'a canvas that size came back blank')
+    }
     await render(exportCtx, scratchCtx, settings, plan.height, media, {
       signal: opts.signal,
       onProgress: opts.onProgress,
@@ -113,18 +122,90 @@ export async function savePrint(
       throw new Error(`The print came out ${width}×${height}, not the planned ${plan.width}×${plan.height}.`)
     }
     const blob = await encode(exportCtx.canvas, format)
+    if (!blob) throw new CanvasLimitError(plan, 'the image could not be encoded')
     return { blob, plan, format }
+  } catch (err) {
+    // Out of memory for a typed array or an ImageData is a RangeError: the
+    // same "too big for this device", said the same way.
+    if (err instanceof RangeError) throw new CanvasLimitError(plan, err.message)
+    throw err
   } finally {
     exportCtx.canvas.width = 0
     scratchCtx.canvas.width = 0
   }
 }
 
-function encode(canvas: HTMLCanvasElement, format: ExportFormat): Promise<Blob> {
+function encode(canvas: HTMLCanvasElement, format: ExportFormat): Promise<Blob | null> {
   const { mime, quality } = ENCODINGS[format]
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('The image could not be encoded.'))), mime, quality)
-  })
+  return new Promise((resolve) => canvas.toBlob(resolve, mime, quality))
+}
+
+/**
+ * This device could not press the print at this size: a canvas came back
+ * blank (a sentinel pixel did not read back), the encoder returned nothing, or
+ * memory ran out. Never answered by quietly saving something smaller: the
+ * save flow offers a smaller copy, in numbers, and the person chooses it
+ * (`findSmallerPlan`).
+ */
+export class CanvasLimitError extends Error {
+  constructor(
+    readonly plan: ExportPlan,
+    readonly why: string,
+  ) {
+    super(`This device couldn't press ${dims(plan.width, plan.height)} (${why}).`)
+    this.name = 'CanvasLimitError'
+  }
+}
+
+/**
+ * Whether a canvas of w x h really works here: sized, a sentinel pixel
+ * (rgb 1, 2, 3) written at its LAST pixel and read back. Reading a pixel of a
+ * blank canvas returns zeros and would pass a plain read; a sentinel cannot.
+ * The canvas is left at that size, blank, its state as it was (the press
+ * then finds it sized and does not size it again).
+ */
+export function fitsCanvas(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
+  try {
+    ctx.canvas.width = w
+    ctx.canvas.height = h
+    if (ctx.canvas.width !== w || ctx.canvas.height !== h) return false
+    ctx.save()
+    ctx.fillStyle = 'rgb(1, 2, 3)'
+    ctx.fillRect(w - 1, h - 1, 1, 1)
+    ctx.restore()
+    const d = ctx.getImageData(w - 1, h - 1, 1, 1).data
+    ctx.clearRect(w - 1, h - 1, 1, 1)
+    return d[0] === 1 && d[1] === 2 && d[2] === 3 && d[3] === 255
+  } catch {
+    return false
+  }
+}
+
+/** Each smaller copy offered is this much shorter than the one before. */
+export const SMALLER_STEP = 0.75
+
+/** No copy is offered shorter than this: a third of the reference height,
+ *  below which a print is a thumbnail of itself. */
+export const SMALLEST_COPY_HEIGHT = 600
+
+/**
+ * The largest smaller copy this device can press: the height stepped down by
+ * SMALLER_STEP (rounded to a whole pixel, the sheet's shape kept) from the one
+ * that failed, until `fits` holds for a sheet that size — or null once a step
+ * would go below SMALLEST_COPY_HEIGHT: this device cannot save this print.
+ */
+export function findSmallerPlan(
+  settings: PrintSettings,
+  failedHeight: number,
+  fits: (w: number, h: number) => boolean,
+): ExportPlan | null {
+  let maxHeight = failedHeight
+  for (;;) {
+    maxHeight = Math.round(maxHeight * SMALLER_STEP)
+    if (maxHeight < SMALLEST_COPY_HEIGHT) return null
+    const plan = planPrint(settings, { maxHeight })
+    if (fits(plan.width, plan.height)) return plan
+  }
 }
 
 /** The pressed print as a named file. */

@@ -8,7 +8,7 @@ import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, subscribeSW } from '../../state/swStatus.ts'
 import { useMediaBitmap } from '../media/useMediaBitmap.ts'
-import { canStart, pressInProgress, progressText, saveButton, useSave } from './useSave.ts'
+import { canStart, pressInProgress, progressText, saveButton, saveQuestion, useSave } from './useSave.ts'
 import './AppShell.css'
 
 export default function AppShell() {
@@ -81,6 +81,16 @@ export default function AppShell() {
   const caption = useMemo(() => describePlan(planPrint(settings), settings.media), [settings])
   const button = saveButton(save.state, mediaState)
   const status = progressText(save.state)
+  // A save that cannot go on unasked: a print too big for this device, or one
+  // that did not finish last time. A plain dialog (restyled in WP3).
+  const question = saveQuestion(save.state, (maxHeight) => planPrint(settings, { maxHeight }))
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (question && !dialog.open) dialog.showModal()
+    if (!question && dialog.open) dialog.close()
+  }, [question])
   const onSave = () => {
     if (pressing) save.cancel()
     else if (save.state.kind === 'ready') save.share()
@@ -214,6 +224,32 @@ export default function AppShell() {
           </IconButton>
         </div>
       </div>
+
+      <dialog ref={dialogRef} className="save-question" aria-labelledby="save-question" onCancel={save.dismiss}>
+        {question && (
+          <>
+            <p id="save-question">
+              {question.text}
+            </p>
+            <div className="media-actions">
+              {question.choices.map((choice, i) => (
+                <button
+                  key={choice.label}
+                  type="button"
+                  className="icon-button"
+                  data-variant={i === 0 ? 'primary' : undefined}
+                  onClick={() => save.answer(choice.height)}
+                >
+                  {choice.label}
+                </button>
+              ))}
+              <button type="button" className="icon-button" onClick={save.dismiss}>
+                {question.choices.length ? 'Cancel' : 'OK'}
+              </button>
+            </div>
+          </>
+        )}
+      </dialog>
 
       {/* One shared live region for state changes (playbook §10.1). */}
       <div role="status" aria-live="polite" className="visually-hidden">

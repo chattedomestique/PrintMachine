@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "note": "Committed hashes for the one text-free frozen document. Recorded at 8d17b48 (before the simplification); re-record only when a commit changes the photo ground on purpose, and say so.",
+    "commit": "8d17b48",
+    "chromium": "141.0.7390.37"
+  },
+  "renders": {
+    "text-free-photo@300": {
+      "sha256": "9814c5865e8379c3bb7a780bc05a28c161fb0423354e80e9e7b0ff737e781b65",
+      "w": 240,
+      "h": 300
+    },
+    "text-free-photo@1000": {
+      "sha256": "2b2e7848783e3e783b2d44472c3b9c9cc1423cabb1037acaf56fbe8d84c2988c",
+      "w": 800,
+      "h": 1000
+    },
+    "text-free-photo@1800": {
+      "sha256": "4935c5c59bf13729ee03f4d718d2b997ca84ec6aa916c358d0bfbdf7725c6cdc",
+      "w": 1440,
+      "h": 1800
+    }
+  }
+}

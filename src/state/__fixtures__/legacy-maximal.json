@@ -1,0 +1,231 @@
+{
+  "aspect": "3:4",
+  "media": {
+    "id": "media-legacy-maximal",
+    "width": 4032,
+    "height": 3024,
+    "scale": 0.5,
+    "x": 0.4,
+    "y": 0.62,
+    "opacity": 0.4,
+    "printed": true,
+    "inkId": "blue",
+    "contrast": 1.6,
+    "lift": 0.3
+  },
+  "paperAmount": 0.3,
+  "paperId": "cream",
+  "paperTexture": 0.7,
+  "paperBlotch": 0.2,
+  "press": {
+    "method": "dither",
+    "screenShape": "cross",
+    "screenPitch": 7,
+    "screenSoftness": 1.5,
+    "ditherType": "jarvis",
+    "ditherThreshold": 0.4,
+    "ditherScale": 4,
+    "carvePitch": 20,
+    "carveAngle": 30,
+    "carveRoughness": 0.8,
+    "density": 0.7,
+    "gamma": 1.6,
+    "mottle": 0.4,
+    "dropout": 0.03,
+    "banding": 0.8,
+    "roughness": 0.8,
+    "roughScale": 6,
+    "bleed": 0.6,
+    "streaks": 0.7,
+    "smear": 0.5,
+    "patches": 0.6,
+    "misregistration": 9,
+    "detailScaling": false
+  },
+  "photoPress": {
+    "method": "woodcut",
+    "screenShape": "circle",
+    "screenPitch": 4,
+    "screenSoftness": 0.7,
+    "ditherType": "atkinson",
+    "ditherThreshold": 0.5,
+    "ditherScale": 3,
+    "carvePitch": 14,
+    "carveAngle": 45,
+    "carveRoughness": 0.5,
+    "density": 0.84,
+    "gamma": 1,
+    "mottle": 0.22,
+    "dropout": 0.012,
+    "banding": 0.5,
+    "roughness": 0.1,
+    "roughScale": 3,
+    "bleed": 0.05,
+    "streaks": 0.3,
+    "smear": 0.18,
+    "patches": 0.22,
+    "misregistration": 2,
+    "detailScaling": true
+  },
+  "seed": 777,
+  "layers": [
+    {
+      "id": "layer-mvkynvpz-4",
+      "text": "Print\nmachine",
+      "inkId": "fluorescentpink",
+      "fontId": "rounded",
+      "weight": 300,
+      "size": 0.16,
+      "lineHeight": 1.1,
+      "tracking": 0.05,
+      "wordSpacing": 0.3,
+      "wordPress": {
+        "0": {
+          "bleed": 0.2,
+          "offset": 3
+        }
+      },
+      "opaque": true,
+      "typewriter": {
+        "wear": 0.6,
+        "strike": 0.5,
+        "impression": 0.4,
+        "ribbon": 0.3
+      },
+      "contrastInkId": null,
+      "contrastThreshold": 0.35,
+      "align": "justify",
+      "justifyBy": "letters",
+      "soloAlign": "right",
+      "x": 0.45,
+      "y": 0.4,
+      "rotation": 3,
+      "caps": true,
+      "opacity": 0.4,
+      "fitWidth": true,
+      "boxes": [],
+      "boxPadding": 0.3,
+      "boxRadius": 0.2
+    },
+    {
+      "id": "layer-mvkynvpz-5",
+      "text": "riso on a photo",
+      "inkId": "blue",
+      "fontId": "serif",
+      "weight": 700,
+      "size": 0.07,
+      "lineHeight": 0.94,
+      "tracking": -0.02,
+      "wordSpacing": 0,
+      "wordPress": {
+        "2": {
+          "offset": 6
+        }
+      },
+      "opaque": false,
+      "typewriter": null,
+      "contrastInkId": "white",
+      "contrastThreshold": 0.5,
+      "align": "left",
+      "justifyBy": "words",
+      "soloAlign": "left",
+      "x": 0.5,
+      "y": 0.7,
+      "rotation": 0,
+      "caps": false,
+      "opacity": 1,
+      "fitWidth": false,
+      "boxes": [
+        {
+          "id": "box-a",
+          "words": [
+            1,
+            2
+          ],
+          "inkId": "yellow",
+          "opacity": 0.7
+        },
+        {
+          "id": "box-b",
+          "words": [],
+          "inkId": "green",
+          "opacity": 1
+        }
+      ],
+      "boxPadding": 0.12,
+      "boxRadius": 0
+    },
+    {
+      "id": "layer-mvkynvpz-6",
+      "text": "the quick brown fox",
+      "inkId": "black",
+      "fontId": "mono",
+      "weight": 600,
+      "size": 0.16,
+      "lineHeight": 0.94,
+      "tracking": -0.02,
+      "wordSpacing": 0,
+      "wordPress": {},
+      "opaque": true,
+      "typewriter": null,
+      "contrastInkId": "white",
+      "contrastThreshold": 0.5,
+      "align": "right",
+      "justifyBy": "words",
+      "soloAlign": "left",
+      "x": 0.5,
+      "y": 0.85,
+      "rotation": 0,
+      "caps": false,
+      "opacity": 1,
+      "fitWidth": true,
+      "boxes": [
+        {
+          "id": "box-c",
+          "words": [],
+          "inkId": "green",
+          "opacity": 1
+        }
+      ],
+      "boxPadding": 0.12,
+      "boxRadius": 0
+    },
+    {
+      "id": "layer-mvkynvpz-7",
+      "text": "lowercase words",
+      "inkId": "fluorescentorange",
+      "fontId": "rounded",
+      "weight": 300,
+      "size": 0.16,
+      "lineHeight": 0.94,
+      "tracking": -0.02,
+      "wordSpacing": 0.5,
+      "wordPress": {},
+      "opaque": true,
+      "typewriter": null,
+      "contrastInkId": null,
+      "contrastThreshold": 0.5,
+      "align": "center",
+      "justifyBy": "words",
+      "soloAlign": "left",
+      "x": 0.5,
+      "y": 0.2,
+      "rotation": 0,
+      "caps": false,
+      "opacity": 1,
+      "fitWidth": true,
+      "boxes": [
+        {
+          "id": "box-d",
+          "words": [
+            0
+          ],
+          "inkId": "blue",
+          "opacity": 1
+        }
+      ],
+      "boxPadding": 0.12,
+      "boxRadius": 0
+    }
+  ]
+}

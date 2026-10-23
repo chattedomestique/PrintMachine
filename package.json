@@ -11,7 +11,8 @@
     "test": "vitest run",
     "preview": "vite preview",
     "verify": "npm run lint && npm run typecheck && npm test && npm run build",
-    "verify:offline": "npm run build && node scripts/verify-offline.mjs"
+    "verify:offline": "npm run build && node scripts/verify-offline.mjs",
+    "harness": "node scripts/harness/run.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

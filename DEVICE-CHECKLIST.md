@@ -70,7 +70,9 @@ So:
       it (RISO keeps its −4° and its place)
 - [ ] The first photo brings a hint over the dock; it names the photo's
       gestures while Photo is open and the type's otherwise, and it goes for
-      good with its × or with the first drag on the sheet
+      good with its × or with the first drag on the sheet; with VoiceOver on,
+      it is read when it appears and when the tool changes, not again after
+      a save
 - [ ] Photo tool open: drag and pinch the photo — it zooms 100–400% and stops
       at its edges, never showing bare paper round it; switch the sheet shape
       in Photo › Sheet and it still covers the sheet

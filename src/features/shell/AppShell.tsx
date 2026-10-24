@@ -235,7 +235,10 @@ export default function AppShell() {
     else startSave('jpeg')
   }
 
-  const showHint = settings.media !== null && !hintDismissed && !pressing
+  // The hint is up from the first photo until it is dismissed. Its card hides
+  // while the print is pressed; its words, for a screen reader, stay.
+  const hintUp = settings.media !== null && !hintDismissed
+  const showHint = hintUp && !pressing
   // What the sheet's gestures do in the open tool.
   const hintText =
     tool === 'photo'
@@ -375,9 +378,11 @@ export default function AppShell() {
         {/* The hint's words for a screen reader, in a live region that is
             there before them, so they are said when they appear (after the
             first photo) and again only when what the gestures move changes.
-            A region born holding its words is not reliably announced. */}
+            A region born holding its words is not reliably announced. They
+            stay while the print is pressed (only the card hides): emptied and
+            refilled, they were read out again after every save. */}
         <p className="sr-only" role="status">
-          {showHint ? hintText : ''}
+          {hintUp ? hintText : ''}
         </p>
         {showHint && (
           <div className="card app__hint">

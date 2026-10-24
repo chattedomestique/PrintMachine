@@ -727,8 +727,10 @@ above 5 MP (the smaller-copy question before anything is pressed, then that
 file), a tab closed mid-press (the notice at the next launch, its choices
 waiting, and saying so, until the photo is back), a stored photo
 deleted (the card and Save say so, and no file), a Cancel tapped while the file is
-encoded (no file, with a share sheet or without) and Ctrl+Z pressed during a
-press (the document stays as it was, and the file is that print).
+encoded (no file, with a share sheet or without), Ctrl+Z pressed during a
+press (the document stays as it was, and the file is that print), where
+focus is while it presses, and the gesture hint across two saves (its card
+hides, its words are not read out again).
 
 ### What an export holds
 
@@ -1139,9 +1141,10 @@ same value modal, action sheets, toast and app bar. What differs, and why:
   pointermove. Type may be dragged 30% past the trim (Border Studio clamps to
   2-98%), so it can bleed.
 - **The gesture hint stays until dismissed or used**, and is announced (again
-  only when the tool it describes changes); Border Studio's fades after 2.8 s
-  with `aria-hidden`, which no screen reader hears. It also says what the open
-  tool's gestures do.
+  only when the tool it describes changes, never after a save: while the print
+  is pressed its card hides and its words stay, `check:save` step 8); Border
+  Studio's fades after 2.8 s with `aria-hidden`, which no screen reader hears.
+  It also says what the open tool's gestures do.
 - **Targets own 44 px everywhere.** Border Studio's parameter name and value
   own 40 px of height on the 36 px line over the slider; here their hit areas
   grow upward. Its hex field owns 40 of its 44 px the way the style guide's

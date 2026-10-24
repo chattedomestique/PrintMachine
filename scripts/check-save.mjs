@@ -36,6 +36,10 @@
  *  7. Focus while the print is pressed: on the card's Cancel (the one thing
  *     that answers), also for a press started from the More sheet's PNG,
  *     whose dialog is still open as the card appears; on Save after.
+ *  8. The gesture hint across two saves: its card hides while each press
+ *     runs and is back after, and its live region (every change of which a
+ *     screen reader reads out) says the hint once, not again after each
+ *     save; it changes once more when the tool changes.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -517,6 +521,60 @@ try {
     check(
       during.join('|') === 'Cancel|Cancel' && after.join('|') === 'Save|Save',
       `focus while pressing: ${during.join(', ')} (from Save, from More's PNG); after: ${after.join(', ')}`,
+    )
+    check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+    await ctx.close()
+  }
+
+  console.log('\n8. The gesture hint across a save: the card hides, its words for a screen reader stay')
+  {
+    // A press long enough to look at: the encoder answers 800 ms late.
+    const slow = `
+      const real = HTMLCanvasElement.prototype.toBlob
+      HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) {
+        return real.call(this, (b) => setTimeout(() => cb(b), 800), ...rest)
+      }
+    `
+    const ctx = await newContext()
+    const { page, errors } = await open(ctx, slow)
+    await choosePhoto(page, 1600, 1200)
+    await page.waitForSelector('.app__hint')
+    // Every change of the hint's live region (each one is announced).
+    await page.evaluate(() => {
+      const region = document.querySelector('.app__float > p.sr-only[role=status]')
+      window.__said = [region.textContent]
+      new MutationObserver(() => window.__said.push(region.textContent)).observe(region, { childList: true, characterData: true, subtree: true })
+    })
+    const cardDuring = []
+    for (let i = 0; i < 2; i++) {
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 120_000 }),
+        (async () => {
+          await page.locator(SAVE).click()
+          await pressing(page)
+          cardDuring.push(await page.locator('.app__hint').count())
+        })(),
+      ])
+      await saved(download)
+      await page.waitForTimeout(400)
+    }
+    const cardAfter = await page.locator('.app__hint').count()
+    const afterSaves = await page.evaluate(() => window.__said.slice())
+    check(
+      cardDuring.join('|') === '0|0' && cardAfter === 1,
+      `the hint's card hides while each press runs (${cardDuring.join(', ')} cards) and is back after (${cardAfter})`,
+    )
+    check(
+      afterSaves.length === 1 && /Tap type to pick it/.test(afterSaves[0]),
+      `its live region says the type's gestures once and not again over two saves: ${afterSaves.map((t) => JSON.stringify(t)).join(' -> ')}`,
+    )
+    // Opening the Photo tool changes what the gestures move: said once more.
+    await openTool(page, 'photo')
+    await page.waitForTimeout(300)
+    const afterTool = await page.evaluate(() => window.__said.slice(1))
+    check(
+      afterTool.length === 1 && /zoom the photo/.test(afterTool[0]),
+      `and once when the tool changes: ${afterTool.map((t) => JSON.stringify(t)).join(' -> ')}`,
     )
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     await ctx.close()

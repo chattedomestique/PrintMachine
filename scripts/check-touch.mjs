@@ -25,6 +25,10 @@
  *  7. A double tap on Type › Size's track (two touches 100 ms apart, where
  *     each alone would move the thumb) ends at the default, 40%, and one Undo
  *     goes back to where it was; a mouse's double-click the same.
+ *  8. A double tap on a plate that is not selected only picks it (Border
+ *     Studio's tap-to-select; nothing moves, no undo step); a double tap on
+ *     the selected plate centres it and zeroes its turn; a mouse's
+ *     double-click on a plate that is not selected only picks it too.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -264,6 +268,59 @@ try {
     await page.locator('.app__bar button[aria-label="Undo"]').click()
     const back2 = await readout()
     check(clicked === '40%' && back2 === was && !(await undoEnabled(page)), `a double-click: ${was} -> ${clicked}; one Undo: ${back2}`)
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
+
+  console.log('8. A double tap on a plate that is not selected only picks it; on the selected one it centres it')
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    await page.locator('[data-tool="type"]').click()
+    await page.waitForSelector('.controls__layername')
+    const cdp = await ctx.newCDPSession(page)
+    const box = await settledBox(page)
+    const before = await stored(page)
+    const [print, riso] = before.layers
+    const on = (l) => ({ x: box.x + l.x * box.width, y: box.y + l.y * box.height })
+    const doubleTap = async (pt) => {
+      for (let i = 0; i < 2; i++) {
+        await touch(cdp, pt)
+        await page.waitForTimeout(90)
+      }
+    }
+    await doubleTap(on(riso))
+    const picked = await selected(page, 'RISO')
+    const after = await stored(page)
+    check(
+      picked === 'RISO' && JSON.stringify(after.layers) === JSON.stringify(before.layers) && !(await undoEnabled(page)),
+      `a double tap on RISO (not selected): ${picked} selected; RISO at ${after.layers[1].x}, ${after.layers[1].y}, ${after.layers[1].rotation}° (was ${riso.x}, ${riso.y}, ${riso.rotation}°); no undo step`,
+    )
+    await doubleTap(on(riso))
+    await page.waitForTimeout(300)
+    const centred = (await stored(page)).layers[1]
+    check(
+      centred.x === 0.5 && centred.y === 0.5 && centred.rotation === 0,
+      `a double tap on RISO, now selected, centres it: ${centred.x}, ${centred.y}, ${centred.rotation}°`,
+    )
+    // RISO back where it was (centred, it lies over PRINT MACHINE); PRINT
+    // MACHINE picked by a tap; then a mouse's double-click on RISO: picked
+    // only, not centred.
+    await page.locator('.app__bar button[aria-label="Undo"]').click()
+    await touch(cdp, { x: on(print).x - 0.05 * box.width, y: on(print).y - 0.04 * box.height })
+    await selected(page, 'PRINT')
+    await page.waitForTimeout(600)
+    await page.mouse.dblclick(on(riso).x, on(riso).y)
+    const clicked = await selected(page, 'RISO')
+    const r3 = (await stored(page)).layers[1]
+    check(
+      clicked === 'RISO' && JSON.stringify(r3) === JSON.stringify(riso),
+      `a double-click on RISO (not selected): ${clicked} selected; RISO at ${r3.x}, ${r3.y}, ${r3.rotation}°`,
+    )
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
   }

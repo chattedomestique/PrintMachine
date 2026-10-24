@@ -23,6 +23,10 @@ const MEDIA_LIMITS: GestureLimits = { size: [1, 4], position: [-Infinity, Infini
  *  beats one beside a box (hitLayer). */
 const HIT_SLOP = 12
 
+/** How recent a double tap's first touch must be to count as its first (a
+ *  platform's double-click interval is at most about half this). */
+const PICK_THEN_TAP_MS = 1000
+
 /**
  * The print preview, plus the surface that manipulates a plate (the selected
  * one, or the one a touch lands on) or, with the Photo tool open, the photo.
@@ -76,14 +80,20 @@ export default function Canvas({
    * the point needs no conversion.
    */
   const measureRef = useRef<FontMeasure | null | undefined>(undefined)
+  // The sheet's last two touches (each gesture's first finger): when, and
+  // whether it picked a plate. A double tap is two of them.
+  const touches = useRef<{ at: number; picked: boolean }[]>([])
   const pick = useCallback(
     (pt: Pt, box: { width: number; height: number }): GestureTarget | null => {
       if (measureRef.current === undefined) measureRef.current = canvasMeasure() ?? null
       const measure = measureRef.current
-      if (!measure || box.height <= 0) return null
-      const plates = settings.layers.map((l) => ({ layer: l, layout: layoutIn(l, box.height, measure) }))
-      const id = hitLayer(plates, pt, { w: box.width, h: box.height }, HIT_SLOP)
-      const hit = id !== null && id !== layer?.id ? settings.layers.find((l) => l.id === id) : undefined
+      let hit: TextLayer | undefined
+      if (measure && box.height > 0) {
+        const plates = settings.layers.map((l) => ({ layer: l, layout: layoutIn(l, box.height, measure) }))
+        const id = hitLayer(plates, pt, { w: box.width, h: box.height }, HIT_SLOP)
+        hit = id !== null && id !== layer?.id ? settings.layers.find((l) => l.id === id) : undefined
+      }
+      touches.current = [...touches.current.slice(-1), { at: performance.now(), picked: hit !== undefined }]
       if (!hit) return null
       selectLayer(hit.id)
       return hit
@@ -130,11 +140,20 @@ export default function Canvas({
   const photoGestures = useLayerGestures(surfaceRef, photoTarget, patchMedia, { limits: MEDIA_LIMITS })
   const gestures = mediaMode ? photoGestures : typeGestures
 
+  /**
+   * Double-tap: fit the photo again (Photo open), or centre the selected plate
+   * and zero its turn. Not when the first tap of the two picked a plate: a tap
+   * on a plate picks it and does nothing else (Border Studio's), and a second
+   * tap, often only because the first seemed not to take, must not throw away
+   * where the plate was and how it was turned.
+   */
   const onDoubleClick = useCallback(() => {
     if (mediaMode) {
       if (settings.media) dispatch({ type: 'patchMedia', patch: { x: 0.5, y: 0.5, scale: 1 } })
       return
     }
+    const [first] = touches.current
+    if (touches.current.length === 2 && first.picked && performance.now() - first.at < PICK_THEN_TAP_MS) return
     if (!layer) return
     dispatch({ type: 'patchLayer', id: layer.id, patch: { x: 0.5, y: 0.5, rotation: 0 } })
   }, [dispatch, layer, mediaMode, settings.media])

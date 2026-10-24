@@ -65,7 +65,9 @@ So:
       from bare paper → the selected plate moves; nothing eats the taps
 - [ ] A small caption (Size about 20%) is easy to pick with a thumb, including
       a touch just beside it
-- [ ] Double-tap re-centres
+- [ ] Double-tap on the selected plate (or on bare paper) re-centres it and
+      zeroes its turn; a double tap on a plate that is not selected only picks
+      it (RISO keeps its −4° and its place)
 - [ ] The first photo brings a hint over the dock; it names the photo's
       gestures while Photo is open and the type's otherwise, and it goes for
       good with its × or with the first drag on the sheet

@@ -1048,7 +1048,10 @@ box still counts (a caption at a few percent of the sheet is a line a few
 pixels tall under a fingertip several times that), and a touch inside one
 plate's box always beats a touch beside another's. One finger has to travel
 4 px before it moves anything, so a tap that picks a plate does not also nudge
-it.
+it. A double tap whose first tap picks a plate only picks it: people tap twice
+when the first tap seems not to take, and centring would throw away where the
+plate was and its turn. Double-tap centres the plate that was already
+selected, or the selected one from bare paper.
 
 The plate the gesture moves is decided at the pointer-down, from the plate it
 landed on, and its patches name that plate. Waiting for the selection to

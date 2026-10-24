@@ -20,6 +20,7 @@ import {
   nudgeChange,
   rangeText,
   resetChange,
+  doubleTapReset,
   rowAt,
   snapTo,
   swipeOpens,
@@ -122,6 +123,15 @@ describe('two ranges: the slider spans one, the setting holds the other', () => 
     expect(nudgeChange(size(0.05), 1)?.discrete).toBe(true)
     expect(typedChange(size(0.05), '60')?.discrete).toBe(true)
     expect(resetChange(size(0.05))?.discrete).toBe(true)
+  })
+
+  it('a double-tap reset joins the step its first tap opened (the thumb jumped to it), so one Undo undoes the double tap', () => {
+    // The first tap moved the thumb (a drag's coalesced step): the reset joins it.
+    expect(doubleTapReset(size(0.082), true)).toEqual({ value: 0.04, discrete: false })
+    // It moved nothing (a tap on the thumb): the reset is a step of its own.
+    expect(doubleTapReset(size(0.09), false)).toEqual({ value: 0.04, discrete: true })
+    expect(doubleTapReset(size(0.04), true)).toBeNull()
+    expect(doubleTapReset(size(0.05, { unavailable: 'Zoom in to move the photo' }), true)).toBeNull()
   })
 
   it('changes nothing when there is nothing to change, or the setting is unavailable', () => {

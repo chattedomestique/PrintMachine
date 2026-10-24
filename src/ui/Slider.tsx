@@ -21,6 +21,7 @@ import {
   displayStep,
   draftOf,
   dragChange,
+  doubleTapReset,
   dragPicks,
   isDoubleTap,
   nudgeChange,
@@ -42,7 +43,14 @@ import {
  * they go aria-disabled (not removed) only at the ends of the setting's range.
  */
 export function Slider({ param }: { param: Param }) {
-  const lastTap = useRef(0)
+  // The last tap on the track: when, and whether the native range then moved
+  // the thumb to it (it does, for a tap anywhere on the track).
+  const lastTap = useRef({ at: 0, moved: false })
+  // From a double tap's second pointer-down until that pointer is up, the
+  // native range's own answer to the same touch (the thumb jumps to the
+  // finger: an `input`, after the pointer-down) is ignored, so the reset
+  // stands. Without this, a touch double tap ended where the finger was.
+  const resetting = useRef(false)
   const id = useId()
   const off = param.unavailable !== undefined
   const reset = () => applyChange(param, resetChange(param))
@@ -76,14 +84,31 @@ export function Slider({ param }: { param: Param }) {
             aria-label={param.label}
             // The true value, also when the thumb is pinned at an end.
             aria-valuetext={off ? param.unavailable : param.format(param.value)}
-            onChange={(e) => applyChange(param, dragChange(param, Number(e.target.value)))}
+            onChange={(e) => {
+              if (resetting.current) return
+              const c = dragChange(param, Number(e.target.value))
+              if (c && lastTap.current.at) lastTap.current.moved = true
+              applyChange(param, c)
+            }}
+            // A mouse's double-click; after a double tap it finds the default
+            // already there and changes nothing.
             onDoubleClick={reset}
             onPointerDown={() => {
               const now = performance.now()
-              if (isDoubleTap(lastTap.current, now)) {
-                reset()
-                lastTap.current = 0
-              } else lastTap.current = now
+              if (!isDoubleTap(lastTap.current.at, now)) {
+                lastTap.current = { at: now, moved: false }
+                return
+              }
+              applyChange(param, doubleTapReset(param, lastTap.current.moved))
+              lastTap.current = { at: 0, moved: false }
+              resetting.current = true
+              const done = () => {
+                resetting.current = false
+                window.removeEventListener('pointerup', done, true)
+                window.removeEventListener('pointercancel', done, true)
+              }
+              window.addEventListener('pointerup', done, true)
+              window.addEventListener('pointercancel', done, true)
             }}
           />
         </div>

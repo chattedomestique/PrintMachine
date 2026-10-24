@@ -1002,7 +1002,11 @@ a button: tap it to type an exact number, in the units you read — "50", not
 "0.05" — with the whole range stated), and under them `[−] slider [+]`. The
 [−] and [+] step once (the single-pointer alternative to dragging, WCAG 2.5.7)
 and a double-tap on the track resets to the default, which is read from the
-document's own defaults, never retyped (a test holds them equal). A panel with
+document's own defaults, never retyped (a test holds them equal). A tap on a
+range input moves its thumb to the finger, so each tap of a double tap would
+also do that: the second one's is ignored, so the reset stands, and the
+first one's joins the reset in one undo step, so one Undo takes the double tap
+back (`check:touch` does it with real touch input). A panel with
 several settings shows one at a time: tap its name, or swipe up from it, for
 the others (Border Studio 4860519). Size, Rotation and Position have two
 ranges: the slider spans where people work (10–100%, ±45°, the sheet) while a

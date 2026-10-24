@@ -168,8 +168,19 @@ export const dragChange = (p: Param, raw: number): Change =>
 export const nudgeChange = (p: Param, dir: 1 | -1): Change =>
   change(p, canNudge(p, dir) ? nudge(p, dir) : null, true)
 
-/** A double-tap on the track: the default. */
+/** A reset to the default (a double-click on the track): a step of its own. */
 export const resetChange = (p: Param): Change => change(p, p.def, true)
+
+/**
+ * A double-tap on the track: the default, as ONE undo step from where the
+ * setting was before the two taps. A tap on a native range moves the thumb to
+ * the finger, so the first tap of the two has usually changed the value, as a
+ * drag does (a coalesced step); the reset then joins that step, and one Undo
+ * goes back past both (Border Studio's history, which coalesces by time,
+ * gives the same). A first tap that moved nothing leaves the reset a step of
+ * its own.
+ */
+export const doubleTapReset = (p: Param, firstTapMoved: boolean): Change => change(p, p.def, !firstTapMoved)
 
 /** A typed value, committed. */
 export const typedChange = (p: Param, typed: string): Change => change(p, committedValue(p, typed), true)

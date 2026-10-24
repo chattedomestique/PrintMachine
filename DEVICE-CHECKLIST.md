@@ -83,7 +83,8 @@ So:
       pixel); [−] and [+] move it one percent; tap the value and type 240 →
       240%; pinch past 100% → the thumb stays at the end and the readout says
       the real value (e.g. 240%), and [−] then reads 239%; double-tap the track
-      → 40%
+      anywhere → 40% (not where the finger was), and one Undo → back to the
+      size before the double tap
 - [ ] Drag a press slider → the preview keeps up, and the grain does **not**
       visibly re-randomise
 - [ ] One slider drag is one undo step; adding a plate is its own step

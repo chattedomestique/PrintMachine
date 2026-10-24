@@ -22,6 +22,9 @@
  *  6. The gesture hint, after the first photo: it says what the sheet's
  *     gestures do in the open tool (the photo with Photo open, the type
  *     otherwise); a tap leaves it, and the first drag dismisses it for good.
+ *  7. A double tap on Type › Size's track (two touches 100 ms apart, where
+ *     each alone would move the thumb) ends at the default, 40%, and one Undo
+ *     goes back to where it was; a mouse's double-click the same.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -223,6 +226,47 @@ try {
 
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
   await ctx.close()
+
+  console.log('7. A double tap on a slider\'s track resets it, as one undo step')
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    await page.locator('[data-tool="type"]').click()
+    await page.locator('[role=tab][data-tab="size"]').click()
+    await page.waitForSelector('.controls__panel[data-sub="size"]')
+    const cdp = await ctx.newCDPSession(page)
+    const readout = () => page.locator('.controls__panel[data-sub="size"] .controls__value').textContent()
+    const size0 = (await stored(page)).layers[0].size
+    const was = await readout()
+    // Two taps 100 ms apart at 80% of the track: each would move the thumb
+    // there on its own (the native range's answer to a tap).
+    const track = await page.locator('.controls__panel[data-sub="size"] .slider__input').boundingBox()
+    const spot = { x: track.x + 12 + 0.8 * (track.width - 24), y: track.y + track.height / 2 }
+    for (let i = 0; i < 2; i++) {
+      await touch(cdp, spot)
+      await page.waitForTimeout(100)
+    }
+    await page.waitForTimeout(300)
+    const tapped = await readout()
+    const sizeTapped = (await stored(page)).layers[0].size
+    check(tapped === '40%' && sizeTapped === 0.04, `a touch double tap at 80% of the track: ${was} -> ${tapped} (stored ${sizeTapped})`)
+    await page.locator('.app__bar button[aria-label="Undo"]').click()
+    const back = await readout()
+    check(back === was && (await stored(page)).layers[0].size === size0 && !(await undoEnabled(page)), `one Undo: ${back}, and no step left`)
+    // A mouse's double-click, the same.
+    await page.mouse.dblclick(spot.x, spot.y)
+    await page.waitForTimeout(300)
+    const clicked = await readout()
+    await page.locator('.app__bar button[aria-label="Undo"]').click()
+    const back2 = await readout()
+    check(clicked === '40%' && back2 === was && !(await undoEnabled(page)), `a double-click: ${was} -> ${clicked}; one Undo: ${back2}`)
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
 } finally {
   await browser.close()
   await new Promise((r) => server.httpServer.close(r))

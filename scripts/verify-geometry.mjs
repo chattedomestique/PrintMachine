@@ -53,6 +53,12 @@
  * Cancel, Share, the card's × and Choose again each answer a tap, and the
  * cards stay between the bar and the dock.
  *
+ * Every state is measured at rest: once its transitions and animations have
+ * run out and its scrollers have stopped (settle), never on a fixed delay, so
+ * a slower machine measures the same thing. A target covered at its centre is
+ * reported with what covers it, the scroll state of the scrollers around it,
+ * its dialog's box and transform, and anything still moving.
+ *
  * The DOM contract it reads (src/features/shell/AppShell.tsx and the panels):
  * tool buttons `[data-tool]` with `aria-pressed`, the open panel
  * `.controls__section[data-tool]` with its `[role=tab][data-tab]`, the content
@@ -133,10 +139,28 @@ const server = await preview({ root, preview: { port: 0, host: '127.0.0.1' }, lo
 const APP = server.resolvedUrls.local[0]
 const browser = await chromium.launch({ executablePath })
 
-/** Two painted frames: layout has settled, the overlay height is published,
- *  SG.fit has written its layouts. */
-const settle = (page) =>
-  page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 60)))))
+/**
+ * Wait for the page to be at rest, then measure: no transition or animation
+ * still running (a sheet still rising, the dock's panel still opening, a tab's
+ * panel still sliding in), no scroller still moving, and then two painted
+ * frames, so the overlay height is published and SG.fit has written its
+ * layouts. Only motion with an end is waited for: the busy Save's spinner
+ * turns for as long as the save runs.
+ *
+ * It used to be two frames and 60 ms, whatever was moving. The parameter sheet
+ * rises for 320 ms, so the probe met it in flight, at whichever frame the
+ * machine's speed made it land on. Held at each frame of that rise, the probe
+ * fails at one, the fourth (66.7 ms in), with exactly the four failures CI
+ * reported: at 200% text that frame puts Position Y's centre within half a
+ * pixel of the screen's bottom edge, where elementFromPoint (it rounds to
+ * whole pixels) finds nothing, and the probe called it covered. A target at
+ * rest is what a person taps, so that is what is measured. If the page is
+ * still moving after 5 s, that is a failure of its own, named.
+ */
+async function settle(page, where = 'the page') {
+  const moving = await page.evaluate(atRest)
+  check(moving === null, `${where}: still moving after 5 s (${moving}), measured anyway`)
+}
 
 /** The measurements of one state. */
 const measure = (page) =>
@@ -152,6 +176,38 @@ const measure = (page) =>
 
 /* ── Page-side probes (run through page.evaluate, so self-contained) ── */
 
+/** Resolves null once the page is at rest (see settle), or, after 5 s, with
+ *  what is still moving. */
+async function atRest() {
+  const tag = (e) =>
+    e ? e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : '') : '?'
+  const running = () =>
+    document.getAnimations().filter((a) => a.playState === 'running' && Number.isFinite(a.effect?.getComputedTiming().endTime ?? Infinity))
+  const scrolled = () => {
+    let s = ''
+    const all = document.querySelectorAll('*')
+    for (let i = 0; i < all.length; i++) if (all[i].scrollTop || all[i].scrollLeft) s += `${i}:${all[i].scrollLeft},${all[i].scrollTop};`
+    return s
+  }
+  const deadline = performance.now() + 5000
+  const late = () => new Promise((r) => setTimeout(r, Math.max(0, deadline - performance.now())))
+  for (;;) {
+    const now = running()
+    if (now.length && performance.now() < deadline) {
+      await Promise.race([Promise.all(now.map((a) => a.finished.catch(() => undefined))), late()])
+      continue
+    }
+    const before = scrolled()
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 60))))
+    const still = running()
+    if (!still.length && scrolled() === before) return null
+    if (performance.now() >= deadline)
+      return still.length
+        ? still.map((a) => `${a.transitionProperty ?? a.animationName ?? 'an animation'} on ${tag(a.effect?.target)}${a.effect?.pseudoElement ?? ''}`).join(', ')
+        : 'a scroller'
+  }
+}
+
 /**
  * Every visible, enabled target in scope, and the hit area it owns through
  * its centre, horizontally and vertically. Scope: the open dialog, or the app
@@ -166,6 +222,29 @@ function probeTargets() {
     e.tagName.toLowerCase() +
     (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : '') +
     (e.getAttribute('aria-label') ? ` [${e.getAttribute('aria-label').slice(0, 32)}]` : ` "${(e.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24)}"`)
+  // Where a covered target is, so a failure explains itself: each scroller it
+  // is in (how far scrolled, of how far it can go), its scope's box and
+  // transform (a dialog still rising is not at rest), and anything moving.
+  const box = (e) => e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className ? '.' + e.className.trim().split(/\s+/).join('.') : '')
+  const scrollOf = (n) =>
+    `scrolled ${Math.round(n.scrollTop)} of ${n.scrollHeight - n.clientHeight} px down, ${Math.round(n.scrollLeft)} of ${n.scrollWidth - n.clientWidth} across`
+  const context = (el, scope) => {
+    const parts = []
+    for (let n = el.parentElement; n && n !== scope; n = n.parentElement) {
+      const ns = getComputedStyle(n)
+      if (/^(auto|scroll)$/.test(ns.overflowY) || /^(auto|scroll)$/.test(ns.overflowX)) parts.push(`in ${box(n)} ${scrollOf(n)}`)
+    }
+    const b = scope.getBoundingClientRect()
+    parts.push(
+      `${box(scope)} at y ${Math.round(b.top)}..${Math.round(b.bottom)} of ${innerHeight}, transform ${getComputedStyle(scope).transform}, ${scrollOf(scope)}`,
+    )
+    const moving = document
+      .getAnimations()
+      .filter((a) => a.playState === 'running')
+      .map((a) => `${a.transitionProperty ?? a.animationName ?? 'an animation'} on ${a.effect?.target ? box(a.effect.target) : '?'}${a.effect?.pseudoElement ?? ''}`)
+    parts.push(moving.length ? `still moving: ${moving.join(', ')}` : 'nothing moving')
+    return parts.join('; ')
+  }
   const out = { measured: 0, scrolled: 0, disabled: 0, small: [] }
   for (const scope of scopes) {
     for (const el of scope.querySelectorAll(SEL)) {
@@ -205,7 +284,11 @@ function probeTargets() {
         return k
       }
       if (!hits(cx, cy)) {
-        out.small.push(`${name(el)}: covered at its centre`)
+        const t = document.elementFromPoint(cx, cy)
+        const by = t
+          ? name(t)
+          : `nothing: elementFromPoint finds no element there (it rounds to whole pixels; the screen is ${innerWidth}x${innerHeight})`
+        out.small.push(`${name(el)}: covered at its centre (${cx.toFixed(1)}, ${cy.toFixed(1)}) by ${by}; ${context(el, scope)}`)
         continue
       }
       const w = Math.max(r.width >= 44 ? r.width : 0, run(-1, 0) + run(1, 0) + 1)
@@ -446,7 +529,7 @@ try {
       const states = []
       let targets = 0
       await eachState(page, async (name) => {
-        await settle(page)
+        await settle(page, `${where}, ${name}`)
         states.push({ name, ...(await measure(page)) })
         targets += (await checkTargets(page, `${where}, ${name}`)).measured
         if (name === 'type-size' && vw === 320) {
@@ -469,7 +552,7 @@ try {
       })
       if (pw === PHOTOS[0][0]) {
         await eachDialog(page, async (name) => {
-          await settle(page)
+          await settle(page, `${where}, ${name}`)
           targets += (await checkTargets(page, `${where}, ${name}`)).measured
           const side = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
           check(side <= 0, `${where}: the page scrolls sideways by ${side} px with ${name} open`)
@@ -500,7 +583,7 @@ try {
     let n = 0
     let targets = 0
     const visit = async (name) => {
-      await settle(page)
+      await settle(page, `${where}, ${name}`)
       n++
       for (const c of await page.evaluate(probeClipped)) check(false, `${where}, ${name}: ${c}`)
       const side = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
@@ -524,7 +607,7 @@ try {
       let last = -1
       for (let w = 430; w >= 320; w -= 5) {
         await page.setViewportSize({ width: w, height: 900 })
-        await settle(page)
+        await settle(page, `the app bar at ${w} px, ${text}% text`)
         const bar = await page.evaluate(probeBar)
         const at = `the app bar at ${w} px, ${text}% text`
         const rank = ORDER.indexOf(bar.fit)
@@ -556,7 +639,7 @@ try {
       for (const scheme of ['light', 'dark']) {
         const { ctx, page } = await newPage({ width: vw, height: vh, scheme })
         const shoot = async (name) => {
-          await settle(page)
+          await settle(page, `screenshot ${vw} ${scheme} ${name}`)
           await page.waitForTimeout(250)
           await page.screenshot({ path: join(SHOTS, shotName(vw, scheme, name)) })
         }
@@ -570,7 +653,7 @@ try {
       const { ctx, page } = await newPage({ width: 390, height: 844 })
       await page.addStyleTag({ content: 'html { font-size: 200% }' })
       const shoot = async (name) => {
-        await settle(page)
+        await settle(page, `screenshot 390 200% ${name}`)
         await page.waitForTimeout(250)
         await page.screenshot({ path: join(SHOTS, shotName(390, 'light', '200pct', name)) })
       }
@@ -582,11 +665,11 @@ try {
       const { ctx, page } = await newPage({ width: 390, height: 844, scheme })
       await page.evaluate(() => document.documentElement.setAttribute('data-palette', 'wire'))
       await closeTools(page)
-      await settle(page)
+      await settle(page, `screenshot 390 ${scheme} wire closed`)
       await page.screenshot({ path: join(SHOTS, shotName(390, scheme, 'wire', 'closed')) })
       for (const tool of ['type', 'ink', 'photo', 'press']) {
         await openTool(page, tool)
-        await settle(page)
+        await settle(page, `screenshot 390 ${scheme} wire ${tool}`)
         await page.waitForTimeout(250)
         await page.screenshot({ path: join(SHOTS, shotName(390, scheme, 'wire', tool)) })
       }
@@ -608,7 +691,7 @@ try {
  */
 async function shootSaveStates(vw, vh, scheme) {
   const shoot = async (page, name) => {
-    await settle(page)
+    await settle(page, `screenshot ${vw} ${scheme} save ${name}`)
     await page.waitForTimeout(300)
     await page.screenshot({ path: join(SHOTS, shotName(vw, scheme, 'save', name)) })
   }
@@ -740,7 +823,7 @@ async function checkSaveStates(vw, vh, tool) {
     if (SHOTS) await page.screenshot({ path: join(SHOTS, shotName(vw, 'light', '200pct', tool ?? 'closed', 'save', name)) })
   }
   const state = async (name, sel, extra = () => true) => {
-    await settle(page)
+    await settle(page, `${where}, ${name}`)
     const p = await page.evaluate(probeSaveCard, sel)
     check(p.between, `${where}, ${name}: the cards reach past the bar or the dock: ${p.column}`)
     check(p.action === 'ok', `${where}, ${name}: ${sel} does not answer a tap: ${p.action}`)

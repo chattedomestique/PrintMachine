@@ -970,8 +970,12 @@ changes size or place between them** (Border Studio fcd91ff). That is checked,
 not assumed: `npm run verify:geometry` opens every tool, sub-tab and Over-photo
 state at 320, 375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
 fails if the sheet moves by a pixel, if a panel overflows, or if the page
-scrolls sideways. Border Studio's README claims such a suite and has no file
-for it; this one is a file, and it checks more:
+scrolls sideways. Each state is measured at rest, once its transitions and
+animations have run out and its scrollers have stopped, never after a fixed
+delay: a slower machine then measures what a faster one does (a sheet caught
+mid-rise once failed CI, see the gate's `settle`). Border Studio's README
+claims such a suite and has no file for it; this one is a file, and it checks
+more:
 
 - **Targets** by the hit area each control still owns: from its centre, how
   far each way a tap lands on it (`elementFromPoint`), counting its `::after`

@@ -1146,6 +1146,39 @@ same value modal, action sheets, toast and app bar. What differs, and why:
   shares in the one tap; a press at a photo's own pixels takes seconds, longer
   than a tap's permission to open the share sheet lasts. See "Saving at the
   photo's own pixels".
+- **A drag that misses every plate moves the selected plate.** In Border
+  Studio a one-finger drag off the text pans the inspect view (or, in Crop,
+  the photo) and never moves a layer. There is no inspect view here (above),
+  and a caption a few pixels tall is easier to drag from beside it than to
+  land on, so a miss keeps what a drag on the sheet always did here.
+- **Double tap.** On a plate that is not selected it only picks it, as a tap
+  on text does in Border Studio. On the selected plate, or from bare paper, it
+  centres the selected plate and zeroes its turn; Border Studio has no such
+  gesture (its double tap resets the inspect view), and this app's type is
+  placed and turned on the sheet, so a way back to the centre belongs there.
+  With Photo open, a double tap fits the photo again, as Border Studio's does
+  in Crop.
+- **With the Photo tool open, a touch on type does not pick it.** Border
+  Studio hit-tests text in every tool, Crop included, so a drag that starts on
+  a line of text moves the text even while framing the photo. Here the
+  photo's tool points every gesture at the photo: a headline usually covers
+  much of it, and framing a photo under its type would otherwise be a hunt for
+  bare patches. The plate button picks plates in Type and Ink.
+- **"New plate" starts from the defaults, with no offer to copy a plate.**
+  Border Studio's Add opens a sheet ("Start from defaults", "Or copy the
+  settings of …"). Not ported: the restyle added no features (this app never
+  had it, so the review that decided which features stay never weighed it),
+  and with at most three plates, a new one ("NEW", a caption at 40% in the
+  next unused ink) is a few taps from any other's settings.
+- **Save, while it presses, shows the style guide's spinner in place of its
+  icon, and "Saving" where there is room for a word (a ring alone in the
+  compact bar).** Border Studio keeps its download icon beside the word and
+  counts a video's percent on Save. Here the progress is in the status card,
+  in pixels and plates, with Cancel; with the icon kept, "Saving" overflowed
+  the bar at 390 px and pushed Undo into the title. Both apps draw a busy Save
+  without its fill (it is busy and unavailable).
+- **The dock's head row has an 8 px gap, not 12,** and the plate button 8 px
+  of side padding, so the plate button and two tab names fit at 320 px.
 - **Checked by files.** Border Studio's README claims a regression suite for
   the photo's rectangle that is not in it; here that suite is a file
   (`verify-geometry.mjs`), with a CSS check and a touch check beside it.

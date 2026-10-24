@@ -1,5 +1,6 @@
 import { ActionSheet, Icon } from '../../ui/ui.tsx'
 import type { SWState } from '../../state/swStatus.ts'
+import type { MoreCaption } from './useSave.ts'
 
 /** The offline signal in words: an icon AND a word, never a colour alone. */
 const OFFLINE_WORDS: Record<SWState, { icon: string; word: string; meta: string }> = {
@@ -11,26 +12,23 @@ const OFFLINE_WORDS: Record<SWState, { icon: string; word: string; meta: string 
 /**
  * More: the rarer things, as an action sheet (the same surface as the
  * parameter picker, so everything that opens on top looks it). First two
- * facts — what Save makes, in pixels and, when it is not the photo's own, why;
- * and whether the app will open with no network — then the one rarer action:
- * the lossless PNG.
+ * facts — what Save makes, in pixels and, when it is not the photo's own, why
+ * (or, while the photo cannot be loaded, that nothing can be saved); and
+ * whether the app will open with no network — then the one rarer action: the
+ * lossless PNG.
  */
 export default function MoreSheet({
   open,
   onClose,
-  size,
-  meta,
+  caption,
   swState,
   canSavePng,
   onSavePng,
 }: {
   open: boolean
   onClose: () => void
-  /** What Save makes ("2419×3024"). */
-  size: string
-  /** What that size is: why it is not the photo's own pixels, in numbers, or
-   *  that it is. */
-  meta: string
+  /** What Save makes, or why it cannot (useSave.ts moreCaption). */
+  caption: MoreCaption
   swState: SWState
   canSavePng: boolean
   onSavePng: () => void
@@ -43,10 +41,10 @@ export default function MoreSheet({
       label="More"
       info={
         <div className="more__facts">
-          <div className="more__fact" data-export-size={size}>
-            <Icon name="image" />
-            <p className="more__fact-word num">Saves {size}</p>
-            <p className="more__fact-meta">{meta}</p>
+          <div className="more__fact" data-export-size={caption.size ?? ''} data-alert={caption.alert || undefined}>
+            <Icon name={caption.alert ? 'circle-alert' : 'image'} />
+            <p className="more__fact-word num">{caption.word}</p>
+            <p className="more__fact-meta">{caption.meta}</p>
           </div>
           <div className="more__fact" data-offline-row={swState}>
             <Icon name={offline.icon} />
@@ -69,7 +67,7 @@ export default function MoreSheet({
       >
         <Icon name="download" />
         Save lossless PNG
-        <span className="menu__meta num">{size}</span>
+        {caption.size && <span className="menu__meta num">{caption.size}</span>}
       </button>
     </ActionSheet>
   )

@@ -24,7 +24,9 @@
  *     nothing, "Loading the photo…"), then the smaller copy saves.
  *  4. The stored photo deleted: with every tool closed, the status card says
  *     so (an alert, with Choose again) and so does Save's name; the Photo
- *     tool's File tab says so; Save cannot be tapped, and no file appears.
+ *     tool's File tab says so; Save cannot be tapped, and no file appears;
+ *     the More sheet promises no size (its first row says why, the PNG row
+ *     is unavailable and shows no size).
  *  5. Cancel tapped while the file is encoded (an encoder slowed to 1.5 s,
  *     as a phone's is): no file, no "Saved" toast, Save again and no card,
  *     with a share sheet and without one.
@@ -377,6 +379,24 @@ try {
     await page.waitForTimeout(2000)
     check(alerts.filter((a) => a === why).length === 2, `the card and the Photo tool's File tab: "${alerts.join(' | ')}"`)
     check(disabled && !downloaded, 'Save cannot be tapped, and no file appears (never the type on bare paper)')
+    // More promises no size either: its first row says why, and the PNG row
+    // (unavailable) has no size to show.
+    await page.locator('.app__bar [aria-label="More"]').click()
+    await page.waitForSelector('dialog[open]')
+    const more = await page.evaluate(() => {
+      const d = document.querySelector('dialog[open]')
+      const png = [...d.querySelectorAll('.menu__item')].find((b) => b.textContent.includes('PNG'))
+      return {
+        row: d.querySelector('[data-export-size]')?.textContent ?? null,
+        size: d.querySelector('[data-export-size]')?.getAttribute('data-export-size') ?? null,
+        png: png?.textContent ?? null,
+        pngOff: png?.getAttribute('aria-disabled') === 'true',
+      }
+    })
+    check(
+      more.row?.startsWith(why) && more.size === '' && !/\d×\d/.test(more.row + more.png) && more.pngOff,
+      `More: "${more.row}"; "${more.png}" (${more.pngOff ? 'unavailable' : 'available'})`,
+    )
     await ctx.close()
   }
 

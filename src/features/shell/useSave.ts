@@ -204,6 +204,38 @@ export function saveLabel(state: SaveState, media: MediaState, size: string): st
   }
 }
 
+/** The More sheet's first row: what a save would make, or why it cannot. */
+export interface MoreCaption {
+  /** The pixel size a save makes ("2419×3024"); null when it promises none. */
+  size: string | null
+  /** The row's words: "Saves 2419×3024", or why nothing can be saved. */
+  word: string
+  /** Under them: why the size is not the photo's own pixels (in numbers),
+   *  that it is, or what to do. */
+  meta: string
+  /** A reason nothing can be saved: drawn as the status card's alert is
+   *  (the card is the alert; this row is the same words where More is read). */
+  alert: boolean
+}
+
+/**
+ * The More sheet's first row, from the caption (describePlan) and the
+ * document's photo. While the photo cannot be loaded no size is promised, as
+ * Save's name and the status card promise none: the row says why, the same
+ * sentence, and nothing is saved without the photo.
+ */
+export function moreCaption(media: MediaState, caption: { size: string; reason: string | null }, photo: boolean): MoreCaption {
+  if (media === 'failed') {
+    return { size: null, word: PHOTO_MISSING, meta: 'Nothing is saved without it: never the type on bare paper.', alert: true }
+  }
+  return {
+    size: caption.size,
+    word: `Saves ${caption.size}`,
+    meta: caption.reason ?? (photo ? "The photo's own pixels, one for one." : 'No photo: type on bare paper.'),
+    alert: false,
+  }
+}
+
 /** What a toast says: a thing done, something to know, or a failure (each
  *  with its own symbol, so none is told by colour). */
 export type Announcement = 'done' | 'info' | 'error'

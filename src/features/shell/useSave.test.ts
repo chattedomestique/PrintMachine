@@ -13,6 +13,7 @@ import {
   IDLE,
   SHARE_AT_ONCE_MS,
   canStart,
+  moreCaption,
   pressInProgress,
   progressText,
   saveButton,
@@ -152,6 +153,39 @@ describe('the save flow', () => {
     const ready = run([{ type: 'start', format: 'jpeg', plan, photo: true }, { type: 'photoLoaded' }, { type: 'pressed', file, now: false }])
     expect(saveButton(ready, 'failed')).toStrictEqual({ text: 'Share', busy: false, disabled: false })
     expect(saveStatus(ready, 'failed')?.text).toBe('3024×3780 is ready (6.2 MB). Tap Share to save it.')
+    // The More sheet promises no size either: its first row says why, and
+    // the PNG row has no size to show.
+    const native = { size: '3024×4032', reason: null }
+    const capped = { size: '4729×3547', reason: 'capped at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is 5712×4284' }
+    for (const c of [native, capped]) {
+      expect(moreCaption('failed', c, true)).toStrictEqual({
+        size: null,
+        word: why,
+        meta: 'Nothing is saved without it: never the type on bare paper.',
+        alert: true,
+      })
+    }
+  })
+
+  it('the More sheet\'s first row: the size a save makes, and why when it is not the photo\'s own pixels', () => {
+    const native = { size: '3024×4032', reason: null }
+    const capped = { size: '4729×3547', reason: 'capped at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is 5712×4284' }
+    expect(moreCaption('ready', native, true)).toStrictEqual({
+      size: '3024×4032',
+      word: 'Saves 3024×4032',
+      meta: "The photo's own pixels, one for one.",
+      alert: false,
+    })
+    expect(moreCaption('ready', capped, true)).toStrictEqual({ size: '4729×3547', word: 'Saves 4729×3547', meta: capped.reason, alert: false })
+    // While the photo decodes the plan is already known (the layer's own
+    // dimensions): the size stands.
+    expect(moreCaption('loading', native, true).size).toBe('3024×4032')
+    expect(moreCaption('none', { size: '2880×3600', reason: null }, false)).toStrictEqual({
+      size: '2880×3600',
+      word: 'Saves 2880×3600',
+      meta: 'No photo: type on bare paper.',
+      alert: false,
+    })
   })
 
   it('the card: an error is an alert with a dismiss; progress is busy, with Cancel', () => {

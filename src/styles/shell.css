@@ -343,6 +343,9 @@
   font: 400 var(--text-sm) / var(--lh-snug) var(--font-sans);
   color: var(--ink-soft);
 }
+/* Nothing can be saved (the photo cannot be loaded): the status card's
+   alert, in the same words and ink. */
+.more__fact[data-alert] :is(.ic, .more__fact-word) { color: var(--bad-ink); }
 
 /* ── Save questions (a print too big, a save that did not finish) ── */
 .savequestion .card__text { margin: 0; }

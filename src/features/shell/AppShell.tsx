@@ -15,6 +15,7 @@ import SaveQuestion from './SaveQuestion.tsx'
 import StatusCard from './StatusCard.tsx'
 import {
   canStart,
+  moreCaption,
   pressInProgress,
   saveButton,
   saveLabel,
@@ -214,8 +215,8 @@ export default function AppShell() {
   }, [pressing, undo, redo])
 
   // What Save will make: the pixel size, and why when it is not the photo's
-  // own pixels. Said in the More sheet, in Save's name, and in the toast when
-  // a save starts.
+  // own pixels. Said in the More sheet (unless the photo cannot be loaded:
+  // moreCaption), in Save's name, and in the toast when a save starts.
   const caption = useMemo(() => describePlan(planPrint(settings), settings.media), [settings])
   const button = saveButton(save.state, mediaState)
   const status = saveStatus(save.state, mediaState)
@@ -422,8 +423,7 @@ export default function AppShell() {
       <MoreSheet
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
-        size={caption.size}
-        meta={caption.reason ?? (settings.media ? "The photo's own pixels, one for one." : 'No photo: type on bare paper.')}
+        caption={moreCaption(mediaState, caption, settings.media !== null)}
         swState={swState}
         canSavePng={canStart(save.state, mediaState)}
         onSavePng={() => startSave('png')}

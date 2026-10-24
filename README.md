@@ -386,7 +386,9 @@ or cannot be decoded, the Photo tool's File tab says so ("This photo could not
 be loaded. Choose it again.") for as long as it is true, and so does Save,
 whichever tool is open: Save cannot be pressed, its name carries the sentence,
 and the status card above the dock shows the same sentence as an alert, with
-Choose again. Nothing is ever saved as the type on bare paper.
+Choose again. The More sheet promises no size meanwhile: its first row says the
+same sentence, and its PNG row is unavailable and shows none. Nothing is ever
+saved as the type on bare paper.
 
 #### Why the bytes are not in localStorage
 

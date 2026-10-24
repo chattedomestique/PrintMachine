@@ -4,10 +4,14 @@ import { Tabs, type TabItem } from '../../ui/ui.tsx'
 /**
  * Every panel is the same two parts at the same heights (editor.css): a head
  * row (the plate button, for Type and Ink, then the tabs) and the content area
- * under it: an options row at the top and the parameter strip at the bottom.
- * The content area is one height in every panel, so the sheet above never
- * changes size when you switch tools or tabs, and the slider is always in the
- * same place under your thumb (Border Studio's DockPanel).
+ * under it, which holds an options row, a hairline and a parameter strip, or
+ * fewer. The content area is one height in every panel, so the sheet above
+ * never changes size when you switch tools or tabs (Border Studio's
+ * DockPanel). Its rows are centred in it, as Border Studio's are, so the
+ * slider is not always in one place: under an options row it sits about 30 px
+ * lower than in a panel that is a strip alone (Type › Place, Photo › Frame).
+ * Ink › Over photo starts at the top instead, so its choice stays under the
+ * finger that made it (dock.css).
  *
  * `data-tool` and `data-sub` are the DOM contract scripts/verify-geometry.mjs
  * reads.

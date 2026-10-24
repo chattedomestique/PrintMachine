@@ -99,12 +99,12 @@
 /* Chosen is the fill alone: the doubled frame (a ring of the resting colour
    inside the border) was there to survive a pale accent next to a frame, and
    there is no frame here. */
-:is(.app__overlay, .app__bar) :is(.btn, .chip):not(dialog *) {
+:is(.app__overlay, .app__bar) .btn:not(dialog *) {
   --_selw: 0px;
   --_select: 0 0 0 0 transparent;
 }
 /* Unavailable is the faint ink alone; a dashed frame was one more line. */
-:is(.app__overlay, .app__bar) :is(.btn, .chip):is(:disabled, [aria-disabled="true"]):not(dialog *) {
+:is(.app__overlay, .app__bar) .btn:is(:disabled, [aria-disabled="true"]):not(dialog *) {
   border-color: transparent;
 }
 
@@ -154,18 +154,10 @@
 }
 
 /* The words on the tray's controls: one size, one weight. */
-.app__overlay :is(.btn, .chip, .segmented) { font: var(--ed-t-ctl); }
-.app__overlay :is(.select, .input, .input-group) { font: var(--ed-t-field); }
+.app__overlay :is(.btn, .segmented) { font: var(--ed-t-ctl); }
+.app__overlay :is(.select, .input) { font: var(--ed-t-field); }
 .app__overlay .switch__label { font: var(--ed-t-name); }
 .app__overlay .swatch-set__name { font: var(--ed-t-hint); color: var(--ink-soft); }
-/* A group's name (the swatch sets) reads like the tabs: small capitals. */
-.app__overlay .t-label {
-  font: var(--ed-t-caps);
-  letter-spacing: var(--ls-label);
-  text-transform: uppercase;
-  color: var(--ink-mute);
-}
-.app__overlay .t-meta { font: var(--ed-t-hint); color: var(--ink-mute); }
 /* A row of tabs wider than the panel scrolls; it snaps so a whole tab starts
    the row (a sliver of a word beside the layer button read as broken) and the
    cut one is at the far end, where it says "more". Scrolled to its end (the
@@ -297,6 +289,6 @@ dialog.dialog.actsheet {
 .actsheet .menu__group > .menu__item:first-of-type { border-block-start-color: var(--line); }
 
 @media (forced-colors: active) {
-  :is(.app__overlay, .app__bar) :is(.btn, .chip, .select, .input, .input-group, .segmented) { border-color: ButtonText; }
+  :is(.app__overlay, .app__bar) :is(.btn, .select, .input, .segmented) { border-color: ButtonText; }
   .btn.ed-bare[aria-pressed="true"] { border-width: var(--bw-heavy); }
 }

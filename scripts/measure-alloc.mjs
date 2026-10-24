@@ -20,7 +20,7 @@
  * local's life early) cannot vary between runs: every run gives the same
  * numbers. The peak of that,
  * over the output's pixel count, is the gate: <= 35 bytes per pixel for cases
- * 1-4 (plan WP2.7; case 5 is recorded, not gated).
+ * 1-4 (case 5 is recorded, not gated).
  *
  * The canvas is a stand-in that rasterises nothing but hands back data of
  * the right size and plausible content (type-shaped strokes where glyphs

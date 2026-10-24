@@ -210,7 +210,9 @@ describe('the undo history', () => {
   it('a change that changes nothing is not an undo step', () => {
     const l = makeLayer({ x: 0.5 })
     let h = initHistory(doc([l]))
-    // The same value again (a second reset, a drag back to where it was).
+    // The same value again (a second reset; a patch that writes what is
+    // there). Compared with the present only: a drag that goes away and comes
+    // back within one gesture still leaves its one step.
     h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.5 } })
     expect(h.past).toHaveLength(0)
     // A photo at 100% on its own sheet cannot move: every drag clamps back.

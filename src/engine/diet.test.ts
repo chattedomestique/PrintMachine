@@ -1,5 +1,5 @@
 /**
- * The export's memory diet (plan WP2.7). An export at a photo's own
+ * The export's memory diet. An export at a photo's own
  * resolution is 11-17 MP, so every sheet-sized buffer is 45-67 MB of a
  * phone's memory. The steps that only change what is HELD must not change a
  * pixel; the ones that change pixels are made in the stages the preview

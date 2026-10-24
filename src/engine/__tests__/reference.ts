@@ -9,7 +9,7 @@
  *  - `knockoutMask`: the knockout as a float field of its own, where the
  *    press cuts it straight into the sheet's running bytes (`cutKnockout`).
  *    Its behaviour tests and the golden recorded when the knockout became a
- *    stage of its own (WP1 1.4) are written against this shape.
+ *    stage of its own are written against this shape.
  */
 
 import { holeAt, type KnockoutParams } from '../knockout.ts'

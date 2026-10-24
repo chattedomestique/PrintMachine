@@ -34,8 +34,8 @@
  *    the dock) is reached by scrolling and is skipped while it is; a disabled
  *    one is not a target;
  *  - the Size slider's travel on the real track: pixels per 1% step, and what
- *    one pixel of drag changes at the smallest size (the touchiness bound of
- *    WP2's Size slider, measured where a thumb meets it);
+ *    one pixel of drag changes at the smallest size (how touchy the slider
+ *    is, measured where a thumb meets it: at least 1.5 px a step);
  *
  * then, with the 4:3 photo, the value modal, the parameter sheet, the plate
  * sheet, the Ink dialog and More: the same target check, and no sideways

@@ -1,5 +1,5 @@
 /**
- * The export's measurement cases (plan WP2.7), shared by measure-alloc.mjs
+ * The export's measurement cases, shared by measure-alloc.mjs
  * (deterministic typed-array accounting, node) and measure-export.mjs (time
  * and resident memory in Chromium). Built from the app's own defaults, which
  * the caller loads and hands in.

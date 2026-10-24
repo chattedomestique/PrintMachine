@@ -405,7 +405,7 @@ describe('text layout', () => {
 })
 
 describe('fitSize — the one-shot Fit action', () => {
-  // The browser stand-in the plan pins: width is 0.55 x size x characters,
+  // A stand-in for the browser's measure: width is 0.55 x size x characters,
   // read from the face's pixel size, so it is linear in size.
   const stub: FontMeasure = (font, text) => 0.55 * font.px * [...text].length
   const layer = (over: Partial<TextLayer> = {}): TextLayer =>
@@ -413,7 +413,7 @@ describe('fitSize — the one-shot Fit action', () => {
   const widest = (l: TextLayer, h: number) =>
     layoutText(l, h, (text, px) => stub({ stack: '', weight: 400, px }, text)).widest
 
-  it('gives the size the plan pins: MACHINE on 4:5 is 0.92 x 0.8 / (0.55 x 7)', () => {
+  it('gives the size the stand-in implies: MACHINE on 4:5 is 0.92 x 0.8 / (0.55 x 7)', () => {
     expect(fitSize(layer(), 0.8, stub)).toBeCloseTo((0.92 * 0.8) / (0.55 * 7), 12)
   })
 

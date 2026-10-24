@@ -56,8 +56,9 @@ describe('the slider: where people set type, at a step that is not touchy', () =
   })
 
   it('changes the size by at most 10% per step at its small end, 2.5% at 40%', () => {
-    // The pixels per step are measured on the real track (WP3's geometry
-    // gate); these are the constants that measurement rests on.
+    // The pixels per step are measured on the real track
+    // (scripts/verify-geometry.mjs); these are the constants that
+    // measurement rests on.
     expect(SIZE_STEP / SIZE_MIN).toBeCloseTo(0.1, 12)
     expect(SIZE_STEP / 0.04).toBeCloseTo(0.025, 12)
   })

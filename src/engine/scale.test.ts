@@ -292,7 +292,7 @@ describe('at the reference height, nothing but the speckle moved (pins re-record
       return f
     }
     // Recorded on f04ac1b, before the scale fixes, and re-pinned since on
-    // purpose, twice (WP2.7):
+    // purpose, twice, by the memory diet (diet.test.ts):
     //  - step 2, coverage in bytes: the halftone moved by at most one level
     //    (mean 0.004; was 4cf552fa5d93...), the binary grain not at all;
     //  - step 6, the ground's luminance on a grid (cell 11 px here): the

@@ -1247,11 +1247,20 @@ a headless browser — but "boots in airplane mode from the home screen" and "th
 share sheet actually puts the file in Photos" are claims only an iPhone can
 settle. See `DEVICE-CHECKLIST.md`.
 
-Nothing is down-rezzed: a photo is stored as it was picked and a print is
-saved at the photo's own pixels, up to the one ceiling below, and says so when
-it is not. The one lossy step in a saved file is JPEG's own: below quality 1.0
-a browser stores colour at half resolution (4:2:0). **Save lossless PNG**, in
-More, is the lossless path.
+**Down-rezzing, in numbers.** The photo itself never is: it is stored byte
+for byte as picked, at any size. A print is saved at the photo's own pixels up
+to 16.7 MP, the one ceiling (the export canvas, below): a 12 MP photo saves at
+its own pixels on every sheet, and a 24 MP iPhone photo on 4:5 at its own
+3427×4284. Two losses remain on the default path, and Save says the first:
+
+- a photo over 16.7 MP on its own Original sheet saves smaller than itself —
+  a 24 MP iPhone photo (5712×4284) at 4729×3547, 69% of its pixels;
+- the default file is a JPEG at quality 0.95, which Chromium stores with its
+  colour at half resolution each way (4:2:0; Safari's is unverified).
+  **Save lossless PNG**, in More, keeps every pixel's colour. (Measured in
+  Chromium 141 on a 2419×3024 print over a photo-like ground: 5.3 MB at 0.95,
+  4:2:0; 16.7 MB at quality 1.0, the only quality it stores 4:4:4; 16.6 MB as
+  PNG.)
 
 A saved print is a few megabytes, in proportion to its pixels (on the harness
 fixture: 1.9 MB for 2419×3024, 2.8 MB for 3024×3780, against the ~300 KB the

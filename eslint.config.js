@@ -5,7 +5,9 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default tseslint.config(
-  { ignores: ['dist', 'dev-dist', 'scripts'] },
+  // The vendored style guide is a copy (scripts/sync-styleguide.mjs), never
+  // edited here, so it is not linted here either.
+  { ignores: ['dist', 'dev-dist', 'scripts', 'src/vendor', 'public/sg'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

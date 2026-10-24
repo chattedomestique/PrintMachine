@@ -135,6 +135,8 @@ export default function AppShell() {
           <span
             className="offline-dot"
             data-state={swState}
+            // The readiness contract scripts/verify-offline.mjs waits on.
+            data-offline-state={swState}
             title={
               swState === 'ready'
                 ? 'Saved for offline — this will open in airplane mode'

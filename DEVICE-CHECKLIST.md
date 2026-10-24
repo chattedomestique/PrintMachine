@@ -51,8 +51,17 @@ So:
       thumb (no near misses between neighbours)
 - [ ] Tap the open tool again → its panel closes and the sheet grows to the
       full height
-- [ ] Dragging the sheet moves the selected plate; nothing eats the taps
+- [ ] Tap a plate on the sheet (RISO) → the plate button names it and its
+      crosshair moves to it; nothing moves and Undo stays as it was
+- [ ] Put a finger on a plate that is not selected and drag → that plate
+      moves with the finger in the same touch, and the other stays put; drag
+      from bare paper → the selected plate moves; nothing eats the taps
+- [ ] A small caption (Size about 20%) is easy to pick with a thumb, including
+      a touch just beside it
 - [ ] Double-tap re-centres
+- [ ] The first photo brings a hint over the dock; it names the photo's
+      gestures while Photo is open and the type's otherwise, and it goes for
+      good with its × or with the first drag on the sheet
 - [ ] Photo tool open: drag and pinch the photo — it zooms 100–400% and stops
       at its edges, never showing bare paper round it; switch the sheet shape
       in Photo › Sheet and it still covers the sheet

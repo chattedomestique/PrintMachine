@@ -123,6 +123,9 @@ export default function AppShell() {
   const fileRef = useRef<HTMLInputElement>(null)
   const photo = usePhotoImport(fileRef, announce)
 
+  // Dismissed for good by its ×, or by the first gesture on the sheet that
+  // moves something: by then what it says has been learned, and while it
+  // shows it covers the foot of the sheet.
   const dismissHint = useCallback(() => {
     setHintDismissed(true)
     savePrefs({ ...loadPrefs(), hintDismissed: true })
@@ -269,7 +272,7 @@ export default function AppShell() {
         <div className="app__canvas-wrap">
           {/* Paused while pressing, so a full-size press and a preview frame
               never hold their buffers at once. */}
-          <Canvas media={media} mediaMode={tool === 'photo'} paused={pressing} />
+          <Canvas media={media} mediaMode={tool === 'photo'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
         </div>
       </main>
 
@@ -342,9 +345,13 @@ export default function AppShell() {
       <div className="app__float">
         {showHint && (
           <div className="card app__hint">
-            {/* Inserted once, after the first photo: announced once. */}
+            {/* Inserted once, after the first photo, and announced; it says
+                what the sheet's gestures do in the open tool, so it changes
+                (and is said again) only when what they move does. */}
             <p className="app__hint-text" role="status">
-              Drag to move · pinch to size and turn · double‑tap to centre
+              {tool === 'photo'
+                ? 'Pinch to zoom the photo · drag to move it · double‑tap to fit'
+                : 'Tap type to pick it · drag to move · pinch to size and turn'}
             </p>
             <button type="button" className="btn ed-bare" data-shape="circle" data-size="sm" aria-label="Dismiss the hint" onClick={dismissHint}>
               <Icon name="x" />

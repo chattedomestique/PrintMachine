@@ -42,10 +42,11 @@ npm run sync:styleguide # re-vendor the style guide from ../styleguide
 npm run measure:fidelity  # Save keeps every pixel of the photo (fails under a gate)
 npm run measure:alloc     # what an export holds, per output pixel (fails over 35 B/px)
 npm run measure:export    # export time and desktop memory (informational)
-npm run build && npm run check:save  # the save flow in the built app, tapped
+npm run build && npm run check:save   # the save flow in the built app, tapped
+npm run build && npm run check:touch  # tap-to-select on the sheet, touched
 ```
 
-The three that can fail run in CI after `verify`, with the harness's parity
+The four that can fail run in CI after `verify`, with the harness's parity
 gate (`npm run harness -- --out p.json --no-hashes --parity 1000`: the
 preview's entry point and the export's give the same bytes); `measure:export`
 runs there too, for the record (see "Every pixel of the photo, measured" and
@@ -968,8 +969,34 @@ keeps panning instead of jumping. Every gesture writes the same fields the
 parameter strips write, so each has a tap equivalent (Size, Rotation and
 Position X/Y for type; Zoom and Position for the photo), and arrow keys / +- /
 brackets mirror it for keyboards. The selected plate shows a crosshair on the
-sheet — the one editing aid, and it never reaches a saved file. The first photo
-brings a one-line gesture hint, dismissed for good with its ×.
+sheet — the one editing aid, and it never reaches a saved file.
+
+**Tap a plate to pick it** (Border Studio's tap-to-select). A touch that lands
+on a plate other than the selected one selects it — the same selection as the
+plate button, and not an undo step — and the drag it starts moves that plate,
+so the touch that picks a plate is the touch that moves it. A touch on
+bare paper or photo moves the selected plate, as it always has. Which plate is
+under a finger is `hitLayer` (engine/text.ts): each plate's line boxes, the
+rectangles its backing would fill, read off the layout the glyphs are drawn
+from and turned with the plate, so a tilted line is hit along its slant; the
+topmost plate wins, as the last prints on top. A touch up to 12 px outside a
+box still counts (a caption at a few percent of the sheet is a line a few
+pixels tall under a fingertip several times that), and a touch inside one
+plate's box always beats a touch beside another's. One finger has to travel
+4 px before it moves anything, so a tap that picks a plate does not also nudge
+it.
+
+The plate the gesture moves is decided at the pointer-down, from the plate it
+landed on, and its patches name that plate. Waiting for the selection to
+re-render would start the drag from the previous plate's place and move it
+(`features/editor/gesture.ts`, tested; `npm run check:touch` touches it in the
+built app).
+
+The first photo brings a short gesture hint saying what the sheet's
+gestures do in the open tool (the photo with Photo open, the type otherwise).
+It goes for good with its ×, or with the first gesture that moves something:
+by then it has been learned, and while it shows it covers the foot of the
+sheet.
 
 A slider's input takes `touch-action: none`, so a drag with any vertical
 component moves the value; nothing in the dock scrolls at 100% text (at large

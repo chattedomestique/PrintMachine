@@ -233,11 +233,15 @@ export const FIT_WIDTH = 0.92
  */
 export function fitSize(layer: TextLayer, aspect: number, measure: FontMeasure): number {
   const REFERENCE = 1000
-  const layout = layoutText({ ...layer, size: 1 }, REFERENCE, (text, px) =>
-    measure(layerFont(layer, px), text),
-  )
+  const layout = layoutIn({ ...layer, size: 1 }, REFERENCE, measure)
   const size = layout.widest > 0 ? (FIT_WIDTH * aspect * REFERENCE) / layout.widest : layer.size
   return Math.min(SIZE_MAX, Math.max(SIZE_MIN, size))
+}
+
+/** Lay a layer out in its own face (Bold included), as the renderer will set
+ *  it, on a sheet `h` pixels tall. Fit and the hit-test both measure so. */
+export function layoutIn(layer: TextLayer, h: number, measure: FontMeasure): TextLayout {
+  return layoutText(layer, h, (text, px) => measure(layerFont(layer, px), text))
 }
 
 /** Horizontal offset of a line within the block, for a given alignment. */
@@ -336,11 +340,15 @@ function prepare(ctx: CanvasRenderingContext2D, layer: TextLayer, h: number): Pr
   const layout = layoutText(layer, h, measure)
   setFont(layout.fontSize)
 
-  return {
-    layout,
-    blockLeft: -layout.widest / 2,
-    firstBaseline: -layout.blockHeight / 2 + layout.lineHeight / 2,
-  }
+  return { layout, ...blockOrigin(layout) }
+}
+
+/** Where a laid-out block sits about the layer's origin: centred on it, its
+ *  left edge before per-line alignment and its first baseline. One spelling,
+ *  shared by both rasterisers and the hit-test, so what a tap finds is where
+ *  the glyphs and the backing are drawn. */
+function blockOrigin(layout: TextLayout): { blockLeft: number; firstBaseline: number } {
+  return { blockLeft: -layout.widest / 2, firstBaseline: -layout.blockHeight / 2 + layout.lineHeight / 2 }
 }
 
 /** Apply the layer's placement transform to the context. */
@@ -432,6 +440,66 @@ export function lineRects(layout: TextLayout, align: TextAlign, blockLeft: numbe
     rects.push({ x: ox + lead - pad, y: oy - above, w: line.width - lead + pad * 2, h: above + below })
   })
   return rects
+}
+
+/* ── Which plate is under a point ─────────────────────────────────────── */
+
+/** A plate and its layout on the sheet being hit-tested (`layoutIn`, at that
+ *  sheet's height). */
+export interface PlateLayout {
+  layer: TextLayer
+  layout: TextLayout
+}
+
+/**
+ * The plate under a point on the sheet, or null: what a tap on the sheet
+ * picks. Pure — the layouts come in, so no context is needed here.
+ *
+ * Each plate is tested against its line boxes: the rectangles its backing
+ * fills (`lineRects`), one per line of ink, read off the same layout and the
+ * same origin the glyphs are drawn from. The point is taken into the block's
+ * own coordinates — moved to the layer's origin and turned back by its
+ * rotation, which the drawing turns about that origin (`transform`) — so a
+ * tilted line is hit along its slant, not by an upright box round it.
+ *
+ * Plates print in order, the last on top, so the topmost plate under the point
+ * wins. `slop` lets a near miss count, for a fingertip on a caption only a few
+ * pixels tall: of the plates within `slop` of the point, the nearest wins, so
+ * a point inside a box always beats one beside a box; a tie goes to the
+ * topmost.
+ *
+ * @param point in sheet pixels, from the sheet's top-left corner.
+ * @param sheet the sheet's size, in the pixels the layouts were made at.
+ * @param slop how far outside a box still counts, in the same pixels.
+ */
+export function hitLayer(
+  plates: readonly PlateLayout[],
+  point: { x: number; y: number },
+  sheet: { w: number; h: number },
+  slop = 0,
+): string | null {
+  let hit: string | null = null
+  let nearest = Infinity
+  for (const { layer, layout } of plates) {
+    const { blockLeft, firstBaseline } = blockOrigin(layout)
+    const turn = (layer.rotation * Math.PI) / 180
+    const cos = Math.cos(turn)
+    const sin = Math.sin(turn)
+    const dx = point.x - layer.x * sheet.w
+    const dy = point.y - layer.y * sheet.h
+    // The inverse of translate-then-rotate: into the block's frame.
+    const bx = dx * cos + dy * sin
+    const by = dy * cos - dx * sin
+    for (const r of lineRects(layout, layer.align, blockLeft, firstBaseline)) {
+      const out = Math.hypot(Math.max(r.x - bx, 0, bx - r.x - r.w), Math.max(r.y - by, 0, by - r.y - r.h))
+      // `<=`: a later plate takes a tie, as it prints on top.
+      if (out <= slop && out <= nearest) {
+        nearest = out
+        hit = layer.id
+      }
+    }
+  }
+  return hit
 }
 
 /**

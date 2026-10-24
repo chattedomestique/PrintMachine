@@ -65,6 +65,13 @@ jobs:
         env:
           PAGES: '1' # serve dist/ at the base it was built for
           CHROMIUM_PATH: /usr/bin/google-chrome
+      # Tap-to-select, touched: a tap picks the plate under it without moving
+      # it, and the drag it starts moves that plate, not the one selected
+      # when the finger went down.
+      - run: node scripts/check-touch.mjs
+        env:
+          PAGES: '1'
+          CHROMIUM_PATH: /usr/bin/google-chrome
       # The preview is a true picture of the print: every harness document
       # through the preview's entry point and the export's, at one height,
       # must give the same bytes (it fails if any differs).

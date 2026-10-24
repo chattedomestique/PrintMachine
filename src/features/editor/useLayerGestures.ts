@@ -1,48 +1,33 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { SIZE_MAX, SIZE_MIN } from '../../engine/limits.ts'
-import type { TextLayer } from '../../engine/types.ts'
+import {
+  beginGesture,
+  stepGesture,
+  type Gesture,
+  type GestureLimits,
+  type GesturePatch,
+  type GestureTarget,
+  type Pt,
+} from './gesture.ts'
 
 /**
- * Direct manipulation of the selected layer.
+ * Direct manipulation on the sheet: a plate, or the photo.
  *
  * For a spatial task, direct manipulation beats indirect controls — someone
  * looking at type on a sheet will try to drag the type (playbook §7). All
  * gestures write the same `{x, y, size, rotation}` the sliders write, so the
- * two are views of one model rather than parallel systems.
+ * two are views of one model rather than parallel systems. The arithmetic is
+ * gesture.ts; this is the pointer bookkeeping round it.
  *
  * Pointer Events with `setPointerCapture` handle mouse, touch and pencil in one
  * path and survive the pointer leaving the element.
  */
 
-const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
-
 /** Type's limits: its size range (engine/limits.ts — a pinch reaches past the
  *  slider's end, up to SIZE_MAX), and a little past the trim so it can bleed
  *  off deliberately without being lost off-screen. Module constants, so the
  *  handlers below are not rebuilt on every render. */
-const TYPE_SIZE: readonly [number, number] = [SIZE_MIN, SIZE_MAX]
-const TYPE_POSITION: readonly [number, number] = [-0.3, 1.3]
-
-/** A pinch is continuous, but what it stores is rounded to this, so a saved
- *  size is never a float tail (0.0412345678...). A tenth of a display percent:
- *  far below anything visible, and the bounds of every range are on it. */
-const PINCH_GRID = 1e4
-
-interface Pt {
-  x: number
-  y: number
-}
-
-interface Gesture {
-  /** Layer state captured when the gesture began. */
-  origin: { x: number; y: number; size: number; rotation: number }
-  /** Centroid of the starting pointers, in element space. */
-  startCentroid: Pt
-  /** Distance between the two starting pointers (0 for a one-finger drag). */
-  startSpread: number
-  /** Angle between the two starting pointers, radians. */
-  startAngle: number
-}
+const TYPE_LIMITS: GestureLimits = { size: [SIZE_MIN, SIZE_MAX], position: [-0.3, 1.3] }
 
 export interface LayerGestureHandlers {
   onPointerDown: (e: React.PointerEvent<HTMLElement>) => void
@@ -53,26 +38,40 @@ export interface LayerGestureHandlers {
 
 export function useLayerGestures(
   surfaceRef: React.RefObject<HTMLElement | null>,
-  layer: TextLayer | null,
-  patch: (p: Partial<TextLayer>) => void,
-  onGestureStart?: () => void,
-  /** Pinch limits. Type and photos want very different ranges — a photo starts
-   *  at cover and is zoomed in from it, not sized as a fraction of the sheet. */
-  sizeRange: readonly [number, number] = TYPE_SIZE,
-  /** Pan limits, in sheet fractions. Type may bleed a little off the trim; a
-   *  photo's limit depends on its zoom, so its caller clamps instead. */
-  positionRange: readonly [number, number] = TYPE_POSITION,
+  /** What the gestures move when nothing else is picked: the selected plate,
+   *  or the photo. Null turns them off. */
+  target: GestureTarget | null,
+  /** Writes a patch to the target whose id it names: the gesture's own
+   *  target, which is not always the `target` of this render (see `pick`). */
+  patch: (p: GesturePatch, id: string) => void,
+  {
+    limits = TYPE_LIMITS,
+    pick,
+  }: {
+    /** Pinch and pan limits. Type and photos want very different ranges — a
+     *  photo starts at cover and is zoomed in from it, not sized as a
+     *  fraction of the sheet, and its pan is clamped by its caller. */
+    limits?: GestureLimits
+    /**
+     * Asked once at the first pointer of a gesture, with where it landed (in
+     * the surface's pixels) and the surface's size: a target to move instead
+     * of `target`, or null to keep it. The gesture is seeded from what this
+     * returns, there and then, rather than from `target` after a re-render.
+     */
+    pick?: (pt: Pt, box: { width: number; height: number }) => GestureTarget | null
+  } = {},
 ): LayerGestureHandlers {
   const pointers = useRef(new Map<number, Pt>())
   const gesture = useRef<Gesture | null>(null)
   // Synced in an effect, never written during render — a ref assigned in the
   // render body is a real staleness bug, and it is the rule the playbook (§8.2)
   // records as having been red and unmonitored in a shipped app. Pointer
-  // handlers all fire after commit, so reading it there is safe.
-  const layerRef = useRef(layer)
+  // handlers all fire after commit, so reading it there is safe. A pick
+  // writes it too, ahead of the render that will say the same.
+  const targetRef = useRef(target)
   useEffect(() => {
-    layerRef.current = layer
-  }, [layer])
+    targetRef.current = target
+  }, [target])
 
   const localPoint = useCallback(
     (e: React.PointerEvent<HTMLElement>): Pt => {
@@ -83,43 +82,31 @@ export function useLayerGestures(
     [surfaceRef],
   )
 
-  /**
-   * Re-seed the gesture from whatever pointers are currently down.
-   *
-   * This is what makes the two-finger → one-finger handoff seamless: lifting a
-   * finger mid-pinch restarts the baseline from the remaining one, so the layer
-   * continues panning from where it is instead of snapping to the new centroid.
-   */
+  /** Re-seed the gesture from whatever pointers are down now (gesture.ts). */
   const rebase = useCallback(() => {
-    const l = layerRef.current
-    if (!l || pointers.current.size === 0) {
+    const t = targetRef.current
+    if (!t || pointers.current.size === 0) {
       gesture.current = null
       return
     }
-    const pts = [...pointers.current.values()]
-    const centroid = {
-      x: pts.reduce((a, p) => a + p.x, 0) / pts.length,
-      y: pts.reduce((a, p) => a + p.y, 0) / pts.length,
-    }
-    const [a, b] = pts
-
-    gesture.current = {
-      origin: { x: l.x, y: l.y, size: l.size, rotation: l.rotation },
-      startCentroid: centroid,
-      startSpread: pts.length >= 2 ? Math.hypot(b.x - a.x, b.y - a.y) : 0,
-      startAngle: pts.length >= 2 ? Math.atan2(b.y - a.y, b.x - a.x) : 0,
-    }
+    gesture.current = beginGesture(t, [...pointers.current.values()], gesture.current?.live ?? false)
   }, [])
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLElement>) => {
-      if (!layerRef.current) return
-      onGestureStart?.()
+      if (!targetRef.current) return
+      const pt = localPoint(e)
+      if (pointers.current.size === 0) {
+        gesture.current = null
+        const rect = surfaceRef.current?.getBoundingClientRect()
+        const picked = pick && rect ? pick(pt, rect) : null
+        if (picked) targetRef.current = picked
+      }
       surfaceRef.current?.setPointerCapture(e.pointerId)
-      pointers.current.set(e.pointerId, localPoint(e))
+      pointers.current.set(e.pointerId, pt)
       rebase()
     },
-    [localPoint, rebase, surfaceRef, onGestureStart],
+    [localPoint, rebase, surfaceRef, pick],
   )
 
   const onPointerMove = useCallback(
@@ -129,39 +116,12 @@ export function useLayerGestures(
 
       const g = gesture.current
       const rect = surfaceRef.current?.getBoundingClientRect()
-      if (!g || !rect || rect.width === 0 || rect.height === 0) return
-
-      const pts = [...pointers.current.values()]
-      const centroid = {
-        x: pts.reduce((a, p) => a + p.x, 0) / pts.length,
-        y: pts.reduce((a, p) => a + p.y, 0) / pts.length,
-      }
-
-      // Pan: the centroid's travel, in sheet-relative units, clamped to the
-      // caller's range.
-      const [lo, hi] = positionRange
-      const next: Partial<TextLayer> = {
-        x: clamp(g.origin.x + (centroid.x - g.startCentroid.x) / rect.width, lo, hi),
-        y: clamp(g.origin.y + (centroid.y - g.startCentroid.y) / rect.height, lo, hi),
-      }
-
-      if (pts.length >= 2 && g.startSpread > 8) {
-        const [a, b] = pts
-        const spread = Math.hypot(b.x - a.x, b.y - a.y)
-        const size = clamp(g.origin.size * (spread / g.startSpread), sizeRange[0], sizeRange[1])
-        next.size = Math.round(size * PINCH_GRID) / PINCH_GRID
-
-        const angle = Math.atan2(b.y - a.y, b.x - a.x)
-        let delta = ((angle - g.startAngle) * 180) / Math.PI
-        // Normalise into (-180, 180] so rotating through the ±pi seam does not
-        // spin the layer the long way round.
-        delta = ((((delta + 180) % 360) + 360) % 360) - 180
-        next.rotation = clamp(g.origin.rotation + delta, -180, 180)
-      }
-
-      patch(next)
+      if (!g || !rect) return
+      const step = stepGesture(g, [...pointers.current.values()], rect, limits)
+      gesture.current = step.gesture
+      if (step.patch) patch(step.patch, g.target.id)
     },
-    [localPoint, patch, surfaceRef, sizeRange, positionRange],
+    [localPoint, patch, surfaceRef, limits],
   )
 
   const release = useCallback(

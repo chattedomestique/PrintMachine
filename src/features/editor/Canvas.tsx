@@ -1,33 +1,42 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { useSettings } from '../../state/settingsStore.ts'
+import { canvasMeasure } from '../../state/persist.ts'
 import { useRenderer } from './useRenderer.ts'
 import { useLayerGestures } from './useLayerGestures.ts'
+import type { GestureLimits, GesturePatch, GestureTarget, Pt } from './gesture.ts'
 import { stepSize } from '../controls/sizeScale.ts'
 import { sheetAspect, type MediaLayer, type TextLayer } from '../../engine/types.ts'
 import { clampPan } from '../../engine/media.ts'
+import { hitLayer, layoutIn, type FontMeasure } from '../../engine/text.ts'
 import './Canvas.css'
 
+/** A photo's gesture limits. Pinch: a zoom on the cover fit, so 1 exactly
+ *  fills the sheet and nothing below it is allowed — it would leave bare
+ *  paper. Pan: not limited to the sheet the way type is; how far the photo may
+ *  travel depends on the zoom and the sheet's shape, and clampPan decides that
+ *  below, so the gesture is left free to reach every edge. */
+const MEDIA_LIMITS: GestureLimits = { size: [1, 4], position: [-Infinity, Infinity] }
+
+/** How far outside a plate's line boxes a touch still picks it, in CSS
+ *  pixels: a caption at a few percent of the sheet is a line a few pixels
+ *  tall, under a fingertip several times that. A touch inside a box always
+ *  beats one beside a box (hitLayer). */
+const HIT_SLOP = 12
+
 /**
- * The print preview, plus the surface that manipulates the selected layer.
+ * The print preview, plus the surface that manipulates a plate (the selected
+ * one, or the one a touch lands on) or, with the Photo tool open, the photo.
  *
  * Input lives on a dedicated transparent sibling with `touch-action: none`,
  * not on the canvas itself — that avoids the whole genre of "the canvas is
  * eating my taps" bug, and lets the canvas stay `pointer-events: none`
  * (playbook §7).
  */
-/** Pinch range for a photo: a zoom on the cover fit, so 1 exactly fills the
- *  sheet and nothing below it is allowed — it would leave bare paper. */
-const MEDIA_SIZE: readonly [number, number] = [1, 4]
-
-/** The photo's centre is not limited to the sheet the way type is: how far it
- *  may travel depends on the zoom and the sheet's shape, and clampPan decides
- *  that below. Unbounded here so the gesture can reach every edge. */
-const MEDIA_POSITION: readonly [number, number] = [-Infinity, Infinity]
-
 export default function Canvas({
   media = null,
   mediaMode = false,
   paused = false,
+  onGesture,
 }: {
   media?: ImageBitmap | null
   /** Point the sheet's gestures at the photo instead of the type. Driven by
@@ -36,6 +45,9 @@ export default function Canvas({
   mediaMode?: boolean
   /** Hold the preview where it is (a save is pressing the print). */
   paused?: boolean
+  /** Told each time a gesture on the sheet moves something (not a tap): the
+   *  gesture hint's cue that what it teaches has been learned. */
+  onGesture?: () => void
 }) {
   const { settings, dispatch, selectedLayerId, selectLayer, selectedLayer } = useSettings()
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -45,18 +57,39 @@ export default function Canvas({
 
   const layer = selectedLayer ?? settings.layers[0] ?? null
 
-  // A whole gesture — drag, pinch, rotate — collapses into one undo step.
+  // A whole gesture — drag, pinch, rotate — collapses into one undo step. The
+  // plate is the gesture's own (by id), which a tap may just have picked.
   const patch = useCallback(
-    (p: Partial<TextLayer>) => {
-      if (!layer) return
-      dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce: true })
+    (p: GesturePatch, id: string) => {
+      dispatch({ type: 'patchLayer', id, patch: p, coalesce: true })
+      onGesture?.()
     },
-    [dispatch, layer],
+    [dispatch, onGesture],
   )
 
-  const ensureSelected = useCallback(() => {
-    if (!selectedLayerId && layer) selectLayer(layer.id)
-  }, [selectedLayerId, layer, selectLayer])
+  /**
+   * Tap a plate to pick it (Border Studio's tap-to-select): a touch that lands
+   * on a plate other than the selected one selects it (the plate button's
+   * selection, not an undo step) and the gesture it starts moves that plate,
+   * seeded from its own place. A touch on no plate moves the selected one, as
+   * it always has. The plates are laid out at the sheet's on-screen size, so
+   * the point needs no conversion.
+   */
+  const measureRef = useRef<FontMeasure | null | undefined>(undefined)
+  const pick = useCallback(
+    (pt: Pt, box: { width: number; height: number }): GestureTarget | null => {
+      if (measureRef.current === undefined) measureRef.current = canvasMeasure() ?? null
+      const measure = measureRef.current
+      if (!measure || box.height <= 0) return null
+      const plates = settings.layers.map((l) => ({ layer: l, layout: layoutIn(l, box.height, measure) }))
+      const id = hitLayer(plates, pt, { w: box.width, h: box.height }, HIT_SLOP)
+      const hit = id !== null && id !== layer?.id ? settings.layers.find((l) => l.id === id) : undefined
+      if (!hit) return null
+      selectLayer(hit.id)
+      return hit
+    },
+    [settings.layers, layer, selectLayer],
+  )
 
   // The photo is presented to the gesture hook in the shape it already speaks:
   // x, y and size. `size` carries `scale`, and rotation is left alone because
@@ -64,13 +97,16 @@ export default function Canvas({
   // bounds, which is a different feature.
   const mediaTarget = settings.media
   const aspect = sheetAspect(settings)
-  const mediaAsLayer =
-    mediaMode && mediaTarget
-      ? ({ ...layer, x: mediaTarget.x, y: mediaTarget.y, size: mediaTarget.scale, rotation: 0 } as TextLayer)
-      : null
+  const photoTarget = useMemo<GestureTarget | null>(
+    () =>
+      mediaMode && mediaTarget
+        ? { id: mediaTarget.id, x: mediaTarget.x, y: mediaTarget.y, size: mediaTarget.scale, rotation: 0 }
+        : null,
+    [mediaMode, mediaTarget],
+  )
 
   const patchMedia = useCallback(
-    (p: Partial<TextLayer>) => {
+    (p: GesturePatch) => {
       if (!mediaTarget) return
       const next: Partial<MediaLayer> = {}
       if (p.x !== undefined) next.x = p.x
@@ -85,19 +121,13 @@ export default function Canvas({
         patch: { x: placed.x, y: placed.y, scale: placed.scale },
         coalesce: true,
       })
+      onGesture?.()
     },
-    [dispatch, mediaTarget, aspect],
+    [dispatch, mediaTarget, aspect, onGesture],
   )
 
-  const typeGestures = useLayerGestures(surfaceRef, mediaMode ? null : layer, patch, ensureSelected)
-  const photoGestures = useLayerGestures(
-    surfaceRef,
-    mediaAsLayer,
-    patchMedia,
-    undefined,
-    MEDIA_SIZE,
-    MEDIA_POSITION,
-  )
+  const typeGestures = useLayerGestures(surfaceRef, mediaMode ? null : layer, patch, { pick })
+  const photoGestures = useLayerGestures(surfaceRef, photoTarget, patchMedia, { limits: MEDIA_LIMITS })
   const gestures = mediaMode ? photoGestures : typeGestures
 
   const onDoubleClick = useCallback(() => {
@@ -155,7 +185,7 @@ export default function Canvas({
         aria-label={
           mediaMode
             ? 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to fit it again. Arrow keys move the selected plate.'
-            : 'Print preview. Drag to move the selected plate, pinch to scale and rotate, double-tap to centre. Arrow keys move, plus and minus scale, brackets rotate.'
+            : 'Print preview. Tap a plate to pick it, drag to move it, pinch to scale and rotate, double-tap to centre. Arrow keys move the selected plate, plus and minus scale, brackets rotate.'
         }
         tabIndex={0}
         onDoubleClick={onDoubleClick}

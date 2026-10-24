@@ -18,7 +18,8 @@
     "measure:alloc": "node scripts/measure-alloc.mjs",
     "measure:export": "node scripts/measure-export.mjs",
     "measure:fidelity": "node scripts/measure-fidelity.mjs",
-    "check:save": "node scripts/check-save.mjs"
+    "check:save": "node scripts/check-save.mjs",
+    "check:touch": "node scripts/check-touch.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

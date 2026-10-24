@@ -1017,17 +1017,17 @@ also do that: the second one's is ignored, so the reset stands, and the
 first one's joins the reset in one undo step, so one Undo takes the double tap
 back. The two taps are timed by when they touched (each event's own time), not
 by when the page got to them: on a phone the preview's render after the first
-tap can hold the second back for a second, and it still counts, and still
-joins the first tap's step (`check:touch` does it with real touch input, also
-on a CPU throttled 4x with the second tap handled late). On a setting already
-at its default the double tap goes there and back, so it leaves no undo step,
-and nor does a drag that ends where it began. A panel with
-several settings shows one at a time: tap its name, or swipe up from it, for
-the others (Border Studio 4860519). Size, Rotation and Position have two
-ranges: the slider spans where people work (10–100%, ±45°, the sheet) while a
-pinch, the keys, a nudge and a typed value reach the whole range (1200%,
-±180°, 30% past the trim); the thumb then pins at the end and the value shows
-the truth.
+tap can hold the second back (over a second with the CPU throttled 4x), and
+it still counts, and still joins the first tap's step (`check:touch` does it
+with real touch input, also on a CPU throttled 4x with the second tap handled
+late). On a setting already at its default the double tap goes there and
+back, so it leaves no undo step, and nor does a drag that ends where it
+began. A panel with several settings shows one at a time: tap its name, or
+swipe up from it, for the others (Border Studio 4860519). Size, Rotation and
+Position have two ranges: the slider spans where people work (10–100%, ±45°,
+the sheet) while a pinch, the keys, a nudge and a typed value reach the whole
+range (1200%, ±180°, 30% past the trim); the thumb then pins at the end and
+the value shows the truth.
 
 The plate the panel edits is the button at the start of the head row of both
 Type and Ink — one selection, reachable from the tool you edit in — and it

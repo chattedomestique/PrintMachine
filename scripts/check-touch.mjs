@@ -314,19 +314,26 @@ try {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [], timestamp: t + 0.03 })
     }
     // Two taps at 80% of the track; returns what the readout said between
-    // them (the first tap alone moves the thumb there).
-    const doubleTapLate = async (panel, was) => {
+    // them (the first tap alone moves the thumb there) and after them, each
+    // read once it is there (or after 15 s: a throttled CPU on a slow runner
+    // takes its time).
+    const shows = (sel, is, text) =>
+      page
+        .waitForFunction(([sel, is, text]) => (document.querySelector(sel)?.textContent === text) === is, [sel, is, text], { timeout: 15_000 })
+        .catch(() => undefined)
+    const doubleTapLate = async (panel, was, end) => {
       const value = `${panel} .controls__value`
       const track = await page.locator(`${panel} .slider__input`).boundingBox()
       const spot = { x: track.x + 12 + 0.8 * (track.width - 24), y: track.y + track.height / 2 }
       const t0 = Date.now() / 1000
       await stampedTap(spot, t0)
-      await page.waitForFunction(([sel, was]) => document.querySelector(sel)?.textContent !== was, [value, was], { timeout: 5000 }).catch(() => undefined)
+      await shows(value, false, was)
       await page.waitForTimeout(400)
       const between = await page.locator(value).first().textContent()
       await stampedTap(spot, t0 + 0.1)
-      await page.waitForTimeout(600)
-      return between
+      await shows(value, true, end)
+      await page.waitForTimeout(300)
+      return [between, await page.locator(value).first().textContent()]
     }
     // Type › Size from the headline's 90% (its default is 40%); Press ›
     // Screen size from its default, 9.0 px.
@@ -341,9 +348,8 @@ try {
       const readout = () => page.locator(`${panel} .controls__value`).first().textContent()
       const was = await readout()
       const from = field(await stored(page))
-      const between = await doubleTapLate(panel, was)
-      const now = await readout()
       const end = want ?? was
+      const [between, now] = await doubleTapLate(panel, was, end)
       check(
         between !== end && now === end,
         `${label}, CPU 4x, two taps stamped 100 ms apart, the second handled late: ${was} -> ${between} -> ${now} (want ${end}; stored ${from} -> ${field(await stored(page))})`,
@@ -353,7 +359,7 @@ try {
         // The stored document, once the debounced write has landed (slower
         // on a throttled CPU).
         await page
-          .waitForFunction(([k, from]) => JSON.parse(localStorage.getItem(k) ?? 'null')?.layers?.[0]?.size === from, [KEY, from], { timeout: 5000 })
+          .waitForFunction(([k, from]) => JSON.parse(localStorage.getItem(k) ?? 'null')?.layers?.[0]?.size === from, [KEY, from], { timeout: 15_000 })
           .catch(() => undefined)
         const back = await readout()
         const kept = field(await stored(page))
@@ -366,10 +372,14 @@ try {
     }
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
     {
-      // A mouse's double-click on Screen size, still at its default: the
-      // same, no step. From a fresh history (a reload), so this says only
-      // what the double-click did.
-      await page.reload()
+      // A mouse's double-click on Screen size at its default: the same, no
+      // step. In a fresh context (a fresh document and history; a reload
+      // would bring back the document as this page left it), so this says
+      // only what the double-click did.
+      const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+      const page = await ctx2.newPage()
+      page.on('pageerror', (e) => errors.push(e.message))
+      await page.goto(APP)
       await page.waitForSelector('.sheet canvas')
       await page.locator('[data-tool="press"]').click()
       await page.locator('.controls__section[data-tool="press"] [role=tab][data-tab="screen"]').click()
@@ -381,6 +391,7 @@ try {
       await page.waitForTimeout(600)
       const now = await page.locator(`${panel} .controls__value`).first().textContent()
       check(now === was && !(await undoEnabled(page)), `Press › Screen size at its default, a mouse double-click: ${was} -> ${now}, and no undo step`)
+      await ctx2.close()
     }
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()

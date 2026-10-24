@@ -203,3 +203,36 @@ describe('the Original sheet: the photo\'s own shape', () => {
     expect(clampPan(s.media!, sheetAspect(s), 1)).toEqual(s.media)
   })
 })
+
+describe('the undo history', () => {
+  const landscape = makeMedia({ id: 'm', width: 4000, height: 3000 })
+
+  it('a change that changes nothing is not an undo step', () => {
+    const l = makeLayer({ x: 0.5 })
+    let h = initHistory(doc([l]))
+    // The same value again (a second reset, a drag back to where it was).
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.5 } })
+    expect(h.past).toHaveLength(0)
+    // A photo at 100% on its own sheet cannot move: every drag clamps back.
+    h = historyReducer(h, { type: 'setMedia', media: landscape })
+    expect(h.past).toHaveLength(1)
+    const before = h.present
+    h = historyReducer(h, { type: 'patchMedia', patch: { x: 0.9, y: 0.1 }, coalesce: true })
+    expect(h.present).toBe(before)
+    expect(h.past).toHaveLength(1)
+    expect(h.bursting).toBe(false)
+    // So Undo takes back the photo, the last thing that changed.
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.media).toBeNull()
+  })
+
+  it('a real change still is one, and a drag still coalesces into one', () => {
+    const l = makeLayer({ x: 0.5 })
+    let h = initHistory(doc([l]))
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.6 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.6 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.7 }, coalesce: true })
+    expect(h.past).toHaveLength(1)
+    expect(h.present.layers[0].x).toBe(0.7)
+  })
+})

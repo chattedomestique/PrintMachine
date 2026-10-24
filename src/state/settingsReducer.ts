@@ -212,6 +212,20 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
   }
 }
 
+/** Equality of plain data, which the document is (it is stored as JSON):
+ *  objects, arrays, strings, numbers, booleans and null. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const ka = Object.keys(a)
+  const kb = Object.keys(b)
+  if (ka.length !== kb.length) return false
+  return ka.every(
+    (k) => Object.hasOwn(b, k) && sameData((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+  )
+}
+
 export function initHistory(settings: PrintSettings): HistoryState {
   return { past: [], present: settings, future: [], bursting: false }
 }
@@ -245,7 +259,11 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
 
     default: {
       const next = applySettings(state.present, action)
-      if (next === state.present) return state
+      // A change that changes nothing is not an undo step. A drag on a photo
+      // that cannot move (100% on its own sheet: every patch clamps back to
+      // where it is) or a second reset of a value already at its default
+      // used to push one, and Undo then seemed to do nothing.
+      if (next === state.present || sameData(next, state.present)) return state
 
       const coalesce = 'coalesce' in action && action.coalesce === true
 

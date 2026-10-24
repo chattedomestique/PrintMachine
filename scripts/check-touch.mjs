@@ -17,8 +17,8 @@
  *  3. A drag that starts on no plate moves the selected plate, as always.
  *  4. A tap just beside a small caption still picks it (the hit slop), and a
  *     tap inside one plate picks that plate, not a neighbour within the slop.
- *  5. With the Photo tool open, a touch on a plate moves nothing but the
- *     photo: the selection stays.
+ *  5. With the Photo tool open, a drag that starts on a plate neither picks
+ *     it nor moves it (the gestures are the photo's there).
  *  6. The gesture hint, after the first photo: it says what the sheet's
  *     gestures do in the open tool (the photo with Photo open, the type
  *     otherwise); a tap leaves it, and the first drag dismisses it for good.
@@ -181,7 +181,7 @@ try {
   await touch(cdp, at(print.x + 20 / box.width, print.y - 0.04))
   check((await selected(page, 'PRINT')) === 'PRINT', 'a tap on PRINT MACHINE picks PRINT MACHINE')
 
-  console.log('5. With the Photo tool open, the sheet moves the photo, not the plates')
+  console.log('5. With the Photo tool open, a drag on a plate neither picks nor moves it')
   await page.locator('[data-tool="photo"]').click()
   await touch(cdp, at(riso.x, riso.y), [at(riso.x + 0.1, riso.y)])
   await page.locator('[data-tool="type"]').click()

@@ -155,9 +155,10 @@ try {
   }
 
   if (opts.parity) {
-    // [FR-4] The preview has to stay a true picture of the print: every
-    // document through renderPrint and through renderPrintAsync (the export's
-    // entry point), overlay off, must give the same bytes.
+    // The preview and the export must give the same pixels, so the preview
+    // stays a true picture of the print: every document through renderPrint
+    // and through renderPrintAsync (the export's entry point), overlay off,
+    // must give the same bytes.
     const { page, errors } = await openPage()
     const docs = opts.docs ?? (await page.evaluate(() => window.H.docs))
     for (const doc of docs) {

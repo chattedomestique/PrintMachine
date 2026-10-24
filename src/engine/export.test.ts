@@ -452,7 +452,7 @@ describe('what Save says', () => {
     )
   })
 
-  it('the canvas ceiling, in numbers [O-1]', () => {
+  it('the canvas ceiling, in numbers: the one cap, as the photo is never down-rezzed at import', () => {
     expect(plan(withPhoto(5712, 4284, { aspect: 'original' }))).toEqual({
       size: '4729×3547',
       reason: 'capped at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is 5712×4284',

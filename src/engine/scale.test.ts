@@ -7,7 +7,7 @@
  * the SHEET, not a count of pixels, or the larger file is a different print:
  * finer paper grain, smaller dust, a grain cell rounded to another size.
  *
- * The test for each field is the one the resolution audit used: its
+ * The test for each field is a measured one: its
  * correlation length, in pixels, must grow in step with the height (within
  * 15%). Below the reference height a field stops at one pixel — a raster
  * cannot hold less, and that is the preview's lower fidelity, not a different

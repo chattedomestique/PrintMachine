@@ -18,7 +18,7 @@ const photo = (width: number, height: number, scale = 1): PlanPhoto => ({ width,
 const dims = (p: { width: number; height: number }) => `${p.width}x${p.height}`
 
 describe('a 12 MP photo exports at its own pixels', () => {
-  it('gives the audit table, row for row', () => {
+  it('gives each sheet the photo\'s own pixels, row for row', () => {
     expect(dims(planExport(SHEETS['4:5'], photo(4032, 3024)))).toBe('2419x3024')
     expect(dims(planExport(SHEETS['4:5'], photo(3024, 4032)))).toBe('3024x3780')
     expect(dims(planExport(SHEETS['2:3'], photo(3024, 4032)))).toBe('2688x4032')
@@ -119,7 +119,7 @@ describe('the floor and no photo', () => {
   })
 })
 
-describe('native follows the photo (the audit matrix)', () => {
+describe('native follows the photo (every photo, zoom and sheet)', () => {
   const photos = [photo(4032, 3024), photo(3024, 4032), photo(1000, 1000), photo(6000, 1200)]
   const zooms = [1, 1.5, 2.5, 4]
   const pans = [

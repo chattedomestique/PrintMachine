@@ -456,7 +456,8 @@ async function eachState(page, visit) {
           await over.locator(`input[type=radio][value="${mode}"]`).check({ force: true })
           await visit(`${tool}-${tab}-${mode}`)
           if (mode === 'second') {
-            // Keep this ink: no Switch point (O-4), the strip gives way to a row.
+            // Keep this ink has no Switch point (both halves would print the
+            // same ink), so the strip gives way to a row.
             await over.locator('[data-ink-button]').first().click()
             await page.locator('dialog[open] input[type=radio][value="keep"]').check({ force: true })
             await page.locator('dialog[open] .dialog__actions .btn').click()

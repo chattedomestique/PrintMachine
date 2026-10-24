@@ -1122,9 +1122,10 @@ same value modal, action sheets, toast and app bar. What differs, and why:
 - **No snapping, grid or guides; no eye-dropper; no presets; no "New photo"
   seed modes; no canvas view modes in More; no build stamp.** The grid
   informed but never acted (cut with the thirds guides); inks are Riso's
-  table, not a colour picked off the photo; presets and seeds are features
-  this app's verdict does not keep. More holds what Save makes, the offline
-  state and the lossless PNG.
+  table, not a colour picked off the photo; presets and seeds were never
+  this app's, and the restyle added no features (what the app keeps, and
+  why, is under "Removed on purpose"). More holds what Save makes, the
+  offline state and the lossless PNG.
 - **The style guide's `default` palette, not `sand`** (below, under the
   playbook's deviations).
 - **A native select for the sheet's shape** (five choices; Border Studio's

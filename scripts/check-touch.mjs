@@ -12,8 +12,8 @@
  *  2. A finger that goes down on PRINT MACHINE and drags moves PRINT MACHINE
  *     by the drag from its own place, in one touch, and RISO stays put; one
  *     Undo takes back exactly that drag. (The plate the gesture moves is the
- *     one it picked at the pointer-down, before React has re-rendered the
- *     selection: plan FR-10.)
+ *     one it picked at the pointer-down, seeded into the gesture there,
+ *     before React has re-rendered the selection.)
  *  3. A drag that starts on no plate moves the selected plate, as always.
  *  4. A tap just beside a small caption still picks it (the hit slop), and a
  *     tap inside one plate picks that plate, not a neighbour within the slop.

@@ -188,9 +188,10 @@ describe('step 2: bytes where they hold the value (tone exact; coverage and mask
   })
 
   it('a three-plate sheet with byte coverage is within 2 levels of the float one, mean under 0.05', () => {
-    // The audit's gate (s7 item 7): three overlapping plates of type-like
-    // blocks at the default ink density, screened with the dot's soft edge,
-    // over a photo and over paper, composited from floats and from bytes.
+    // The gate for keeping coverage in bytes: three overlapping plates of
+    // type-like blocks at the default ink density, screened with the dot's
+    // soft edge, over a photo and over paper, composited from floats and from
+    // bytes.
     const blocks = (k: number) => {
       const f = new Float32Array(w * h)
       for (let y = 0; y < h; y++) {

@@ -186,7 +186,7 @@ So:
 > smears the dots, which is the one thing this app exists to render, so the
 > size stands.
 
-From the resolution audit (none of these can be automated):
+Saving at full resolution (none of these can be automated):
 
 - [ ] 12 MP photo, default document, Save: completes without a tab reload; the
       saved file's pixel size equals what More said; Photos shows 2419×3024

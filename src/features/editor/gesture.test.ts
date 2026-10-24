@@ -42,7 +42,7 @@ describe('a touch on the sheet', () => {
     expect(h.past).toHaveLength(0)
   })
 
-  it('the first move after a tap-pick moves the TAPPED plate from its own origin, and leaves the selected one alone [FR-10]', () => {
+  it('the first move after a tap-pick moves the TAPPED plate from its own origin, and leaves the selected one alone (it is seeded into the gesture at the pointer-down)', () => {
     const { a, b, history } = twoPlates()
     // At the pointer-down that picks B the editor still has A selected; the
     // gesture is seeded from B, not from the selection.

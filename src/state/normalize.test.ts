@@ -366,8 +366,8 @@ describe('legacy documents', () => {
   it('no valid stored value is lost: every field that still exists keeps what was saved', () => {
     // Checked field by field against the raw fixture, for every field the
     // current schema has and the fixture holds a valid value for — except the
-    // ones a named conversion or the cover rule rewrites, which the verdict
-    // table below checks one by one.
+    // ones a named conversion or the cover rule rewrites, which the table of
+    // removed fields below checks one by one.
     const REWRITTEN: Record<string, readonly string[]> = {
       settings: [],
       // A dither's cell becomes the grain's screen size.
@@ -447,13 +447,15 @@ describe('legacy documents', () => {
   })
 })
 
-/* ── Verdict §4.1, one row per line ───────────────────────────────────── */
+/* ── Every removed field, one row per line ───────────────────────────── */
 
 /**
- * The verdict's persistence table, as tests: each row a stored shape and what
- * it becomes. Rows arrive with the commit that removes their field.
+ * What each field the app no longer has becomes in a saved print, as tests:
+ * each row a stored shape and what it becomes (README, "Removed on purpose"
+ * and "Saved prints keep opening"). Rows arrived with the commit that removed
+ * their field.
  */
-describe('verdict §4.1: what each removed field becomes', () => {
+describe('what each removed field becomes', () => {
   const max = () => normalizeSettings(copy(maximal))
   const rawMax = maximal as unknown as Doc
 
@@ -741,9 +743,9 @@ describe('verdict §4.1: what each removed field becomes', () => {
   })
 
   it('layer.opacity 0: plate opacity is cut, so a hidden plate prints at full strength', () => {
-    // Stated, not fixed: the verdict cut plate opacity (#17) and there is no
-    // other way to hide a plate, while dropping it would destroy work. The
-    // README's "Saved prints keep opening" names this exception.
+    // Stated, not fixed: plate opacity is cut and there is no other way to
+    // hide a plate, while dropping it would destroy work. The README's
+    // "Saved prints keep opening" names this exception.
     const d = copy(defaultDoc) as unknown as Doc
     ;(d.layers as Doc[])[1].opacity = 0
     const s = normalizeSettings(d)

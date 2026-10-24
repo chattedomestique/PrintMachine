@@ -237,4 +237,33 @@ describe('the undo history', () => {
     expect(h.past).toHaveLength(1)
     expect(h.present.layers[0].x).toBe(0.7)
   })
+
+  it('a double tap\'s reset joins its first tap\'s step even after the burst is over', () => {
+    // The second tap is handled late (behind a render), after the burst's
+    // idle timer has ended the first tap's burst; it still touched within the
+    // double-tap window, so the reset is part of that step.
+    const l = makeLayer({ size: 0.09 })
+    let h = initHistory(doc([l]))
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.082 }, coalesce: true })
+    h = historyReducer(h, { type: 'endBurst' })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, coalesce: true, join: true })
+    expect(h.past).toHaveLength(1)
+    expect(h.present.layers[0].size).toBe(0.04)
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.layers[0].size).toBe(0.09)
+    expect(h.past).toHaveLength(0)
+  })
+
+  it('a join is a step of its own when there is no step to join, or one was undone since', () => {
+    const l = makeLayer({ size: 0.09 })
+    let h = initHistory(doc([l]))
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, coalesce: true, join: true })
+    expect(h.past).toHaveLength(1)
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.05 } })
+    h = historyReducer(h, { type: 'undo' })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.06 }, coalesce: true, join: true })
+    expect(h.past).toHaveLength(2)
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.layers[0].size).toBe(0.04)
+  })
 })

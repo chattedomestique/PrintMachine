@@ -25,7 +25,10 @@
  *     move; the first drag that moves something dismisses it for good.
  *  7. A double tap on Type › Size's track (two touches 100 ms apart, where
  *     each alone would move the thumb) ends at the default, 40%, and one Undo
- *     goes back to where it was; a mouse's double-click the same.
+ *     goes back to where it was; a mouse's double-click the same. Then on a
+ *     phone's CPU (throttled 4x), on Size and on Press › Screen size: two
+ *     touches stamped 100 ms apart by their own timestamp, the second
+ *     handled late (as behind a slow preview render), still reset.
  *  8. A double tap on a plate that is not selected only picks it (Border
  *     Studio's tap-to-select; nothing moves, no undo step); a double tap on
  *     the selected plate centres it and zeroes its turn; a mouse's
@@ -281,6 +284,81 @@ try {
     await page.locator('.app__bar button[aria-label="Undo"]').click()
     const back2 = await readout()
     check(clicked === '40%' && back2 === was && !(await undoEnabled(page)), `a double-click: ${was} -> ${clicked}; one Undo: ${back2}`)
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
+
+  console.log('7b. The same on a phone\'s CPU: the two taps timed by when they touched, not when they were handled')
+  {
+    // The README's phone profile: the CPU throttled 4x. The first tap moves
+    // the thumb and the preview re-renders on the main thread; a second tap
+    // that lands meanwhile is handled after the render. So the two touches
+    // are stamped 100 ms apart (the touch event's own timestamp), and the
+    // second is sent only once the first tap's move is on screen and more
+    // than DOUBLE_TAP_MS have passed: handled late, as behind a phone's
+    // render, whatever this machine's speed. The slider must go by the
+    // touches' time.
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    const cdp = await ctx.newCDPSession(page)
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
+    const stampedTap = async (pt, t) => {
+      const points = [{ x: pt.x, y: pt.y, id: 1, radiusX: 4, radiusY: 4, force: 1 }]
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points, timestamp: t })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [], timestamp: t + 0.03 })
+    }
+    // Two taps at 80% of the track; returns what the readout said between
+    // them (the first tap alone moves the thumb there).
+    const doubleTapLate = async (panel, was) => {
+      const value = `${panel} .controls__value`
+      const track = await page.locator(`${panel} .slider__input`).boundingBox()
+      const spot = { x: track.x + 12 + 0.8 * (track.width - 24), y: track.y + track.height / 2 }
+      const t0 = Date.now() / 1000
+      await stampedTap(spot, t0)
+      await page.waitForFunction(([sel, was]) => document.querySelector(sel)?.textContent !== was, [value, was], { timeout: 5000 }).catch(() => undefined)
+      await page.waitForTimeout(400)
+      const between = await page.locator(value).first().textContent()
+      await stampedTap(spot, t0 + 0.1)
+      await page.waitForTimeout(600)
+      return between
+    }
+    // Type › Size from the headline's 90% (its default is 40%); Press ›
+    // Screen size from its default, 9.0 px.
+    for (const [tool, tab, label, field, want] of [
+      ['type', 'size', 'Type › Size', (doc) => doc.layers[0].size, '40%'],
+      ['press', 'screen', 'Press › Screen › Screen size', (doc) => doc.press.screenPitch, null],
+    ]) {
+      await page.locator(`[data-tool="${tool}"]`).click()
+      await page.locator(`.controls__section[data-tool="${tool}"] [role=tab][data-tab="${tab}"]`).click()
+      const panel = `.controls__panel[data-sub="${tab}"]`
+      await page.waitForSelector(panel)
+      const readout = () => page.locator(`${panel} .controls__value`).first().textContent()
+      const was = await readout()
+      const from = field(await stored(page))
+      const between = await doubleTapLate(panel, was)
+      const now = await readout()
+      const end = want ?? was
+      check(
+        between !== end && now === end,
+        `${label}, CPU 4x, two taps stamped 100 ms apart, the second handled late: ${was} -> ${between} -> ${now} (want ${end}; stored ${from} -> ${field(await stored(page))})`,
+      )
+      if (want) {
+        await page.locator('.app__bar button[aria-label="Undo"]').click()
+        // The stored document, once the debounced write has landed (slower
+        // on a throttled CPU).
+        await page
+          .waitForFunction(([k, from]) => JSON.parse(localStorage.getItem(k) ?? 'null')?.layers?.[0]?.size === from, [KEY, from], { timeout: 5000 })
+          .catch(() => undefined)
+        const back = await readout()
+        const kept = field(await stored(page))
+        check(back === was && kept === from && !(await undoEnabled(page)), `${label}: one Undo goes back to ${was} (${back}, stored ${kept}), and no step is left`)
+      }
+    }
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
   }

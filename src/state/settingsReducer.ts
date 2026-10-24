@@ -23,15 +23,21 @@ import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits
  * render — reading a ref during render is a real staleness bug.
  */
 
+/**
+ * `coalesce`: part of a burst (a drag, typing) that is one undo step. `join`:
+ * part of the undo step of the change just before it, even if that step's
+ * burst is over: a double tap's reset joins the move its first tap made, and
+ * the second tap can be handled long after the first (behind a render).
+ */
 export type SettingsAction =
-  | { type: 'patch'; patch: Partial<PrintSettings>; coalesce?: boolean }
-  | { type: 'patchLayer'; id: string; patch: Partial<TextLayer>; coalesce?: boolean }
+  | { type: 'patch'; patch: Partial<PrintSettings>; coalesce?: boolean; join?: boolean }
+  | { type: 'patchLayer'; id: string; patch: Partial<TextLayer>; coalesce?: boolean; join?: boolean }
   /** `id`: the new plate's, so the UI that adds it can select it. */
   | { type: 'addLayer'; id?: string }
   | { type: 'removeLayer'; id: string }
-  | { type: 'patchPress'; patch: Partial<PressProfile>; coalesce?: boolean }
+  | { type: 'patchPress'; patch: Partial<PressProfile>; coalesce?: boolean; join?: boolean }
   | { type: 'setMedia'; media: MediaLayer | null }
-  | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean }
+  | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean; join?: boolean }
   | { type: 'reset'; settings: PrintSettings }
 
 export type HistoryAction =
@@ -266,11 +272,15 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
       if (next === state.present || sameData(next, state.present)) return state
 
       const coalesce = 'coalesce' in action && action.coalesce === true
+      // Joining the step before: there must be one, and nothing undone since
+      // (after an Undo the step before is no longer the change it joins).
+      const join = 'join' in action && action.join === true && state.past.length > 0 && state.future.length === 0
 
       // Mid-burst: replace the present without growing the history, so the
-      // whole drag reads as a single step.
-      if (coalesce && state.bursting) {
-        return { ...state, present: next, future: [] }
+      // whole drag reads as a single step. A join does the same after the
+      // burst is over.
+      if ((coalesce && state.bursting) || join) {
+        return { ...state, present: next, future: [], bursting: state.bursting || coalesce }
       }
 
       const past = [...state.past, state.present]

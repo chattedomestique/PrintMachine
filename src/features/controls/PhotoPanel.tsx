@@ -45,7 +45,7 @@ export default function PhotoPanel({
   const veilHint = useId()
   const media = settings.media
 
-  const set = (p: Partial<MediaLayer>, how: ChangeHow) => dispatch({ type: 'patchMedia', patch: p, coalesce: !how.discrete })
+  const set = (p: Partial<MediaLayer>, how: ChangeHow) => dispatch({ type: 'patchMedia', patch: p, coalesce: !how.discrete, join: how.joins })
 
   const chooseButton = (
     <button type="button" className="btn" data-size="sm" disabled={photo.busy} onClick={photo.choose}>

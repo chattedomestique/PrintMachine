@@ -1013,7 +1013,11 @@ document's own defaults, never retyped (a test holds them equal). A tap on a
 range input moves its thumb to the finger, so each tap of a double tap would
 also do that: the second one's is ignored, so the reset stands, and the
 first one's joins the reset in one undo step, so one Undo takes the double tap
-back (`check:touch` does it with real touch input). A panel with
+back. The two taps are timed by when they touched (each event's own time), not
+by when the page got to them: on a phone the preview's render after the first
+tap can hold the second back for a second, and it still counts, and still
+joins the first tap's step (`check:touch` does it with real touch input, also
+on a CPU throttled 4x with the second tap handled late). A panel with
 several settings shows one at a time: tap its name, or swipe up from it, for
 the others (Border Studio 4860519). Size, Rotation and Position have two
 ranges: the slider spans where people work (10–100%, ±45°, the sheet) while a

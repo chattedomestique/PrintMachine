@@ -42,7 +42,7 @@ export default function InkPanel({
   if (!layer) return null
 
   const set = (p: Partial<TextLayer>, how: ChangeHow) =>
-    dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce: !how.discrete })
+    dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce: !how.discrete, join: how.joins })
   const patch = (p: Partial<TextLayer>) => dispatch({ type: 'patchLayer', id: layer.id, patch: p })
 
   const over = overPhotoOf(layer)

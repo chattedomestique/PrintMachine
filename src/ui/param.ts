@@ -26,8 +26,14 @@
 
 export interface ChangeHow {
   /** False for a drag (one coalesced undo step for the whole drag); true for
-   *  a nudge, a typed value and a double-tap reset (each its own step). */
+   *  a nudge, a typed value and a reset (each its own step). */
   discrete: boolean
+  /** A double tap's reset after a first tap that moved the thumb: it belongs
+   *  to that tap's undo step, even when that step's burst has ended. The two
+   *  taps are timed by when they touched, so the second can be handled long
+   *  after the first (behind a slow preview render) and after the burst's
+   *  idle timer has run. */
+  joins?: boolean
 }
 
 export interface Param {
@@ -154,7 +160,7 @@ export function committedValue(p: Pick<Param, 'fromDisplay' | 'min' | 'max' | 's
  * a reset are each a step of their own. Null when it changes nothing (an
  * unavailable setting, a value already there, a typo).
  */
-export type Change = { value: number; discrete: boolean } | null
+export type Change = { value: number; discrete: boolean; joins?: true } | null
 
 const change = (p: Pick<Param, 'value' | 'unavailable'>, value: number | null, discrete: boolean): Change =>
   p.unavailable !== undefined || value === null || value === p.value ? null : { value, discrete }
@@ -177,17 +183,21 @@ export const resetChange = (p: Param): Change => change(p, p.def, true)
  * the finger, so the first tap of the two has usually changed the value, as a
  * drag does (a coalesced step); the reset then joins that step, and one Undo
  * goes back past both (Border Studio's history, which coalesces by time,
- * gives the same). A first tap that moved nothing leaves the reset a step of
- * its own.
+ * gives the same). It joins it by name (`joins`), not by arriving in time: the
+ * second tap may be handled after the first tap's burst is over. A first tap
+ * that moved nothing leaves the reset a step of its own.
  */
-export const doubleTapReset = (p: Param, firstTapMoved: boolean): Change => change(p, p.def, !firstTapMoved)
+export const doubleTapReset = (p: Param, firstTapMoved: boolean): Change => {
+  const c = change(p, p.def, !firstTapMoved)
+  return c && firstTapMoved ? { ...c, joins: true } : c
+}
 
 /** A typed value, committed. */
 export const typedChange = (p: Param, typed: string): Change => change(p, committedValue(p, typed), true)
 
 /** Hand a change to the setting. */
 export function applyChange(p: Param, c: Change): void {
-  if (c) p.onChange(c.value, { discrete: c.discrete })
+  if (c) p.onChange(c.value, c.joins ? { discrete: c.discrete, joins: true } : { discrete: c.discrete })
 }
 
 /** Two taps on the track this close together reset it (Border Studio's

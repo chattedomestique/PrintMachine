@@ -40,7 +40,7 @@ export default function TypePanel({ sub, onSub }: { sub: SubId<'type'>; onSub: (
 
   /** A slider's change: a drag coalesces into one undo step. */
   const set = (p: Partial<TextLayer>, how: ChangeHow) =>
-    dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce: !how.discrete })
+    dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce: !how.discrete, join: how.joins })
   /** A tap's change: its own undo step. */
   const patch = (p: Partial<TextLayer>) => dispatch({ type: 'patchLayer', id: layer.id, patch: p })
 

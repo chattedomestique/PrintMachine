@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import {
   DOUBLE_TAP_MS,
+  applyChange,
   canNudge,
   committedValue,
   decimalsOf,
@@ -27,6 +28,7 @@ import {
   thumbValue,
   trackPosition,
   typedChange,
+  type ChangeHow,
   type Param,
 } from './param.ts'
 import { ParamStrip, Slider } from './Slider.tsx'
@@ -127,11 +129,26 @@ describe('two ranges: the slider spans one, the setting holds the other', () => 
 
   it('a double-tap reset joins the step its first tap opened (the thumb jumped to it), so one Undo undoes the double tap', () => {
     // The first tap moved the thumb (a drag's coalesced step): the reset joins it.
-    expect(doubleTapReset(size(0.082), true)).toEqual({ value: 0.04, discrete: false })
+    expect(doubleTapReset(size(0.082), true)).toEqual({ value: 0.04, discrete: false, joins: true })
     // It moved nothing (a tap on the thumb): the reset is a step of its own.
     expect(doubleTapReset(size(0.09), false)).toEqual({ value: 0.04, discrete: true })
     expect(doubleTapReset(size(0.04), true)).toBeNull()
     expect(doubleTapReset(size(0.05, { unavailable: 'Zoom in to move the photo' }), true)).toBeNull()
+  })
+
+  it('a double-tap reset says it joins its first tap\'s step, so it does even when that burst is over', () => {
+    // The two taps are timed by when they touched: the second can be handled
+    // long after the first, behind a render, once the burst's timer has run.
+    const calls: [number, ChangeHow][] = []
+    const p = size(0.082, { onChange: (v, how) => calls.push([v, how]) })
+    applyChange(p, doubleTapReset(p, true))
+    applyChange(p, doubleTapReset(p, false))
+    applyChange(p, dragChange(p, 0.05))
+    expect(calls).toEqual([
+      [0.04, { discrete: false, joins: true }],
+      [0.04, { discrete: true }],
+      [0.05, { discrete: false }],
+    ])
   })
 
   it('changes nothing when there is nothing to change, or the setting is unavailable', () => {

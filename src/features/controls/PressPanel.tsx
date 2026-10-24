@@ -53,7 +53,7 @@ export default function PressPanel({ sub, onSub }: { sub: SubId<'press'>; onSub:
   const { settings, dispatch } = useSettings()
   const rerollHint = useId()
   const press = settings.press
-  const set = (p: Partial<PressProfile>, how: ChangeHow) => dispatch({ type: 'patchPress', patch: p, coalesce: !how.discrete })
+  const set = (p: Partial<PressProfile>, how: ChangeHow) => dispatch({ type: 'patchPress', patch: p, coalesce: !how.discrete, join: how.joins })
 
   return (
     <DockPanel tool="press" label="Press" tabs={SUBS.press} sub={sub} onSub={onSub}>

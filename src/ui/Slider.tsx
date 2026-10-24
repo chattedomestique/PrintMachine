@@ -43,8 +43,13 @@ import {
  * they go aria-disabled (not removed) only at the ends of the setting's range.
  */
 export function Slider({ param }: { param: Param }) {
-  // The last tap on the track: when, and whether the native range then moved
-  // the thumb to it (it does, for a tap anywhere on the track).
+  // The last tap on the track: when the finger touched (the event's own
+  // timeStamp), and whether the native range then moved the thumb to it (it
+  // does, for a tap anywhere on the track). The touch's time, not the time
+  // the handler runs: the first tap moves the thumb, the preview re-renders
+  // on the main thread, and a second tap that lands during that render is
+  // handled after it. Timed by the handler, a phone's slow render ate the
+  // double tap (Size went 90% -> 82% under a 4x-throttled CPU).
   const lastTap = useRef({ at: 0, moved: false })
   // From a double tap's second pointer-down until that pointer is up, the
   // native range's own answer to the same touch (the thumb jumps to the
@@ -93,8 +98,8 @@ export function Slider({ param }: { param: Param }) {
             // A mouse's double-click; after a double tap it finds the default
             // already there and changes nothing.
             onDoubleClick={reset}
-            onPointerDown={() => {
-              const now = performance.now()
+            onPointerDown={(e) => {
+              const now = e.timeStamp
               if (!isDoubleTap(lastTap.current.at, now)) {
                 lastTap.current = { at: now, moved: false }
                 return

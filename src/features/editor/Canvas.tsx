@@ -126,6 +126,12 @@ export default function Canvas({
       // Clamped while dragging, so the photo stops at its edge on screen
       // rather than the stored value running ahead of what is drawn.
       const placed = clampPan({ ...mediaTarget, ...next }, aspect, 1)
+      // A photo that cannot move (100% on its own sheet) clamps straight
+      // back, give or take a float's last bit (0.5000000000000001): nothing
+      // moved, so nothing is written (no undo step that undoes nothing) and
+      // the gesture hint stays.
+      const same = (a: number, b: number) => Math.abs(a - b) < 1e-9
+      if (same(placed.x, mediaTarget.x) && same(placed.y, mediaTarget.y) && same(placed.scale, mediaTarget.scale)) return
       dispatch({
         type: 'patchMedia',
         patch: { x: placed.x, y: placed.y, scale: placed.scale },

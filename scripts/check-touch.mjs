@@ -21,7 +21,8 @@
  *     it nor moves it (the gestures are the photo's there).
  *  6. The gesture hint, after the first photo: it says what the sheet's
  *     gestures do in the open tool (the photo with Photo open, the type
- *     otherwise); a tap leaves it, and the first drag dismisses it for good.
+ *     otherwise); a tap leaves it, and so does a drag on a photo that cannot
+ *     move; the first drag that moves something dismisses it for good.
  *  7. A double tap on Type › Size's track (two touches 100 ms apart, where
  *     each alone would move the thumb) ends at the default, 40%, and one Undo
  *     goes back to where it was; a mouse's double-click the same.
@@ -213,6 +214,18 @@ try {
   await page.waitForSelector(HINT, { timeout: 30_000 })
   const photoHint = await page.locator(HINT).textContent()
   check(/zoom the photo/.test(photoHint), `with Photo open it is about the photo ("${photoHint}")`)
+  // The photo is at 100% on its own sheet: a drag on it moves nothing, so it
+  // teaches nothing either, and the hint stays.
+  const box1 = await settledBox(page)
+  const mid = { x: box1.x + box1.width / 2, y: box1.y + box1.height / 2 }
+  const still = JSON.stringify((await stored(page)).media)
+  await touch(cdp, mid, [{ x: mid.x + 40, y: mid.y }])
+  await page.waitForTimeout(300)
+  const after = JSON.stringify((await stored(page)).media)
+  check(
+    (await page.locator(HINT).count()) === 1 && after === still,
+    `a drag on a photo that cannot move writes nothing (not even a float's last bit) and leaves it`,
+  )
   await page.locator('[data-tool="type"]').click()
   const typeHint = await page.locator(HINT).textContent()
   check(/Tap type to pick it/.test(typeHint), `with Type open it is about the type ("${typeHint}")`)

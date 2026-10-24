@@ -288,8 +288,9 @@ tolerance taken over the height let a resample of every pixel through. A test
 plans real photo sizes on every sheet at every zoom from 100% to 400%, and the
 planner's random photos on random aspects, and checks that each native plan is
 drawn at the photo's own pixels, at a whole-pixel offset. A preview is 1:1
-only for a photo no larger than the preview, and snaps then too; a blit that
-is not 1:1 (a large photo's preview, a small photo enlarged to the reference
+when the photo lands on it at its own size (a photo no larger than the
+preview, or one zoomed to that point), and snaps then too; a blit that is not
+1:1 (a large photo's preview at 100%, a small photo enlarged to the reference
 height) is left alone.
 
 #### The photo always covers the sheet
@@ -623,10 +624,10 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   press outlasts it. A press that finished within a second of the tap would
   share at once, but at a photo's own resolution none does (a print with no
   photo, 2880×3600, takes over 4 s on a desktop): Save becomes **Save to
-  Photos (6.2 MB)**, a fresh tap that shares the file already made. A share that fails keeps the file and the
-  button: in a home-screen app it never falls through to a download, which on
-  iOS navigates to the image and takes the app with it. On a desktop with no
-  share sheet the file downloads.
+  Photos (6.2 MB)**, a fresh tap that shares the file already made. A share
+  that fails keeps the file and the button: in a home-screen app it never
+  falls through to a download, which on iOS navigates to the image and takes
+  the app with it. On a desktop with no share sheet the file downloads.
 - **The file.** JPEG at quality 0.95 (measured on the harness fixture: 1.20x
   to 1.37x the bytes of 0.92, for cleaner dot edges). Below quality 1.0
   browsers store JPEG colour at half resolution (4:2:0), the one loss a quality

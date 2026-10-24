@@ -42,9 +42,9 @@ export const PREVIEW_PHOTO_AREA = 4_194_304
  * Zooming in to crop is ordinary, and a copy fixed at 4 MP went soft under the
  * person's eye as they did it (a 12 MP 4:3 photo on 4:5 was stretched past
  * 1:1 from 177% and 2.26x at 400%) while the print kept every pixel. The
- * tiers are coarse on purpose: a zoom decodes the photo again only when it
- * crosses one, at most twice over the whole range, after it settles
- * (useMediaBitmap).
+ * tiers are coarse on purpose: the photo is decoded again only when the zoom
+ * rests on a tier whose copy is not the one held, so at most twice over the
+ * whole range, and once for a drag that crosses tiers (useMediaBitmap).
  *
  * Memory: the copy grows with the zoom squared, and the export shrinks with
  * it (fewer of the photo's pixels land on the sheet), so a zoomed save holds

@@ -342,10 +342,13 @@ canvases are made:
   canvas ceiling, or the whole photo if it is smaller), so the preview shows
   the photo at one copy pixel or more to each of its own pixels at any zoom: a
   fixed 4 MP copy of a 12 MP photo on 4:5 was stretched past 1:1 from 177% and
-  2.26x at 400%. The photo is decoded again only when the zoom crosses a tier
-  and rests for 300 ms, and the old copy is drawn until the new one lands
-  (measured in the built app: at 300% the preview of a noise photo holds 7.2x
-  the fine detail it did from the fixed copy). The largest copy is 67 MB, held
+  2.26x at 400%. The photo is decoded again only when the zoom (or the
+  sheet) has rested for 300 ms on a tier whose copy is not the one held:
+  every change restarts the wait, so a drag from 100% to 400% decodes once,
+  where it stops, and a zoom that leaves the held tier and comes back decodes
+  nothing. The old copy is drawn until the new one lands (measured in the
+  built app: at 300% the preview of a noise photo holds 7.2x the fine detail
+  it did from the fixed copy). The largest copy is 67 MB, held
   through a save, but a save from that far in is small: the print shrinks with
   the zoom squared, since fewer of the photo's pixels land on the sheet (a
   24 MP photo on its own sheet at 400% saves 2400x1800; at 100%, 4729x3547).

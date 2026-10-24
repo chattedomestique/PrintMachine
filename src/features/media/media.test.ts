@@ -17,7 +17,7 @@ import { coverRect } from '../../engine/media.ts'
 import { previewSize } from '../../engine/render.ts'
 import { mulberry32 } from '../../engine/rng.ts'
 import { ASPECTS } from '../../engine/types.ts'
-import { fromHeld, mediaState, type HeldMedia } from './useMediaBitmap.ts'
+import { copyKey, decodeWhen, fromHeld, mediaState, type HeldMedia } from './useMediaBitmap.ts'
 
 const NOW = Date.UTC(2026, 9, 23, 12)
 
@@ -179,6 +179,49 @@ describe("the preview's working copy follows the zoom", () => {
       }
       if (area > PREVIEW_PHOTO_AREA) expect(area).toBeLessThan(2 * needed)
     }
+  })
+})
+
+describe('the copy is decoded again only where the zoom rests, and never for the copy it holds', () => {
+  const job = (id: string | null, copy: string) => ({ id, copy })
+  // A 12 MP photo on 4:5: 100% wants the 4 MP copy, 200% the 8.4 MP one,
+  // 300% the whole photo.
+  const at = (z: number) => copyKey(4032, 3024, previewArea({ width: 4032, height: 3024, scale: z }, 4 / 5))
+
+  it('names a copy by its pixels, so two tiers that make the same copy are one', () => {
+    expect(at(1)).toBe('2364x1773')
+    expect(at(2)).toBe('3344x2508')
+    expect(at(3)).toBe('4032x3024')
+    expect(at(4)).toBe(at(3))
+    // A photo smaller than every tier is always itself.
+    expect(copyKey(1600, 1200, PREVIEW_PHOTO_AREA)).toBe(copyKey(1600, 1200, MAX_AREA))
+  })
+
+  it('a new photo, or the first one, at once', () => {
+    expect(decodeWhen(null, null, 'a', at(1))).toBe('now')
+    expect(decodeWhen(job('a', at(1)), null, 'b', at(1))).toBe('now')
+    // A decode of the old photo still in flight does not hold up the new one.
+    expect(decodeWhen(job('a', at(1)), job('a', at(3)), 'b', at(1))).toBe('now')
+    expect(decodeWhen(null, null, null, '')).toBe('now')
+    expect(decodeWhen(job(null, ''), null, null, '')).toBe('none')
+  })
+
+  it('the photo held at another copy: later, once the zoom has rested (every change restarts the wait)', () => {
+    expect(decodeWhen(job('a', at(1)), null, 'a', at(3))).toBe('later')
+    // Still moving after a decode started: the next rest decides again.
+    expect(decodeWhen(job('a', at(1)), job('a', at(2)), 'a', at(3))).toBe('later')
+  })
+
+  it('back at the copy it holds: nothing to decode, and a decode of another copy in flight is dropped', () => {
+    expect(decodeWhen(job('a', at(3)), null, 'a', at(4))).toBe('none')
+    expect(decodeWhen(job('a', at(3)), null, 'a', at(3))).toBe('none')
+    expect(decodeWhen(job('a', at(3)), job('a', at(1)), 'a', at(3))).toBe('drop')
+  })
+
+  it('a decode of the wanted copy on its way: nothing more, and a first decode is let land even at another copy', () => {
+    expect(decodeWhen(job('a', at(1)), job('a', at(3)), 'a', at(3))).toBe('none')
+    expect(decodeWhen(null, job('a', at(1)), 'a', at(3))).toBe('none')
+    expect(decodeWhen(job('z', at(1)), job('a', at(1)), 'a', at(3))).toBe('none')
   })
 })
 

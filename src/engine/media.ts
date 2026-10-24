@@ -170,13 +170,21 @@ export function isReducedCopy(media: { width: number; height: number; native?: b
  *    1:1, a + 0.5 under it; the worst is an Original sheet of about 1:1);
  *  - (floor(a) + 1) / a x (1 + 2/H), just over 2 at most, for a sheet wider
  *    than 1:1 whose WIDTH binds — a photo narrower than a landscape sheet,
- *    which only a fixed landscape sheet could make (there is none today).
+ *    which only a fixed landscape sheet could make (there is none).
  * A tolerance of 1.5 over the sheet's HEIGHT missed every tall sheet whose
  * width binds: a 2268x4032 photo on its own sheet at 113% was planned native
  * and resampled by 1.0005, losing a third of its finest detail. 2.5 holds
- * both bounds with room, and exportPlan.test.ts checks every native plan of
- * its sweeps (the app's sheets, and the planner's own random aspects) is drawn
- * at the photo's own pixels.
+ * both bounds with room.
+ *
+ * The tolerance is not the whole story on a fixed landscape sheet. At exactly
+ * 100% there, the native width can come out a pixel or two WIDER than the
+ * photo (the width steps by up to ceil(a) px a row), so the photo at its own
+ * size would not cover the sheet and the snap keeps the cover fit: a resample
+ * under a `native` label. So the claim is for the sheets the app makes (the
+ * fixed ones, none wider than 1:1, and Original, which binds on both sides),
+ * at every zoom, and for any aspect only above 100%; a fixed landscape sheet
+ * would need the planner to fit its width to the photo's. exportPlan.test.ts
+ * checks each of those sweeps, and pins the landscape case.
  *
  * Snapping a little early costs nothing visible: a snap only ever draws the
  * photo at its own size, still covering the sheet, and the crop moves by

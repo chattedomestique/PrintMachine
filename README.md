@@ -281,13 +281,18 @@ original's Laplacian energy unsnapped, 1.000 snapped. A zoomed photo snaps the
 same way at its own native height. "Holds the photo at its own pixels" means a
 scale within 2.5 px of 1:1 over the sheet's shorter side (`SNAP_PX`): the
 planner's native height can land up to a pixel and a half past 1:1 across the
-sheet's shorter side on the app's sheets (just over 2 on a landscape sheet
-narrower than its photo, which none is today), so on a tall sheet whose width
-binds (a 2268x4032 photo on its own sheet at 113% is drawn at 1.0005) a
-tolerance taken over the height let a resample of every pixel through. A test
-plans real photo sizes on every sheet at every zoom from 100% to 400%, and the
-planner's random photos on random aspects, and checks that each native plan is
-drawn at the photo's own pixels, at a whole-pixel offset. A preview is 1:1
+sheet's shorter side on the app's sheets, so on a tall sheet whose width binds
+(a 2268x4032 photo on its own sheet at 113% is drawn at 1.0005) a tolerance
+taken over the height let a resample of every pixel through. A test plans real
+and random photo sizes on every sheet the app makes, at exactly 100% and at
+every zoom to 400%, and the planner's random photos on any aspect zoomed past
+100%, and checks that each native plan is drawn at the photo's own pixels, at
+a whole-pixel offset. The claim stops there on purpose: on a fixed landscape
+sheet, which the app does not make, the native width at exactly 100% can be a
+pixel or two wider than the photo (3001x2251 on 3:2 plans 3002x2001), the
+photo at its own size would not cover it, and the blit stays a cover-fit
+resample; such a sheet would need the planner to fit its width to the photo's
+first, and a test pins the case. A preview is 1:1
 when the photo lands on it at its own size (a photo no larger than the
 preview, or one zoomed to that point), and snaps then too; a blit that is not
 1:1 (a large photo's preview at 100%, a small photo enlarged to the reference

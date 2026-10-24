@@ -239,9 +239,11 @@ describe('every native plan is drawn at the photo\'s own pixels (the snap covers
     expect(native).toBeGreaterThan(1000)
   })
 
-  it('on any sheet: the planner\'s own 2000 random photos, aspects (1:3 to 3:1) and zooms, at four pans', () => {
-    // Aspects the app does not make today (a landscape sheet narrower than its
-    // photo), so the snap holds for whatever sheet comes next.
+  it('zoomed past 100%, on any aspect: the planner\'s own 2000 random photos, aspects (1:3 to 3:1) and zooms above 100%, at four pans', () => {
+    // Aspects the app does not make (a landscape sheet narrower than its
+    // photo) at zooms over 100%, where the zoomed photo overhangs the sheet on
+    // both axes, so the snap has travel either way. At exactly 100% a fixed
+    // landscape sheet is NOT covered: see the next test.
     const rand = mulberry32(0x5eed)
     let native = 0
     for (let i = 0; i < 2000; i++) {
@@ -258,6 +260,34 @@ describe('every native plan is drawn at the photo\'s own pixels (the snap covers
       }
     }
     expect(native).toBeGreaterThan(400)
+  })
+
+  it('exactly 100% on every sheet the app makes: the four fixed sheets (none wider than 1:1) and Original', () => {
+    const rand = mulberry32(0x100)
+    let native = 0
+    for (let i = 0; i < 4000; i++) {
+      const mw = Math.round(600 + rand() * 11400)
+      const mh = Math.round(600 + rand() * 11400)
+      for (const key of KEYS) if (drawnNative(mw, mh, key, 1, rand(), rand())) native++
+    }
+    expect(native).toBeGreaterThan(5000)
+  })
+
+  it('is not claimed for a fixed landscape sheet at 100%, which the app does not make: its width can overshoot the photo', () => {
+    // Where a sheet wider than 1:1 binds on its WIDTH, the planner's widths step
+    // by up to ceil(a) px a row, so at 100% the smallest height that lands 1:1
+    // can make the sheet a pixel or two wider than the photo. Drawn at its own
+    // size the photo would not cover it, so snapRect rightly keeps the cover
+    // fit: a resample by about one part in 3000, under a `native` label. A
+    // fixed landscape sheet would need the planner to fit its width to the
+    // photo's first. This test pins the case so that adding one cannot miss it.
+    const p = photo(3001, 2251)
+    const plan = planExport(3 / 2, p)
+    expect(plan).toMatchObject({ width: 3002, height: 2001, limit: 'native' })
+    const r = groundRect({ id: 'p', ...p, x: 0.5, y: 0.5 }, plan.width, plan.height)
+    expect(r.dw).toBe(3002)
+    expect(r.dh).toBeCloseTo(2251.75, 2)
+    expect(Number.isInteger(r.dy)).toBe(false)
   })
 
   it('needs the short side: the 2268x4032 case lands outside a tolerance taken over the height', () => {

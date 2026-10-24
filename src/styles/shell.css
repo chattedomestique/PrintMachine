@@ -172,22 +172,34 @@
 
 /* ── The floating plane over the stage ──
    The cards that sit over the sheet, just above the dock: the gesture hint,
-   the save's status (its progress and Cancel, a file waiting for Share, an
-   error, a photo that could not be loaded) and the toast. Stacked in one
-   column, newest nearest the dock, so two never overlap. */
+   the toast and the save's status (its progress and Cancel, a file waiting
+   for Share, an error, a photo that could not be loaded). Stacked in one
+   column, so two never overlap, with the status card nearest the dock: it
+   holds the one action its state needs, and nothing above it can push that
+   out of reach.
+
+   The column is the room between the app bar and the dock, and never more:
+   at large text on a small phone the cards are taller than that room, and a
+   column that grew upward put the press's Cancel above the screen and the
+   ready card over Share. What does not fit gives way at the top, cut at the
+   bar's edge (the toast, the hint: neither is the only copy of anything);
+   the status card itself is never taller than the room (below). */
 .app__float {
   position: fixed;
-  inset-block-end: calc(var(--overlay-h) + var(--space-3));
+  inset-block: calc(var(--bar-h, 0px) + var(--space-2)) calc(var(--overlay-h) + var(--space-3));
   inset-inline: 0;
   z-index: 40;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-2);
   padding-inline: var(--gutter);
+  overflow: clip;
   pointer-events: none;
 }
 .app__float > * {
+  flex: none;
   pointer-events: auto;
   max-inline-size: min(100%, var(--container-sm));
 }
@@ -196,40 +208,58 @@
    card is an inline-size container, which has no intrinsic width, so in this
    shrink-to-fit column it collapsed to its 10rem floor and wrapped one line
    into five. Nothing in these cards queries the container. */
-.app__float > .card {
+.app__float .card {
   flex-direction: row;
   container-type: normal;
+  max-inline-size: 100%;
 }
 
 /* The status card: words and the one action they need, on one line where
-   they fit. */
+   they fit, the action under the words at the card's end where they do not
+   (11em of words beside it, at least). Never taller than the room between the
+   bar and the dock: past that its words scroll, and the action stays in view
+   at the card's foot. */
 .app__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--chrome-2) var(--space-3);
+  padding: var(--chrome-2) var(--chrome-2) var(--chrome-2) var(--chrome-4);
+  min-block-size: var(--chrome-hit);
+  max-block-size: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.app__status-body {
+  flex: 1 1 11em;
+  min-inline-size: 0;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--chrome-2) var(--chrome-2) var(--chrome-2) var(--chrome-4);
-  min-block-size: var(--chrome-hit);
+  /* A sentence, not a control's word: the tray's control size, not the
+     toast's 600 (at 320px a five-line bold card covered the sheet). */
+  font: var(--ed-t-ctl);
 }
 .app__status-text {
   flex: 1 1 auto;
   min-inline-size: 0;
   margin: 0;
-  /* A sentence, not a control's word: the tray's control size, not the
-     toast's 600 (at 320px a five-line bold card covered the sheet). */
-  font: var(--ed-t-ctl);
   line-height: var(--lh-snug);
   color: var(--ink);
 }
 .app__status[data-alert] .app__status-text { color: var(--bad-ink); }
-.app__status > .ic { --ic-size: 1.15em; flex: none; color: var(--bad-ink); }
-.app__status > .spinner { flex: none; }
-.app__status > .btn { flex: none; }
+.app__status-body > .ic { --ic-size: 1.15em; flex: none; color: var(--bad-ink); }
+.app__status-body > .spinner { flex: none; }
+.app__status > .btn {
+  flex: none;
+  margin-inline-start: auto;
+  position: sticky;
+  inset-block-end: 0;
+}
 /* A photo that could not be loaded: a sentence and a wide "Choose again".
    Side by side, at 320px the sentence was a five-line column beside the
-   button; the button goes under the words instead, at the card's end. */
-.app__status[data-action="choose"] { flex-wrap: wrap; row-gap: var(--chrome-2); }
-.app__status[data-action="choose"] > .app__status-text { flex: 1 1 calc(100% - 3rem); }
-.app__status[data-action="choose"] > .btn { margin-inline-start: auto; }
+   button; the button always goes under the words, at the card's end. */
+.app__status[data-action="choose"] > .app__status-body { flex-basis: calc(100% - 3rem); }
 /* "Loading the photo" waits 300ms before it shows, so a decode that lands at
    once never flashes a card. */
 .app__status[data-delay] { animation: status-in var(--dur-enter) var(--ease-out) 300ms both; }
@@ -237,7 +267,12 @@
   from { opacity: 0; translate: 0 calc(var(--space-2) * var(--move, 1)); }
 }
 
-/* ── Status toast (the role=status live region) ── */
+/* ── Status toast, in the role=status live region ──
+   The region (.app__said) is always there; the toast is in it from the
+   moment something is said until its fade-out is over. Empty, the region is
+   out of the column, so it takes no room and no gap. */
+.app__float > .app__said { pointer-events: none; }
+.app__said:empty { position: absolute; }
 .app__toast {
   pointer-events: none;
   inline-size: max-content;
@@ -248,11 +283,15 @@
               translate var(--dur-enter) var(--ease-out),
               visibility var(--dur-hover);
 }
-.app__float > .app__toast { pointer-events: none; }
 .app__toast--show {
   opacity: 1;
   visibility: visible;
   translate: 0 0;
+  /* It arrives already shown (it is new each time), so it rises in. */
+  animation: toast-in var(--dur-enter) var(--ease-out);
+}
+@keyframes toast-in {
+  from { opacity: 0; translate: 0 calc(var(--space-2) * var(--move, 1)); }
 }
 .app__toast-body {
   display: flex;

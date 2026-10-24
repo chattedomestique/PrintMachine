@@ -47,7 +47,11 @@
  * steps, at 100% and 200% text: SG.fit's layout (full, then compact, then
  * tight) never gets richer as the bar gets narrower, tight only when the
  * title needs its second line, the bar's actions stay one row, Save's word
- * (when shown) is one line, and nothing in the bar reaches past it.
+ * (when shown) is one line, and nothing in the bar reaches past it. Then the
+ * save states on a small phone (320x640 and 375x667) at 200% text, where the
+ * cards over the stage are taller than the room they have (checkSaveStates):
+ * Cancel, Share, the card's × and Choose again each answer a tap, and the
+ * cards stay between the bar and the dock.
  *
  * The DOM contract it reads (src/features/shell/AppShell.tsx and the panels):
  * tool buttons `[data-tool]` with `aria-pressed`, the open panel
@@ -61,7 +65,8 @@
  * photo, ready to Share, the photo that could not be loaded, the smaller-copy
  * question, the save that did not finish); at 390 px with 200% text, every
  * state and dialog; at 390 px in the style guide's wire palette, light and
- * dark, the dock closed and each tool (the guide's squint test).
+ * dark, the dock closed and each tool (the guide's squint test); and the save
+ * states at 200% text as they are checked.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -108,6 +113,12 @@ const SHOT_WIDTHS = [
   [320, 640],
   [390, 844],
 ]
+
+/** The small phones the save states are checked on at 200% text. */
+const SAVE_VIEWPORTS = [
+  [320, 640],
+  [375, 667],
+].filter(([w]) => ONLY_WIDTH === null || w === ONLY_WIDTH)
 
 const failures = []
 const check = (ok, what) => {
@@ -534,7 +545,12 @@ try {
     await ctx.close()
   }
 
-  // ── 4. The review screenshots ──
+  // ── 4. The save states on a small phone at 200% text ──
+  for (const [vw, vh] of SAVE_VIEWPORTS) {
+    for (const tool of [null, 'photo']) await checkSaveStates(vw, vh, tool)
+  }
+
+  // ── 5. The review screenshots ──
   if (SHOTS) {
     for (const [vw, vh] of SHOT_WIDTHS) {
       for (const scheme of ['light', 'dark']) {
@@ -666,6 +682,109 @@ async function shootSaveStates(vw, vh, scheme) {
     await shoot(page, 'missing-photo')
     await ctx.close()
   }
+}
+
+/**
+ * Where the save's cards are, and whether their actions answer a tap: the
+ * floating column lies between the app bar and the dock, and the control
+ * `sel` is on screen and is what a tap at its centre lands on.
+ */
+function probeSaveCard(sel) {
+  const box = (s) => document.querySelector(s)?.getBoundingClientRect()
+  const bar = box('.app__bar')
+  const dock = box('.app__overlay')
+  const float = box('.app__float')
+  const el = document.querySelector(sel)
+  let action = 'missing'
+  if (el) {
+    const b = el.getBoundingClientRect()
+    const x = b.left + b.width / 2
+    const y = b.top + b.height / 2
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) action = `off the screen at ${Math.round(x)},${Math.round(y)}`
+    else {
+      const t = document.elementFromPoint(x, y)
+      action = t === el || el.contains(t) ? 'ok' : `covered by ${t ? t.tagName.toLowerCase() + '.' + String(t.className).split(' ').join('.') : 'nothing'}`
+    }
+  }
+  return {
+    between: float.top >= bar.bottom - 0.5 && float.bottom <= dock.top + 0.5,
+    column: `${Math.round(float.top)}..${Math.round(float.bottom)} (bar ends ${Math.round(bar.bottom)}, dock starts ${Math.round(dock.top)})`,
+    action,
+    toast: document.querySelector('.app__toast--show')?.textContent ?? null,
+    text: document.querySelector('.app__status-text')?.textContent ?? null,
+  }
+}
+
+/**
+ * The save states at 200% text on a small phone, where the cards are taller
+ * than the room between the bar and the dock: a 5712×4284 photo on its own
+ * sheet (the longest reason the planner gives: "capped at 16.7 MP, ...;
+ * photo is 5712×4284", in the toast as the press starts), its encoder slowed
+ * to 3 s as a phone's is, with the dock closed and with the Photo tool open
+ * (where it is right after a photo is chosen). Pressing, with that toast
+ * shown: Cancel answers a tap. Ready: Share in the bar answers a tap, and so
+ * does the card's ×. The stored photo gone: Choose again answers a tap. In
+ * each, the cards stay between the bar and the dock.
+ */
+async function checkSaveStates(vw, vh, tool) {
+  const where = `${vw}x${vh} at 200% text, ${tool ? `the ${tool} tool open` : 'the dock closed'}`
+  const slowEncoder = `
+    const real = HTMLCanvasElement.prototype.toBlob
+    HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) { return real.call(this, (b) => setTimeout(() => cb(b), 3000), ...rest) }
+    navigator.canShare = () => true
+    navigator.share = async () => { window.__shared = (window.__shared ?? 0) + 1 }
+  `
+  const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [5712, 4284], init: slowEncoder })
+  const large = () => page.addStyleTag({ content: 'html { font-size: 200% }' })
+  const shoot = async (name) => {
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, shotName(vw, 'light', '200pct', tool ?? 'closed', 'save', name)) })
+  }
+  const state = async (name, sel, extra = () => true) => {
+    await settle(page)
+    const p = await page.evaluate(probeSaveCard, sel)
+    check(p.between, `${where}, ${name}: the cards reach past the bar or the dock: ${p.column}`)
+    check(p.action === 'ok', `${where}, ${name}: ${sel} does not answer a tap: ${p.action}`)
+    check(extra(p), `${where}, ${name}: ${JSON.stringify(p)}`)
+    await shoot(name)
+    return p
+  }
+  await large()
+  if (tool) await openTool(page, tool)
+  else await closeTools(page)
+  await page.locator('.app__save').click()
+  await page.waitForFunction(() => document.querySelector('.app__status-text')?.textContent?.startsWith('Pressing'), null, { timeout: 60_000 })
+  // The press's first moments, with the save's toast up.
+  const pressing = await state('pressing', '.app__status .btn', (p) => p.toast?.includes('capped at 16.7 MP') === true)
+  await page.waitForFunction(() => document.querySelector('.app__save')?.textContent === 'Share', null, { timeout: 180_000 })
+  await state('ready', '.app__save')
+  await state('ready', '.app__status .btn')
+  const share = await page.locator('.app__save').boundingBox()
+  await page.mouse.click(share.x + share.width / 2, share.y + share.height / 2)
+  await page.waitForFunction(() => (window.__shared ?? 0) > 0, null, { timeout: 5_000 }).catch(() => undefined)
+  check((await page.evaluate(() => window.__shared ?? 0)) === 1, `${where}: a tap on Share did not share`)
+
+  // The stored photo gone: the card says so, with Choose again.
+  await page.evaluate(
+    () =>
+      new Promise((res) => {
+        const id = JSON.parse(localStorage.getItem('printmachine:settings:v1')).media.id
+        const r = indexedDB.open('printmachine')
+        r.onsuccess = () => {
+          const t = r.result.transaction('media', 'readwrite')
+          t.objectStore('media').delete(id)
+          t.oncomplete = res
+        }
+      }),
+  )
+  await page.reload()
+  await page.waitForSelector('.sheet canvas')
+  await large()
+  if (tool) await openTool(page, tool)
+  await page.waitForFunction(() => document.querySelector('.app__status[data-action="choose"]'), null, { timeout: 30_000 })
+  await state('missing-photo', '.app__status .btn')
+  check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
+  console.log(`${where}: pressing (${pressing.text}, with the toast), ready and the missing photo: every action answers, the cards stay between bar and dock`)
+  await ctx.close()
 }
 
 if (failures.length) {

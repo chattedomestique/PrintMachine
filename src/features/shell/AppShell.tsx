@@ -26,6 +26,9 @@ import {
 
 /** How long a toast stays (Border Studio's). */
 const TOAST_MS = 2400
+/** How long its fade-out is given before it is taken away: longer than the
+ *  style guide's longest (opacity over --dur-hover, 200ms). */
+const TOAST_FADE_MS = 400
 
 /** A toast's symbol, by what it says. */
 const TOAST_ICON: Record<Announcement, string> = { done: 'check', info: 'info', error: 'circle-alert' }
@@ -55,35 +58,47 @@ export default function AppShell() {
   const [subs, setSubs] = useState<Subs>(FIRST_SUBS)
   const [moreOpen, setMoreOpen] = useState(false)
   // The toast's words stay while it fades out (an emptied card would fade as
-  // a squashed frame); `shown` is what comes and goes.
+  // a squashed frame); `shown` is what comes and goes. Once the fade is over
+  // the toast is gone (null), so it takes no room above the status card.
   const [toast, setToast] = useState<{ text: string; kind: Announcement; shown: boolean } | null>(null)
   const [hintDismissed, setHintDismissed] = useState(() => loadPrefs().hintDismissed)
 
   const toastTimer = useRef<number | undefined>(undefined)
   const appRef = useRef<HTMLDivElement>(null)
+  const barRef = useRef<HTMLElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
 
   /**
    * The dock's live height, published as `--overlay-h`: the sheet reserves
-   * exactly the room the dock takes, so it is as large as it can be.
+   * exactly the room the dock takes, so it is as large as it can be. And the
+   * app bar's, as `--bar-h`: the cards over the stage stay between the two.
    *
    * The BORDER box: the dock has safe-area padding at the bottom, and
    * contentRect leaves it out (on a phone with a home indicator that put the
-   * bottom of the sheet under the dock). Written on the app AND on :root,
-   * because the sheets and dialogs portalled to <body> live outside .app.
+   * bottom of the sheet under the dock); the bar has it at the top. The dock's
+   * is written on the app AND on :root, because the sheets and dialogs
+   * portalled to <body> live outside .app.
    */
   useEffect(() => {
     const el = overlayRef.current
+    const bar = barRef.current
     const root = appRef.current
-    if (!el || !root) return
+    if (!el || !bar || !root) return
     const ro = new ResizeObserver((entries) => {
-      const box = entries[0].borderBoxSize?.[0]
-      const h = `${Math.round(box ? box.blockSize : el.getBoundingClientRect().height)}px`
-      root.style.setProperty('--overlay-h', h)
-      document.documentElement.style.setProperty('--overlay-h', h)
+      for (const entry of entries) {
+        const box = entry.borderBoxSize?.[0]
+        const h = `${Math.round(box ? box.blockSize : entry.target.getBoundingClientRect().height)}px`
+        if (entry.target === bar) {
+          root.style.setProperty('--bar-h', h)
+          continue
+        }
+        root.style.setProperty('--overlay-h', h)
+        document.documentElement.style.setProperty('--overlay-h', h)
+      }
     })
     ro.observe(el)
+    ro.observe(bar)
     return () => ro.disconnect()
   }, [])
 
@@ -98,7 +113,10 @@ export default function AppShell() {
     if (!message) return
     window.clearTimeout(toastTimer.current)
     setToast({ text: message, kind, shown: true })
-    toastTimer.current = window.setTimeout(() => setToast((t) => (t ? { ...t, shown: false } : t)), TOAST_MS)
+    toastTimer.current = window.setTimeout(() => {
+      setToast((t) => (t ? { ...t, shown: false } : t))
+      toastTimer.current = window.setTimeout(() => setToast(null), TOAST_FADE_MS)
+    }, TOAST_MS)
   }, [])
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
@@ -222,7 +240,7 @@ export default function AppShell() {
     <div className="app" ref={appRef}>
       {/* While the print is pressed, everything but its status card (and its
           Cancel) is inert: the document cannot change under the press. */}
-      <header className="appbar app__bar" inert={pressing || undefined}>
+      <header className="appbar app__bar" ref={barRef} inert={pressing || undefined}>
         <h1 className="appbar__title">Print Machine</h1>
         <div className="appbar__end">
           <button className="btn ed-bare" type="button" data-shape="circle" data-size="sm" onClick={undo} disabled={!canUndo} aria-label="Undo">
@@ -341,7 +359,10 @@ export default function AppShell() {
         </div>
       </div>
 
-      {/* The floating plane over the stage, just above the dock. */}
+      {/* The floating plane over the stage, between the bar and the dock. The
+          status card is nearest the dock: it carries the one action its state
+          needs (Cancel, ×, Choose again), so nothing above it can push it out
+          of reach; what does not fit gives way at the top, under the bar. */}
       <div className="app__float">
         {showHint && (
           <div className="card app__hint">
@@ -358,6 +379,19 @@ export default function AppShell() {
             </button>
           </div>
         )}
+        {/* The one live region for state changes ("Saved 2419×3024"). Always
+            in the DOM, so what is written into it is announced; empty (no
+            toast, or one whose fade is over) it takes no room. */}
+        <div className="app__said" role="status" aria-live="polite">
+          {toast && (
+            <div className={`card app__toast${toast.shown ? ' app__toast--show' : ''}`}>
+              <span className="app__toast-body num" aria-hidden={!toast.shown || undefined}>
+                <Icon name={TOAST_ICON[toast.kind]} />
+                {toast.text}
+              </span>
+            </div>
+          )}
+        </div>
         <StatusCard
           status={status}
           cancelRef={cancelRef}
@@ -366,16 +400,6 @@ export default function AppShell() {
           onDismiss={save.dismiss}
           onChoose={photo.choose}
         />
-        {/* The one live region for state changes ("Saved 2419×3024"). Always
-            in the DOM, so what is written into it is announced. */}
-        <div className={`card app__toast${toast?.shown ? ' app__toast--show' : ''}`} role="status" aria-live="polite">
-          {toast && (
-            <span className="app__toast-body num" aria-hidden={!toast.shown || undefined}>
-              <Icon name={TOAST_ICON[toast.kind]} />
-              {toast.text}
-            </span>
-          )}
-        </div>
       </div>
 
       {/* Offline readiness as a DOM fact (scripts/verify-offline.mjs waits on

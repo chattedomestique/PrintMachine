@@ -146,6 +146,11 @@ So:
       shows no card at all)
 - [ ] At 320 px wide (an iPhone SE) and at the largest text size, the app bar
       stays one row: Save becomes an icon rather than wrapping
+- [ ] Same phone, largest text size, a 24 MP photo on its own Original sheet
+      (the longest reason: "capped at 16.7 MP …"), Save: while it presses, the
+      card's Cancel is on screen and stops the press; when Save reads Share,
+      no card covers it and one tap on it opens the share sheet. Again with
+      the Photo tool open
 - [ ] A confirmation appears after saving, with the pixel size
 - [ ] Cancel the share sheet → no error toast
 - [ ] Swipe the app away (or let iOS evict it) while it reads "Pressing …" →

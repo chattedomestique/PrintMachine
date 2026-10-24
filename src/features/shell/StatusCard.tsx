@@ -34,15 +34,20 @@ export default function StatusCard({
       data-action={status.action ?? undefined}
       data-delay={status.delay ? '' : undefined}
     >
-      {status.busy && (
-        <span className="spinner" data-size="sm" aria-hidden="true">
-          <span className="spinner__ring" />
-        </span>
-      )}
-      {status.alert && <Icon name="circle-alert" />}
-      <p className="app__status-text num" role={status.alert ? 'alert' : 'status'}>
-        {status.text}
-      </p>
+      {/* The words and their symbol, one piece: when the action does not fit
+          beside them (a narrow screen, large text) it goes under them, at
+          the card's end, rather than squeezing them into a column. */}
+      <div className="app__status-body">
+        {status.busy && (
+          <span className="spinner" data-size="sm" aria-hidden="true">
+            <span className="spinner__ring" />
+          </span>
+        )}
+        {status.alert && <Icon name="circle-alert" />}
+        <p className="app__status-text num" role={status.alert ? 'alert' : 'status'}>
+          {status.text}
+        </p>
+      </div>
       {status.action === 'cancel' && (
         // The rest of the page is inert while the print is pressed, so focus
         // comes here, to the one thing that answers (AppShell.tsx moves it).

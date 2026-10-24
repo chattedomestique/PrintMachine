@@ -921,7 +921,12 @@ its `--ed-*` names): the stage, where the sheet sits; the tray, the dock one
 step up, whose controls have no frames and do not lift; and the floating plane,
 where whatever opens on top gets its frame back: the sheets and dialogs over a
 scrim, the toast, the save's status card and the gesture hint just above the
-dock. That port reads a few of the style guide's button-private properties,
+dock. Those cards stack between the app bar and the dock and never reach past
+either: the status card is nearest the dock, because it holds the one action
+its state needs (Cancel, ×, Choose again), and on a small phone at large text
+whatever does not fit gives way at the top, under the bar; the status card's
+own words scroll before its action leaves the screen. A toast takes room only
+while it is on screen. That port reads a few of the style guide's button-private properties,
 which is why the vendored commit is pinned and why a sync must be followed by
 `npm run verify:geometry`.
 
@@ -979,6 +984,12 @@ for it; this one is a file, and it checks more:
   one row of actions, Save's word on one line, nothing past the bar, and the
   layout steps full → compact → tight as it narrows (tight only when the
   title needs a second line).
+- **The save states at 200% text** on a 320×640 and a 375×667 phone, with the
+  dock closed and with the Photo tool open: a 5712×4284 photo on its own sheet
+  (so the toast carries the longest reason the planner gives), pressing with
+  that toast up, ready, and the photo that could not be loaded. Cancel, Share,
+  the card's × and Choose again each answer a tap at their centre, and the
+  cards stay between the bar and the dock.
 
 `--shots <dir>` writes the review set: every state, dialog and save state at
 320 and 390 px in both themes, 200% text at 390, and the wire palette (the

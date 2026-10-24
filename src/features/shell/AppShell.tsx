@@ -145,13 +145,32 @@ export default function AppShell() {
   // While the print is pressed focus is on the card's Cancel (the rest is
   // inert); when the press ends the card goes, and focus comes back to Save
   // rather than being dropped on the page.
+  //
+  // Cancel is focused from here, not by autoFocus: a press started from a
+  // dialog (More's PNG, a save question's answer) mounts the card while that
+  // dialog is still open, when everything outside it, the card included, is
+  // inert and cannot take focus. So once more after the dialog has closed
+  // (two frames: its own focus restore runs in the first).
   const saveRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const wasPressing = useRef(false)
   useEffect(() => {
+    let frame = 0
+    if (pressing && !wasPressing.current) {
+      const focusCancel = () => {
+        const c = cancelRef.current
+        if (c && document.activeElement !== c) c.focus()
+      }
+      focusCancel()
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(focusCancel)
+      })
+    }
     if (wasPressing.current && !pressing && (!document.activeElement || document.activeElement === document.body)) {
       saveRef.current?.focus()
     }
     wasPressing.current = pressing
+    return () => cancelAnimationFrame(frame)
   }, [pressing])
 
   // Keyboard undo/redo (Ctrl or Cmd+Z, with Shift to redo). A window
@@ -334,6 +353,7 @@ export default function AppShell() {
         )}
         <StatusCard
           status={status}
+          cancelRef={cancelRef}
           onCancel={save.cancel}
           onDiscard={save.dismiss}
           onDismiss={save.dismiss}

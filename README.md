@@ -910,7 +910,7 @@ step up, whose controls have no frames and do not lift; and the floating plane,
 where whatever opens on top (sheets, dialogs, the toast, the save's status
 card, the gesture hint) gets its frame back over a scrim. That port reads a few
 of the style guide's button-private properties, which is why the vendored
-commit is pinned and the geometry gate runs after every sync.
+commit is pinned and why a sync must be followed by `npm run verify:geometry`.
 
 ### The dock
 

@@ -6,6 +6,11 @@ import { useEffect, useRef, type RefObject } from 'react'
  * and closes on Esc — so none of that is faked here. A tap on the backdrop
  * closes it too (a tap outside the card lands on the <dialog> element itself).
  *
+ * On opening, focus goes to the element marked `data-autofocus` (when it can
+ * take it), else where the browser puts it: the first focusable element.
+ * React's autoFocus cannot do this: it focuses at mount, while the dialog is
+ * still closed and its contents cannot take focus.
+ *
  * Focus goes back to whatever opened the dialog, however it ends — closed, or
  * unmounted. The browser only does that for a dialog that is closed, and most
  * of these unmount, so the hook does it. The opener is recorded BEFORE
@@ -25,6 +30,7 @@ export function useModalDialog(open: boolean, onClose: () => void): RefObject<HT
     if (open && !d.open) {
       openerRef.current = document.activeElement
       d.showModal()
+      d.querySelector<HTMLElement>('[data-autofocus]:not(:disabled)')?.focus()
     }
     if (!open && d.open) d.close()
   }, [open])

@@ -14,13 +14,14 @@
  *     and gone after.
  *  2. Canvases that read back blank above 5 MP (what an iOS canvas over its
  *     limit does): Save asks, in numbers, for a smaller copy before pressing
- *     anything, and Save smaller saves a file that size. Blank above 0.3 MP:
- *     it says this device cannot save the print.
+ *     anything (focus on Save smaller), and Save smaller saves a file that
+ *     size. Blank above 0.3 MP: it says this device cannot save the print.
  *  3. The tab closed mid-press: the next launch says the last save did not
- *     finish, with Try again and a smaller copy; Escape dismisses it, the
- *     launch after says nothing. Killed again, and the photo's preview
- *     decode held back: the question waits for the photo (its choices
- *     disabled, "Loading the photo…"), then the smaller copy saves.
+ *     finish, with Try again (focused) and a smaller copy; Escape dismisses
+ *     it, the launch after says nothing. Killed again, and the photo's
+ *     preview decode held back: the question waits for the photo (its
+ *     choices aria-disabled, focus still on Try again, a tap on it starting
+ *     nothing, "Loading the photo…"), then the smaller copy saves.
  *  4. The stored photo deleted: with every tool closed, the status card says
  *     so (an alert, with Choose again) and so does Save's name; the Photo
  *     tool's File tab says so; Save cannot be tapped, and no file appears.
@@ -30,6 +31,9 @@
  *  6. Ctrl+Z while the print is pressed: the document does not change (the
  *     page is inert, and so is keyboard undo), the file is the print on
  *     screen, and Ctrl+Z works again once the press is over.
+ *  7. Focus while the print is pressed: on the card's Cancel (the one thing
+ *     that answers), also for a press started from the More sheet's PNG,
+ *     whose dialog is still open as the card appears; on Save after.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -170,6 +174,8 @@ const question = (page) =>
       open: !!d?.open,
       text: d?.querySelector('.card__text')?.textContent ?? null,
       buttons: [...(d?.querySelectorAll('.dialog__actions button') ?? [])].map((b) => b.textContent),
+      // Which of them has focus: the save the question offers first.
+      focus: d?.contains(document.activeElement) ? document.activeElement.textContent : null,
     }
   }, QUESTION)
 const waitForQuestion = (page) => page.waitForFunction((Q) => document.querySelector(Q)?.open, QUESTION, { timeout: 60_000 })
@@ -234,7 +240,7 @@ try {
       q.text === "This device couldn't press 2419×3024 (a canvas that size came back blank). Save a smaller 1814×2268 copy instead?",
       `asked: "${q.text}"`,
     )
-    check(q.buttons.join('|') === 'Cancel|Save smaller', `choices: ${q.buttons.join(', ')}`)
+    check(q.buttons.join('|') === 'Cancel|Save smaller' && q.focus === 'Save smaller', `choices: ${q.buttons.join(', ')}; focus on "${q.focus}"`)
     check(!pressed && files.length === 0, 'nothing pressed, no file, before the answer')
     const [download] = await Promise.all([page.waitForEvent('download', { timeout: 120_000 }), page.getByRole('button', { name: 'Save smaller' }).click()])
     const file = await saved(download)
@@ -270,7 +276,10 @@ try {
     await waitForQuestion(next)
     const q = await question(next)
     check(q.text === 'The last save, 2419×3024, did not finish.', `the next launch: "${q.text}"`)
-    check(q.buttons.join('|') === 'Cancel|Try again|Save smaller (1814×2268)', `choices: ${q.buttons.join(', ')}`)
+    check(
+      q.buttons.join('|') === 'Cancel|Try again|Save smaller (1814×2268)' && q.focus === 'Try again',
+      `choices: ${q.buttons.join(', ')}; focus on "${q.focus}"`,
+    )
     check((await next.evaluate((F) => localStorage.getItem(F), FLAG)) === null, 'reading the mark cleared it')
     await next.keyboard.press('Escape')
     await next.waitForTimeout(200)
@@ -296,17 +305,26 @@ try {
     // Asked at launch, before the photo is back: its saves wait for it, and
     // say so (E21).
     const early = await fourth.evaluate((Q) => ({
-      disabled: [...document.querySelectorAll(`${Q} button`)].filter((b) => b.disabled).map((b) => b.textContent),
+      disabled: [...document.querySelectorAll(`${Q} button`)].filter((b) => b.getAttribute('aria-disabled') === 'true').map((b) => b.textContent),
       note: document.querySelector(`${Q} .savequestion__wait`)?.textContent ?? null,
     }), QUESTION)
     check(
       early.disabled.join('|') === 'Try again|Save smaller (1814×2268)' && early.note === 'Loading the photo…',
       `asked before the photo is back: disabled ${early.disabled.join(', ') || 'none'}; note "${early.note ?? ''}"`,
     )
-    const [download] = await Promise.all([
-      fourth.waitForEvent('download', { timeout: 120_000 }),
-      fourth.getByRole('button', { name: 'Save smaller (1814×2268)' }).click(),
-    ])
+    // The first save has focus even while it waits (aria-disabled, as Save
+    // is), and a tap on it then does nothing.
+    const smaller = fourth.getByRole('button', { name: 'Save smaller (1814×2268)' })
+    const waitFocus = await fourth.evaluate(() => document.activeElement?.textContent ?? null)
+    await fourth.getByRole('button', { name: 'Try again' }).click({ force: true })
+    await fourth.waitForTimeout(100)
+    const tapWaiting = await fourth.evaluate((LINE) => document.querySelector(LINE)?.textContent ?? null, LINE)
+    check(
+      waitFocus === 'Try again' && (await question(fourth)).open && tapWaiting === 'Loading the photo…',
+      `while it waits: focus on "${waitFocus}", a tap on it leaves the question open and starts nothing (card: "${tapWaiting}")`,
+    )
+    await fourth.waitForFunction((Q) => !document.querySelector(`${Q} [aria-disabled="true"]`), QUESTION, { timeout: 30_000 })
+    const [download] = await Promise.all([fourth.waitForEvent('download', { timeout: 120_000 }), smaller.click()])
     check((await saved(download)) === '1814x2268', 'killed again and answered Save smaller once the photo was back: a 1814x2268 file')
     check(errors.length + later.length === 0, `no page errors ${[...errors, ...later].join(' | ')}`)
     await ctx.close()
@@ -432,6 +450,54 @@ try {
     await page.keyboard.press('Control+z')
     await page.waitForTimeout(300)
     check((await ratio()) === '0.8', `Ctrl+Z after the press undoes the 1:1: ratio ${await ratio()}`)
+    check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+    await ctx.close()
+  }
+
+  console.log('\n7. Focus while the print is pressed')
+  {
+    // A press long enough to look at: the encoder answers 1.5 s late.
+    const slow = `
+      const real = HTMLCanvasElement.prototype.toBlob
+      HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) {
+        return real.call(this, (b) => setTimeout(() => cb(b), 1500), ...rest)
+      }
+    `
+    const ctx = await newContext()
+    const { page, errors } = await open(ctx, slow)
+    await page.waitForTimeout(600)
+    const focused = () =>
+      page.evaluate((CANCEL) => {
+        const a = document.activeElement
+        if (a && a === document.querySelector(CANCEL)) return 'Cancel'
+        if (a && a.matches('.app__save')) return 'Save'
+        return a ? a.tagName.toLowerCase() : 'none'
+      }, CANCEL)
+    const pressAndLook = async (start) => {
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 120_000 }),
+        (async () => {
+          await start()
+          await pressing(page)
+          await page.waitForTimeout(150)
+          during.push(await focused())
+        })(),
+      ])
+      await saved(download)
+      await page.waitForTimeout(300)
+      after.push(await focused())
+    }
+    const during = []
+    const after = []
+    await pressAndLook(() => page.locator(SAVE).click())
+    await pressAndLook(async () => {
+      await page.getByRole('button', { name: 'More' }).click()
+      await page.getByRole('menuitem', { name: /Save lossless PNG/ }).click()
+    })
+    check(
+      during.join('|') === 'Cancel|Cancel' && after.join('|') === 'Save|Save',
+      `focus while pressing: ${during.join(', ')} (from Save, from More's PNG); after: ${after.join(', ')}`,
+    )
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     await ctx.close()
   }

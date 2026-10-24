@@ -54,7 +54,7 @@ function rangeOf(rows: readonly Row[], key: string): { min: number; max: number 
 
 /** The change a panel hands in: the patch, and whether it is its own undo
  *  step (a drag is not; a nudge, a typed value and a reset are). */
-type Set<T> = (patch: Partial<T>, how: ChangeHow) => void
+type SetPatch<T> = (patch: Partial<T>, how: ChangeHow) => void
 
 /** The defaults a reset lands on: a NEW plate's, the press a new document
  *  pulls with, a photo as it is placed on import. */
@@ -69,7 +69,7 @@ const MEDIA = makeMedia({ id: 'default', width: 1, height: 1 })
  * to 100% in 1% steps; a pinch, the keys, Fit and a typed value reach 1200%,
  * and then the thumb pins at the end while the readout shows the true value.
  */
-export function sizeParam(layer: TextLayer, set: Set<TextLayer>): Param {
+export function sizeParam(layer: TextLayer, set: SetPatch<TextLayer>): Param {
   return {
     key: 'size',
     label: 'Size',
@@ -89,7 +89,7 @@ export function sizeParam(layer: TextLayer, set: Set<TextLayer>): Param {
 }
 
 /** Line height and tracking: the spacing of a block of type. */
-export function spaceParams(layer: TextLayer, set: Set<TextLayer>): Param[] {
+export function spaceParams(layer: TextLayer, set: SetPatch<TextLayer>): Param[] {
   const lh = rangeOf(LAYER_FIELDS, 'lineHeight')
   const tr = rangeOf(LAYER_FIELDS, 'tracking')
   return [
@@ -130,7 +130,7 @@ export function spaceParams(layer: TextLayer, set: Set<TextLayer>): Param[] {
  * tilted stamp lives; a pinch and the bracket keys turn it to ±180°. Position
  * spans the sheet, 0 to 100%; a drag can take type 30% past the trim, to bleed.
  */
-export function placeParams(layer: TextLayer, set: Set<TextLayer>): Param[] {
+export function placeParams(layer: TextLayer, set: SetPatch<TextLayer>): Param[] {
   const rot = rangeOf(LAYER_FIELDS, 'rotation')
   const pos = rangeOf(LAYER_FIELDS, 'x')
   const position = (axis: 'x' | 'y', label: string): Param => ({
@@ -170,7 +170,7 @@ export function placeParams(layer: TextLayer, set: Set<TextLayer>): Param[] {
 
 /** Where the plate's pass changes from its ink to its second ink, by the
  *  photo's (blurred) lightness under it. */
-export function switchPointParam(layer: TextLayer, set: Set<TextLayer>): Param {
+export function switchPointParam(layer: TextLayer, set: SetPatch<TextLayer>): Param {
   const r = rangeOf(LAYER_FIELDS, 'contrastThreshold')
   return {
     key: 'contrastThreshold',
@@ -200,7 +200,7 @@ export const NO_TRAVEL = 'Zoom in to move the photo'
  * sheet covered. Where there is no travel the position is unavailable, and
  * says why.
  */
-export function frameParams(media: MediaLayer, aspect: number, set: Set<MediaLayer>): Param[] {
+export function frameParams(media: MediaLayer, aspect: number, set: SetPatch<MediaLayer>): Param[] {
   const zoom = rangeOf(MEDIA_FIELDS, 'scale')
   const position = (axis: 'x' | 'y', label: string): Param => {
     const f = panFraction(media, aspect, 1, axis)
@@ -250,7 +250,7 @@ export function frameParams(media: MediaLayer, aspect: number, set: Set<MediaLay
 /** One texture size for both screens: the halftone's dot pitch, and a grain
  *  cell a third of it. The slider stops at 24; a grain converted from an older
  *  build can hold up to 36, and keeps it. */
-export function screenParam(press: PressProfile, set: Set<PressProfile>): Param {
+export function screenParam(press: PressProfile, set: SetPatch<PressProfile>): Param {
   const r = rangeOf(PRESS_FIELDS, 'screenPitch')
   return {
     key: 'screenPitch',
@@ -270,7 +270,7 @@ export function screenParam(press: PressProfile, set: Set<PressProfile>): Param 
 
 /** The machine: how much ink, how far each pass lands from the last, how
  *  ragged the letters are, how blotchy the ink is. */
-export function pressParams(press: PressProfile, set: Set<PressProfile>): Param[] {
+export function pressParams(press: PressProfile, set: SetPatch<PressProfile>): Param[] {
   const amount = (key: 'density' | 'edge' | 'wear', label: string): Param => {
     const r = rangeOf(PRESS_FIELDS, key)
     return {

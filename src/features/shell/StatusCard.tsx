@@ -1,3 +1,4 @@
+import type { Ref } from 'react'
 import { Icon } from '../../ui/ui.tsx'
 import type { SaveStatus } from './useSave.ts'
 
@@ -11,12 +12,15 @@ import type { SaveStatus } from './useSave.ts'
  */
 export default function StatusCard({
   status,
+  cancelRef,
   onCancel,
   onDiscard,
   onDismiss,
   onChoose,
 }: {
   status: SaveStatus | null
+  /** Cancel, which the shell focuses while the print is pressed. */
+  cancelRef?: Ref<HTMLButtonElement>
   onCancel: () => void
   onDiscard: () => void
   onDismiss: () => void
@@ -36,8 +40,8 @@ export default function StatusCard({
       </p>
       {status.action === 'cancel' && (
         // The rest of the page is inert while the print is pressed, so focus
-        // comes here, to the one thing that answers.
-        <button type="button" className="btn" data-size="sm" autoFocus onClick={onCancel}>
+        // comes here, to the one thing that answers (AppShell.tsx moves it).
+        <button ref={cancelRef} type="button" className="btn" data-size="sm" onClick={onCancel}>
           Cancel
         </button>
       )}

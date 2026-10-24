@@ -71,9 +71,14 @@ export default function SaveQuestion({
                 type="button"
                 className="btn num"
                 data-variant={i === 0 ? 'primary' : undefined}
-                autoFocus={i === 0}
-                disabled={!canAnswer}
-                onClick={() => onAnswer(choice.height)}
+                // Focused as the dialog opens (useModalDialog). Waiting, it is
+                // aria-disabled, not disabled, as Save is: it keeps focus, and
+                // a tap does nothing until the photo is back.
+                data-autofocus={i === 0 ? '' : undefined}
+                aria-disabled={!canAnswer || undefined}
+                onClick={() => {
+                  if (canAnswer) onAnswer(choice.height)
+                }}
               >
                 {choice.label}
               </button>

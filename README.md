@@ -1083,6 +1083,14 @@ stage has no transition of its own: while the panel slides open or shut the
 sheet follows its measured height, and it is CSS-sized, so that costs no
 render. On a wide screen the app is a phone-width column, centred.
 
+Every part of the page is in a landmark, so a screen reader can go straight
+to it: the app bar (banner), the sheet (main), the dock (a region named
+Tools) and the cards over the stage (a region named Notifications, as the
+style guide names its toast region; the offline state's words live there
+too). What those cards say is announced through live regions that exist
+before the words do — the toast's, and one for the gesture hint — because a
+region born holding its words is not reliably read.
+
 `engine/` must never import from `state/`, `ui/`, or `features/`, and must never
 touch React or the DOM beyond a canvas context handed to it. That constraint is
 what lets the export path re-render a fresh, overlay-free frame with the exact

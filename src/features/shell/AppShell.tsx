@@ -67,7 +67,7 @@ export default function AppShell() {
   const toastTimer = useRef<number | undefined>(undefined)
   const appRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLElement>(null)
-  const overlayRef = useRef<HTMLDivElement>(null)
+  const overlayRef = useRef<HTMLElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
 
   /**
@@ -236,6 +236,11 @@ export default function AppShell() {
   }
 
   const showHint = settings.media !== null && !hintDismissed && !pressing
+  // What the sheet's gestures do in the open tool.
+  const hintText =
+    tool === 'photo'
+      ? 'Pinch to zoom the photo · drag to move it · double‑tap to fit'
+      : 'Tap type to pick it · drag to move · pinch to size and turn'
 
   return (
     <div className="app" ref={appRef}>
@@ -296,8 +301,9 @@ export default function AppShell() {
       </main>
 
       {/* Fixed to the viewport bottom so it never takes flow space from the
-          sheet; the stage reserves --overlay-h for it instead. */}
-      <div className="app__overlay" ref={overlayRef} inert={pressing || undefined}>
+          sheet; the stage reserves --overlay-h for it instead. A labelled
+          landmark: a screen reader's way straight to the tools. */}
+      <section className="app__overlay" aria-label="Tools" ref={overlayRef} inert={pressing || undefined}>
         <div className={`app__panel${tool ? ' app__panel--open' : ''}`}>
           <div className="app__panel-inner" inert={tool === null || undefined}>
             <Controls tool={tool} subs={subs} onSub={onSub} mediaState={mediaState} photo={photo} />
@@ -358,22 +364,25 @@ export default function AppShell() {
             </button>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* The floating plane over the stage, between the bar and the dock. The
           status card is nearest the dock: it carries the one action its state
           needs (Cancel, ×, Choose again), so nothing above it can push it out
-          of reach; what does not fit gives way at the top, under the bar. */}
-      <div className="app__float">
+          of reach; what does not fit gives way at the top, under the bar. A
+          labelled landmark, as the style guide's toast region is. */}
+      <section className="app__float" aria-label="Notifications">
+        {/* The hint's words for a screen reader, in a live region that is
+            there before them, so they are said when they appear (after the
+            first photo) and again only when what the gestures move changes.
+            A region born holding its words is not reliably announced. */}
+        <p className="sr-only" role="status">
+          {showHint ? hintText : ''}
+        </p>
         {showHint && (
           <div className="card app__hint">
-            {/* Inserted once, after the first photo, and announced; it says
-                what the sheet's gestures do in the open tool, so it changes
-                (and is said again) only when what they move does. */}
-            <p className="app__hint-text" role="status">
-              {tool === 'photo'
-                ? 'Pinch to zoom the photo · drag to move it · double‑tap to fit'
-                : 'Tap type to pick it · drag to move · pinch to size and turn'}
+            <p className="app__hint-text" aria-hidden="true">
+              {hintText}
             </p>
             <button type="button" className="btn ed-bare" data-shape="circle" data-size="sm" aria-label="Dismiss the hint" onClick={dismissHint}>
               <Icon name="x" />
@@ -401,13 +410,13 @@ export default function AppShell() {
           onDismiss={save.dismiss}
           onChoose={photo.choose}
         />
-      </div>
-
-      {/* Offline readiness as a DOM fact (scripts/verify-offline.mjs waits on
-          the attribute), never hidden from a screen reader; seen in More. */}
-      <span className="sr-only" data-offline-state={swState}>
-        {OFFLINE_SAID[swState]}
-      </span>
+        {/* Offline readiness as a DOM fact (scripts/verify-offline.mjs waits
+            on the attribute), never hidden from a screen reader (this plane
+            is never inert); seen in More. */}
+        <span className="sr-only" data-offline-state={swState}>
+          {OFFLINE_SAID[swState]}
+        </span>
+      </section>
 
       {/* One file input for every "Choose photo". */}
       <input

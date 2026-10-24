@@ -166,9 +166,12 @@
   color: var(--ink-mute);
 }
 .app__overlay .t-meta { font: var(--ed-t-hint); color: var(--ink-mute); }
-/* A row of tabs wider than the panel scrolls; it snaps so a whole tab always
-   starts the row (a sliver of a word beside the layer button read as broken)
-   and the cut one is at the far end, where it says "more". */
+/* A row of tabs wider than the panel scrolls; it snaps so a whole tab starts
+   the row (a sliver of a word beside the layer button read as broken) and the
+   cut one is at the far end, where it says "more". Scrolled to its end (the
+   last tab chosen, or large text) the row cannot start on a tab, and the cut
+   one is at the start instead, saying "more" that way (Border Studio's does
+   the same). */
 .app__overlay .tabs[data-variant="underline"] .tabs__list {
   gap: var(--chrome-4);
   scroll-snap-type: x mandatory;

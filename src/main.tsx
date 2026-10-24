@@ -65,10 +65,18 @@ if ('serviceWorker' in navigator) {
 // Vite hoists this module into <head>, ahead of the style guide's deferred
 // scripts in <body>, so SG may not exist yet. Every deferred script has run by
 // DOMContentLoaded, so register then if it is not already there.
-const registerBarFit = () =>
+//
+// A menu row with a meta (the More sheet's PNG row and its size, a plate and
+// its ink) puts the meta under its words when both will not fit on one line:
+// the style guide's own registration (its 63-menu.js, which is not loaded
+// because it owns menu state React owns). Without it, at large text the
+// size ran off the sheet's edge.
+const registerFits = () => {
   window.SG?.fit?.register('.app__bar', { steps: ['full', 'compact', 'tight'], parts: '.appbar__title', strict: true })
-if (window.SG?.fit) registerBarFit()
-else document.addEventListener('DOMContentLoaded', registerBarFit, { once: true })
+  window.SG?.fit?.register('.menu__item:has(> .menu__meta)', { steps: ['inline', 'stack'], parts: '.menu__meta' })
+}
+if (window.SG?.fit) registerFits()
+else document.addEventListener('DOMContentLoaded', registerFits, { once: true })
 // SG.fit re-checks when `document.fonts.ready` settles, and that can settle
 // before Archivo is even asked for (the bar mounts after the scripts ran), so
 // a launch from cache measured the title in the fallback face and kept the

@@ -69,6 +69,7 @@ export default function PhotoPanel({
             </label>
             <div className="select controls__select">
               <select
+                className="controls__select-field"
                 id={sheetId}
                 value={settings.aspect}
                 onChange={(e) => dispatch({ type: 'patch', patch: { aspect: e.target.value as PrintSettings['aspect'] } })}

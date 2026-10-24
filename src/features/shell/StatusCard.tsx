@@ -28,7 +28,12 @@ export default function StatusCard({
 }) {
   if (!status) return null
   return (
-    <div className="card app__status" data-alert={status.alert || undefined} data-delay={status.delay ? '' : undefined}>
+    <div
+      className="card app__status"
+      data-alert={status.alert || undefined}
+      data-action={status.action ?? undefined}
+      data-delay={status.delay ? '' : undefined}
+    >
       {status.busy && (
         <span className="spinner" data-size="sm" aria-hidden="true">
           <span className="spinner__ring" />

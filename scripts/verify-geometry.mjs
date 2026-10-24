@@ -1,7 +1,8 @@
 /**
- * The dock's geometry, measured in the built app. Exits 1 if any check fails.
+ * The dock's geometry and the style guide's measurable rules, in the built
+ * app. Exits 1 if any check fails.
  *
- *   npm run build && node scripts/verify-geometry.mjs [--shots <dir>] [--width 320]
+ *   npm run build && node scripts/verify-geometry.mjs [--width 320] [--shots <dir>]
  *
  * Border Studio's README claims "the regression suite checks the photo's
  * rectangle across every tool and tab", and no such file exists in it. This
@@ -17,15 +18,50 @@
  *  - the panel never overflows at 100% text: the dock's scroller
  *    (.app__panel-inner) is not taller inside than out, and the page does not
  *    scroll sideways;
+ *  - tap targets, as the hit area each control still OWNS: for every visible,
+ *    enabled button, input, select, tab and menu row in the app bar, the dock
+ *    and the cards over the stage (or, with a dialog open, in the dialog),
+ *    how far from its centre a tap still lands on it, each way, by
+ *    elementFromPoint. That counts its box, its ::after hit area (the style
+ *    guide draws small circles at 36px with a 44px ::after), and loses
+ *    whatever a neighbour covers, so it must be 44px across both ways. This is
+ *    the style guide's own probe (its tests/a11y.mjs) measured as a run rather
+ *    than at two points, so a hit area that grows one way only (the strip's
+ *    name line, dock.css) is measured as it is. It is also how "8px between
+ *    targets" is checked: that gap is what lets two 36px circles each own a
+ *    44px target, and a neighbour closer than that takes part of it. A
+ *    control scrolled partly out of its scroller (a tab in a row wider than
+ *    the dock) is reached by scrolling and is skipped while it is; a disabled
+ *    one is not a target;
  *  - the Size slider's travel on the real track: pixels per 1% step, and what
  *    one pixel of drag changes at the smallest size (the touchiness bound of
- *    WP2's Size slider, measured where a thumb meets it).
+ *    WP2's Size slider, measured where a thumb meets it);
+ *
+ * then, with the 4:3 photo, the value modal, the parameter sheet, the plate
+ * sheet, the Ink dialog and More: the same target check, and no sideways
+ * scroll. Then all of it again at 200% text (font-size: 200% on <html>):
+ * every state and dialog, no text cut off by a clipping box (the style
+ * guide's probeClipped: text inside a scroller is reachable, not cut), no
+ * sideways scroll, targets as above. The dock may scroll at 200%; the sheet
+ * may shrink. Last, the app bar at every width from 320 to 430 px in 5 px
+ * steps, at 100% and 200% text: SG.fit's layout (full, then compact, then
+ * tight) never gets richer as the bar gets narrower, tight only when the
+ * title needs its second line, the bar's actions stay one row, Save's word
+ * (when shown) is one line, and nothing in the bar reaches past it.
  *
  * The DOM contract it reads (src/features/shell/AppShell.tsx and the panels):
  * tool buttons `[data-tool]` with `aria-pressed`, the open panel
  * `.controls__section[data-tool]` with its `[role=tab][data-tab]`, the content
  * area `.controls__panel[data-sub]`, the scroller `.app__panel-inner`, the
- * sheet `.sheet`. `--shots <dir>` writes a screenshot of every state.
+ * sheet `.sheet`, the bar `.app__bar` with `data-fit`.
+ *
+ * --shots <dir> also writes the review set: at 320 and 390 px, light and
+ * dark, the dock closed, every sub-tab and Over photo state, the five dialogs
+ * and sheets, and the save states (pressing with Cancel, waiting for the
+ * photo, ready to Share, the photo that could not be loaded, the smaller-copy
+ * question, the save that did not finish); at 390 px with 200% text, every
+ * state and dialog; at 390 px in the style guide's wire palette, light and
+ * dark, the dock closed and each tool (the guide's squint test).
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -67,6 +103,12 @@ const PHOTOS = [
   [1000, 3000],
 ]
 
+/** The widths of the review screenshots. */
+const SHOT_WIDTHS = [
+  [320, 640],
+  [390, 844],
+]
+
 const failures = []
 const check = (ok, what) => {
   if (!ok) {
@@ -80,7 +122,8 @@ const server = await preview({ root, preview: { port: 0, host: '127.0.0.1' }, lo
 const APP = server.resolvedUrls.local[0]
 const browser = await chromium.launch({ executablePath })
 
-/** Two painted frames: layout has settled, the overlay height is published. */
+/** Two painted frames: layout has settled, the overlay height is published,
+ *  SG.fit has written its layouts. */
 const settle = (page) =>
   page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 60)))))
 
@@ -95,6 +138,142 @@ const measure = (page) =>
       sideways: document.documentElement.scrollWidth - window.innerWidth,
     }
   })
+
+/* ── Page-side probes (run through page.evaluate, so self-contained) ── */
+
+/**
+ * Every visible, enabled target in scope, and the hit area it owns through
+ * its centre, horizontally and vertically. Scope: the open dialog, or the app
+ * bar, the dock and the cards over the stage.
+ */
+function probeTargets() {
+  const dialogs = [...document.querySelectorAll('dialog[open]')]
+  const scopes = dialogs.length ? [dialogs[dialogs.length - 1]] : [...document.querySelectorAll('.app__bar, .app__overlay, .app__float')]
+  const SEL =
+    'a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=tab], [role=switch], [role=radio], [role=checkbox], [role=slider], [role=menuitem], [role=menuitemradio], [role=option]'
+  const name = (e) =>
+    e.tagName.toLowerCase() +
+    (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : '') +
+    (e.getAttribute('aria-label') ? ` [${e.getAttribute('aria-label').slice(0, 32)}]` : ` "${(e.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24)}"`)
+  const out = { measured: 0, scrolled: 0, disabled: 0, small: [] }
+  for (const scope of scopes) {
+    for (const el of scope.querySelectorAll(SEL)) {
+      const r = el.getBoundingClientRect()
+      const cs = getComputedStyle(el)
+      if (r.width === 0 || r.height === 0 || cs.visibility === 'hidden' || el.closest('.sr-only, [hidden], [inert]')) continue
+      // A native radio drawn by its label is 1px; the style guide's own probe
+      // skips it the same way (the segmented and swatch radios cover their
+      // labels and are measured).
+      if (el.matches('input[type=radio], input[type=checkbox]') && r.width < 4) continue
+      if (el.matches(':disabled, [aria-disabled="true"]')) {
+        out.disabled++
+        continue
+      }
+      let clipped = false
+      for (let n = el.parentElement; n && n !== scope.parentElement; n = n.parentElement) {
+        const ns = getComputedStyle(n)
+        if (ns.overflowX === 'visible' && ns.overflowY === 'visible') continue
+        const b = n.getBoundingClientRect()
+        if (r.left < b.left - 1 || r.right > b.right + 1 || r.top < b.top - 1 || r.bottom > b.bottom + 1) clipped = true
+      }
+      if (clipped) {
+        out.scrolled++
+        continue
+      }
+      out.measured++
+      const cx = r.left + r.width / 2
+      const cy = r.top + r.height / 2
+      const hits = (x, y) => {
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true
+        const t = document.elementFromPoint(x, y)
+        return !!t && (t === el || el.contains(t))
+      }
+      const run = (dx, dy) => {
+        let k = 0
+        while (k < 40 && hits(cx + dx * (k + 1), cy + dy * (k + 1))) k++
+        return k
+      }
+      if (!hits(cx, cy)) {
+        out.small.push(`${name(el)}: covered at its centre`)
+        continue
+      }
+      const w = Math.max(r.width >= 44 ? r.width : 0, run(-1, 0) + run(1, 0) + 1)
+      const h = Math.max(r.height >= 44 ? r.height : 0, run(0, -1) + run(0, 1) + 1)
+      if (w < 43.5 || h < 43.5) out.small.push(`${name(el)}: owns ${Math.round(w)}x${Math.round(h)} (drawn ${Math.round(r.width)}x${Math.round(r.height)})`)
+    }
+  }
+  return out
+}
+
+/** Text that a clipping box (overflow hidden or clip) cuts off: the style
+ *  guide's probeClipped, which scrollWidth checks and axe do not see. Text in
+ *  a scroller is reachable, ellipsis is deliberate, a 1px visually hidden
+ *  box (Save's word when it is an icon) is not shown at all. */
+function probeClipped() {
+  const out = []
+  const name = (e) => e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : '')
+  for (const box of document.querySelectorAll('*')) {
+    const cs = getComputedStyle(box)
+    if (!/^(clip|hidden)$/.test(cs.overflowX) && !/^(clip|hidden)$/.test(cs.overflowY)) continue
+    if (box.closest('.sr-only, [hidden]')) continue
+    const b = box.getBoundingClientRect()
+    if (b.width <= 1 || b.height <= 1) continue
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT)
+    for (let t; (t = walker.nextNode()); ) {
+      if (!t.nodeValue.trim()) continue
+      const host = t.parentElement
+      const hs = getComputedStyle(host)
+      if (hs.visibility === 'hidden' || hs.display === 'none' || host.closest('.sr-only, [aria-hidden="true"]') || hs.textOverflow === 'ellipsis') continue
+      let hidden = false
+      let scrollsX = false
+      let scrollsY = false
+      for (let n = host; n && n !== box; n = n.parentElement) {
+        const nb = n.getBoundingClientRect()
+        if (nb.width <= 1 && nb.height <= 1) hidden = true
+        const ns = getComputedStyle(n)
+        if (/^(auto|scroll)$/.test(ns.overflowX)) scrollsX = true
+        if (/^(auto|scroll)$/.test(ns.overflowY)) scrollsY = true
+      }
+      if (hidden) continue
+      const range = document.createRange()
+      range.selectNodeContents(t)
+      for (const q of range.getClientRects()) {
+        if (!q.width) continue
+        const cutX = !scrollsX && /^(clip|hidden)$/.test(cs.overflowX) && (q.right > b.right + 1 || q.left < b.left - 1)
+        const cutY = !scrollsY && /^(clip|hidden)$/.test(cs.overflowY) && (q.bottom > b.bottom + 1 || q.top < b.top - 1)
+        if (cutX || cutY) {
+          out.push(`"${t.nodeValue.trim().slice(0, 28)}" cut off by ${name(box)}`)
+          break
+        }
+      }
+    }
+  }
+  return [...new Set(out)]
+}
+
+/** The app bar: its SG.fit layout, and whether it holds as one row. */
+function probeBar() {
+  const bar = document.querySelector('.app__bar')
+  const b = bar.getBoundingClientRect()
+  const actions = [...bar.querySelectorAll('.appbar__end > *')].map((e) => e.getBoundingClientRect())
+  const centres = new Set(actions.map((q) => Math.round(q.top + q.height / 2)))
+  const word = bar.querySelector('.app__save-word')
+  const wb = word?.getBoundingClientRect()
+  const range = document.createRange()
+  if (word) range.selectNodeContents(word)
+  const wordLines = word && wb.width > 1 ? new Set([...range.getClientRects()].map((q) => Math.round(q.top))).size : 0
+  const outside = [...bar.querySelectorAll('.appbar__title, .appbar__end > *')].filter((e) => {
+    const q = e.getBoundingClientRect()
+    return q.left < b.left - 0.5 || q.right > b.right + 0.5 || q.top < b.top - 0.5 || q.bottom > b.bottom + 0.5
+  })
+  const title = bar.querySelector('.appbar__title')
+  const tr = document.createRange()
+  tr.selectNodeContents(title)
+  const titleLines = new Set([...tr.getClientRects()].filter((q) => q.width > 0).map((q) => Math.round(q.top))).size
+  return { fit: bar.dataset.fit ?? null, rows: centres.size, wordLines, titleLines, outside: outside.length }
+}
+
+/* ── Driving the app ── */
 
 /** A w x h JPEG made in the page and chosen through the real file input. */
 async function choosePhoto(page, w, h) {
@@ -135,97 +314,365 @@ async function openTool(page, tool) {
   await page.waitForSelector(`.controls__section[data-tool="${tool}"]`)
 }
 
+async function openTab(page, tool, tab) {
+  await openTool(page, tool)
+  await page.locator(`.controls__section[data-tool="${tool}"] [role=tab][data-tab="${tab}"]`).click()
+  await page.waitForSelector(`.controls__panel[data-sub="${tab}"]`)
+}
+
 async function closeTools(page) {
   const open = page.locator('[data-tool][aria-pressed="true"]')
   if (await open.count()) await open.first().click()
 }
 
-try {
-  for (const [vw, vh] of VIEWPORTS) {
-    for (const [pw, ph] of PHOTOS) {
-      const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 2, serviceWorkers: 'block' })
-      const page = await ctx.newPage()
-      const errors = []
-      page.on('pageerror', (e) => errors.push(e.message))
-      await page.goto(APP)
-      await page.waitForSelector('.sheet canvas')
-      await openTool(page, 'photo')
-      await choosePhoto(page, pw, ph)
+/** A fresh page at a viewport, a photo chosen, the hint dismissed. */
+async function newPage({ width, height, scheme = 'light', photo = PHOTOS[0], init }) {
+  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: scheme, serviceWorkers: 'block' })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  if (init) await page.addInitScript(init)
+  await page.goto(APP)
+  await page.waitForSelector('.sheet canvas')
+  if (photo) {
+    await openTool(page, 'photo')
+    await choosePhoto(page, ...photo)
+    // The hint covers the foot of the sheet until it is dismissed.
+    await page.locator('.app__hint .btn').click()
+  }
+  return { ctx, page, errors }
+}
 
-      const where = `${vw}x${vh}, a ${pw}x${ph} photo`
-      const states = []
-      const record = async (name) => {
-        await settle(page)
-        const m = await measure(page)
-        states.push({ name, ...m })
-        if (SHOTS) await page.screenshot({ path: join(SHOTS, `${vw}-${pw}x${ph}-${name.replace(/[^a-z0-9]+/gi, '-')}.png`) })
-      }
-
-      for (const tool of ['type', 'ink', 'photo', 'press']) {
-        await openTool(page, tool)
-        const tabs = await page.locator(`.controls__section[data-tool="${tool}"] [role=tab]`).evaluateAll((els) => els.map((e) => e.dataset.tab))
-        for (const tab of tabs) {
-          await page.locator(`.controls__section[data-tool="${tool}"] [role=tab][data-tab="${tab}"]`).click()
-          await page.waitForSelector(`.controls__panel[data-sub="${tab}"]`)
-          if (tool === 'ink' && tab === 'over') {
-            // Every state of Over photo: the strip comes and goes with them.
-            const over = page.locator('.controls__panel[data-sub="over"]')
-            for (const mode of ['off', 'second', 'backing']) {
-              await over.locator(`input[type=radio][value="${mode}"]`).check({ force: true })
-              await record(`${tool}-${tab}-${mode}`)
-              if (mode === 'second') {
-                // Keep this ink: no Switch point (O-4), the strip gives way to a row.
-                await over.locator('[data-ink-button]').first().click()
-                await page.locator('dialog[open] input[type=radio][value="keep"]').check({ force: true })
-                await page.locator('dialog[open] .dialog__actions .btn').click()
-                await page.waitForSelector('dialog[open]', { state: 'detached' })
-                await record(`${tool}-${tab}-keep`)
-              }
-            }
-            await over.locator('input[type=radio][value="second"]').check({ force: true })
-            continue
-          }
-          await record(`${tool}-${tab}`)
-          if (tool === 'type' && tab === 'size' && vw === 320) {
-            const travel = await page.evaluate(() => {
-              const input = document.querySelector('.controls__panel[data-sub="size"] .slider__input')
-              const thumb = parseFloat(getComputedStyle(input.closest('.slider')).getPropertyValue('--_thumb')) || 24
-              const w = input.getBoundingClientRect().width
-              const steps = Math.round((Number(input.max) - Number(input.min)) / Number(input.step))
-              return { width: w, thumb, steps, pxPerStep: (w - thumb) / steps }
-            })
-            // At the smallest size (10%) one step is a tenth of the size.
-            const perPx = 0.1 / travel.pxPerStep
-            console.log(
-              `  Size slider at 320 px: ${travel.width.toFixed(1)} px track, ${(travel.width - travel.thumb).toFixed(1)} px of travel, ` +
-                `${travel.steps} steps, ${travel.pxPerStep.toFixed(2)} px a step; at 10% one pixel of drag is ${(perPx * 100).toFixed(1)}% of the size`,
-            )
-            check(travel.steps === 90, `${where}: the Size slider has 90 steps (has ${travel.steps})`)
-            check(travel.pxPerStep >= 1.5, `${where}: a Size step is at least 1.5 px of travel (${travel.pxPerStep.toFixed(2)})`)
+/**
+ * Every tool, every sub-tab, every Over photo state, in order, calling
+ * `visit(name)` in each. Leaves the second ink on and the tools closed.
+ */
+async function eachState(page, visit) {
+  await closeTools(page)
+  await visit('closed')
+  for (const tool of ['type', 'ink', 'photo', 'press']) {
+    await openTool(page, tool)
+    const tabs = await page.locator(`.controls__section[data-tool="${tool}"] [role=tab]`).evaluateAll((els) => els.map((e) => e.dataset.tab))
+    for (const tab of tabs) {
+      await openTab(page, tool, tab)
+      if (tool === 'ink' && tab === 'over') {
+        // Every state of Over photo: the strip comes and goes with them.
+        const over = page.locator('.controls__panel[data-sub="over"]')
+        for (const mode of ['off', 'second', 'backing']) {
+          await over.locator(`input[type=radio][value="${mode}"]`).check({ force: true })
+          await visit(`${tool}-${tab}-${mode}`)
+          if (mode === 'second') {
+            // Keep this ink: no Switch point (O-4), the strip gives way to a row.
+            await over.locator('[data-ink-button]').first().click()
+            await page.locator('dialog[open] input[type=radio][value="keep"]').check({ force: true })
+            await page.locator('dialog[open] .dialog__actions .btn').click()
+            await page.waitForSelector('dialog[open]', { state: 'detached' })
+            await visit(`${tool}-${tab}-keep`)
+            // Back to a second ink of its own, so the strip is there again.
+            await over.locator('[data-ink-button]').first().click()
+            await page.locator('dialog[open] input[type=radio][value="black"]').check({ force: true })
+            await page.locator('dialog[open] .dialog__actions .btn').click()
+            await page.waitForSelector('dialog[open]', { state: 'detached' })
           }
         }
+        await over.locator('input[type=radio][value="second"]').check({ force: true })
+        continue
       }
-      await closeTools(page)
+      await visit(`${tool}-${tab}`)
+    }
+  }
+  await closeTools(page)
+}
 
-      const first = states[0]
-      for (const s of states) {
+/** The sheets and dialogs, each opened and closed: `visit(name)` with each
+ *  open. */
+async function eachDialog(page, visit) {
+  const close = async () => {
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('dialog[open]', { state: 'detached' })
+  }
+  await openTab(page, 'type', 'size')
+  await page.locator('.controls__panel[data-sub="size"] .controls__value').click()
+  await page.waitForSelector('dialog[open]')
+  await visit('value-modal')
+  await close()
+  await openTab(page, 'type', 'place')
+  await page.locator('.controls__panel[data-sub="place"] .paramstrip__pick').click()
+  await page.waitForSelector('dialog[open]')
+  await visit('picker')
+  await close()
+  await page.locator('.controls__section[data-tool="type"] .controls__layerbtn').click()
+  await page.waitForSelector('dialog[open]')
+  await visit('plates')
+  await close()
+  await openTab(page, 'ink', 'ink')
+  await page.locator('.controls__panel[data-sub="ink"] [data-ink-button]').click()
+  await page.waitForSelector('dialog[open]')
+  await visit('ink-dialog')
+  await close()
+  await closeTools(page)
+  await page.locator('.app__bar [aria-label="More"]').click()
+  await page.waitForSelector('dialog[open]')
+  await visit('more')
+  await close()
+}
+
+/** Check the targets of the state on screen. */
+async function checkTargets(page, where) {
+  const t = await page.evaluate(probeTargets)
+  for (const s of t.small) check(false, `${where}: a target under 44px: ${s}`)
+  return t
+}
+
+const shotName = (...parts) => parts.join('-').replace(/[^a-z0-9-]+/gi, '-') + '.png'
+
+try {
+  // ── 1. Every viewport, every photo, at 100% text ──
+  for (const [vw, vh] of VIEWPORTS) {
+    for (const [pw, ph] of PHOTOS) {
+      const where = `${vw}x${vh}, a ${pw}x${ph} photo`
+      const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [pw, ph] })
+      const states = []
+      let targets = 0
+      await eachState(page, async (name) => {
+        await settle(page)
+        states.push({ name, ...(await measure(page)) })
+        targets += (await checkTargets(page, `${where}, ${name}`)).measured
+        if (name === 'type-size' && vw === 320) {
+          const travel = await page.evaluate(() => {
+            const input = document.querySelector('.controls__panel[data-sub="size"] .slider__input')
+            const thumb = parseFloat(getComputedStyle(input.closest('.slider')).getPropertyValue('--_thumb')) || 24
+            const w = input.getBoundingClientRect().width
+            const steps = Math.round((Number(input.max) - Number(input.min)) / Number(input.step))
+            return { width: w, thumb, steps, pxPerStep: (w - thumb) / steps }
+          })
+          // At the smallest size (10%) one step is a tenth of the size.
+          const perPx = 0.1 / travel.pxPerStep
+          console.log(
+            `  Size slider at 320 px: ${travel.width.toFixed(1)} px track, ${(travel.width - travel.thumb).toFixed(1)} px of travel, ` +
+              `${travel.steps} steps, ${travel.pxPerStep.toFixed(2)} px a step; at 10% one pixel of drag is ${(perPx * 100).toFixed(1)}% of the size`,
+          )
+          check(travel.steps === 90, `${where}: the Size slider has 90 steps (has ${travel.steps})`)
+          check(travel.pxPerStep >= 1.5, `${where}: a Size step is at least 1.5 px of travel (${travel.pxPerStep.toFixed(2)})`)
+        }
+      })
+      if (pw === PHOTOS[0][0]) {
+        await eachDialog(page, async (name) => {
+          await settle(page)
+          targets += (await checkTargets(page, `${where}, ${name}`)).measured
+          const side = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+          check(side <= 0, `${where}: the page scrolls sideways by ${side} px with ${name} open`)
+        })
+      }
+
+      // With every tool closed the sheet takes the dock's room as well: the
+      // gesture for a full-height sheet. Every open state holds still.
+      const open = states.filter((s) => s.name !== 'closed')
+      const first = open[0]
+      for (const s of open) {
         const same = s.sheet && first.sheet && s.sheet.every((v, i) => Math.abs(v - first.sheet[i]) <= 1)
         check(same, `${where}: the sheet moved in ${s.name}: ${JSON.stringify(s.sheet)} against ${JSON.stringify(first.sheet)} in ${first.name}`)
         check(s.overflow <= 0.5, `${where}: the panel overflows by ${s.overflow} px in ${s.name}`)
         check(s.sideways <= 0, `${where}: the page scrolls sideways by ${s.sideways} px in ${s.name}`)
       }
       check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
-      console.log(`${where}: ${states.length} states, sheet ${JSON.stringify(first.sheet)}${failures.length ? '' : ', all the same'}`)
+      console.log(`${where}: ${open.length} open states, sheet ${JSON.stringify(first.sheet)}, ${targets} targets measured`)
       await ctx.close()
     }
+  }
+
+  // ── 2. 200% text, the 4:3 photo ──
+  for (const [vw, vh] of VIEWPORTS) {
+    const where = `${vw}x${vh} at 200% text`
+    const { ctx, page, errors } = await newPage({ width: vw, height: vh })
+    await page.addStyleTag({ content: 'html { font-size: 200% }' })
+    let n = 0
+    let targets = 0
+    const visit = async (name) => {
+      await settle(page)
+      n++
+      for (const c of await page.evaluate(probeClipped)) check(false, `${where}, ${name}: ${c}`)
+      const side = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+      check(side <= 0, `${where}, ${name}: the page scrolls sideways by ${side} px`)
+      targets += (await checkTargets(page, `${where}, ${name}`)).measured
+    }
+    await eachState(page, visit)
+    await eachDialog(page, visit)
+    check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
+    console.log(`${where}: ${n} states and dialogs, no text cut off, ${targets} targets measured`)
+    await ctx.close()
+  }
+
+  // ── 3. The app bar at every width ──
+  {
+    const ORDER = ['full', 'compact', 'tight']
+    const { ctx, page } = await newPage({ width: 430, height: 900, photo: null })
+    for (const text of [100, 200]) {
+      if (text === 200) await page.addStyleTag({ content: 'html { font-size: 200% }' })
+      const seen = []
+      let last = -1
+      for (let w = 430; w >= 320; w -= 5) {
+        await page.setViewportSize({ width: w, height: 900 })
+        await settle(page)
+        const bar = await page.evaluate(probeBar)
+        const at = `the app bar at ${w} px, ${text}% text`
+        const rank = ORDER.indexOf(bar.fit)
+        check(rank >= 0, `${at}: no layout (${bar.fit})`)
+        check(rank >= last, `${at}: ${bar.fit} is richer than ${ORDER[last]} at a wider width`)
+        check(bar.rows === 1, `${at}: its actions are on ${bar.rows} rows`)
+        check(bar.wordLines <= 1, `${at}: Save's word wraps (${bar.wordLines} lines)`)
+        check(bar.outside === 0, `${at}: ${bar.outside} of its parts reach past it`)
+        // Tight differs from compact only in letting the title wrap: tight
+        // with the title on one line means compact was refused for something
+        // that is not the title (a hit area read as overflow, once).
+        check(bar.fit !== 'tight' || bar.titleLines > 1, `${at}: tight, though the title is on one line (compact should fit)`)
+        last = Math.max(last, rank)
+        if (seen[seen.length - 1]?.fit !== bar.fit) seen.push({ fit: bar.fit, from: w })
+      }
+      console.log(`The app bar at ${text}% text: ${seen.map((s) => `${s.fit} from ${s.from} px`).join(', ')}`)
+    }
+    await ctx.close()
+  }
+
+  // ── 4. The review screenshots ──
+  if (SHOTS) {
+    for (const [vw, vh] of SHOT_WIDTHS) {
+      for (const scheme of ['light', 'dark']) {
+        const { ctx, page } = await newPage({ width: vw, height: vh, scheme })
+        const shoot = async (name) => {
+          await settle(page)
+          await page.waitForTimeout(250)
+          await page.screenshot({ path: join(SHOTS, shotName(vw, scheme, name)) })
+        }
+        await eachState(page, shoot)
+        await eachDialog(page, shoot)
+        await ctx.close()
+        await shootSaveStates(vw, vh, scheme)
+      }
+    }
+    {
+      const { ctx, page } = await newPage({ width: 390, height: 844 })
+      await page.addStyleTag({ content: 'html { font-size: 200% }' })
+      const shoot = async (name) => {
+        await settle(page)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: join(SHOTS, shotName(390, 'light', '200pct', name)) })
+      }
+      await eachState(page, shoot)
+      await eachDialog(page, shoot)
+      await ctx.close()
+    }
+    for (const scheme of ['light', 'dark']) {
+      const { ctx, page } = await newPage({ width: 390, height: 844, scheme })
+      await page.evaluate(() => document.documentElement.setAttribute('data-palette', 'wire'))
+      await closeTools(page)
+      await settle(page)
+      await page.screenshot({ path: join(SHOTS, shotName(390, scheme, 'wire', 'closed')) })
+      for (const tool of ['type', 'ink', 'photo', 'press']) {
+        await openTool(page, tool)
+        await settle(page)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: join(SHOTS, shotName(390, scheme, 'wire', tool)) })
+      }
+      await ctx.close()
+    }
+    console.log(`Screenshots: ${SHOTS}`)
   }
 } finally {
   await browser.close()
   await new Promise((r) => server.httpServer.close(r))
 }
 
+/**
+ * The save states, for the review set: pressing with Cancel and then ready to
+ * Share (an encoder slowed to 3 s, as a phone's is), waiting for the photo (a
+ * preview decode held back), the photo that could not be loaded (its stored
+ * bytes deleted), the smaller-copy question (canvases over 5 MP read back
+ * blank) and the save that did not finish (the in-flight mark left set).
+ */
+async function shootSaveStates(vw, vh, scheme) {
+  const shoot = async (page, name) => {
+    await settle(page)
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: join(SHOTS, shotName(vw, scheme, 'save', name)) })
+  }
+  const slowEncoder = `
+    const real = HTMLCanvasElement.prototype.toBlob
+    HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) { return real.call(this, (b) => setTimeout(() => cb(b), 3000), ...rest) }
+    navigator.canShare = () => true
+    navigator.share = async () => {}
+  `
+  const blankAbove5MP = `
+    const real = CanvasRenderingContext2D.prototype.getImageData
+    CanvasRenderingContext2D.prototype.getImageData = function (...a) {
+      const d = real.apply(this, a)
+      if (!this.canvas.isConnected && this.canvas.width * this.canvas.height > 5e6) d.data.fill(0)
+      return d
+    }
+  `
+  const slowDecode = `
+    const real = window.createImageBitmap
+    window.createImageBitmap = (src, ...rest) =>
+      rest.some((o) => o && typeof o === 'object' && 'resizeWidth' in o)
+        ? new Promise((r) => setTimeout(r, 4000)).then(() => real(src, ...rest))
+        : real(src, ...rest)
+  `
+  {
+    const { ctx, page } = await newPage({ width: vw, height: vh, scheme, photo: null, init: slowEncoder })
+    await page.locator('.app__save').click()
+    await page.waitForFunction(() => document.querySelector('.app__status-text')?.textContent?.includes('plate'), null, { timeout: 60_000 })
+    await shoot(page, 'pressing')
+    await page.waitForFunction(() => document.querySelector('.app__save')?.textContent === 'Share', null, { timeout: 120_000 })
+    await shoot(page, 'ready')
+    await ctx.close()
+  }
+  {
+    const { ctx, page } = await newPage({ width: vw, height: vh, scheme, photo: null, init: blankAbove5MP })
+    await page.locator('.app__save').click()
+    await page.waitForFunction(() => document.querySelector('dialog.savequestion')?.open, null, { timeout: 120_000 })
+    await shoot(page, 'smaller-copy')
+    await ctx.close()
+  }
+  {
+    const { ctx, page } = await newPage({ width: vw, height: vh, scheme, photo: null })
+    await page.evaluate(() => localStorage.setItem('printmachine:export-in-flight', JSON.stringify({ height: 3600, format: 'jpeg' })))
+    await page.reload()
+    await page.waitForFunction(() => document.querySelector('dialog.savequestion')?.open, null, { timeout: 30_000 }).catch(() => undefined)
+    await shoot(page, 'did-not-finish')
+    await ctx.close()
+  }
+  {
+    const { ctx, page } = await newPage({ width: vw, height: vh, scheme })
+    await page.addInitScript(slowDecode)
+    await page.reload()
+    await page.waitForSelector('.sheet canvas')
+    await page.waitForTimeout(1200)
+    await shoot(page, 'loading-photo')
+    await page.evaluate(
+      () =>
+        new Promise((res) => {
+          const id = JSON.parse(localStorage.getItem('printmachine:settings:v1')).media.id
+          const r = indexedDB.open('printmachine')
+          r.onsuccess = () => {
+            const t = r.result.transaction('media', 'readwrite')
+            t.objectStore('media').delete(id)
+            t.oncomplete = res
+          }
+        }),
+    )
+    await page.reload()
+    await page.waitForSelector('.sheet canvas')
+    await page.waitForTimeout(1500)
+    await shoot(page, 'missing-photo')
+    await ctx.close()
+  }
+}
+
 if (failures.length) {
   console.error(`\n${failures.length} geometry check(s) failed.`)
   process.exit(1)
 }
-console.log('\nGeometry: the sheet holds still across every tool and tab, and no panel overflows.')
+console.log(
+  '\nGeometry: the sheet holds still across every tool and tab, no panel overflows, every target owns 44px, ' +
+    'nothing is cut off at 200% text, and the app bar holds one row at every width.',
+)

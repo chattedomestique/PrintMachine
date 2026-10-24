@@ -19,10 +19,19 @@
   position: relative;
 }
 
-/* The bar is part of the column, so it stays inside the gutters. */
+/* The bar is part of the column, so it stays inside the gutters.
+
+   A circle's target reaches 4px past its drawn edge (44 on 36), so in the
+   compact and tight layouts Save's target hangs past the bar's end, into the
+   gutter, where it still works. SG.fit measures the bar's overflow, and read
+   that as "does not fit": compact was never chosen, at any width (Border
+   Studio skips it the same way). The bar's box takes that room back from
+   its margin, so the target is inside it and nothing drawn moves. */
 .app__bar {
   flex: 0 0 auto;
   padding-block-start: max(var(--chrome-2), var(--safe-top, 0px));
+  padding-inline-end: calc((var(--chrome-hit) - var(--chrome-ctl-sm)) / 2);
+  margin-inline-end: calc((var(--chrome-ctl-sm) - var(--chrome-hit)) / 2);
 }
 
 .app__main {
@@ -215,6 +224,12 @@
 .app__status > .ic { --ic-size: 1.15em; flex: none; color: var(--bad-ink); }
 .app__status > .spinner { flex: none; }
 .app__status > .btn { flex: none; }
+/* A photo that could not be loaded: a sentence and a wide "Choose again".
+   Side by side, at 320px the sentence was a five-line column beside the
+   button; the button goes under the words instead, at the card's end. */
+.app__status[data-action="choose"] { flex-wrap: wrap; row-gap: var(--chrome-2); }
+.app__status[data-action="choose"] > .app__status-text { flex: 1 1 calc(100% - 3rem); }
+.app__status[data-action="choose"] > .btn { margin-inline-start: auto; }
 /* "Loading the photo" waits 300ms before it shows, so a decode that lands at
    once never flashes a card. */
 .app__status[data-delay] { animation: status-in var(--dur-enter) var(--ease-out) 300ms both; }

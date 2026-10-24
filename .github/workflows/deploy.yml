@@ -49,6 +49,15 @@ jobs:
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
 
+      # The dock holds still and the style guide's measurable rules hold, in
+      # the built app at four phone widths: the sheet's rectangle in every
+      # tool and tab, no panel overflow, every target owning 44px, nothing
+      # cut off at 200% text, the app bar one row at every width.
+      - run: node scripts/verify-geometry.mjs
+        env:
+          PAGES: '1' # serve dist/ at the base it was built for
+          CHROMIUM_PATH: /usr/bin/google-chrome
+
       # "No down-rezzing at all" is a claim, so it is measured. The memory
       # gate: the real export path in node with every typed array counted;
       # it fails over 35 bytes per output pixel (an iPhone evicts a tab that

@@ -50,6 +50,12 @@
   gap: var(--ed-gap);
   min-block-size: var(--ed-content-h);
 }
+/* Over photo's rows follow its own choice (Off: none; a second ink: its
+   strip; a backing: its ink), so centred like the rest, its Off / Second ink
+   / Backing control moved under the finger that chose (48px, the way Border
+   Studio's Box tab moves when Pill is chosen). Here the choice starts the
+   panel, so it stays where it was tapped. */
+.controls__panel[data-sub="over"] { justify-content: flex-start; }
 /* The hairline between two settings: inset to the gutters, as in a list. */
 .controls__rule {
   flex: none;
@@ -116,7 +122,7 @@
    The style guide's slider readout (plain text, tabular), made a button so
    you can tap it to type an exact number. No frame: it reads as the value.
    The largest words in the tray, because the number you are changing is what
-   the eye should find first. Its target reaches 44px past the line's 36. */
+   the eye should find first. Its target is 44px on the line's 36 (below). */
 .controls__value {
   position: relative;
   flex: 0 0 auto;
@@ -135,11 +141,24 @@
 @media (hover: hover) {
   .controls__value:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 }
+/* The 44px targets on the strip's 36px name line (style guide rule 6). They
+   cannot grow 4px each way as a lone button would: the line's foot belongs to
+   the slider row under it, whose input stands a border's width proud of its
+   row (the style guide's focus frame), and the nudges' hit areas reach as
+   far. So they grow UP, into the gap over the strip where nothing is
+   tappable (the hairline and its two gaps, 17px; or open space where the
+   strip stands alone), and stop that border's width short of the line's
+   foot: 44px of target each, overlapping nothing (verify-geometry measures
+   the hit area each one still owns). The leading ink button is set to the
+   line's height plus its own frame, centred, so its padding box is the line
+   too and the same rule places its target. */
 :is(.controls__value, .paramstrip__pick)::after {
   content: "";
   position: absolute;
   inset-inline: 0;
-  inset-block: min(0px, calc((100% - var(--chrome-hit)) / 2));
+}
+:is(.controls__value, .paramstrip__pick, .paramstrip__head > .controls__inkbtn)::after {
+  inset-block: min(0px, calc(100% - var(--chrome-hit) - var(--bw))) var(--bw);
 }
 
 /* ── Sliders ── */
@@ -190,7 +209,11 @@
 .paramstrip__why { text-align: end; }
 /* A control leading the strip (the second ink before its Switch point): the
    name follows it, the value keeps the far end. */
-.paramstrip__head > .controls__inkbtn { margin-block: calc((var(--ed-strip-head-h) - var(--chrome-ctl-sm)) / 2); }
+.paramstrip__head > .controls__inkbtn {
+  min-block-size: 0;
+  block-size: calc(var(--ed-strip-head-h) + 2 * var(--bw));
+  margin-block: calc(-1 * var(--bw));
+}
 .paramstrip__head > .controls__inkbtn + * { margin-inline-end: auto; }
 
 /* ── The plate button at the start of the head row ── */
@@ -274,8 +297,16 @@
   border: var(--bw-thin) solid var(--ink-faint);
 }
 
-/* A native select in a row: never under 16px (iOS zooms below that). */
+/* A native select in a row: never under 16px (iOS zooms below that). The
+   style guide draws its frame on the wrapper and sets the <select> a
+   border's width inside it each way, so a tap on the frame's edge opened
+   nothing: 40px of target in a 44px control. The select fills the frame
+   (its own border is transparent, so nothing drawn moves). */
 .controls__select { flex: 0 0 auto; min-inline-size: 9rem; }
+.controls__select-field {
+  min-block-size: var(--_h);
+  margin-block: calc(-1 * var(--_bw));
+}
 
 /* Stocks on one scrolling line in the dock: a second row of chips would cost
    the sheet ~90px. The chip cut at the edge says "more"; the padding keeps

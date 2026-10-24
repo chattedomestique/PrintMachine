@@ -105,8 +105,9 @@ export function Tabs<T extends string>({
   const listRef = useRef<HTMLDivElement>(null)
   // A bar wider than the dock scrolls; keep the chosen tab in view (the style
   // guide's tabs script would, and it is not loaded). The row is scrolled to
-  // the first tab START from which the chosen tab is whole, so the row always
-  // begins with a whole word, never a sliver of another.
+  // the first tab START from which the chosen tab is whole, so the row begins
+  // with a whole word, not a sliver of another, wherever the row can scroll
+  // that far: near its end it stops short, and the cut word is at the start.
   useEffect(() => {
     const list = listRef.current
     const el = list?.querySelector<HTMLElement>('[aria-selected="true"]')

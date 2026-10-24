@@ -31,9 +31,9 @@ npm run dev        # http://localhost:5173
 ```
 
 ```sh
-npm run verify          # the gate: lint + typecheck + test + build
+npm run verify          # the gate: lint + typecheck + check-css + test + build
 npm run verify:offline  # proves the build boots with no network (a PAGES=1 build)
-npm run verify:geometry # the dock: the sheet never moves between tools and tabs
+npm run verify:geometry # the dock holds still; 44px targets; 200% text; the app bar
 PAGES=1 npm run build   # production build for the GitHub Pages sub-path
 npm run sync:styleguide # re-vendor the style guide from ../styleguide
 ```
@@ -46,11 +46,11 @@ npm run build && npm run check:save   # the save flow in the built app, tapped
 npm run build && npm run check:touch  # tap-to-select on the sheet, touched
 ```
 
-The four that can fail run in CI after `verify`, with the harness's parity
-gate (`npm run harness -- --out p.json --no-hashes --parity 1000`: the
-preview's entry point and the export's give the same bytes); `measure:export`
-runs there too, for the record (see "Every pixel of the photo, measured" and
-"What an export holds").
+The four that can fail run in CI after `verify`, `verify:offline` and
+`verify:geometry`, with the harness's parity gate (`npm run harness -- --out
+p.json --no-hashes --parity 1000`: the preview's entry point and the export's
+give the same bytes); `measure:export` runs there too, for the record (see
+"Every pixel of the photo, measured" and "What an export holds").
 
 `verify` is one script rather than four commands so that "it's green" means the
 same thing locally as it does in CI. Running the steps by hand once let a
@@ -897,7 +897,15 @@ keyboard patterns are in `ui/` instead (two owners of `aria-selected` fight).
 The app's own CSS is unlayered, so it beats every `sg.*` layer without
 `!important`, and so it holds no bare element rules (a `button {}` would strip
 every button the style guide draws) and no colour literals: components read
-the style guide's roles. The palette is the guide's `default`, the true
+the style guide's roles. `npm run verify` holds it to that: `scripts/check-css.mjs`
+is the honest subset of the style guide's own lint (which lints the style
+guide's source tree and is not vendored) that a file can show — no blur or
+backdrop filter, no blurred shadow written as a number, no colour literal
+(the symbols' SVG masks aside), no font size in px, no `outline: none`
+without a replacement, no `!important`, no rule whose subject is a bare
+button, input, select or textarea. It runs its own cases first, so a check
+that has stopped catching what it names fails before the app's files are
+read. What only a render can judge (contrast, the look) is the screenshots'. The palette is the guide's `default`, the true
 neutral grey (`<html data-palette="default">`): this app exists to judge ink
 and paper colour, and chrome with a hue shifts how the inks read. The Riso pink
 is an ink, and the app icon, never chrome. `theme-color` is the guide's
@@ -935,7 +943,28 @@ not assumed: `npm run verify:geometry` opens every tool, sub-tab and Over-photo
 state at 320, 375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
 fails if the sheet moves by a pixel, if a panel overflows, or if the page
 scrolls sideways. Border Studio's README claims such a suite and has no file
-for it; this one is a file.
+for it; this one is a file, and it checks more:
+
+- **Targets** by the hit area each control still owns: from its centre, how
+  far each way a tap lands on it (`elementFromPoint`), counting its `::after`
+  hit area and losing whatever a neighbour covers — 44 px both ways for every
+  enabled button, field, tab and menu row in the bar, the dock, the cards and
+  each dialog. That is also the style guide's "8 px between targets": the gap
+  is what lets two 36 px circles each own 44. The strip's name line is 36 px
+  over the 44 px slider row, so its name and value grow their hit areas
+  upward, into the gap over the strip (Border Studio's name and value, on
+  the same geometry, own 40 px).
+- **200% text** (`font-size: 200%` on `<html>`): every state and dialog with
+  no text cut off by a clipping box, and no sideways scroll. The dock may
+  scroll and the sheet shrink; nothing is lost.
+- **The app bar** at every width from 320 to 430 px, at 100% and 200% text:
+  one row of actions, Save's word on one line, nothing past the bar, and the
+  layout steps full → compact → tight as it narrows (tight only when the
+  title needs a second line).
+
+`--shots <dir>` writes the review set: every state, dialog and save state at
+320 and 390 px in both themes, 200% text at 390, and the wire palette (the
+style guide's squint test).
 
 Every numeric setting is one strip: its name and value on one line (the value
 a button: tap it to type an exact number, in the units you read — "50", not

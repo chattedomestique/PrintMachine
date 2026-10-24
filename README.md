@@ -900,15 +900,18 @@ The app's own CSS is unlayered, so it beats every `sg.*` layer without
 `!important`, and so it holds no bare element rules (a `button {}` would strip
 every button the style guide draws) and no colour literals: components read
 the style guide's roles. `npm run verify` holds it to that:
-`scripts/check-css.mjs` is the honest subset of the style guide's own lint
-(which lints the style guide's source tree and is not vendored) that a file
-can show — no blur or backdrop filter, no blurred shadow written as a number,
-no colour literal (the symbols' SVG masks aside), no font size in px, no
-`outline: none` without a replacement, no `!important`, no button, input,
-select or textarea without a class of its own anywhere in a selector. It runs
-its own cases first, so a check that has stopped catching what it names fails
-before the app's files are read. What only a render can judge (contrast, the
-look) is the screenshots'.
+`scripts/check-css.mjs` is a subset of the style guide's own lint (which
+lints the style guide's source tree and is not vendored) — no blur or
+backdrop filter, no gradient that blends (a hard-stop one, as for a meter or
+a hatch, passes, as in the guide's lint), no blurred shadow written as a
+number, no `drop-shadow()` or `text-shadow`, no colour literal (the symbols'
+SVG masks aside), no font size in px, no `outline: none` without a
+replacement, no `!important`, no button, input, select or textarea without a
+class of its own anywhere in a selector. A subset: the guide's lint also reads
+token use and line weights drawn with shadows, among others, which this does
+not. It runs its own cases first, so a check that has stopped catching what it
+names fails before the app's files are read. What only a render can judge
+(contrast, the look) is the screenshots'.
 
 The palette is the guide's `default`, the true neutral grey (`<html
 data-palette="default">`): this app exists to judge ink and paper colour, and
@@ -928,23 +931,23 @@ either: the status card is nearest the dock, because it holds the one action
 its state needs (Cancel, ×, Choose again), and on a small phone at large text
 whatever does not fit gives way at the top, under the bar; the status card's
 own words scroll before its action leaves the screen. A toast takes room only
-while it is on screen. That port reads a few of the style guide's button-private properties,
-which is why the vendored commit is pinned and why a sync must be followed by
-`npm run verify:geometry`.
+while it is on screen. That port reads a few of the style guide's
+button-private properties, which is why the vendored commit is pinned and why a
+sync must be followed by `npm run verify:geometry`.
 
 **What the gates check, and what they cannot.** `check-css` (in `verify`) holds
-the app's CSS to the style guide's rules a file can show; `verify:geometry`
-holds the dock to its one geometry, every control to a 44 px target it owns,
-200% text to no clipped words and the app bar to one row (see "The dock"). Both
-run in CI. None of them sees colour: contrast is the style guide's own,
-verified in its repository for the `default` palette and not re-run here, and
-the app adds no colour of its own (the inks and stocks are data, shown with
-their names). None of them is an iPhone: Safari's real touch slop, VoiceOver's
-reading order, Larger Text past 200%, the safe areas and the home-screen app
-are DEVICE-CHECKLIST items. And none of them has taste: the review screenshots
-(`npm run verify:geometry -- --shots <dir>`, read beside Border Studio's at
-the same widths) are where a screen that passes and still looks wrong is
-caught.
+the app's CSS to the subset of the style guide's rules listed above;
+`verify:geometry` holds the dock to its one geometry, every control to a 44 px
+target it owns, 200% text to no clipped words and the app bar to one row (see
+"The dock"). Both run in CI. None of them sees colour: contrast is the style
+guide's own, verified in its repository for the `default` palette and not
+re-run here, and the app adds no colour of its own (the inks and stocks are
+data, shown with their names). None of them is an iPhone: Safari's real touch
+slop, VoiceOver's reading order, Larger Text past 200%, the safe areas and the
+home-screen app are DEVICE-CHECKLIST items. And none of them has taste: the
+review screenshots (`npm run verify:geometry -- --shots <dir>`, read beside
+Border Studio's at the same widths) are where a screen that passes and still
+looks wrong is caught.
 
 ### The dock
 

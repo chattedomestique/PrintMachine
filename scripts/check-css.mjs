@@ -6,14 +6,24 @@
  *
  * The style guide's own lint (its tests/lint.mjs: a CSS tokenizer, undefined
  * tokens, layering, AI tells, unknown classes...) is not vendored: it lints
- * the style guide's source tree, not an app. This is the honest subset that
- * holds for the app's CSS (every .css under src/ but src/vendor, and any
- * <style> in index.html), each rule with the reason it exists:
+ * the style guide's source tree, not an app. This is the subset of its rules
+ * that holds for the app's CSS (every .css under src/ but src/vendor, and any
+ * <style> in index.html), each rule with the reason it exists. It is a
+ * subset: the guide's lint also reads, among others, token use, line weights
+ * drawn with shadows, and a blur hidden in a filter: url(); the review
+ * screenshots and the guide's squint test are where those are seen.
  *
  *  - blur          no `backdrop-filter`, no `blur(`: flat, no glass (rule 2).
+ *  - gradient      no gradient that blends (linear, radial, conic, repeating):
+ *                  flat fills only (rule 2). A hard-stop gradient (each colour
+ *                  starts where the last ends: a meter, a hatch) is allowed,
+ *                  as the style guide's lint allows it.
  *  - soft-shadow   no box-shadow with a non-zero blur written as a number: a
  *                  shadow is hard-edged and means "you can press this" (rule
  *                  2). A blur given through var() or calc() is not read.
+ *  - drop-shadow   no `drop-shadow()` and no `text-shadow` at all, as in the
+ *                  style guide's lint: shadows are hard-edged and only on what
+ *                  you can press, and neither is how one is drawn (rule 2).
  *  - colour        no colour literal (hex, rgb(), hsl(), hwb(), lab(), lch(),
  *                  oklab(), oklch(), color(), a named colour): components
  *                  read roles (rules 6, golden 1). The symbols' SVG data URIs
@@ -154,6 +164,37 @@ function parse(css) {
   return rules
 }
 
+/** The text inside the parentheses that open at `open` (the index of '('). */
+function argsAt(text, open) {
+  let depth = 0
+  for (let j = open; j < text.length; j++) {
+    if (text[j] === '(') depth++
+    else if (text[j] === ')' && --depth === 0) return text.slice(open + 1, j)
+  }
+  return text.slice(open + 1)
+}
+
+/** Whether a gradient's stops never blend: every colour starts where the one
+ *  before it ends (or at 0), the style guide's gradientIsFlat. */
+function gradientIsFlat(args) {
+  const stops = splitTop(args, ',')
+    .map((p) => p.trim())
+    .filter((p) => !/^(to\s|-?\d+(\.\d+)?(deg|turn|rad|grad)\b|circle|ellipse|closest|farthest|at\s|from\s|in\s)/i.test(p))
+    .map((p) => {
+      const toks = splitTop(p, ' ').filter(Boolean)
+      return { colour: toks[0], p1: toks[1], p2: toks[2] ?? toks[1] }
+    })
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1]
+    const b = stops[i]
+    if (a.colour === b.colour) continue
+    const atStart = b.p1 === '0' || b.p1 === '0%'
+    const meets = b.p1 !== undefined && a.p2 !== undefined && b.p1 === a.p2
+    if (!atStart && !meets) return false
+  }
+  return true
+}
+
 /** True when a complex selector's subject or any compound is a bare
  *  button/input/select/textarea, or the whole selector is a lone `*`. */
 function bareIn(selector) {
@@ -201,6 +242,11 @@ export function checkCss(css) {
       if (/!\s*important/.test(v)) add(line, 'important', `${prop}: ${value}`)
       if (/(^|-)backdrop-filter$/.test(prop)) add(line, 'blur', `${prop} (no glass)`)
       if (/\bblur\(/.test(v)) add(line, 'blur', `${prop}: ${value}`)
+      for (const m of v.matchAll(/\b(repeating-)?(linear|radial|conic)-gradient\(/g)) {
+        if (!gradientIsFlat(argsAt(v, m.index + m[0].length - 1))) add(line, 'gradient', `${prop}: ${value} (a blend; flat fills only)`)
+      }
+      if (/\bdrop-shadow\(/.test(v)) add(line, 'drop-shadow', `${prop}: ${value}`)
+      if (prop === 'text-shadow' && !/^none$/.test(v.trim())) add(line, 'drop-shadow', `${prop}: ${value}`)
       if (/shadow/.test(prop)) {
         // Per layer: the lengths are offset-x, offset-y, blur, spread, with
         // the colour first or last; the blur is the third length.
@@ -236,6 +282,15 @@ const CASES = [
   ['.a { --_shadow: 2px 2px 0.5rem var(--line); }', 'soft-shadow'],
   ['.a { box-shadow: 2px 2px 0 0 var(--line), inset 0 0 0 2px var(--paper); }', null],
   ['.a { box-shadow: 0 0 0 var(--ring-offset) var(--paper); }', null],
+  ['.a { background: linear-gradient(var(--ink), var(--paper)); }', 'gradient'],
+  ['.a { background-image: radial-gradient(circle at 50% 50%, var(--ink), transparent 70%); }', 'gradient'],
+  ['.a { --track: conic-gradient(from 90deg, var(--ink) 25%, var(--paper) 40%); }', 'gradient'],
+  ['.a { background: linear-gradient(to right, var(--ink) 50%, var(--paper) 50%); }', null],
+  ['.a { background: repeating-linear-gradient(45deg, var(--ink) 0 2px, transparent 2px 6px); }', null],
+  ['.a { filter: drop-shadow(0 2px 4px var(--ink)); }', 'drop-shadow'],
+  ['.a { filter: drop-shadow(2px 2px 0 var(--ink)); }', 'drop-shadow'],
+  ['.a { text-shadow: 0 0 1px var(--ink); }', 'drop-shadow'],
+  ['.a { text-shadow: none; }', null],
   ['.a { color: #ff48b0; }', 'colour'],
   ['.a { background: rgb(0 0 0 / 0.5); }', 'colour'],
   ['.a { --x: oklch(0.7 0.1 30); }', 'colour'],

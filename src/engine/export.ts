@@ -238,7 +238,7 @@ export function canShareFile(file: File): boolean {
  * download only where `allowDownload` says that is safe. In an iOS home-screen
  * app it is not — `<a download>` navigates to the image and takes the app
  * with it — so the error is thrown and the caller keeps the file and the
- * "Save to Photos" button for another tap.
+ * Share button for another tap.
  */
 export async function deliverFile(file: File, opts: { allowDownload: boolean }): Promise<Delivery> {
   if (canShareFile(file)) {

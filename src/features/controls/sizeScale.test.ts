@@ -8,7 +8,9 @@ import { describe, expect, it } from 'vitest'
 import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX, SIZE_STEP } from '../../engine/limits.ts'
 import { defaultSettings, makeLayer } from '../../state/defaults.ts'
 import { applySettings } from '../../state/settingsReducer.ts'
-import { SIZE_RANGE_TEXT, formatSize, fromDisplay, parseSize, stepSize, toDisplay } from './sizeScale.ts'
+import { committedValue, rangeText } from '../../ui/param.ts'
+import { sizeParam } from './params.ts'
+import { formatSize, fromDisplay, stepSize, toDisplay } from './sizeScale.ts'
 
 describe('the size display: a tenth of the sheet reads 100%', () => {
   it('maps the stored size to the shown percent', () => {
@@ -19,25 +21,29 @@ describe('the size display: a tenth of the sheet reads 100%', () => {
     expect(fromDisplay(100)).toBe(0.1)
   })
 
+  // What a person types into the Size strip's value (ui/param.ts, with the
+  // Size parameter of params.ts).
+  const typed = (text: string) => committedValue(sizeParam(makeLayer(), () => undefined), text)
+
   it('round-trips every whole percent from 10 to 1200 through what a person types', () => {
     for (let pct = 10; pct <= 1200; pct++) {
-      const size = parseSize(String(pct))
+      const size = typed(String(pct))
       expect(size).toBe(fromDisplay(pct))
       expect(toDisplay(size!)).toBe(pct)
-      expect(parseSize(`${pct}%`)).toBe(size)
-      expect(parseSize(` ${pct} % `)).toBe(size)
+      expect(typed(`${pct}%`)).toBe(size)
+      expect(typed(` ${pct} % `)).toBe(size)
     }
   })
 
   it('snaps a typed value to the step, clamps it to the range, and refuses what is not a size', () => {
-    expect(parseSize('40.4')).toBe(0.04)
-    expect(parseSize('5')).toBe(SIZE_MIN)
-    expect(parseSize('5000')).toBe(SIZE_MAX)
-    for (const bad of ['-5', 'x', '', '%', '4 0', '1e3', '--1']) expect(parseSize(bad)).toBeNull()
+    expect(typed('40.4')).toBe(0.04)
+    expect(typed('5')).toBe(SIZE_MIN)
+    expect(typed('5000')).toBe(SIZE_MAX)
+    for (const bad of ['-5', '\u22125', 'x', '', '%', '4 0', '1e3', '0x10', 'Infinity', '--1', '40%%']) expect(typed(bad)).toBeNull()
   })
 
   it('states the range a typed value may take', () => {
-    expect(SIZE_RANGE_TEXT).toBe('10% to 1200%')
+    expect(rangeText(sizeParam(makeLayer(), () => undefined))).toBe('10% to 1200%')
   })
 })
 

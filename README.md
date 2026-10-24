@@ -31,9 +31,11 @@ npm run dev        # http://localhost:5173
 ```
 
 ```sh
-npm run verify         # the gate: lint + typecheck + test + build
-npm run verify:offline # proves the build boots with no network
-PAGES=1 npm run build  # production build for the GitHub Pages sub-path
+npm run verify          # the gate: lint + typecheck + test + build
+npm run verify:offline  # proves the build boots with no network (a PAGES=1 build)
+npm run verify:geometry # the dock: the sheet never moves between tools and tabs
+PAGES=1 npm run build   # production build for the GitHub Pages sub-path
+npm run sync:styleguide # re-vendor the style guide from ../styleguide
 ```
 
 ```sh
@@ -66,9 +68,13 @@ src/
   state/     the document: its schema and load-time normaliser, defaults,
              persistence, and one settings reducer + Context over a coalescing
              undo/redo hook. Tested in node like the engine.
-  ui/        token-driven, app-agnostic primitives.
+  ui/        the style guide's elements as React components (Segmented, Tabs,
+             Switch, SwatchSet, ActionSheet, the Slider and its parameter
+             strip), app-agnostic: nothing in it knows what a print is.
   features/  app-aware composition — the only layer that knows what the app is.
-  styles/    tokens.css (the design system) + index.css.
+  styles/    the app's own CSS over the style guide: index.css (app facts),
+             editor.css (the planes), dock.css (the panels), shell.css.
+  vendor/    the style guide, vendored (never edited here; see "Design system").
 ```
 
 Node has no 2D context, so everything after the type is rasterised and the
@@ -135,11 +141,12 @@ playbook records — installable, and blank offline.
 
 **On iOS the build being correct is not sufficient.** A home-screen PWA has to
 be launched once *while online* before it will ever open offline; going straight
-from "Add to Home Screen" into airplane mode fails regardless. The dot beside
-the wordmark reports when precaching has finished, so that state is visible
-before you are somewhere without signal rather than discovered there. It is only
-as honest as the manifest, though — a truncated one would still turn it green,
-which is what the CI check is for.
+from "Add to Home Screen" into airplane mode fails regardless. The More sheet
+says when precaching has finished ("Works offline", with an icon, never a
+colour alone), and the status region says it once when it happens, so that
+state is visible before you are somewhere without signal rather than
+discovered there. It is only as honest as the manifest, though — a truncated
+one would still say it is ready, which is what the CI check is for.
 
 ### The photo is the paper
 
@@ -219,12 +226,12 @@ print that ink, and the photo is cut back to paper wherever it is darker than
 the ink, so one colour reads across the whole photograph — the riso way, with
 the ink still transparent. The choice comes first in the second-ink picker, and
 it follows the plate when its ink changes. It has no Switch point: both halves
-print the same ink, so moving the switch would change nothing, and the panel
+print the same ink, so moving the switch would change nothing, and the dock
 does not offer it.
 
 ### The press: two screens, two kinds of wear
 
-A Riso driver screens with dots or with grain, so the Press tab offers exactly
+A Riso driver screens with dots or with grain, so the Press tool offers exactly
 those: **Halftone** (round dots on an angled lattice, a different angle per
 plate so the screens beat into a rosette) and **Grain** (Atkinson error
 diffusion, which carries only 6/8 of the error and so blows out highlights and
@@ -363,22 +370,22 @@ canvases are made:
   (`MAX_AREA`, `engine/exportPlan.ts`), the most a browser canvas is guaranteed
   to hold, and no edge cap. A print whose photo would land above it pixel for
   pixel (a 24 MP photo on its own Original sheet) is the one resample, made at
-  Save and stated in the caption; the stored photo keeps every pixel, and the
+  Save and stated before the tap; the stored photo keeps every pixel, and the
   same photo on a 4:5 sheet saves at its own 3427x4284. Saving above the
   ceiling would need tiled rendering and a JavaScript encoder, which are not
   built.
 
 Photos saved by an older build are the 2048 px copies it made; the originals
 are gone. Such a photo (no `native` flag, a long edge of exactly 2048) carries
-a note in the Photo panel: "This photo was saved at reduced size by an older
+a note in the Photo tool's File tab: "This photo was saved at reduced size by an older
 version. Choose it again for full resolution."
 
 **A photo cannot silently drop out of a print.** If the stored image is missing
-or cannot be decoded, the Photo panel says so ("This photo could not be loaded.
-Choose it again.") for as long as it is true, and so does Save, whichever tool
-is open: Save cannot be pressed, its label carries the sentence, and the line
-above it shows the same sentence as an alert in place of the size it would
-save. Nothing is ever saved as the type on bare paper.
+or cannot be decoded, the Photo tool's File tab says so ("This photo could not
+be loaded. Choose it again.") for as long as it is true, and so does Save,
+whichever tool is open: Save cannot be pressed, its name carries the sentence,
+and the status card above the dock shows the same sentence as an alert, with
+Choose again. Nothing is ever saved as the type on bare paper.
 
 #### Why the bytes are not in localStorage
 
@@ -422,9 +429,9 @@ part of the picture.
 A plate takes a backing **or** a second ink, never both. The second ink decides
 each glyph's ink from the photo's luminance, but over a backing the real ground
 is the block, so a light second ink chosen for a dark patch of photo would land
-on the block and vanish. The Ink panel offers them as one choice — Over the
-photo: Off, Second ink, Backing — and the document rules hold it in the reducer
-and the normaliser too.
+on the block and vanish. The Ink tool offers them as one choice — Over photo:
+Off, Second ink, Backing — and the document rules hold it in the reducer and
+the normaliser too.
 
 Saved prints with word-picked boxes open with a backing in the ink of the
 first box that printed: per-line instead of per-word, and, because a plate
@@ -439,7 +446,7 @@ At most **3 text plates and 4 pressed passes** — a backing is a pass of its
 own, while a second ink is pressed once and then split, so it counts once.
 Every pass is a full press at export resolution, so the cap is what keeps the
 worst export knowable on a phone. Over budget, Add and Backing are disabled and
-the panel says why. A print saved with more plates keeps all of them: dropping
+the dock says why. A print saved with more plates keeps all of them: dropping
 a plate would destroy work, and a slow save is recoverable.
 
 ### Type: one size, set as typed
@@ -449,12 +456,18 @@ a tenth of the sheet reads **100%** (`size x 1000`). The slider runs 10% to
 100% in 1% steps — 90 positions, with captions and short lines (the old
 readout's 1-4%, now 10-40%) on the first third of the travel instead of its
 first two percent. A step changes the size by at most 10% of itself at the
-small end, about 3 px of travel on a 320 px phone. Bigger type is still there:
-a pinch, the `+`/`-` keys (5% a press, never less than one step) and Fit reach
-1200%; past 100% the thumb pins at the end and the readout shows the true
-value. A new plate opens at 40%; the default print's headline is 90% and its
-stamp 60%, both inside the travel. The stored unit did not change, so a saved
-print opens at exactly the size it was (a saved 0.8 reads 800%).
+small end, 1.9 px of travel on a 320 px phone (measured on the real track,
+between its [−] and [+], by `scripts/verify-geometry.mjs`); the [−] and [+]
+take one step each, and a tap on the value types an exact one. Bigger type is
+still there: a pinch, the `+`/`-` keys (5% a press, never less than one step),
+Fit and a typed value reach 1200%; past 100% the thumb pins at the end, the
+readout shows the true value, and [−] steps down from it (240%, then 239%).
+Dragging a pinned thumb jumps the size to where the finger lands, as any range
+input does; a nudge, a typed value and a double-tap reset never do. A new
+plate opens at 40%, which is also where a double-tap on the track resets; the
+default print's headline is 90% and its stamp 60%, both inside the travel. The
+stored unit did not change, so a saved print opens at exactly the size it was
+(a saved 0.8 reads 800%).
 
 The text prints exactly as typed — there is no case switch (the keyboard asks
 iOS for capitals already) and no hidden transform. The size is the size: **Fit**
@@ -606,40 +619,45 @@ print made smaller (never under 1800 px tall); a print with no photo saves at
 3600 px tall. The one ceiling is the export canvas's area, 16.7 MP: a 24 MP
 photo on its own Original sheet saves at 4729×3547, and says so.
 
-It says so **before** the tap. The line above the toolbar reads "Saves
+It says so **before** the tap. The More sheet's first row reads "Saves
 2419×3024", and when the print is not the photo's own pixels, why, in numbers:
 "photo is 1600×1200: upscaled 1.5x", or "capped at 16.7 MP, the most a browser
-canvas is guaranteed to hold; photo is 5712×4284". The confirmation repeats the
-size. Nothing falls back to a smaller file: a press that fails stops, with the
-reason and the numbers, and a smaller copy is only ever one the person chose.
+canvas is guaranteed to hold; photo is 5712×4284". Save's own name carries the
+size ("Save 2419×3024 JPEG"), the toast repeats size and reason the moment a
+save starts, and the confirmation repeats the size. Save itself stays one word,
+so the app bar never wraps. Nothing falls back to a smaller file: a press that
+fails stops, with the reason and the numbers, and a smaller copy is only ever
+one the person chose.
 
 A print at the photo's own resolution is seconds of work on a phone, so Save
 is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
 
-- **Pressing.** The label changes before any work starts (two painted
-  frames), then "Pressing 3024×3780, plate 2 of 3", with Save turned into
-  **Cancel**. The press runs through `renderPrintAsync`, which runs the very
-  stages the preview runs and yields to the page between them, so the progress
-  paints and Cancel works, up to the file itself: a Cancel tapped while the
-  file is being encoded (a second or more on a phone) leaves no file. The
-  preview stops rendering meanwhile (a full-size press and a preview frame
-  never hold their buffers together), and the rest of the page is inert,
-  keyboard undo included, so the document cannot change under the press and
-  the file is the print on screen. The two entry points print the same bytes
+- **Pressing.** Save reads **Saving** before any work starts (two painted
+  frames), and the status card above the dock says "Pressing 3024×3780, plate
+  2 of 3", with **Cancel**. The press runs through `renderPrintAsync`, which
+  runs the very stages the preview runs and yields to the page between them,
+  so the progress paints and Cancel works, up to the file itself: a Cancel
+  tapped while the file is being encoded (a second or more on a phone) leaves
+  no file. The preview stops rendering meanwhile (a full-size press and a
+  preview frame never hold their buffers together), and the rest of the page
+  is inert (the status card and its Cancel aside), keyboard undo included, so
+  the document cannot change under the press and the file is the print on
+  screen. The two entry points print the same bytes
   at the same height: `npm run harness -- --out p.json --no-hashes --parity
   1000` renders every harness document through both and fails if any differs.
 - **Sharing.** The share sheet needs the tap that opens it to be recent, and a
   press outlasts it. A press that finished within a second of the tap would
   share at once, but at a photo's own resolution none does (a print with no
-  photo, 2880×3600, takes over 4 s on a desktop): Save becomes **Save to
-  Photos (6.2 MB)**, a fresh tap that shares the file already made. A share
-  that fails keeps the file and the button: in a home-screen app it never
-  falls through to a download, which on iOS navigates to the image and takes
-  the app with it. On a desktop with no share sheet the file downloads.
+  photo, 2880×3600, takes over 4 s on a desktop): Save becomes **Share** and
+  the card says "3024×3780 is ready (6.2 MB)", a fresh tap that shares the file
+  already made (the card's × lets it go). A share that fails keeps the file and
+  the button: in a home-screen app it never falls through to a download, which
+  on iOS navigates to the image and takes the app with it. On a desktop with
+  no share sheet the file downloads.
 - **The file.** JPEG at quality 0.95 (measured on the harness fixture: 1.20x
   to 1.37x the bytes of 0.92, for cleaner dot edges). Below quality 1.0
   browsers store JPEG colour at half resolution (4:2:0), the one loss a quality
-  setting cannot remove, so **PNG** sits beside Save as the lossless file.
+  setting cannot remove, so **Save lossless PNG** is in the More sheet.
 - **Too big for this device.** Over its limit an iOS canvas does not throw: it
   hands back a blank one, and the print would come out as empty paper. So both
   of the press's canvases are proved at full size before any work — a sentinel
@@ -689,7 +707,7 @@ down) of at least 0.98 of the original's and a correlation of at least 0.999,
 with the file the size the plan says and the stored photo the picked file byte
 for byte; the two controls are the ways this app used to draw a photo, and the
 script fails if either passes. The same 5712x4284 photo on its own Original
-sheet meets the one ceiling and is saved at 4729x3547, with the caption "capped
+sheet meets the one ceiling and is saved at 4729x3547, saying "capped
 at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is
 5712×4284". A JPEG whose EXIF says to rotate it saves upright, a PNG's
 transparent hole prints as paper (never black), a document whose stored photo
@@ -699,12 +717,13 @@ and two documents of small type correlate with themselves at twice the height
 0.95.
 
 `scripts/check-save.mjs` taps the same flow in the built app: a 12 MP photo on
-4:5 (the button reads Cancel within 100 ms, the line counts the press, the file
-is the size the caption promised), a device whose canvases come back blank
+4:5 (Save reads Saving and the card offers Cancel within 100 ms, the card
+counts the press, the file is the size the More sheet and Save's name
+promised), a device whose canvases come back blank
 above 5 MP (the smaller-copy question before anything is pressed, then that
 file), a tab closed mid-press (the notice at the next launch, its choices
 waiting, and saying so, until the photo is back), a stored photo
-deleted (Save says so, and no file), a Cancel tapped while the file is
+deleted (the card and Save say so, and no file), a Cancel tapped while the file is
 encoded (no file, with a share sheet or without) and Ctrl+Z pressed during a
 press (the document stays as it was, and the file is that print).
 
@@ -858,39 +877,120 @@ untouched — it presses at the photo's own resolution, through its own entry
 point, and keeps no cache at all: it reads the noise where it prints it (see
 "What an export holds").
 
-<!-- WP3: Touch and Layout are rewritten for the style guide's dock in WP3. -->
+### Design system
+
+The interface is built on the owner's style guide, vendored exactly as Border
+Studio (the app this one follows) vendors it: `scripts/sync-styleguide.mjs`
+copies the core CSS, the icon masks, the Archivo font and fourteen elements
+(button, card, appbar, toolbar, tabs, segmented, slider, switch, swatch,
+select, input, dialog, menu, spinner) into `src/vendor/styleguide/`, and the
+layout-only scripts (core's `SG.fit`, the segmented control's fit, the
+toolbar's paging, and the scrubber script only because the toolbar calls its
+`SG.afterParse`) into `public/sg/`. `VERSION.md` records the commit
+(`e38263e`). The copies are never edited here: `npm run sync:styleguide`
+re-vendors them from a sibling checkout, and `npm run verify:geometry` then
+proves the dock still holds still. The style guide's scripts that own state
+(tabs, slider, dialog, menu) are not loaded: React owns that state, so their
+keyboard patterns are in `ui/` instead (two owners of `aria-selected` fight).
+
+The app's own CSS is unlayered, so it beats every `sg.*` layer without
+`!important`, and so it holds no bare element rules (a `button {}` would strip
+every button the style guide draws) and no colour literals: components read
+the style guide's roles. The palette is the guide's `default`, the true
+neutral grey (`<html data-palette="default">`): this app exists to judge ink
+and paper colour, and chrome with a hue shifts how the inks read. The Riso pink
+is an ink, and the app icon, never chrome. `theme-color` is the guide's
+`--canvas`, resolved in a browser: #F5F5F5 light, #0E0E0E dark. The guide
+needs a 2024 browser (`light-dark()`, `:has()`, container queries), which an
+iOS-first PWA in 2026 has.
+
+The editor is Border Studio's three planes (`styles/editor.css`, ported with
+its `--ed-*` names): the stage, where the sheet sits; the tray, the dock one
+step up, whose controls have no frames and do not lift; and the floating plane,
+where whatever opens on top (sheets, dialogs, the toast, the save's status
+card, the gesture hint) gets its frame back over a scrim. That port reads a few
+of the style guide's button-private properties, which is why the vendored
+commit is pinned and the geometry gate runs after every sync.
+
+### The dock
+
+Four tools — **Type, Ink, Photo, Press** — are a toolbar of toggle buttons,
+not tabs: tapping the open tool closes its panel for a full-height sheet, and a
+tab cannot be "none open". Each tool's panel is two bands of fixed height: a
+head row (the plate button, on Type and Ink, then the sub-tabs) and a content
+area of one options row, a hairline and one parameter strip (141 px). A feature
+that does not fit is a sub-tab, never another row:
+
+| Tool | Sub-tabs |
+|---|---|
+| Type | Text (the words) · Face (typeface, Bold) · Size (Fit, Size) · Space (alignment; line height, tracking) · Place (rotation, position) |
+| Ink | Ink (the plate's ink, from the 77 in a dialog) · Over photo (Off, Second ink, Backing; the second ink and its Switch point, or the backing's ink) |
+| Photo | Sheet (Original, 1:1, 4:5, 3:4, 2:3; paper over the photo) · Frame (zoom, position) · File (choose, replace, remove) |
+| Press | Screen (halftone or grain; screen size) · Press (Re-roll; ink, misregistration, Edge, Wear) · Paper (the stock) |
+
+The panel is the same height in every tool and every tab, so **the sheet never
+changes size or place between them** (Border Studio fcd91ff). That is checked,
+not assumed: `npm run verify:geometry` opens every tool, sub-tab and Over-photo
+state at 320, 375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
+fails if the sheet moves by a pixel, if a panel overflows, or if the page
+scrolls sideways. Border Studio's README claims such a suite and has no file
+for it; this one is a file.
+
+Every numeric setting is one strip: its name and value on one line (the value
+a button: tap it to type an exact number, in the units you read — "50", not
+"0.05" — with the whole range stated), and under them `[−] slider [+]`. The
+[−] and [+] step once (the single-pointer alternative to dragging, WCAG 2.5.7)
+and a double-tap on the track resets to the default, which is read from the
+document's own defaults, never retyped (a test holds them equal). A panel with
+several settings shows one at a time: tap its name, or swipe up from it, for
+the others (Border Studio 4860519). Size, Rotation and Position have two
+ranges: the slider spans where people work (10–100%, ±45°, the sheet) while a
+pinch, the keys, a nudge and a typed value reach the whole range (1200%,
+±180°, 30% past the trim); the thumb then pins at the end and the value shows
+the truth.
+
+The plate the panel edits is the button at the start of the head row of both
+Type and Ink — one selection, reachable from the tool you edit in — and it
+opens a sheet to switch plate, add one (with the reason when the budget is
+spent) or remove this one. A second control a setting needs (the second ink
+beside its Switch point) leads its strip instead of costing a row.
+Explanations that used to sit under the controls are descriptions for screen
+readers; the why is here, in this README.
+
 ### Touch
 
-Gestures are scoped per control rather than left to the browser's guess.
-Sliders take `touch-action: none` so a thumb drag with any vertical component
-moves the value instead of scrolling the drawer; horizontal strips (swatches,
-segmented controls, tabs, the plate strip) take `pan-x` so a swipe along one
-cannot drift into a vertical scroll; the scrolling panel takes `pan-y` with
-contained overscroll so a flick off its end never bounces the page behind it.
-
-On the sheet: drag to move, two-finger pinch to scale and rotate, double-tap to
-centre. With the Photo tab open the same gestures pan and zoom the photo
+The sheet's surface takes `touch-action: none`, so its gestures are never the
+browser's: drag to move, two-finger pinch to scale and rotate, double-tap to
+centre. With the Photo tool open the same gestures pan and zoom the photo
 instead (100–400%, never off the sheet), and double-tap fits it again. A finger
 lifting mid-pinch re-seeds the gesture from the remaining one, so the layer
-keeps panning instead of jumping. Every gesture writes the same layer fields
-the sliders write, and arrow keys / +- / brackets mirror all of it for
-keyboards. The selected plate shows a crosshair on the sheet — the one editing
-aid, and it never reaches a saved file.
+keeps panning instead of jumping. Every gesture writes the same fields the
+parameter strips write, so each has a tap equivalent (Size, Rotation and
+Position X/Y for type; Zoom and Position for the photo), and arrow keys / +- /
+brackets mirror it for keyboards. The selected plate shows a crosshair on the
+sheet — the one editing aid, and it never reaches a saved file. The first photo
+brings a one-line gesture hint, dismissed for good with its ×.
+
+A slider's input takes `touch-action: none`, so a drag with any vertical
+component moves the value; nothing in the dock scrolls at 100% text (at large
+text the panel may, rather than push the sheet off the screen).
 
 ### Layout
 
-The controls are a fixed overlay, not a flow sibling. Their live height is
-measured with a `ResizeObserver` and published as `--overlay-h`, which the
-canvas reserves as bottom padding — so the sheet is always as large as it can
-be, re-measuring as panels open and close. Tapping the open tab collapses the
-drawer entirely for a full-height sheet.
+The dock is a fixed overlay, not a flow sibling. Its live height is measured
+with a `ResizeObserver` (its border box: its safe-area padding counts) and
+published as `--overlay-h` on the app and on `:root`, which the stage reserves
+as bottom padding — so the sheet is always as large as it can be. The dock is
+one height in every panel, so the only change is opening and closing it, and
+that is not animated on the stage. On a wide screen the app is a phone-width
+column, centred.
 
 `engine/` must never import from `state/`, `ui/`, or `features/`, and must never
 touch React or the DOM beyond a canvas context handed to it. That constraint is
 what lets the export path re-render a fresh, overlay-free frame with the exact
-same code the preview uses.
+same code the preview uses. `ui/` knows nothing about riso and imports nothing
+from `engine/`.
 
-<!-- WP3: this list changes with the move to the style guide in WP3. -->
 ## Deliberate deviations from the playbook
 
 - **TypeScript, not the JS that Borders used.** The playbook makes TS strict the
@@ -903,9 +1003,11 @@ same code the preview uses.
   lifted verbatim with credit and the screening/dithering is reimplemented as
   pure typed-array code, per §1.3 ("use the best algorithm, the best port — note
   the provenance and move on") and §14 ("don't add heavy dependencies").
-- **Neutral gray chrome, not the playbook's warm `#F1EBE2`.** This app's job is
-  showing what ink looks like on paper; tinted chrome shifts how the inks read.
-  The one accent is Riso Fluorescent Pink.
+- **The style guide's `default` palette, not Border Studio's `sand`.** Sand
+  tints the stage (chroma 0.013) right around a sheet whose whole job is judging
+  ink and stock colour; `default` is chroma 0, the style guide's own
+  photo-editor reference. The Riso pink is an ink, not chrome (white on it is
+  3.09:1, too little for a button's word anyway).
 - **`verify` also runs on pull requests**, not just pushes to `main`. §11.1 wants
   the CI gate hung on the PR; the §16.7 template only triggers on push.
 - **Deploys to a `gh-pages` branch, not the OIDC Pages pipeline.** §2.1/§11.2
@@ -928,7 +1030,7 @@ stock); an imported photo as the printing ground (stored exactly as imported,
 shown as shot, on its own Original sheet or a 1:1, 4:5, 3:4 or 2:3 crop,
 zoomed and panned within the sheet, paper over it or not); undo/redo,
 persistence that opens every older save, and save via the share sheet. Four
-tabs: Type, Ink, Photo, Press.
+tools — Type, Ink, Photo, Press — on the vendored style guide.
 
 Photos only — **video is not in yet**. A JPEG cannot hold one, so it needs a
 decision about what Save produces, and `MediaRecorder` on iOS Safari is limited
@@ -953,8 +1055,8 @@ settle. See `DEVICE-CHECKLIST.md`.
 Nothing is down-rezzed: a photo is stored as it was picked and a print is
 saved at the photo's own pixels, up to the one ceiling below, and says so when
 it is not. The one lossy step in a saved file is JPEG's own: below quality 1.0
-a browser stores colour at half resolution (4:2:0). **PNG** is the lossless
-path, beside Save.
+a browser stores colour at half resolution (4:2:0). **Save lossless PNG**, in
+More, is the lossless path.
 
 A saved print is a few megabytes, in proportion to its pixels (on the harness
 fixture: 1.9 MB for 2419×3024, 2.8 MB for 3024×3780, against the ~300 KB the

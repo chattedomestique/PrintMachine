@@ -8,8 +8,11 @@ import { VitePWA } from 'vite-plugin-pwa'
 // from this constant rather than hard-coding a path.
 const base = process.env.PAGES ? '/PrintMachine/' : '/'
 
-// Must equal the light-scheme <meta name="theme-color"> in index.html (§3.1).
-const THEME_COLOR = '#EDEDEC'
+// Must equal the light-scheme <meta name="theme-color"> in index.html (§3.1):
+// the style guide's --canvas in its `default` palette, oklch(0.97 0 95),
+// resolved in a browser (the dark one is oklch(0.165 0 95), #0E0E0E). Change
+// them together with data-palette.
+const THEME_COLOR = '#F5F5F5'
 
 export default defineConfig({
   base,

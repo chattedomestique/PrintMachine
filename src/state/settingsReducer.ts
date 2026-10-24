@@ -26,7 +26,8 @@ import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits
 export type SettingsAction =
   | { type: 'patch'; patch: Partial<PrintSettings>; coalesce?: boolean }
   | { type: 'patchLayer'; id: string; patch: Partial<TextLayer>; coalesce?: boolean }
-  | { type: 'addLayer' }
+  /** `id`: the new plate's, so the UI that adds it can select it. */
+  | { type: 'addLayer'; id?: string }
   | { type: 'removeLayer'; id: string }
   | { type: 'patchPress'; patch: Partial<PressProfile>; coalesce?: boolean }
   | { type: 'setMedia'; media: MediaLayer | null }
@@ -160,7 +161,7 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
         ...state,
         // At makeLayer()'s size, inside the Size slider: a new plate that
         // opened past its end would pin the thumb and jump on the first drag.
-        layers: [...state.layers, makeLayer({ text: 'NEW', inkId, y: 0.3 })],
+        layers: [...state.layers, makeLayer({ text: 'NEW', inkId, y: 0.3, ...(action.id ? { id: action.id } : {}) })],
       }
     }
 

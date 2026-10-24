@@ -1,0 +1,299 @@
+/* ── Print Machine's layers ──────────────────────────────────────────────────
+   Ported from Border Studio's editor.css (PR #1, 597ce7a), the app this one
+   follows, with its --ed-* names kept so the two can be read side by side.
+   It reads a few of the style guide's button.css-private properties
+   (--_selw, --_select, --_rest-bg, --_rest-ink, --_on-bg, --_on-ink), so it
+   depends on the vendored commit (src/vendor/styleguide/VERSION.md): after
+   `npm run sync:styleguide`, run scripts/verify-geometry.mjs.
+
+   The editor is three planes, and you can tell them apart by brightness alone.
+   That is the style guide's own photo-editor reference (references/screens/
+   img6: "hierarchy comes only from luminance"):
+
+     0  stage   --canvas     the sheet sits here; nothing else competes with it
+     1  tray    --ed-tray    the dock under the sheet, one step up
+     2  float   --ed-float   whatever opens ON TOP (action sheets, dialogs, the
+                             toast): framed, over a scrim that dims 0 and 1
+
+   Three rules make the hierarchy:
+
+   - A FRAME MEANS "ON TOP". Only plane 2 is framed. A control resting in the
+     tray has no frame: an icon control is a bare glyph, a control with words
+     sits in a well (a fill one step up from the tray), and whatever is chosen
+     is the ink fill, the brightest shape on screen after the print. A 2px
+     frame on every control of a tray said nothing about any of them.
+   - NOTHING LIFTS IN THE TRAY. The style guide's hard shadow says "this can be
+     pressed" on a page of mixed content; in a tray where everything is a
+     control it repeated itself forty times. Focus keeps its ring.
+   - ONE TYPE SCALE, strongest first, and set by size and ink more than by
+     weight (nothing in the tray is heavier than 500 but the tabs' capitals):
+     the value being set (18px), the names of things you set (15px), the
+     words on controls (14px), the tabs (12px capitals), hints (13px, muted),
+     the tool names (12px, muted until chosen). Typed text is 16px, so iOS
+     never zooms on focus.
+   - ONE GEOMETRY. The dock is three bands with a full-width hairline between
+     each: the tabs (and the plate button, on Type and Ink), the
+     settings, the tools. The settings band is one fixed height in every
+     panel, so the sheet is the same size in every tool and every tab. In it,
+     each setting is a row (its name at the start, its control at the end)
+     with a hairline between rows, and the rows sit in the middle of the band,
+     so the space above them is the space below.
+
+   Roles only: every colour here is a style-guide role, or a mix of two. */
+
+:root {
+  /* The type scale (see the header). */
+  --ed-t-value: 500 1.125rem / 1 var(--font-sans);
+  --ed-t-name: 500 0.9375rem / 1.2 var(--font-sans);
+  --ed-t-ctl: 500 0.875rem / 1.15 var(--font-sans);
+  --ed-t-field: 400 1rem / 1.3 var(--font-sans);
+  --ed-t-hint: 400 0.8125rem / 1.35 var(--font-sans);
+  --ed-t-caps: 600 0.75rem / 1 var(--font-sans);
+  --ed-t-tool: 500 0.75rem / 1.2 var(--font-sans);
+
+  /* The dock's geometry (see the header): the tabs' band, then the content
+     area: one options row, the hairline between settings, and the strip (a
+     36px line for the name and value over the 44px slider row). */
+  --ed-head-h: var(--hit);
+  --ed-gap: var(--space-2);
+  --ed-band-pad: var(--space-3);
+  --ed-row-h: var(--hit);
+  --ed-strip-head-h: 2.25rem;
+  --ed-strip-h: calc(var(--ed-strip-head-h) + var(--chrome-hit));
+  --ed-content-h: calc(var(--ed-row-h) + 2 * var(--ed-gap) + var(--bw-thin) + var(--ed-strip-h));
+
+  --ed-tray: var(--paper);
+  --ed-well: var(--paper-3);
+  /* Up is lighter in the dark (as the style guide's own cards over its
+     canvas); in the light, the floating plane is the white paper and its frame
+     and the scrim carry the "on top". */
+  --ed-float: light-dark(var(--paper), var(--paper-2));
+  --ed-float-2: light-dark(var(--paper-2), var(--paper-3));
+  --ed-float-3: light-dark(var(--paper-3), color-mix(in oklab, var(--paper-3), var(--ink) 10%));
+  --ed-line: var(--line);
+  /* Tints for a bare control under a pointer or a finger. */
+  --ed-tint: color-mix(in oklab, var(--ink) 10%, transparent);
+  --ed-tint-2: color-mix(in oklab, var(--ink) 18%, transparent);
+  /* The one rule inside the tray: tools below, the panel above. */
+  --ed-hair: color-mix(in oklab, var(--ink) 12%, transparent);
+  /* The plane a control sits on, for the few things drawn in its colour (the
+     ring around a slider's thumb, the glyph on an ink disc). */
+  --ed-surface: var(--canvas);
+}
+
+/* ── Plane 0: the stage ── */
+/* The bar sits on the stage like the sheet does: no rule under it. */
+.app__bar { border-block-end-color: transparent; }
+
+/* ── Plane 1: the tray ──
+   Inside it a control's "paper" is the well, and its frame is no line at all.
+   The two roles every style-guide control reads, swapped in one place. */
+.app__overlay {
+  --ed-surface: var(--ed-tray);
+  --line: transparent;
+  --paper: var(--ed-well);
+  --paper-2: var(--ed-well);
+  --paper-3: color-mix(in oklab, var(--ink) 14%, var(--ed-well));
+}
+:is(.app__overlay, .app__bar) :not(dialog, dialog *) { --lift: 0; }
+/* Chosen is the fill alone: the doubled frame (a ring of the resting colour
+   inside the border) was there to survive a pale accent next to a frame, and
+   there is no frame here. */
+:is(.app__overlay, .app__bar) :is(.btn, .chip):not(dialog *) {
+  --_selw: 0px;
+  --_select: 0 0 0 0 transparent;
+}
+/* Unavailable is the faint ink alone; a dashed frame was one more line. */
+:is(.app__overlay, .app__bar) :is(.btn, .chip):is(:disabled, [aria-disabled="true"]):not(dialog *) {
+  border-color: transparent;
+}
+
+/* A bare control: a glyph in soft ink, a tint under the finger, and when it is
+   a toggle that is on, the ink disc. */
+.btn.ed-bare {
+  --_rest-bg: transparent;
+  --_rest-ink: var(--ink-soft);
+  --_on-bg: var(--ed-tint-2);
+  --_on-ink: var(--ink);
+  border-color: transparent;
+}
+.btn.ed-bare[aria-pressed="true"] {
+  --_on-bg: var(--ink);
+  --_on-ink: var(--ed-surface);
+  --_selw: 0px;
+}
+.btn.ed-bare[aria-pressed="false"]:active {
+  --fill: 1;
+  --_on-bg: var(--ed-tint-2);
+  --_on-ink: var(--ink);
+}
+
+/* The tools: muted names, the chosen one in ink under its disc. */
+.app__tray .toolbar__label {
+  font: var(--ed-t-tool);
+  color: var(--ink-mute);
+  text-decoration: none;
+}
+.app__tray .toolbar__item:has(> [aria-pressed="true"]) .toolbar__label {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* The panel's tabs: small capitals in muted ink, the chosen one in ink with a
+   bar under its word that sits on the band's hairline (the style guide's
+   underline tabs, with the hairline drawn by the band, controls__head, so it
+   runs under the layer button too and the full width of the dock). The tab
+   is centred in the band, so its word has the same room above and below. */
+.app__overlay .tabs[data-variant="underline"] .tabs__bar { border-block-end-width: 0; }
+.app__overlay .tabs[data-variant="underline"] .tabs__list { margin-block: calc(-1 * var(--chrome-2)); }
+.app__overlay .tabs[data-variant="underline"] .tabs__tab {
+  --_rest-ink: var(--ink-mute);
+  font: var(--ed-t-caps);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+}
+
+/* The words on the tray's controls: one size, one weight. */
+.app__overlay :is(.btn, .chip, .segmented) { font: var(--ed-t-ctl); }
+.app__overlay :is(.select, .input, .input-group) { font: var(--ed-t-field); }
+.app__overlay .switch__label { font: var(--ed-t-name); }
+.app__overlay .swatch-set__name { font: var(--ed-t-hint); color: var(--ink-soft); }
+/* A group's name (the swatch sets) reads like the tabs: small capitals. */
+.app__overlay .t-label {
+  font: var(--ed-t-caps);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.app__overlay .t-meta { font: var(--ed-t-hint); color: var(--ink-mute); }
+/* A row of tabs wider than the panel scrolls; it snaps so a whole tab always
+   starts the row (a sliver of a word beside the layer button read as broken)
+   and the cut one is at the far end, where it says "more". */
+.app__overlay .tabs[data-variant="underline"] .tabs__list {
+  gap: var(--chrome-4);
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: var(--chrome-2);
+  scrollbar-width: none;
+}
+.app__overlay .tabs__list::-webkit-scrollbar { display: none; }
+.app__overlay .tabs__tab {
+  scroll-snap-align: start;
+  /* A short word ("Ink") is as wide as its word; the style guide's ::after
+     still makes its target 44px. A 44px box around it pushed the last tab of
+     a row off the panel. */
+  min-inline-size: 0;
+}
+.app__overlay .tabs[data-variant="underline"] .tabs__tab::before {
+  inset-inline: calc(50% - var(--chrome-3));
+  /* from the tab's padding box down to the band's hairline */
+  inset-block-end: calc(-1 * ((var(--ed-head-h) - var(--_bar-h)) / 2 + var(--bw)));
+  background: var(--ink);
+}
+
+/* Segmented controls: the well is the track, the chosen cell the ink. */
+.app__overlay .segmented { --_track: var(--ed-well); }
+
+/* Every slider in the app: a thin rail, the ink up to the thumb, an ink thumb
+   ringed in its surface's colour so it reads apart from the fill it sits on.
+   The style guide's 12px framed rail and outlined thumb were the heaviest
+   shape in the tray, heavier than the value they set. */
+.slider {
+  --_tr: min(0.25rem, 4px);
+  --_thumb: min(1.5rem, 24px);
+  --_rail: color-mix(in oklab, var(--ink) 24%, var(--ed-surface));
+  --_fillc: var(--ink);
+}
+.slider__track::before {
+  border: 0;
+  border-radius: var(--radius-pill);
+}
+.slider__track::after {
+  inset-inline-start: 0;
+  inset-block-start: var(--_rail-top);
+  block-size: var(--_tr);
+  inline-size: calc((100% - var(--_thumb)) * var(--p, 0) + var(--_thumb) / 2);
+  border-radius: var(--radius-pill);
+}
+.slider__input::-webkit-slider-thumb {
+  background: var(--ink);
+  border: min(0.1875rem, 3px) solid var(--ed-surface);
+  box-shadow: none;
+  transform: none;
+  transition: scale var(--dur-press) var(--ease-out);
+}
+.slider__input:active::-webkit-slider-thumb { scale: calc(1 + var(--move, 1) * 0.15); }
+.slider__input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 var(--ring-offset) var(--ed-surface); }
+.slider__input::-moz-range-thumb {
+  background: var(--ink);
+  border: min(0.1875rem, 3px) solid var(--ed-surface);
+  box-shadow: none;
+  transform: none;
+}
+
+/* Swatches are inks and stocks, so they keep an edge (a pale one on a pale
+   tray still has a boundary, 1.4.11). The chosen one is ringed in ink. */
+.app__overlay .swatch-set { --line: var(--ink-faint); }
+.app__overlay .swatch-set__opt:has(> input:checked) { --line: var(--ink); }
+
+/* ── Plane 2: floating ──
+   Anything on top gets the style guide's frames back, on the floating paper:
+   the dialogs and sheets, and the cards over the stage (the toast, the save's
+   status, the gesture hint). */
+dialog.dialog,
+.app__toast,
+.app__status,
+.app__hint {
+  --ed-surface: var(--ed-float);
+  --line: var(--ed-line);
+  --paper: var(--ed-float);
+  --paper-2: var(--ed-float-2);
+  --paper-3: var(--ed-float-3);
+}
+
+/* The action sheet: the style guide's menu presented as a sheet (its
+   data-presentation="sheet") on a modal <dialog>, so the page behind is inert
+   and the scrim covers the sheet and the tray alike. Docked to the bottom,
+   where the thumb already is; rows are the style guide's .menu__item. */
+dialog.dialog.actsheet {
+  --_rise: calc(var(--move) * 100%);
+  inset: auto 0 0 0;
+  margin: 0 auto;
+  inline-size: 100%;
+  max-inline-size: var(--container-sm);
+  max-block-size: calc(100dvh - var(--safe-top) - var(--space-8));
+  padding: 0 0 var(--safe-bottom);
+  flex-direction: column;
+  overflow-y: auto;
+  border-block-end-width: 0;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
+/* Full width on a phone: its sides are the screen's edges, so only the top
+   is framed. */
+@media (max-width: 30rem) {
+  dialog.dialog.actsheet { border-inline-width: 0; }
+}
+.actsheet__title {
+  /* the sheet's name, for orientation: what these rows change */
+  padding-block: var(--chrome-4) var(--chrome-2);
+}
+.actsheet .menu__item {
+  min-block-size: var(--chrome-ctl-lg);
+  font: 500 var(--text-md) / var(--lh-snug) var(--font-sans);
+}
+.actsheet .menu__item[aria-checked="true"] { font-weight: 650; }
+.actsheet .menu__item .menu__meta { font: 400 var(--text-sm) / var(--lh-snug) var(--font-sans); }
+.actsheet .menu__item[data-variant="cancel"] {
+  justify-content: center;
+  border-block-start: var(--bw) solid var(--line);
+}
+/* The row under a dragging finger, before it lifts. */
+.actsheet .menu__item[data-drag] { --fill: 1; }
+.actsheet .menu__group + .menu__group,
+.actsheet .menu__group + .menu__item { border-block-start: var(--bw) solid var(--line); }
+.actsheet .menu__group > .menu__item:first-of-type { border-block-start-color: var(--line); }
+
+@media (forced-colors: active) {
+  :is(.app__overlay, .app__bar) :is(.btn, .chip, .select, .input, .input-group, .segmented) { border-color: ButtonText; }
+  .btn.ed-bare[aria-pressed="true"] { border-width: var(--bw-heavy); }
+}

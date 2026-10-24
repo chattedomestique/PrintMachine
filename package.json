@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "verify": "npm run lint && npm run typecheck && npm test && npm run build",
     "verify:offline": "PAGES=1 npm run build && node scripts/verify-offline.mjs",
+    "verify:geometry": "npm run build && node scripts/verify-geometry.mjs",
     "sync:styleguide": "node scripts/sync-styleguide.mjs ../styleguide",
     "harness": "node scripts/harness/run.mjs",
     "measure:alloc": "node scripts/measure-alloc.mjs",

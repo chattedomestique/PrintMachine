@@ -1,80 +1,59 @@
-@import './tokens.css';
+/* ── Print Machine on the style guide ────────────────────────────────────────
+   Colour, type, space, line, shape, motion, focus and the reset all come from
+   the vendored style guide (src/vendor/styleguide, imported first in
+   main.tsx). This file is unlayered, so anything here beats every sg.* layer
+   regardless of specificity — which is why it holds NO element-level rules (a
+   bare `button {}`, `input[type=range] {}` or `* { box-sizing }` here would
+   strip every .btn the style guide draws) and NO colour literals. Components
+   read the style guide's roles. The one element rule, overscroll on html and
+   body (Border Studio's too), sets a property the style guide leaves alone.
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+   The look is set on <html> in index.html: data-palette="default", the true
+   neutral grey. This app exists to judge ink and paper colour, and chrome
+   with a hue in it shifts how the inks read; the Riso pink lives on as an ink
+   (and the app icon), never as chrome.
+
+   Only app-level facts live here: the full-height shell, the space the bottom
+   overlay takes (published by AppShell.tsx as --overlay-h), and the symbols
+   the style guide does not ship. The editor's planes are editor.css, the
+   dock's panels dock.css, the shell shell.css. */
+
+:root {
+  /* What the editor's bottom overlay covers; AppShell.tsx measures and
+     overwrites it. The fallback keeps the sheet clear before the first
+     measurement. */
+  --overlay-h: 12rem;
 }
 
 html,
 body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
   overscroll-behavior: none;
 }
 
-body {
-  background: var(--bg);
-  color: var(--ink-1);
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-/* dvh, never vh — handles the iOS dynamic toolbar (playbook §3.4). */
 #root {
-  height: 100dvh;
-  display: flex;
-  flex-direction: column;
-}
-
-/* ── Global a11y block (playbook §16.8) ─────────────────────────────── */
-
-:where(button, a, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
-button,
-[role='button'] {
-  min-height: var(--touch-min);
-  font-family: inherit;
-}
-
-/* Applied everywhere, not just the canvas — partial application is more
-   jarring than none (§7). */
-button,
-canvas,
-[role='button'] {
-  -webkit-tap-highlight-color: transparent;
-}
-
-input[type='range'] {
-  min-height: var(--touch-min);
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
+  /* dvh, not %: the % chain on iOS can resolve shorter than the screen. */
+  block-size: 100dvh;
+  inline-size: 100%;
   overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
-  }
+/* Symbols the style guide does not ship, drawn on its grid (24 × 24, 2px
+   stroke, square caps, mitred joins) so they sit with the Lucide set. A black
+   mask: the colour comes from the control, as for every .ic. */
+
+/* The press: a duplicator, drawn as the printer it is. */
+.ic--press {
+  --ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M6 9V2h12v7'/%3E%3Cpath d='M6 18H2V9h20v9h-4'/%3E%3Cpath d='M6 14h12v8H6z'/%3E%3C/svg%3E");
+}
+/* Re-roll: pull another sheet — the same settings, shuffled. */
+.ic--shuffle {
+  --ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M2 18h3l9-12h7'/%3E%3Cpath d='m18 3 3 3-3 3'/%3E%3Cpath d='M2 6h3l3 4'/%3E%3Cpath d='M21 18h-7l-3-4'/%3E%3Cpath d='m18 15 3 3-3 3'/%3E%3C/svg%3E");
+}
+/* Halftone: round dots on a lattice, shrinking with the tone. */
+.ic--halftone {
+  --ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3E%3Ccircle cx='5' cy='5' r='3'/%3E%3Ccircle cx='12' cy='5' r='2.4'/%3E%3Ccircle cx='19' cy='5' r='1.8'/%3E%3Ccircle cx='5' cy='12' r='2.4'/%3E%3Ccircle cx='12' cy='12' r='1.8'/%3E%3Ccircle cx='19' cy='12' r='1.2'/%3E%3Ccircle cx='5' cy='19' r='1.8'/%3E%3Ccircle cx='12' cy='19' r='1.2'/%3E%3Ccircle cx='19' cy='19' r='0.7'/%3E%3C/svg%3E");
+}
+/* Grain: an irregular scatter, as error diffusion lays it. */
+.ic--grain {
+  --ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3E%3Crect x='4' y='4' width='3' height='3'/%3E%3Crect x='11' y='3' width='2' height='2'/%3E%3Crect x='17' y='5' width='3' height='3'/%3E%3Crect x='3' y='11' width='2' height='2'/%3E%3Crect x='10' y='10' width='4' height='4'/%3E%3Crect x='18' y='12' width='2' height='2'/%3E%3Crect x='5' y='17' width='3' height='3'/%3E%3Crect x='12' y='18' width='2' height='2'/%3E%3Crect x='17' y='17' width='3' height='3'/%3E%3C/svg%3E");
 }

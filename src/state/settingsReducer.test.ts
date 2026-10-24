@@ -121,6 +121,8 @@ describe('the plate budget', () => {
     const s = doc([makeLayer(), makeLayer(), makeLayer()])
     expect(applySettings(s, { type: 'addLayer' })).toBe(s)
     expect(applySettings(doc([makeLayer(), makeLayer()]), { type: 'addLayer' }).layers).toHaveLength(3)
+    // The plate button names the new plate's id, so it can select it.
+    expect(applySettings(doc([makeLayer()]), { type: 'addLayer', id: 'plate-new' }).layers[1].id).toBe('plate-new')
   })
 
   it(`adds no plate when ${MAX_PRESSED_PASSES} passes are already spent`, () => {

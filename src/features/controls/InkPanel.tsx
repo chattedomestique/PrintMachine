@@ -1,168 +1,143 @@
-import { Field, IconButton, Segmented, Slider, Swatches, Toggle } from '../../ui/controls.tsx'
-import { PlusIcon, TrashIcon } from '../../ui/icons.tsx'
-import { contrastPartner, cssRgb, inkById, RISO_INKS } from '../../engine/inks.ts'
-import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES } from '../../engine/limits.ts'
+import { useId, useState } from 'react'
+import { Segmented } from '../../ui/ui.tsx'
+import { ParamStrip } from '../../ui/Slider.tsx'
+import type { ChangeHow } from '../../ui/param.ts'
 import type { TextLayer } from '../../engine/types.ts'
-import {
-  atPassLimit,
-  atPlateLimit,
-  hasSwitchPoint,
-  overPhotoOf,
-  overPhotoPatch,
-  type OverPhoto,
-} from '../../state/settingsReducer.ts'
+import { atPassLimit, hasSwitchPoint, overPhotoOf, overPhotoPatch, type OverPhoto } from '../../state/settingsReducer.ts'
 import { useSettings } from '../../state/settingsStore.ts'
+import { DockPanel, Rule } from './Dock.tsx'
+import { InkButton, InkDialog } from './InkDialog.tsx'
+import PlateButton from './PlateButton.tsx'
+import { switchPointParam } from './params.ts'
+import { BUDGET } from './plates.ts'
+import { SUBS, type SubId } from './tools.ts'
 
-const pct = (v: number) => `${Math.round(v * 100)}%`
-
-const BUDGET = `Up to ${MAX_TEXT_PLATES} plates and ${MAX_PRESSED_PASSES} passes (a backing is a pass of its own).`
+/** Which ink a dialog is choosing. */
+type Choosing = 'ink' | 'second' | 'backing' | null
 
 /**
- * Plates, and what colour each one is.
+ * Ink: what colour the selected plate prints in, and what it does over the
+ * photo. One choice per plate there, because the two cannot be combined: the
+ * second ink reads the photo, but over a backing the ground is the block.
  *
- * The strip doubles as the layer selector — a real press has one plate per
- * colour, so "which layer am I editing" and "which ink is this" are the same
- * question, and there is no reason to answer it in two places.
+ * Over photo is one options row (Off, Second ink, Backing) and under it the
+ * one thing that choice needs: the second ink with its Switch point (the ink
+ * button leads the strip, so it costs no row), the second ink alone when it
+ * keeps the plate's own ink (both halves print that ink, so a Switch point
+ * would move nothing and is not offered), or the backing's ink.
  */
-export default function InkPanel() {
-  const { settings, dispatch, selectedLayerId, selectLayer, selectedLayer } = useSettings()
+export default function InkPanel({
+  sub,
+  onSub,
+  hasPhoto,
+}: {
+  sub: SubId<'ink'>
+  onSub: (sub: SubId<'ink'>) => void
+  hasPhoto: boolean
+}) {
+  const { settings, dispatch, selectedLayer } = useSettings()
+  const [choosing, setChoosing] = useState<Choosing>(null)
+  const overHint = useId()
   const layer = selectedLayer ?? settings.layers[0]
-  const plateLimit = atPlateLimit(settings)
+  if (!layer) return null
+
+  const set = (p: Partial<TextLayer>, how: ChangeHow) =>
+    dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce: !how.discrete })
+  const patch = (p: Partial<TextLayer>) => dispatch({ type: 'patchLayer', id: layer.id, patch: p })
+
+  const over = overPhotoOf(layer)
   const passLimit = atPassLimit(settings)
+  // Second ink reads the photo, so without one there is nothing to read; a
+  // plate that already has one keeps it (it shows again with a photo).
+  const secondOff = !hasPhoto && over !== 'second'
+  const backingOff = passLimit && !layer.backing
+  const tabs = SUBS.ink.map((t) => ({ ...t, on: t.id === 'over' && over !== 'off' }))
+  const keeps = layer.contrastInkId === layer.inkId
 
-  const patch = (p: Partial<TextLayer>, coalesce = false) =>
-    layer && dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce })
-
-  const setOver = (over: OverPhoto) => layer && patch(overPhotoPatch(layer, over))
+  // What the Over photo choice needs said, in words, where a control cannot.
+  const notes = [
+    secondOff ? 'Second ink needs a photo behind the type.' : null,
+    over === 'second' && !hasPhoto ? 'It shows once there is a photo behind the type.' : null,
+    backingOff ? BUDGET : null,
+  ].filter((n): n is string => n !== null)
 
   return (
-    <div className="control-stack">
-      <Field label={`Plates · ${settings.layers.length}`}>
-        <div className="plate-strip">
-          {settings.layers.map((l, i) => {
-            const ink = inkById(l.inkId)
-            const active = l.id === (selectedLayerId ?? settings.layers[0]?.id)
-            return (
-              <button
-                key={l.id}
-                type="button"
-                className="plate"
-                aria-pressed={active}
-                onClick={() => selectLayer(l.id)}
-              >
-                <span className="plate-dot" style={{ background: cssRgb(ink.rgb) }} aria-hidden="true" />
-                <span className="plate-text">{l.text.split('\n')[0] || `Plate ${i + 1}`}</span>
-                <span className="plate-ink">{ink.name}</span>
-              </button>
-            )
-          })}
+    <DockPanel tool="ink" label="Ink" lead={<PlateButton />} tabs={tabs} sub={sub} onSub={onSub}>
+      {sub === 'ink' && (
+        <div className="controls__row">
+          <span className="controls__label">Ink</span>
+          <InkButton inkId={layer.inkId} what="this plate's ink" onClick={() => setChoosing('ink')} />
         </div>
-        <div className="plate-actions">
-          <IconButton label="Add a plate" disabled={plateLimit} onClick={() => dispatch({ type: 'addLayer' })}>
-            <PlusIcon />
-          </IconButton>
-          <IconButton
-            label="Delete this plate"
-            disabled={settings.layers.length <= 1 || !layer}
-            onClick={() => layer && dispatch({ type: 'removeLayer', id: layer.id })}
-          >
-            <TrashIcon />
-          </IconButton>
-          <span className="plate-hint">
-            {plateLimit
-              ? BUDGET
-              : settings.layers.length > 1
-                ? 'Plates print in order — the last one lays on top.'
-                : 'Add a second plate to get overprinting.'}
-          </span>
-        </div>
-      </Field>
+      )}
 
-      {layer && (
+      {sub === 'over' && (
         <>
-          <Field label="Ink" value={inkById(layer.inkId).name}>
-            <Swatches label="Ink" value={layer.inkId} options={RISO_INKS} onChange={(inkId) => patch({ inkId })} />
-          </Field>
+          <Segmented<OverPhoto>
+            label="Over the photo"
+            value={over}
+            describedBy={overHint}
+            options={[
+              { id: 'off', label: 'Off' },
+              { id: 'second', label: 'Second ink', disabled: secondOff },
+              { id: 'backing', label: 'Backing', disabled: backingOff },
+            ]}
+            onChange={(v) => patch(overPhotoPatch(layer, v))}
+          />
+          <p className="sr-only" id={overHint}>
+            One ink cannot read across a whole photograph. A second ink splits the pass by what is behind it, and
+            the photo is cut back to paper where the ink is lighter than what it lands on. A backing is a block of
+            ink behind each line, pressed first, with the photo cut back to paper under it.
+          </p>
+          {(over !== 'off' || notes.length > 0) && <Rule />}
 
-          {/* One choice per plate, because the two cannot be combined: the
-              second ink reads the photo, but over a backing the ground is the
-              block. */}
-          <Field label="Over the photo">
-            <Segmented
-              label="Over the photo"
-              value={overPhotoOf(layer)}
-              options={[
-                { value: 'off', label: 'Off' },
-                { value: 'second', label: 'Second ink' },
-                { value: 'backing', label: 'Backing', disabled: passLimit && !layer.backing },
-              ]}
-              onChange={setOver}
+          {over === 'second' && layer.contrastInkId && hasPhoto && hasSwitchPoint(layer) && (
+            <ParamStrip
+              key="switch"
+              lead={<InkButton inkId={layer.contrastInkId} what="the second ink" onClick={() => setChoosing('second')} />}
+              params={[switchPointParam(layer, set)]}
             />
-            {passLimit && !layer.backing && <p className="plate-hint">{BUDGET}</p>}
-          </Field>
-
-          {overPhotoOf(layer) === 'second' && layer.contrastInkId && (
-            <>
-              <p className="panel-note">
-                {hasSwitchPoint(layer)
-                  ? 'Type in one ink cannot read across a whole photograph. The pass is pressed once ' +
-                    'and split between two inks by what is behind it, and the photo is knocked back ' +
-                    'to paper wherever the ink is lighter than what it lands on — a transparent light ' +
-                    'ink over solid black is still solid black. Keep this ink to stay in one colour.'
-                  : 'One colour across the whole photograph: the photo is cut back to paper wherever ' +
-                    'it is darker than the ink, so the ink prints on paper there and reads everywhere.'}
-                {settings.media ? '' : ' It shows once there is a photo behind the type.'}
-              </p>
-              <Toggle
-                label="Keep this ink"
-                checked={layer.contrastInkId === layer.inkId}
-                onChange={(keep) =>
-                  patch({ contrastInkId: keep ? layer.inkId : contrastPartner(layer.inkId) })
-                }
+          )}
+          {over === 'second' && layer.contrastInkId && !(hasPhoto && hasSwitchPoint(layer)) && (
+            <div className="controls__row">
+              <span className="controls__label">Second ink</span>
+              <InkButton
+                inkId={layer.contrastInkId}
+                text={keeps ? 'Keep this ink' : undefined}
+                what="the second ink"
+                onClick={() => setChoosing('second')}
               />
-              <Field label="Second ink" value={inkById(layer.contrastInkId).name}>
-                <Swatches
-                  label="Second ink"
-                  value={layer.contrastInkId}
-                  options={RISO_INKS.filter((i) => i.id !== layer.inkId)}
-                  onChange={(contrastInkId) => patch({ contrastInkId })}
-                />
-              </Field>
-              {/* Only between two different inks: with the plate's own ink
-                  both halves print the same colour, so it would move nothing. */}
-              {hasSwitchPoint(layer) && (
-                <Slider
-                  label="Switch point"
-                  value={layer.contrastThreshold}
-                  min={0.1}
-                  max={0.9}
-                  step={0.01}
-                  format={pct}
-                  onChange={(contrastThreshold) => patch({ contrastThreshold }, true)}
-                />
-              )}
-            </>
+            </div>
           )}
-
-          {overPhotoOf(layer) === 'backing' && layer.backing && (
-            <>
-              <p className="panel-note">
-                A solid block of ink behind each line, pressed as its own plate before the type, so
-                the type overprints it into a third colour. The photo is cut back to paper under the
-                block, so it reads the same over any part of the picture.
-              </p>
-              <Field label="Backing ink" value={inkById(layer.backing).name}>
-                <Swatches
-                  label="Backing ink"
-                  value={layer.backing}
-                  options={RISO_INKS}
-                  onChange={(backing) => patch({ backing })}
-                />
-              </Field>
-            </>
+          {over === 'backing' && layer.backing && (
+            <div className="controls__row">
+              <span className="controls__label">Backing ink</span>
+              <InkButton inkId={layer.backing} what="the backing's ink" onClick={() => setChoosing('backing')} />
+            </div>
           )}
+          {notes.map((n) => (
+            <p key={n} className="controls__hint">
+              {n}
+            </p>
+          ))}
         </>
       )}
-    </div>
+
+      {choosing === 'ink' && (
+        <InkDialog title="Ink" value={layer.inkId} onPick={(inkId) => patch({ inkId })} onClose={() => setChoosing(null)} />
+      )}
+      {choosing === 'second' && layer.contrastInkId && (
+        <InkDialog
+          title="Second ink"
+          value={layer.contrastInkId}
+          keepInk={layer.inkId}
+          exclude={layer.inkId}
+          onPick={(contrastInkId) => patch({ contrastInkId })}
+          onClose={() => setChoosing(null)}
+        />
+      )}
+      {choosing === 'backing' && layer.backing && (
+        <InkDialog title="Backing ink" value={layer.backing} onPick={(backing) => patch({ backing })} onClose={() => setChoosing(null)} />
+      )}
+    </DockPanel>
   )
 }

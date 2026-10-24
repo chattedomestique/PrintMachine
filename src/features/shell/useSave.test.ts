@@ -16,8 +16,9 @@ import {
   pressInProgress,
   progressText,
   saveButton,
-  saveLine,
+  saveLabel,
   saveQuestion,
+  saveStatus,
   saveReducer,
   type SaveEvent,
   type SaveState,
@@ -76,7 +77,14 @@ describe('the save flow', () => {
     expect(sharing.kind).toBe('sharing')
     const again = saveReducer(sharing, { type: 'shareFailed' })
     expect(again).toEqual({ kind: 'ready', file, plan })
-    expect(saveButton(again, 'none')).toEqual({ text: 'Save to Photos (6.2 MB)', disabled: false })
+    expect(saveButton(again, 'none')).toEqual({ text: 'Share', busy: false, disabled: false })
+    expect(saveLabel(again, 'none', '3024×3780')).toBe('Share 3024×3780 (6.2 MB)')
+    expect(saveStatus(again, 'none')).toEqual({
+      text: '3024×3780 is ready (6.2 MB). Tap Share to save it.',
+      alert: false,
+      busy: false,
+      action: 'discard',
+    })
   })
 
   it('an error says why, with the numbers, and a new tap starts over', () => {
@@ -113,41 +121,76 @@ describe('the save flow', () => {
     expect(states.map(pressInProgress)).toEqual([false, true, true, false, false])
   })
 
-  it('waits for the document\'s photo: Loading photo while it decodes, refused when it failed', () => {
+  it('waits for the document\'s photo: Save disabled and the card saying so while it decodes, refused when it failed', () => {
     expect(canStart(IDLE, 'loading')).toBe(false)
-    expect(saveButton(IDLE, 'loading')).toEqual({ text: 'Loading photo', disabled: true })
+    expect(saveButton(IDLE, 'loading')).toStrictEqual({ text: 'Save', busy: false, disabled: true })
+    expect(saveLabel(IDLE, 'loading', '2419×3024')).toBe('Save: loading the photo')
+    expect(saveStatus(IDLE, 'loading')).toEqual({ text: 'Loading the photo…', alert: false, busy: true, action: null, delay: true })
     expect(canStart(IDLE, 'failed')).toBe(false)
     expect(canStart(IDLE, 'ready')).toBe(true)
     expect(canStart(IDLE, 'none')).toBe(true)
-    // While loading, the line keeps the caption: the size is true once it is back.
-    expect(saveLine(IDLE, 'loading')).toBeNull()
-    expect(saveLine(IDLE, 'ready')).toBeNull()
+    // Nothing to say otherwise: Save is one word, the size is in its name.
+    expect(saveStatus(IDLE, 'ready')).toBeNull()
+    expect(saveStatus(IDLE, 'none')).toBeNull()
+    expect(saveButton(IDLE, 'ready')).toStrictEqual({ text: 'Save', busy: false, disabled: false })
+    expect(saveLabel(IDLE, 'ready', '2419×3024')).toBe('Save 2419×3024 JPEG')
   })
 
-  it('a photo that could not be loaded: Save says why, beside it and in its label, and promises no size', () => {
+  it('a photo that could not be loaded: Save says why, in the card and in its name, and promises no size', () => {
     const why = 'This photo could not be loaded. Choose it again.'
-    expect(saveButton(IDLE, 'failed')).toStrictEqual({ text: 'Save', disabled: true, why })
-    // The line above Save is the alert, in place of the caption's size.
-    expect(saveLine(IDLE, 'failed')).toEqual({ text: why, alert: true })
+    expect(saveButton(IDLE, 'failed')).toStrictEqual({ text: 'Save', busy: false, disabled: true, why })
+    expect(saveLabel(IDLE, 'failed', '2419×3024')).toBe(`Save: ${why}`)
+    // The card is the alert, with the way out: choose the photo again.
+    expect(saveStatus(IDLE, 'failed')).toEqual({ text: why, alert: true, busy: false, action: 'choose' })
     // Over an old error, a question, or an unfinished save's notice too.
     const error: SaveState = { kind: 'error', message: 'Could not press 2419×3024: x' }
     for (const s of [error, saveReducer(IDLE, { type: 'interrupted', format: 'jpeg', height: 3780 })]) {
       expect(saveButton(s, 'failed').why).toBe(why)
-      expect(saveLine(s, 'failed')).toEqual({ text: why, alert: true })
+      expect(saveStatus(s, 'failed')).toEqual({ text: why, alert: true, busy: false, action: 'choose' })
     }
     // A file already pressed is still the print it was: it can be shared.
     const ready = run([{ type: 'start', format: 'jpeg', plan, photo: true }, { type: 'photoLoaded' }, { type: 'pressed', file, now: false }])
-    expect(saveButton(ready, 'failed')).toStrictEqual({ text: 'Save to Photos (6.2 MB)', disabled: false })
-    expect(saveLine(ready, 'failed')).toEqual({ text: '3024×3780 is ready.', alert: false })
+    expect(saveButton(ready, 'failed')).toStrictEqual({ text: 'Share', busy: false, disabled: false })
+    expect(saveStatus(ready, 'failed')?.text).toBe('3024×3780 is ready (6.2 MB). Tap Share to save it.')
   })
 
-  it('the line: an error is an alert, progress is not', () => {
-    expect(saveLine({ kind: 'error', message: 'Could not press: x' }, 'ready')).toEqual({ text: 'Could not press: x', alert: true })
+  it('the card: an error is an alert with a dismiss; progress is busy, with Cancel', () => {
+    expect(saveStatus({ kind: 'error', message: 'Could not press: x' }, 'ready')).toEqual({
+      text: 'Could not press: x',
+      alert: true,
+      busy: false,
+      action: 'dismiss',
+    })
     const pressing = run([
       { type: 'start', format: 'jpeg', plan, photo: false },
       { type: 'progress', progress: { step: 'press', pass: 1, passes: 2 } },
     ])
-    expect(saveLine(pressing, 'none')).toEqual({ text: 'Pressing 3024×3780, plate 1 of 2', alert: false })
+    expect(saveStatus(pressing, 'none')).toEqual({ text: 'Pressing 3024×3780, plate 1 of 2', alert: false, busy: true, action: 'cancel' })
+    expect(saveStatus(run([{ type: 'start', format: 'jpeg', plan, photo: true }]), 'ready')?.action).toBe('cancel')
+    const sharing = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'pressed', file, now: true }])
+    expect(saveStatus(sharing, 'none')).toEqual({ text: 'Saving 3024×3780', alert: false, busy: true, action: null })
+    // A question is a dialog of its own, not a card.
+    expect(saveStatus(saveReducer(IDLE, { type: 'interrupted', format: 'jpeg', height: 3780 }), 'ready')).toBeNull()
+  })
+
+  it('Save is one word in every state, so the bar never wraps', () => {
+    const states: SaveState[] = [
+      IDLE,
+      run([{ type: 'start', format: 'jpeg', plan, photo: true }]),
+      run([{ type: 'start', format: 'jpeg', plan, photo: false }]),
+      run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'pressed', file, now: false }]),
+      run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'pressed', file, now: true }]),
+      { kind: 'error', message: 'x' },
+      saveReducer(IDLE, { type: 'interrupted', format: 'jpeg', height: 3780 }),
+    ]
+    for (const s of states) {
+      for (const m of ['none', 'loading', 'ready', 'failed'] as const) {
+        const b = saveButton(s, m)
+        expect(['Save', 'Saving', 'Share']).toContain(b.text)
+        // The name starts with the word on screen (WCAG 2.5.3).
+        expect(saveLabel(s, m, '3024×3780').startsWith(b.text)).toBe(true)
+      }
+    }
   })
 
   it('says how far the press has got, in pixels and plates', () => {
@@ -161,7 +204,8 @@ describe('the save flow', () => {
     )
     const pressing = run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'press', pass: 2, passes: 3 } }], start)
     expect(progressText(pressing)).toBe('Pressing 3024×3780, plate 2 of 3')
-    expect(saveButton(pressing, 'ready')).toEqual({ text: 'Cancel', disabled: false })
+    expect(saveButton(pressing, 'ready')).toEqual({ text: 'Saving', busy: true, disabled: true })
+    expect(saveLabel(pressing, 'ready', '3024×3780')).toBe('Saving 3024×3780')
     expect(progressText(saveReducer(pressing, { type: 'progress', progress: { step: 'print', pass: 3, passes: 3 } }))).toBe(
       'Pressing 3024×3780: printing the sheet',
     )
@@ -178,6 +222,7 @@ describe('a print too big for this device, and a save that did not finish', () =
     expect(asked).toEqual({ kind: 'tooBig', format: 'png', failed: plan, why: 'a canvas that size came back blank', smaller })
     expect(pressInProgress(asked)).toBe(false)
     expect(saveQuestion(asked, planAt)).toEqual({
+      title: 'Too big for this device',
       text: "This device couldn't press 3024×3780 (a canvas that size came back blank). Save a smaller 2268×2835 copy instead?",
       choices: [{ label: 'Save smaller', height: 2835 }],
     })
@@ -195,6 +240,7 @@ describe('a print too big for this device, and a save that did not finish', () =
   it('with no copy this device can press, it says so and offers nothing', () => {
     const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, why: 'Out of memory', smaller: null }])
     expect(saveQuestion(asked, planAt)).toEqual({
+      title: 'Too big for this device',
       text: "This device couldn't press 3024×3780 (Out of memory), nor a copy smaller than it: it cannot save this print.",
       choices: [],
     })
@@ -203,6 +249,7 @@ describe('a print too big for this device, and a save that did not finish', () =
   it('a save the app went away during is said at launch: the same again, or a step smaller', () => {
     const notice = saveReducer(IDLE, { type: 'interrupted', format: 'jpeg', height: 3780 })
     expect(saveQuestion(notice, planAt)).toEqual({
+      title: 'A save did not finish',
       text: 'The last save, 3024×3780, did not finish.',
       choices: [
         { label: 'Try again', height: 3780 },
@@ -210,7 +257,7 @@ describe('a print too big for this device, and a save that did not finish', () =
       ],
     })
     expect(canStart(notice, 'ready')).toBe(true)
-    expect(saveButton(notice, 'ready')).toEqual({ text: 'Save', disabled: false })
+    expect(saveButton(notice, 'ready')).toEqual({ text: 'Save', busy: false, disabled: false })
     expect(progressText(notice)).toBeNull()
     // Its offer is worked out from the document as it is, so an edit keeps it;
     // a smaller copy worked out for a failed press is dropped.

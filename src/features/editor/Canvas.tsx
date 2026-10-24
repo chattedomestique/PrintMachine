@@ -152,7 +152,11 @@ export default function Canvas({
         ref={surfaceRef}
         className="drag-surface"
         role="application"
-        aria-label="Print preview. Drag to move the selected plate, pinch to scale and rotate, double-tap to centre. Arrow keys move, plus and minus scale, brackets rotate."
+        aria-label={
+          mediaMode
+            ? 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to fit it again. Arrow keys move the selected plate.'
+            : 'Print preview. Drag to move the selected plate, pinch to scale and rotate, double-tap to centre. Arrow keys move, plus and minus scale, brackets rotate.'
+        }
         tabIndex={0}
         onDoubleClick={onDoubleClick}
         onKeyDown={onKeyDown}

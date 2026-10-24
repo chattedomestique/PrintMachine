@@ -1,126 +1,140 @@
 import { useId } from 'react'
-import { Field, Segmented, Slider, Toggle } from '../../ui/controls.tsx'
+import { Icon, Segmented } from '../../ui/ui.tsx'
+import { ParamStrip } from '../../ui/Slider.tsx'
+import type { ChangeHow } from '../../ui/param.ts'
 import { FONTS, sheetAspect, type TextAlign, type TextLayer } from '../../engine/types.ts'
 import { fitSize } from '../../engine/text.ts'
-import { SIZE_MIN, SIZE_SLIDER_MAX, SIZE_STEP } from '../../engine/limits.ts'
-import { formatSize } from './sizeScale.ts'
 import { canvasMeasure } from '../../state/persist.ts'
 import { useSettings } from '../../state/settingsStore.ts'
+import { DockPanel, Rule } from './Dock.tsx'
+import PlateButton from './PlateButton.tsx'
+import { placeParams, sizeParam, spaceParams } from './params.ts'
+import { SUBS, type SubId } from './tools.ts'
 
-const ALIGNS: readonly { value: TextAlign; label: string }[] = [
-  { value: 'left', label: 'Left' },
-  { value: 'center', label: 'Centre' },
-  { value: 'right', label: 'Right' },
-  // Forced justification: every line, including the last, stretched to the
+const ALIGNS: readonly { id: TextAlign; label: string }[] = [
+  { id: 'left', label: 'Left' },
+  { id: 'center', label: 'Centre' },
+  { id: 'right', label: 'Right' },
+  // Forced justification: every line, the last included, stretched to the
   // widest — by its word gaps where it has any, by its letters where not.
-  { value: 'justify', label: 'Justify' },
+  { id: 'justify', label: 'Justify' },
 ]
 
-export default function TypePanel() {
+/** The faces, the poster face first: the default plate's. Each name is set in
+ *  its own face, the way a type menu shows them. */
+const FACES = ['poster', 'grotesk', 'serif', 'mono'].map((id) => FONTS.find((f) => f.id === id)!)
+
+/**
+ * Type: the words of the selected plate and how they are set. Five sub-tabs,
+ * each one row and a strip at most: Text (the words), Face (typeface and
+ * Bold), Size (Fit, and the Size slider: a tenth of the sheet reads 100%),
+ * Space (alignment, line height, tracking), Place (rotation and position, the
+ * tap equivalents of turning and dragging the type on the sheet).
+ */
+export default function TypePanel({ sub, onSub }: { sub: SubId<'type'>; onSub: (sub: SubId<'type'>) => void }) {
   const { settings, dispatch, selectedLayer } = useSettings()
-  const textId = useId()
+  const textHint = useId()
+  const fitHint = useId()
   const layer = selectedLayer ?? settings.layers[0]
   if (!layer) return null
 
-  const patch = (p: Partial<TextLayer>, coalesce = false) =>
-    dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce })
+  /** A slider's change: a drag coalesces into one undo step. */
+  const set = (p: Partial<TextLayer>, how: ChangeHow) =>
+    dispatch({ type: 'patchLayer', id: layer.id, patch: p, coalesce: !how.discrete })
+  /** A tap's change: its own undo step. */
+  const patch = (p: Partial<TextLayer>) => dispatch({ type: 'patchLayer', id: layer.id, patch: p })
 
-  // One-shot: computes the size at which the widest line spans the sheet and
-  // stores it, so there is only ever one size. Editing the text afterwards
-  // does not re-fit; tapping Fit again does. Its own undo step.
+  // One-shot: the size at which the widest line spans the sheet, stored, so
+  // there is only ever one size. Editing the text afterwards does not re-fit;
+  // tapping Fit again does. Its own undo step.
   const fit = () => {
     const measure = canvasMeasure()
     if (measure) patch({ size: fitSize(layer, sheetAspect(settings), measure) })
   }
 
   return (
-    <div className="control-stack">
-      <p className="panel-note">
-        On the sheet: drag to move, pinch to scale and rotate, double-tap to centre.
-      </p>
-      <Field label="Text" htmlFor={textId}>
-        <textarea
-          id={textId}
-          className="text-input"
-          rows={2}
-          value={layer.text}
-          spellCheck={false}
-          autoCapitalize="characters"
-          placeholder="Type something"
-          onChange={(e) => patch({ text: e.target.value }, true)}
-        />
-      </Field>
+    <DockPanel tool="type" label="Type" lead={<PlateButton />} tabs={SUBS.type} sub={sub} onSub={onSub}>
+      {sub === 'text' && (
+        <>
+          <textarea
+            className="input controls__textarea"
+            aria-label="Text"
+            aria-describedby={textHint}
+            rows={3}
+            value={layer.text}
+            spellCheck={false}
+            // The keyboard asks iOS for capitals; what is typed is what prints.
+            autoCapitalize="characters"
+            placeholder="Type something"
+            // Typing coalesces into one undo step, like a drag.
+            onChange={(e) => dispatch({ type: 'patchLayer', id: layer.id, patch: { text: e.target.value }, coalesce: true })}
+          />
+          <p className="sr-only" id={textHint}>
+            Each line breaks where you break it. On the sheet: drag the type to move it, pinch to size and turn it,
+            double-tap to centre it.
+          </p>
+        </>
+      )}
 
-      <Field label="Typeface">
-        <Segmented
-          label="Typeface"
-          value={layer.fontId}
-          options={FONTS.map((f) => ({ value: f.id, label: f.name }))}
-          onChange={(fontId) => patch({ fontId })}
-        />
-      </Field>
+      {sub === 'face' && (
+        <>
+          <Segmented
+            label="Typeface"
+            value={layer.fontId as (typeof FACES)[number]['id']}
+            options={FACES.map((f) => ({ id: f.id, label: <span style={{ fontFamily: f.stack }}>{f.name}</span>, aria: f.name }))}
+            onChange={(fontId) => patch({ fontId: fontId as TextLayer['fontId'] })}
+          />
+          <Rule />
+          {/* Regular or bold: heavier strokes survive the screen, the tear and
+              the bleed. A circle holding its letter, Border Studio's form, on
+              a row of its own: beside four face names it does not fit a
+              320px phone, and a row that wraps leaves it alone on a line. */}
+          <div className="controls__row">
+            <span className="controls__label" aria-hidden="true">
+              Bold
+            </span>
+            <button
+              type="button"
+              className="btn controls__letter"
+              data-shape="circle"
+              data-size="sm"
+              aria-pressed={layer.bold}
+              aria-label="Bold"
+              onClick={() => patch({ bold: !layer.bold })}
+            >
+              B
+            </button>
+          </div>
+        </>
+      )}
 
-      <Toggle label="Bold" checked={layer.bold} onChange={(bold) => patch({ bold })} />
+      {sub === 'size' && (
+        <>
+          <div className="controls__row">
+            <span className="controls__label" id={fitHint}>
+              Widest line to the sheet
+            </span>
+            <button type="button" className="btn" data-size="sm" aria-describedby={fitHint} onClick={fit}>
+              <span className="btn__label">
+                <Icon name="chevrons-left-right" />
+                Fit
+              </span>
+            </button>
+          </div>
+          <Rule />
+          <ParamStrip key="size" params={[sizeParam(layer, set)]} />
+        </>
+      )}
 
-      {/* 10% to 100% across the whole travel, 1% a step: a tenth of the
-          sheet reads 100%. Bigger type (a pinch, the keys, Fit on a short
-          word) pins the thumb at the end and the readout shows the truth. */}
-      <Slider
-        label="Size"
-        value={layer.size}
-        min={SIZE_MIN}
-        max={SIZE_SLIDER_MAX}
-        step={SIZE_STEP}
-        format={formatSize}
-        onChange={(size) => patch({ size }, true)}
-      />
-      <button
-        type="button"
-        className="icon-button"
-        aria-label="Fit: size the widest line to the sheet's width"
-        onClick={fit}
-      >
-        Fit
-      </button>
+      {sub === 'space' && (
+        <>
+          <Segmented label="Alignment" value={layer.align} options={ALIGNS} onChange={(align) => patch({ align })} />
+          <Rule />
+          <ParamStrip key="space" params={spaceParams(layer, set)} />
+        </>
+      )}
 
-      <Slider
-        label="Line height"
-        value={layer.lineHeight}
-        min={0.6}
-        max={2}
-        step={0.01}
-        format={(v) => v.toFixed(2)}
-        onChange={(lineHeight) => patch({ lineHeight }, true)}
-      />
-
-      <Slider
-        label="Letter tracking"
-        value={layer.tracking}
-        min={-0.1}
-        max={0.4}
-        step={0.005}
-        format={(v) => `${v > 0 ? '+' : ''}${v.toFixed(3)}em`}
-        onChange={(tracking) => patch({ tracking }, true)}
-      />
-
-      <Slider
-        label="Rotation"
-        value={layer.rotation}
-        min={-180}
-        max={180}
-        step={0.5}
-        format={(v) => `${v}°`}
-        onChange={(rotation) => patch({ rotation }, true)}
-      />
-
-      <Field label="Alignment">
-        <Segmented
-          label="Alignment"
-          value={layer.align}
-          options={ALIGNS}
-          onChange={(align) => patch({ align })}
-        />
-      </Field>
-    </div>
+      {sub === 'place' && <ParamStrip key="place" params={placeParams(layer, set)} />}
+    </DockPanel>
   )
 }

@@ -129,14 +129,23 @@ export const rangeText = (p: Pick<Param, 'min' | 'max' | 'format'>): string => `
 /**
  * A typed number (display units), as the value it commits: converted back,
  * then snapped onto the grid and into the setting's FULL range (typing 240 on
- * Size gives 240%, never 100%). Null for anything that is not a number, so a
- * typo never becomes a value.
+ * Size gives 240%, never 100%). The setting's own unit may be typed after it
+ * ("40%", "−4°"), and a true minus sign counts as one. Null for anything that
+ * is not a plain number — "4 0", "x", "", "1e3" — and for a negative number
+ * where the setting has none, so a typo never becomes a value.
  */
 export function committedValue(p: Pick<Param, 'fromDisplay' | 'min' | 'max' | 'step'>, typed: string): number | null {
-  // A true minus sign typed or pasted counts as one.
-  const n = Number.parseFloat(typed.replace(/−/g, '-'))
-  if (!Number.isFinite(n)) return null
-  return snapTo(p.fromDisplay(n), p.min, p.max, p.step)
+  const bare = typed
+    .replace(/\u2212/g, '-')
+    .trim()
+    .replace(/\s*(%|°|px|em)$/i, '')
+    .trim()
+  // A plain decimal only: Number() alone would also take "1e3", "0x10" and
+  // "Infinity", none of which is a value anyone types on purpose.
+  if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(bare)) return null
+  const v = p.fromDisplay(Number(bare))
+  if (v < 0 && p.min >= 0) return null
+  return snapTo(v, p.min, p.max, p.step)
 }
 
 /**

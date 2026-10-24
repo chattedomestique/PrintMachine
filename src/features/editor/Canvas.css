@@ -10,12 +10,15 @@
    Instead width is the smaller of the two fits — the container's width, or the
    width that lets the full height fit — and the height follows from the aspect
    ratio. Both constraints hold at once, so nothing is ever clamped on one axis
-   only. cqw/cqh come from the container-type: size on .app__canvas-wrap. */
+   only. cqw/cqh come from the container-type: size on .app__canvas-wrap.
+
+   Its edge is a 1px line, not a shadow: the style guide allows a shadow only
+   on what can be pressed, and a white stock on the pale stage still needs a
+   boundary (1.4.11). CSS only: the export never sees it. */
 .sheet {
   position: relative;
   height: auto;
-  box-shadow: var(--shadow-2);
-  border-radius: 2px;
+  outline: var(--bw-thin) solid var(--line-soft);
   overflow: hidden;
   /* --sheet-ratio is the sheet's width over its height, set by Canvas.tsx: any
      number, so an Original sheet takes its photo's own shape. */
@@ -42,4 +45,10 @@
 }
 .drag-surface:active {
   cursor: grabbing;
+}
+/* The keyboard path to the gestures: the style guide's ring, inside the
+   sheet so the clip does not cut it. */
+.drag-surface:focus-visible {
+  outline: var(--ring) solid var(--focus);
+  outline-offset: calc(-1 * var(--ring));
 }

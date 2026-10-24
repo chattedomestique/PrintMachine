@@ -8,8 +8,9 @@
  * spans the whole slider instead of its first two percent.
  *
  * Here, not in `engine/` (the engine never shows a number) and not in `ui/`
- * (which knows nothing about type): the Size slider, the keys and, later, the
- * typed value all read it, so they cannot disagree about what "40%" is.
+ * (which knows nothing about type): the Size strip (its readout, its typed
+ * value: params.ts) and the keys all read it, so they cannot disagree about
+ * what "40%" is.
  */
 
 import { SIZE_MAX, SIZE_MIN, SIZE_STEP } from '../../engine/limits.ts'
@@ -35,20 +36,6 @@ export const fromDisplay = (pct: number): number => pct / PER_SIZE
 
 /** The readout: "40%". The true value, also past the slider's end ("240%"). */
 export const formatSize = (size: number): string => `${toDisplay(size)}%`
-
-/** The range a typed value may take, in words, for whatever asks for one. */
-export const SIZE_RANGE_TEXT = `${toDisplay(SIZE_MIN)}% to ${toDisplay(SIZE_MAX)}%`
-
-/**
- * A typed size: "40", "40%" or " 40 % ". Snapped to whole percent (the
- * slider's step) and clamped to the size range; null for anything that is not
- * a non-negative number, so a typo never becomes a size.
- */
-export function parseSize(text: string): number | null {
-  const m = /^\s*(\d+(?:\.\d*)?)\s*%?\s*$/.exec(text)
-  if (!m) return null
-  return clamp(snap(fromDisplay(Number(m[1]))), SIZE_MIN, SIZE_MAX)
-}
 
 /**
  * The size one `+` or `-` key press makes: 5% of the size (20% with Shift),

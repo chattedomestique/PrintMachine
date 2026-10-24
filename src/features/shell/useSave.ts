@@ -24,8 +24,9 @@ import type { MediaState } from '../media/useMediaBitmap.ts'
 import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../../state/persist.ts'
 
 /**
- * The save flow, as a state machine with no UI in it (the old chrome and the
- * style guide's dock both render from it).
+ * The save flow, as a state machine with no UI in it: the app bar's Save,
+ * the status card above the dock, the More sheet and the save questions all
+ * render from it.
  *
  * Why a flow at all: the print is pressed at the photo's own resolution,
  * which is seconds of work on a phone, and the share sheet needs the tap that
@@ -35,8 +36,8 @@ import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../
  *                                                         └──(under a second)──▶ sharing
  *
  * A press that finished within a second of the tap shares at once; a longer
- * one waits on a fresh tap ("Save to Photos (6.2 MB)") with the file already
- * encoded. Cancel works at every step of the press. A share that fails keeps
+ * one waits on a fresh tap (Save reads "Share", and the card says "2419×3024
+ * is ready (6.2 MB)") with the file already encoded. Cancel works at every step of the press. A share that fails keeps
  * the file and the button: in an iOS home-screen app it never falls through to
  * a download, which would navigate away from the app.
  */
@@ -145,40 +146,111 @@ export function canStart(state: SaveState, media: MediaState): boolean {
   return startsFrom(state) && media !== 'loading' && media !== 'failed'
 }
 
-/** What the Save button says, whether it can be pressed, and, when it cannot
- *  for a reason the person has to act on, `why` (said beside it and in its
- *  label: a bare disabled Save explains nothing). */
-export function saveButton(state: SaveState, media: MediaState): { text: string; disabled: boolean; why?: string } {
+/**
+ * What the app bar's Save says: ONE word, so the bar never wraps and Save
+ * never changes width (the style guide's rule 19; Border Studio keeps it to
+ * one word too). "Save"; "Saving" while the photo loads, the print is pressed
+ * or the file is handed over (busy: a spinner, and taps are ignored); "Share"
+ * once a file is ready and waits for a fresh tap to open the share sheet.
+ * Everything longer (the size, the progress, why it cannot be pressed) is
+ * said in the status card above the dock (saveStatus), in the More sheet and
+ * in the button's accessible name (saveLabel).
+ *
+ * `disabled` when a tap would do nothing; `why` when it cannot be pressed for
+ * a reason the person has to act on (a bare disabled Save explains nothing).
+ */
+export function saveButton(
+  state: SaveState,
+  media: MediaState,
+): { text: 'Save' | 'Saving' | 'Share'; busy: boolean; disabled: boolean; why?: string } {
   switch (state.kind) {
     case 'loadingPhoto':
     case 'pressing':
-      return { text: 'Cancel', disabled: false }
-    case 'ready':
-      return { text: `Save to Photos (${fileSize(state.file.size)})`, disabled: false }
     case 'sharing':
-      return { text: 'Saving…', disabled: true }
+      return { text: 'Saving', busy: true, disabled: true }
+    case 'ready':
+      return { text: 'Share', busy: false, disabled: false }
     case 'idle':
     case 'error':
     case 'tooBig':
     case 'interrupted':
-      if (media === 'loading') return { text: 'Loading photo', disabled: true }
+      // The document's photo is still decoding: Save waits for it.
+      if (media === 'loading') return { text: 'Save', busy: false, disabled: true }
       // The document's photo is gone: no size is promised and nothing can be
       // pressed until it is chosen again (never the type on bare paper).
-      if (media === 'failed') return { text: 'Save', disabled: true, why: PHOTO_MISSING }
-      return { text: 'Save', disabled: false }
+      if (media === 'failed') return { text: 'Save', busy: false, disabled: true, why: PHOTO_MISSING }
+      return { text: 'Save', busy: false, disabled: false }
   }
 }
 
 /**
- * The line above Save, when it has something to say other than the size Save
- * makes: why Save cannot be pressed, an error (both alerts), or how far the
- * press has got. Null: show the caption (`describePlan`).
+ * Save's accessible name: its one word first (WCAG 2.5.3, the name starts
+ * with the label you see), then what it would make or why it cannot.
+ *
+ * @param size what Save makes now ("2419×3024"), from the caption.
  */
-export function saveLine(state: SaveState, media: MediaState): { text: string; alert: boolean } | null {
+export function saveLabel(state: SaveState, media: MediaState, size: string): string {
+  const b = saveButton(state, media)
+  if (b.why) return `${b.text}: ${b.why}`
+  switch (state.kind) {
+    case 'loadingPhoto':
+    case 'pressing':
+    case 'sharing':
+      return `Saving ${dims(state.plan.width, state.plan.height)}`
+    case 'ready':
+      return `Share ${dims(state.plan.width, state.plan.height)} (${fileSize(state.file.size)})`
+    default:
+      return media === 'loading' ? 'Save: loading the photo' : `Save ${size} JPEG`
+  }
+}
+
+/** What a toast says: a thing done, something to know, or a failure (each
+ *  with its own symbol, so none is told by colour). */
+export type Announcement = 'done' | 'info' | 'error'
+
+/** What the status card above the dock carries, and the one action it
+ *  offers. */
+export interface SaveStatus {
+  text: string
+  /** An error, or a reason Save cannot be pressed: role=alert. */
+  alert: boolean
+  /** Work under way: a spinner beside the words. */
+  busy: boolean
+  /**
+   *  - `cancel`   stop the press (the rest of the page is inert meanwhile);
+   *  - `discard`  let go of a file waiting for its Share;
+   *  - `dismiss`  close an error;
+   *  - `choose`   choose the photo again.
+   */
+  action: 'cancel' | 'discard' | 'dismiss' | 'choose' | null
+  /** Shown only if it is still true after a moment, so a wait that ends at
+   *  once never flashes a card. */
+  delay?: true
+}
+
+/**
+ * The status card: the save flow's state when it has something to say beyond
+ * the one word on Save. Null: no card.
+ */
+export function saveStatus(state: SaveState, media: MediaState): SaveStatus | null {
   const why = saveButton(state, media).why
-  if (why) return { text: why, alert: true }
-  const text = progressText(state)
-  return text === null ? null : { text, alert: state.kind === 'error' }
+  if (why) return { text: why, alert: true, busy: false, action: 'choose' }
+  switch (state.kind) {
+    case 'loadingPhoto':
+    case 'pressing':
+      return { text: progressText(state) ?? '', alert: false, busy: true, action: 'cancel' }
+    case 'sharing':
+      return { text: progressText(state) ?? '', alert: false, busy: true, action: null }
+    case 'ready':
+      return { text: `${dims(state.plan.width, state.plan.height)} is ready (${fileSize(state.file.size)}). Tap Share to save it.`, alert: false, busy: false, action: 'discard' }
+    case 'error':
+      return { text: state.message, alert: true, busy: false, action: 'dismiss' }
+    case 'idle':
+    case 'tooBig':
+    case 'interrupted':
+      // Save waits for the document's photo to decode, and says so.
+      return media === 'loading' ? { text: 'Loading the photo…', alert: false, busy: true, action: null, delay: true } : null
+  }
 }
 
 /** A way to answer a save question: a save no taller than `height`. */
@@ -189,19 +261,29 @@ export interface SaveChoice {
 
 /**
  * The question the save flow puts when it cannot go on unasked, in numbers,
- * with the saves it offers (Cancel is always there besides). Null when there
- * is none.
+ * with the saves it offers (Cancel is always there besides), and a heading for
+ * its dialog. Null when there is none.
  *
  * @param planAt the current document's plan no taller than a height.
  */
-export function saveQuestion(state: SaveState, planAt: (maxHeight: number) => ExportPlan): { text: string; choices: SaveChoice[] } | null {
+export function saveQuestion(
+  state: SaveState,
+  planAt: (maxHeight: number) => ExportPlan,
+): { title: string; text: string; choices: SaveChoice[] } | null {
   const size = (p: ExportPlan) => dims(p.width, p.height)
   if (state.kind === 'tooBig') {
     // The reason in the browser's words too: a "too big" that was really
     // something else must not hide behind the offer.
     const failed = `${size(state.failed)} (${state.why})`
-    if (!state.smaller) return { text: `This device couldn't press ${failed}, nor a copy smaller than it: it cannot save this print.`, choices: [] }
+    if (!state.smaller) {
+      return {
+        title: 'Too big for this device',
+        text: `This device couldn't press ${failed}, nor a copy smaller than it: it cannot save this print.`,
+        choices: [],
+      }
+    }
     return {
+      title: 'Too big for this device',
       text: `This device couldn't press ${failed}. Save a smaller ${size(state.smaller)} copy instead?`,
       choices: [{ label: 'Save smaller', height: state.smaller.height }],
     }
@@ -216,7 +298,7 @@ export function saveQuestion(state: SaveState, planAt: (maxHeight: number) => Ex
       const smaller = planAt(smallerHeight)
       choices.push({ label: `Save smaller (${size(smaller)})`, height: smaller.height })
     }
-    return { text: `The last save, ${size(again)}, did not finish.`, choices }
+    return { title: 'A save did not finish', text: `The last save, ${size(again)}, did not finish.`, choices }
   }
   return null
 }
@@ -279,9 +361,14 @@ function canvasesFit(w: number, h: number): boolean {
 /**
  * Run the save flow for the current document.
  *
- * @param announce shows a one-line message (the toast).
+ * @param announce shows a one-line message (the toast): a save done, or why
+ *   a share did not happen.
  */
-export function useSave(settings: PrintSettings, media: MediaState, announce: (message: string | null) => void) {
+export function useSave(
+  settings: PrintSettings,
+  media: MediaState,
+  announce: (message: string | null, kind?: Announcement) => void,
+) {
   const [state, dispatch] = useReducer(saveReducer, IDLE)
   const stateRef = useRef(state)
   const abortRef = useRef<AbortController | null>(null)
@@ -314,14 +401,11 @@ export function useSave(settings: PrintSettings, media: MediaState, announce: (m
       try {
         const delivery = await deliverFile(file, { allowDownload: !isStandalone() })
         dispatch({ type: 'delivered' })
-        announce(saveMessage(delivery, plan))
+        announce(saveMessage(delivery, plan), 'done')
       } catch (err) {
         dispatch({ type: 'shareFailed' })
-        announce(
-          err instanceof Error && err.name === 'NotAllowedError'
-            ? 'Tap Save to Photos to save it.'
-            : `It could not be shared: ${err instanceof Error ? err.message : String(err)}`,
-        )
+        if (err instanceof Error && err.name === 'NotAllowedError') announce('Tap Share to save it.', 'info')
+        else announce(`It could not be shared: ${err instanceof Error ? err.message : String(err)}`, 'error')
       }
     },
     [announce],

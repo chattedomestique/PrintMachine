@@ -177,7 +177,8 @@ try {
                 // Keep this ink: no Switch point (O-4), the strip gives way to a row.
                 await over.locator('[data-ink-button]').first().click()
                 await page.locator('dialog[open] input[type=radio][value="keep"]').check({ force: true })
-                await page.waitForSelector('dialog[open]', { state: 'detached' }).catch(() => undefined)
+                await page.locator('dialog[open] .dialog__actions .btn').click()
+                await page.waitForSelector('dialog[open]', { state: 'detached' })
                 await record(`${tool}-${tab}-keep`)
               }
             }

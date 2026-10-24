@@ -275,6 +275,7 @@ export function ActionSheet({
   onClose,
   title,
   label,
+  info,
   children,
   listRef,
 }: {
@@ -282,6 +283,9 @@ export function ActionSheet({
   onClose: () => void
   title?: string
   label?: string
+  /** Facts to read before the rows (not rows themselves: a menu holds only
+   *  what can be chosen). */
+  info?: ReactNode
   children: ReactNode
   listRef?: RefObject<HTMLDivElement | null>
 }) {
@@ -321,6 +325,7 @@ export function ActionSheet({
           {title}
         </p>
       )}
+      {info}
       <div className="actsheet__list" role="menu" aria-label={label ?? title} ref={setList} onKeyDown={onKeyDown}>
         {children}
         <button type="button" className="menu__item" role="menuitem" data-variant="cancel" onClick={onClose}>

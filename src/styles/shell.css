@@ -1,0 +1,304 @@
+/* ── Print Machine: the editor shell ─────────────────────────────────────────
+   Ported from Border Studio's App.css (PR #1, 597ce7a). Built on the style
+   guide's .app shell (a phone-width column, centred on a wide screen, safe-area
+   aware) and its appbar / toolbar / card / dialog. This file only lays them
+   out for an editor: the sheet takes everything between the bar and the
+   bottom overlay, and nothing ever scrolls it away.
+
+   Flat, as the style guide requires: no glass, no blur, no soft shadows. The
+   planes the editor is built from (stage, tray, floating) and the rules that
+   tell them apart are in editor.css. */
+
+/* ── Shell ── */
+.app {
+  /* The editor is the whole viewport, not a scrolling page: the overlay is
+     fixed to the bottom and the sheet sizes itself to what is left. */
+  block-size: 100%;
+  min-block-size: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* The bar is part of the column, so it stays inside the gutters. */
+.app__bar {
+  flex: 0 0 auto;
+  padding-block-start: max(var(--chrome-2), var(--safe-top, 0px));
+}
+
+.app__main {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* The style guide's .app__main pads for a dock; this app's overlay reserves
+     its own room (--overlay-h on the canvas wrap below). */
+  padding-block: 0;
+}
+
+/* ── The stage: the sheet gets everything the overlay is not using ──
+   --overlay-h is measured live (AppShell.tsx), so this reserves exactly the
+   dock's height. No transition on the padding: the dock is one height in
+   every panel, so the only change is opening and closing it, and animating
+   that would re-lay out (and re-render) the sheet every frame. */
+.app__canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-block-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* Makes cqw/cqh in Canvas.css resolve against this box's content area, so
+     the sheet sizes itself from whichever axis actually binds. */
+  container-type: size;
+  padding-block: var(--space-2) calc(var(--overlay-h) + var(--space-2));
+}
+
+/* ── Bottom overlay: the open panel above the tool tray ── */
+.app__overlay {
+  position: fixed;
+  inset-block-end: 0;
+  inset-inline: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  /* Same column as the shell, so on a wide screen the tray lines up with the
+     bar instead of running edge to edge. */
+  max-inline-size: var(--container-sm);
+  margin-inline: auto;
+  /* The panel and the tools set their own sides (below), so the hairline
+     between them can run the full width of the tray. */
+  padding-inline: var(--safe-left, 0px) var(--safe-right, 0px);
+  padding-block-end: max(var(--chrome-2), var(--safe-bottom, 0px));
+  /* Plane 1 (editor.css): one step up from the stage. The change of fill is
+     the edge; a rule there was one more line the width of the screen. */
+  background: var(--ed-tray);
+}
+
+/* Sliding panel — the grid-rows trick gives a symmetric open / close. */
+.app__panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-enter) var(--ease-out);
+}
+.app__panel--open {
+  grid-template-rows: 1fr;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app__panel { transition-duration: 1ms; }
+}
+
+/* The inner wrapper lets the row collapse to 0 and is the scroll container. */
+.app__panel-inner {
+  overflow: hidden;
+  min-block-size: 0;
+  padding-inline: var(--gutter);
+}
+.app__panel--open .app__panel-inner {
+  overflow-y: auto;
+  /* Every panel is one height (editor.css), well under this. The bound only
+     matters at large text, where the rows grow: the panel then scrolls
+     rather than pushing the sheet off the screen. */
+  max-block-size: min(50dvh, 32rem);
+  overscroll-behavior: contain;
+  /* No top padding: the tabs' band is centred on its own height, so the
+     dock's edge is as far above the tab names as the hairline is below. */
+  padding-block: 0 var(--ed-band-pad);
+}
+
+/* ── Bottom row: the tool tray, the full width of the column ── */
+.app__tools {
+  padding-block-start: var(--space-1);
+  padding-inline: var(--chrome-2);
+}
+/* Under an open panel, a hairline the full width of the tray keeps the tools
+   (where you go) apart from the panel (what you set). */
+.app__panel--open + .app__tools { border-block-start: var(--bw-thin) solid var(--ed-hair); }
+/* The tray loses the toolbar's frame here: the dock's own fill already says
+   where the controls begin. */
+.app__tray {
+  inline-size: 100%;
+  border-width: 0;
+  padding-inline: 0;
+  background: transparent;
+}
+/* Four tools in a tray wider than they need: spread them so the row reads as
+   one set rather than a set and a gap. While the toolbar script pages the
+   list (a very narrow screen), it does its own spreading, so this steps aside. */
+.app__tray .toolbar__list:not([data-sg-paged]) { justify-content: space-around; }
+
+/* ── Save: one word, one width ──
+   "Save", "Saving" or "Share" (useSave.ts saveButton), so the bar never
+   shifts while a print is pressed. */
+.app__save { min-inline-size: 6.5rem; }
+
+/* The bar's layouts, chosen by SG.fit (main.tsx). While one is set the title
+   stays on one line, so "does not fit" shows up as overflow to the measure,
+   never as a word broken inside itself. */
+.app__bar[data-fit] .appbar__title { white-space: nowrap; }
+.app__bar[data-fit="tight"] .appbar__title { white-space: normal; overflow-wrap: normal; }
+/* Icon-only, Save is chrome like the circles beside it: it stops at its 100%
+   size instead of growing with the (now hidden) word. */
+.app__bar:is([data-fit="compact"], [data-fit="tight"]) .app__save {
+  min-inline-size: 0;
+  inline-size: var(--chrome-ctl-sm);
+  block-size: var(--chrome-ctl-sm);
+  min-block-size: 0;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  --ic-size: var(--chrome-ic-sm);
+  /* and so does its target: at 200% text a target that grew with the text
+     covered More beside it */
+  --_hit: var(--chrome-hit);
+}
+.app__bar:is([data-fit="compact"], [data-fit="tight"]) .app__save-word {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── The floating plane over the stage ──
+   The cards that sit over the sheet, just above the dock: the gesture hint,
+   the save's status (its progress and Cancel, a file waiting for Share, an
+   error, a photo that could not be loaded) and the toast. Stacked in one
+   column, newest nearest the dock, so two never overlap. */
+.app__float {
+  position: fixed;
+  inset-block-end: calc(var(--overlay-h) + var(--space-3));
+  inset-inline: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding-inline: var(--gutter);
+  pointer-events: none;
+}
+.app__float > * {
+  pointer-events: auto;
+  max-inline-size: min(100%, var(--container-sm));
+}
+/* A card here is a row (words, then the one action): the style guide's card
+   is a column of bar and body. And it sizes to its words: the style guide's
+   card is an inline-size container, which has no intrinsic width, so in this
+   shrink-to-fit column it collapsed to its 10rem floor and wrapped one line
+   into five. Nothing in these cards queries the container. */
+.app__float > .card {
+  flex-direction: row;
+  container-type: normal;
+}
+
+/* The status card: words and the one action they need, on one line where
+   they fit. */
+.app__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--chrome-2) var(--chrome-2) var(--chrome-2) var(--chrome-4);
+  min-block-size: var(--chrome-hit);
+}
+.app__status-text {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  margin: 0;
+  /* A sentence, not a control's word: the tray's control size, not the
+     toast's 600 (at 320px a five-line bold card covered the sheet). */
+  font: var(--ed-t-ctl);
+  line-height: var(--lh-snug);
+  color: var(--ink);
+}
+.app__status[data-alert] .app__status-text { color: var(--bad-ink); }
+.app__status > .ic { --ic-size: 1.15em; flex: none; color: var(--bad-ink); }
+.app__status > .spinner { flex: none; }
+.app__status > .btn { flex: none; }
+/* "Loading the photo" waits 300ms before it shows, so a decode that lands at
+   once never flashes a card. */
+.app__status[data-delay] { animation: status-in var(--dur-enter) var(--ease-out) 300ms both; }
+@keyframes status-in {
+  from { opacity: 0; translate: 0 calc(var(--space-2) * var(--move, 1)); }
+}
+
+/* ── Status toast (the role=status live region) ── */
+.app__toast {
+  pointer-events: none;
+  inline-size: max-content;
+  opacity: 0;
+  visibility: hidden;
+  translate: 0 calc(var(--space-2) * var(--move, 1));
+  transition: opacity var(--dur-hover) var(--ease-out),
+              translate var(--dur-enter) var(--ease-out),
+              visibility var(--dur-hover);
+}
+.app__float > .app__toast { pointer-events: none; }
+.app__toast--show {
+  opacity: 1;
+  visibility: visible;
+  translate: 0 0;
+}
+.app__toast-body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--chrome-3) var(--chrome-4);
+  font: var(--type-ctl);
+}
+
+/* ── Gesture hint (after the first photo, until dismissed) ── */
+.app__hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--chrome-1) var(--chrome-1) var(--chrome-1) var(--chrome-4);
+}
+.app__hint-text {
+  flex: 1 1 auto;
+  margin: 0;
+  font: var(--type-meta);
+  color: var(--ink-soft);
+}
+.app__hint > .btn { flex: none; }
+
+/* ── The More sheet: what Save makes, and whether the app works offline ──
+   Facts, not actions, so they sit above the menu's rows. */
+.more__facts {
+  display: flex;
+  flex-direction: column;
+  padding: var(--chrome-4) var(--gutter) var(--chrome-4);
+  gap: var(--chrome-3);
+  border-block-end: var(--bw) solid var(--line);
+}
+.more__fact {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-3);
+  align-items: start;
+}
+.more__fact > .ic { --ic-size: 1.15em; margin-block-start: 0.1em; }
+.more__fact-word {
+  margin: 0;
+  font: 500 var(--text-md) / var(--lh-snug) var(--font-sans);
+  color: var(--ink);
+}
+.more__fact-meta {
+  grid-column: 2;
+  margin: 0;
+  font: 400 var(--text-sm) / var(--lh-snug) var(--font-sans);
+  color: var(--ink-soft);
+}
+
+/* ── Save questions (a print too big, a save that did not finish) ── */
+.savequestion .card__text { margin: 0; }
+/* What the question waits on: the photo coming back, or not. */
+.savequestion__wait {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--ink-soft);
+}
+.savequestion__wait[role="alert"] { color: var(--bad-ink); }
+.savequestion__wait > .ic { --ic-size: 1.15em; flex: none; }
+.savequestion .dialog__actions { flex-wrap: wrap; }

@@ -529,6 +529,8 @@ try {
   console.log('\n8. The gesture hint across a save: the card hides, its words for a screen reader stay')
   {
     // A press long enough to look at: the encoder answers 1.5 s late, as in 7.
+    // The hint is looked at as soon as the status line says the print is
+    // being pressed, in whichever phase (photo, plates, the sheet).
     const slow = `
       const real = HTMLCanvasElement.prototype.toBlob
       HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) {
@@ -551,7 +553,7 @@ try {
         page.waitForEvent('download', { timeout: 120_000 }),
         (async () => {
           await page.locator(SAVE).click()
-          await pressing(page)
+          await page.waitForFunction((LINE) => document.querySelector(LINE)?.textContent?.startsWith('Pressing'), LINE, { timeout: 60_000 })
           cardDuring.push(await page.locator('.app__hint').count())
         })(),
       ])

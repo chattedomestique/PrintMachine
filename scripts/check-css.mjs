@@ -26,9 +26,10 @@
  *                  (golden 9, WCAG 2.4.7).
  *  - important     no `!important`: the app's CSS is unlayered, so it already
  *                  beats every sg.* layer; `!important` would mean a fight.
- *  - bare-element  no rule whose subject is a bare button, input, select or
- *                  textarea (or a lone `*`): unlayered, it would beat every
- *                  .btn, .slider and .select the style guide draws.
+ *  - bare-element  no button, input, select or textarea without a class or
+ *                  id of its own anywhere in a selector (and no lone `*`):
+ *                  unlayered, `.dock input {}` would beat every slider the
+ *                  style guide draws in the dock.
  *
  * Its own cases run first: a check that has stopped catching what it names
  * fails before the app's files are read.

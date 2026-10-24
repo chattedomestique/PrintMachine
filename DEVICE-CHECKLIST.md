@@ -51,6 +51,13 @@ So:
       thumb (no near misses between neighbours)
 - [ ] Tap the open tool again → its panel closes and the sheet grows to the
       full height
+- [ ] Tap targets, with a thumb: a setting's value (Size's "90%") opens the
+      number pad and its name (Line height, with its chevrons) the list of
+      settings, never the slider just under them; the [−] and [+] beside a
+      slider never catch the name or value above; the sheet's select and the
+      plate button open on any tap inside their frame
+- [ ] Ink › Over photo: tap Off, Second ink and Backing in turn → the control
+      stays exactly where it is while the rows under it change
 - [ ] Tap a plate on the sheet (RISO) → the plate button names it and its
       crosshair moves to it; nothing moves and Undo stays as it was
 - [ ] Put a finger on a plate that is not selected and drag → that plate

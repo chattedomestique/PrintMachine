@@ -897,18 +897,21 @@ keyboard patterns are in `ui/` instead (two owners of `aria-selected` fight).
 The app's own CSS is unlayered, so it beats every `sg.*` layer without
 `!important`, and so it holds no bare element rules (a `button {}` would strip
 every button the style guide draws) and no colour literals: components read
-the style guide's roles. `npm run verify` holds it to that: `scripts/check-css.mjs`
-is the honest subset of the style guide's own lint (which lints the style
-guide's source tree and is not vendored) that a file can show — no blur or
-backdrop filter, no blurred shadow written as a number, no colour literal
-(the symbols' SVG masks aside), no font size in px, no `outline: none`
-without a replacement, no `!important`, no rule whose subject is a bare
-button, input, select or textarea. It runs its own cases first, so a check
-that has stopped catching what it names fails before the app's files are
-read. What only a render can judge (contrast, the look) is the screenshots'. The palette is the guide's `default`, the true
-neutral grey (`<html data-palette="default">`): this app exists to judge ink
-and paper colour, and chrome with a hue shifts how the inks read. The Riso pink
-is an ink, and the app icon, never chrome. `theme-color` is the guide's
+the style guide's roles. `npm run verify` holds it to that:
+`scripts/check-css.mjs` is the honest subset of the style guide's own lint
+(which lints the style guide's source tree and is not vendored) that a file
+can show — no blur or backdrop filter, no blurred shadow written as a number,
+no colour literal (the symbols' SVG masks aside), no font size in px, no
+`outline: none` without a replacement, no `!important`, no button, input,
+select or textarea without a class of its own anywhere in a selector. It runs
+its own cases first, so a check that has stopped catching what it names fails
+before the app's files are read. What only a render can judge (contrast, the
+look) is the screenshots'.
+
+The palette is the guide's `default`, the true neutral grey (`<html
+data-palette="default">`): this app exists to judge ink and paper colour, and
+chrome with a hue shifts how the inks read. The Riso pink is an ink, and the
+app icon, never chrome. `theme-color` is the guide's
 `--canvas`, resolved in a browser: #F5F5F5 light, #0E0E0E dark. The guide
 needs a 2024 browser (`light-dark()`, `:has()`, container queries), which an
 iOS-first PWA in 2026 has.
@@ -916,10 +919,25 @@ iOS-first PWA in 2026 has.
 The editor is Border Studio's three planes (`styles/editor.css`, ported with
 its `--ed-*` names): the stage, where the sheet sits; the tray, the dock one
 step up, whose controls have no frames and do not lift; and the floating plane,
-where whatever opens on top (sheets, dialogs, the toast, the save's status
-card, the gesture hint) gets its frame back over a scrim. That port reads a few
-of the style guide's button-private properties, which is why the vendored
-commit is pinned and why a sync must be followed by `npm run verify:geometry`.
+where whatever opens on top gets its frame back: the sheets and dialogs over a
+scrim, the toast, the save's status card and the gesture hint just above the
+dock. That port reads a few of the style guide's button-private properties,
+which is why the vendored commit is pinned and why a sync must be followed by
+`npm run verify:geometry`.
+
+**What the gates check, and what they cannot.** `check-css` (in `verify`) holds
+the app's CSS to the style guide's rules a file can show; `verify:geometry`
+holds the dock to its one geometry, every control to a 44 px target it owns,
+200% text to no clipped words and the app bar to one row (see "The dock"). Both
+run in CI. None of them sees colour: contrast is the style guide's own,
+verified in its repository for the `default` palette and not re-run here, and
+the app adds no colour of its own (the inks and stocks are data, shown with
+their names). None of them is an iPhone: Safari's real touch slop, VoiceOver's
+reading order, Larger Text past 200%, the safe areas and the home-screen app
+are DEVICE-CHECKLIST items. And none of them has taste: the review screenshots
+(`npm run verify:geometry -- --shots <dir>`, read beside Border Studio's at
+the same widths) are where a screen that passes and still looks wrong is
+caught.
 
 ### The dock
 
@@ -1037,15 +1055,69 @@ The dock is a fixed overlay, not a flow sibling. Its live height is measured
 with a `ResizeObserver` (its border box: its safe-area padding counts) and
 published as `--overlay-h` on the app and on `:root`, which the stage reserves
 as bottom padding — so the sheet is always as large as it can be. The dock is
-one height in every panel, so the only change is opening and closing it, and
-that is not animated on the stage. On a wide screen the app is a phone-width
-column, centred.
+one height in every panel, so the only change is opening and closing it. The
+stage has no transition of its own: while the panel slides open or shut the
+sheet follows its measured height, and it is CSS-sized, so that costs no
+render. On a wide screen the app is a phone-width column, centred.
 
 `engine/` must never import from `state/`, `ui/`, or `features/`, and must never
 touch React or the DOM beyond a canvas context handed to it. That constraint is
 what lets the export path re-render a fresh, overlay-free frame with the exact
 same code the preview uses. `ui/` knows nothing about riso and imports nothing
 from `engine/`.
+
+## Where this departs from Border Studio
+
+The interface follows Border Studio (the owner's app this one is told to
+match) as its PR #1 left it at 597ce7a: the same vendored style guide and
+planes, the same dock of tools, sub-tabs, parameter strips and pickers, the
+same value modal, action sheets, toast and app bar. What differs, and why:
+
+- **No upload screen.** Border Studio starts on a photo picker; a print here
+  exists without a photo (type on paper), so the app opens on the editor and
+  the photo is chosen in Photo › File.
+- **Pinch scales and turns the type; there is no inspect zoom.** Border Studio
+  pinches the view outside Crop. Here a pinch on the sheet is the type's size
+  and rotation (rotation is a feature; Border Studio has none), and a zoomed
+  view would show a 1000 px preview the saved file does not have.
+- **No snapping, grid or guides; no eye-dropper; no presets; no "New photo"
+  seed modes; no canvas view modes in More; no build stamp.** The grid
+  informed but never acted (cut with the thirds guides); inks are Riso's
+  table, not a colour picked off the photo; presets and seeds are features
+  this app's verdict does not keep. More holds what Save makes, the offline
+  state and the lossless PNG.
+- **The style guide's `default` palette, not `sand`** (below, under the
+  playbook's deviations).
+- **A native select for the sheet's shape** (five choices; Border Studio's
+  crop ratios are chips), and the typefaces as a segmented control with Bold
+  as its own B toggle (Border Studio lists fonts).
+- **Tap-to-select picks with a slop** (12 px, the nearest plate, a touch
+  inside a box beating one beside it) and a drag starts after 4 px, so a tap
+  picks without moving; Border Studio hit-tests the exact box and moves on any
+  pointermove. Type may be dragged 30% past the trim (Border Studio clamps to
+  2-98%), so it can bleed.
+- **The gesture hint stays until dismissed or used**, and is announced (again
+  only when the tool it describes changes); Border Studio's fades after 2.8 s
+  with `aria-hidden`, which no screen reader hears. It also says what the open
+  tool's gestures do.
+- **Targets own 44 px everywhere.** Border Studio's parameter name and value
+  own 40 px of height on the 36 px line over the slider; here their hit areas
+  grow upward. Its hex field owns 40 of its 44 px the way the style guide's
+  select does; here the sheet's select fills its frame.
+- **The app bar's compact layout is reachable.** Border Studio's Save hit area
+  hangs past its bar and SG.fit skips compact for tight at every narrow width;
+  here the bar has room for it.
+- **Over photo's choice does not move when chosen.** Border Studio centres
+  every panel's rows, so a control whose choice adds rows (its Box tab) jumps
+  under the finger; here that panel starts with its choice.
+- **Save is two steps when a press is long** (Saving, then Share, with the
+  file's size), with Cancel and a status card. Border Studio renders and
+  shares in the one tap; a press at a photo's own pixels takes seconds, longer
+  than a tap's permission to open the share sheet lasts. See "Saving at the
+  photo's own pixels".
+- **Checked by files.** Border Studio's README claims a regression suite for
+  the photo's rectangle that is not in it; here that suite is a file
+  (`verify-geometry.mjs`), with a CSS check and a touch check beside it.
 
 ## Deliberate deviations from the playbook
 
@@ -1086,7 +1158,10 @@ stock); an imported photo as the printing ground (stored exactly as imported,
 shown as shot, on its own Original sheet or a 1:1, 4:5, 3:4 or 2:3 crop,
 zoomed and panned within the sheet, paper over it or not); undo/redo,
 persistence that opens every older save, and save via the share sheet. Four
-tools — Type, Ink, Photo, Press — on the vendored style guide.
+tools — Type, Ink, Photo, Press — on the vendored style guide, in Border
+Studio's dock: one geometry for every tool and tab, every numeric setting a
+strip with a tap equivalent, a plate picked by tapping it on the sheet, and
+gates that check it in CI (`check-css`, `verify:geometry`, `check:touch`).
 
 Photos only — **video is not in yet**. A JPEG cannot hold one, so it needs a
 decision about what Save produces, and `MediaRecorder` on iOS Safari is limited

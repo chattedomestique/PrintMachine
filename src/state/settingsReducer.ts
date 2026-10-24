@@ -280,6 +280,14 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
       // whole drag reads as a single step. A join does the same after the
       // burst is over.
       if ((coalesce && state.bursting) || join) {
+        // A run that ends where it began (a drag back to its start; a double
+        // tap on a setting already at its default, whose first tap moved the
+        // thumb) is no step at all: drop the step it opened, and end the
+        // burst, so a move after it opens a step of its own.
+        const start = state.past[state.past.length - 1]
+        if (start !== undefined && sameData(next, start)) {
+          return { past: state.past.slice(0, -1), present: start, future: [], bursting: false }
+        }
         return { ...state, present: next, future: [], bursting: state.bursting || coalesce }
       }
 

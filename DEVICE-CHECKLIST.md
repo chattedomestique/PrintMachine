@@ -90,7 +90,9 @@ So:
       preview takes a moment to redraw after the first tap
 - [ ] Drag a press slider → the preview keeps up, and the grain does **not**
       visibly re-randomise
-- [ ] One slider drag is one undo step; adding a plate is its own step
+- [ ] One slider drag is one undo step; adding a plate is its own step; a
+      drag that comes back to where it started, or a double tap on a slider
+      already at its default, leaves no step (Undo stays unavailable)
 - [ ] Re-roll → a different sheet (tear, mottle, registration); Undo brings the
       previous one back
 - [ ] Background the app for 5 minutes → return → the document is still there

@@ -28,7 +28,9 @@
  *     goes back to where it was; a mouse's double-click the same. Then on a
  *     phone's CPU (throttled 4x), on Size and on Press › Screen size: two
  *     touches stamped 100 ms apart by their own timestamp, the second
- *     handled late (as behind a slow preview render), still reset.
+ *     handled late (as behind a slow preview render), still reset. On a
+ *     setting already at its default a double tap (touch or mouse) leaves
+ *     no undo step: it went there and back.
  *  8. A double tap on a plate that is not selected only picks it (Border
  *     Studio's tap-to-select; nothing moves, no undo step); a double tap on
  *     the selected plate centres it and zeroes its turn; a mouse's
@@ -356,9 +358,30 @@ try {
         const back = await readout()
         const kept = field(await stored(page))
         check(back === was && kept === from && !(await undoEnabled(page)), `${label}: one Undo goes back to ${was} (${back}, stored ${kept}), and no step is left`)
+      } else {
+        // At its default already: the double tap went there and back, which
+        // is no change, so it leaves no undo step (an Undo would do nothing).
+        check(!(await undoEnabled(page)), `${label}: a double tap on a setting at its default leaves no undo step`)
       }
     }
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+    {
+      // A mouse's double-click on Screen size, still at its default: the
+      // same, no step. From a fresh history (a reload), so this says only
+      // what the double-click did.
+      await page.reload()
+      await page.waitForSelector('.sheet canvas')
+      await page.locator('[data-tool="press"]').click()
+      await page.locator('.controls__section[data-tool="press"] [role=tab][data-tab="screen"]').click()
+      const panel = '.controls__panel[data-sub="screen"]'
+      await page.waitForSelector(panel)
+      const track = await page.locator(`${panel} .slider__input`).boundingBox()
+      const was = await page.locator(`${panel} .controls__value`).first().textContent()
+      await page.mouse.dblclick(track.x + 12 + 0.8 * (track.width - 24), track.y + track.height / 2)
+      await page.waitForTimeout(600)
+      const now = await page.locator(`${panel} .controls__value`).first().textContent()
+      check(now === was && !(await undoEnabled(page)), `Press › Screen size at its default, a mouse double-click: ${was} -> ${now}, and no undo step`)
+    }
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
   }

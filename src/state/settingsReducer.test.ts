@@ -211,8 +211,8 @@ describe('the undo history', () => {
     const l = makeLayer({ x: 0.5 })
     let h = initHistory(doc([l]))
     // The same value again (a second reset; a patch that writes what is
-    // there). Compared with the present only: a drag that goes away and comes
-    // back within one gesture still leaves its one step.
+    // there). A run that goes away and comes back, within one burst, is the
+    // test after next.
     h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.5 } })
     expect(h.past).toHaveLength(0)
     // A photo at 100% on its own sheet cannot move: every drag clamps back.
@@ -236,6 +236,46 @@ describe('the undo history', () => {
     h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.7 }, coalesce: true })
     expect(h.past).toHaveLength(1)
     expect(h.present.layers[0].x).toBe(0.7)
+  })
+
+  it('a run that ends where it began leaves no undo step: a drag back to its start', () => {
+    const l = makeLayer({ x: 0.5 })
+    let h = initHistory(doc([l]))
+    const start = h.present
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.6 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.7 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.5 }, coalesce: true })
+    expect(h.past).toHaveLength(0)
+    expect(h.present).toBe(start)
+    expect(h.bursting).toBe(false)
+    // The finger carries on: that is a step of its own, back to 0.5.
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.55 }, coalesce: true })
+    expect(h.past).toEqual([start])
+    // A step before the run is kept: the run drops only the step it opened.
+    h = historyReducer(h, { type: 'endBurst' })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.6 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { x: 0.55 }, coalesce: true })
+    expect(h.past).toHaveLength(1)
+    expect(h.present.layers[0].x).toBe(0.55)
+  })
+
+  it('a run that ends where it began leaves no undo step: a double tap on a setting at its default', () => {
+    // Press › Screen size at its default, double-tapped at 80% of the track:
+    // the first tap moves the thumb (a coalesced step), the reset joins it
+    // and lands back on the default.
+    let h = initHistory(defaultSettings())
+    const def = h.present.press.screenPitch
+    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: 19.5 }, coalesce: true })
+    expect(h.past).toHaveLength(1)
+    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: def }, coalesce: true, join: true })
+    expect(h.past).toHaveLength(0)
+    expect(h.present.press.screenPitch).toBe(def)
+    expect(h.bursting).toBe(false)
+    // The same when the second tap is handled after the burst is over.
+    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: 19.5 }, coalesce: true })
+    h = historyReducer(h, { type: 'endBurst' })
+    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: def }, coalesce: true, join: true })
+    expect(h.past).toHaveLength(0)
   })
 
   it('a double tap\'s reset joins its first tap\'s step even after the burst is over', () => {

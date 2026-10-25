@@ -979,6 +979,16 @@ delay, so the frame it is measured at does not depend on the machine's speed
 state with a clock of its own, a save's first moments with its 2.4 s toast
 up, is held there while it is measured: a press in progress keeps the main
 thread busy, and a slow machine came to rest only after the toast had gone.
+Nothing in the dock is clicked while it is still moving, and every state is
+measured from the dock's start, which is then checked: a tab clicked while
+its panel was still opening was partly outside the dock, the browser
+scrolled the dock 12 px to reach it, and the dock stayed so, hiding the plate
+button from eight states (so a fast and a slow machine counted 203 and 195
+targets at 320 px). At 200% text a control below the dock's fold is still
+scrolled to before it is clicked, as a person would, and the dock is put
+back before the next state is measured; where the dock scrolls, each state's
+targets are checked from its start and again from its end, so what lies
+below the fold is checked too.
 Border Studio's README claims such a suite and has no file for it; this one
 is a file, and it checks more:
 

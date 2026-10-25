@@ -18,6 +18,11 @@
  *  - the panel never overflows at 100% text: the dock's scroller
  *    (.app__panel-inner) is not taller inside than out, and the page does not
  *    scroll sideways;
+ *  - every state from the dock's start: the dock is put back there before a
+ *    state is measured (a control below its fold is scrolled to before it is
+ *    clicked) and must then still be there, its content area not scrolled,
+ *    its tab strip not scrolled down (dockAtStart, probeDockScroll), so the
+ *    set of targets measured does not depend on how the state was reached;
  *  - tap targets, as the hit area each control still OWNS: for every visible,
  *    enabled button, input, select, tab and menu row in the app bar, the dock
  *    and the cards over the stage (or, with a dialog open, in the dialog),
@@ -31,8 +36,10 @@
  *    targets" is checked: that gap is what lets two 36px circles each own a
  *    44px target, and a neighbour closer than that takes part of it. A
  *    control scrolled partly out of its scroller (a tab in a row wider than
- *    the dock) is reached by scrolling and is skipped while it is; a disabled
- *    one is not a target;
+ *    the dock) is reached by scrolling and is skipped while it is; at 200%
+ *    text, where the dock is shorter than some panels, each state is checked
+ *    from the dock's start and from its end, so what lies below its fold is
+ *    checked too (checkTargetsWholeDock); a disabled one is not a target;
  *  - the Size slider's travel on the real track: pixels per 1% step, and what
  *    one pixel of drag changes at the smallest size (how touchy the slider
  *    is, measured where a thumb meets it: at least 1.5 px a step);
@@ -57,10 +64,11 @@
  * run out and its scrollers have stopped (settle), never on a fixed delay, so
  * the frame a state is measured at does not depend on the machine's speed.
  * The one state with a clock of its own, a save's first moments with its
- * 2.4 s toast up, is held still while it is measured (checkSaveStates). A
- * target covered at its centre is reported with what covers it, the scroll
- * state of the scrollers around it, its dialog's box and transform, and
- * anything still moving.
+ * 2.4 s toast up, is held still while it is measured (checkSaveStates). And
+ * every click on the dock lands on a dock at rest (openTool). A target
+ * covered at its centre is reported with what covers it, the scroll state of
+ * the scrollers around it, its dialog's box and transform, and anything
+ * still moving.
  *
  * The DOM contract it reads (src/features/shell/AppShell.tsx and the panels):
  * tool buttons `[data-tool]` with `aria-pressed`, the open panel
@@ -215,8 +223,14 @@ async function atRest() {
  * Every visible, enabled target in scope, and the hit area it owns through
  * its centre, horizontally and vertically. Scope: the open dialog, or the app
  * bar, the dock and the cards over the stage.
+ *
+ * `pass`: 'start' remembers what it measured, and 'end' (the dock scrolled to
+ * its end) measures only what 'start' did not, so the two count each target
+ * once.
  */
-function probeTargets() {
+function probeTargets(pass = 'all') {
+  if (pass === 'start') window.__gateSeen = new WeakSet()
+  const seen = pass === 'end' ? (window.__gateSeen ?? new WeakSet()) : null
   const dialogs = [...document.querySelectorAll('dialog[open]')]
   const scopes = dialogs.length ? [dialogs[dialogs.length - 1]] : [...document.querySelectorAll('.app__bar, .app__overlay, .app__float')]
   const SEL =
@@ -262,6 +276,8 @@ function probeTargets() {
         out.disabled++
         continue
       }
+      // Measured from the dock's start already.
+      if (seen?.has(el)) continue
       let clipped = false
       for (let n = el.parentElement; n && n !== scope.parentElement; n = n.parentElement) {
         const ns = getComputedStyle(n)
@@ -273,6 +289,7 @@ function probeTargets() {
         out.scrolled++
         continue
       }
+      if (pass === 'start') window.__gateSeen.add(el)
       out.measured++
       const cx = r.left + r.width / 2
       const cy = r.top + r.height / 2
@@ -299,6 +316,24 @@ function probeTargets() {
       if (w < 43.5 || h < 43.5) out.small.push(`${name(el)}: owns ${Math.round(w)}x${Math.round(h)} (drawn ${Math.round(r.width)}x${Math.round(r.height)})`)
     }
   }
+  return out
+}
+
+/**
+ * The dock's scrollers that are not at their start: its content area
+ * (.app__panel-inner) scrolled either way, its tab strip scrolled down. (A tab
+ * strip scrolled ACROSS is how a tab beyond the dock's width is reached, so
+ * that is allowed.) A scrolled dock hides part of what is measured, and the
+ * targets it puts partly outside are skipped, so a dock left scrolled makes
+ * the set of targets measured depend on how the state was reached.
+ */
+function probeDockScroll() {
+  const out = []
+  const inner = document.querySelector('.app__panel-inner')
+  if (inner && (inner.scrollTop > 0.5 || inner.scrollLeft > 0.5))
+    out.push(`the dock (.app__panel-inner) is scrolled ${Math.round(inner.scrollTop)} px down, ${Math.round(inner.scrollLeft)} across`)
+  for (const list of document.querySelectorAll('.app__panel-inner .tabs__list'))
+    if (list.scrollTop > 0.5) out.push(`the tab strip of ${list.getAttribute('aria-label') ?? '?'} is scrolled ${Math.round(list.scrollTop)} px down`)
   return out
 }
 
@@ -404,17 +439,29 @@ async function choosePhoto(page, w, h) {
   await page.waitForFunction(() => !document.querySelector('.app__save[aria-disabled="true"]'), null, { timeout: 30_000 })
 }
 
-/** Open a tool (a no-op when it is open). */
+/**
+ * Open a tool (a no-op when it is open), and return once the page is at rest.
+ *
+ * Every click on the dock lands on a dock at rest. Before a click, Playwright
+ * scrolls its target into view; a tab clicked while its panel is still
+ * opening is partly outside the dock, so the click scrolled the dock (12 px
+ * at 200% text, the tab strip 8 px) and it stayed so: the plate button was
+ * then partly outside the dock and skipped in eight states, a count that
+ * changed from run to run (CI's 195 targets at 320 px against 203).
+ */
 async function openTool(page, tool) {
   const btn = page.locator(`[data-tool="${tool}"][aria-pressed]`)
-  if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click()
+  if ((await btn.getAttribute('aria-pressed')) === 'true') return
+  await btn.click()
   await page.waitForSelector(`.controls__section[data-tool="${tool}"]`)
+  await settle(page, `opening ${tool}`)
 }
 
 async function openTab(page, tool, tab) {
   await openTool(page, tool)
   await page.locator(`.controls__section[data-tool="${tool}"] [role=tab][data-tab="${tab}"]`).click()
   await page.waitForSelector(`.controls__panel[data-sub="${tab}"]`)
+  await settle(page, `opening ${tool} › ${tab}`)
 }
 
 async function closeTools(page) {
@@ -456,6 +503,7 @@ async function eachState(page, visit) {
         // Every state of Over photo: the strip comes and goes with them.
         const over = page.locator('.controls__panel[data-sub="over"]')
         for (const mode of ['off', 'second', 'backing']) {
+          await settle(page, `ink-over, before ${mode}`)
           await over.locator(`input[type=radio][value="${mode}"]`).check({ force: true })
           await visit(`${tool}-${tab}-${mode}`)
           if (mode === 'second') {
@@ -473,6 +521,7 @@ async function eachState(page, visit) {
             await page.waitForSelector('dialog[open]', { state: 'detached' })
           }
         }
+        await settle(page, 'ink-over, before second')
         await over.locator('input[type=radio][value="second"]').check({ force: true })
         continue
       }
@@ -488,6 +537,7 @@ async function eachDialog(page, visit) {
   const close = async () => {
     await page.keyboard.press('Escape')
     await page.waitForSelector('dialog[open]', { state: 'detached' })
+    await settle(page, 'a dialog closing')
   }
   await openTab(page, 'type', 'size')
   await page.locator('.controls__panel[data-sub="size"] .controls__value').click()
@@ -515,11 +565,72 @@ async function eachDialog(page, visit) {
   await close()
 }
 
+/**
+ * Every state is measured from the dock's start. At 200% text the dock is
+ * shorter than some panels, and a control below its fold (the Ink › Over
+ * photo strip's ink button) is scrolled to before the gate clicks it, as a
+ * person would scroll to it; the dock then stays so, into the states after.
+ * So the dock is put back at its start and the page let come to rest, and
+ * then it must still be there (probeDockScroll). Returns whether it had to be
+ * put back.
+ */
+async function dockAtStart(page, where) {
+  const moved = await page.evaluate(() => {
+    let moved = false
+    const inner = document.querySelector('.app__panel-inner')
+    if (inner && (inner.scrollTop || inner.scrollLeft)) {
+      inner.scrollTop = 0
+      inner.scrollLeft = 0
+      moved = true
+    }
+    for (const list of document.querySelectorAll('.app__panel-inner .tabs__list')) {
+      if (list.scrollTop) {
+        list.scrollTop = 0
+        moved = true
+      }
+    }
+    return moved
+  })
+  if (moved) await settle(page, `${where}, the dock back at its start`)
+  for (const d of await page.evaluate(probeDockScroll)) check(false, `${where}: ${d}`)
+  return moved
+}
+
 /** Check the targets of the state on screen. */
 async function checkTargets(page, where) {
   const t = await page.evaluate(probeTargets)
   for (const s of t.small) check(false, `${where}: a target under 44px: ${s}`)
   return t
+}
+
+/**
+ * The same, from the dock's start and, where the dock scrolls (at 200% text
+ * it is shorter than some panels), from its end too: what lies below the
+ * dock's fold is a target as well, reached by scrolling. Each target counts
+ * once. Leaves the dock at its start.
+ */
+async function checkTargetsWholeDock(page, where) {
+  const t = await page.evaluate(probeTargets, 'start')
+  for (const s of t.small) check(false, `${where}: a target under 44px: ${s}`)
+  const room = await page.evaluate(() => {
+    const inner = document.querySelector('.app__panel-inner')
+    return inner && !document.querySelector('dialog[open]') ? inner.scrollHeight - inner.clientHeight : 0
+  })
+  if (room <= 1) return t
+  await page.evaluate(() => {
+    const inner = document.querySelector('.app__panel-inner')
+    inner.scrollTop = inner.scrollHeight
+  })
+  await settle(page, `${where}, the dock at its end`)
+  const end = await page.evaluate(probeTargets, 'end')
+  for (const s of end.small) check(false, `${where}, the dock scrolled to its end: a target under 44px: ${s}`)
+  await page.evaluate(() => {
+    document.querySelector('.app__panel-inner').scrollTop = 0
+  })
+  await settle(page, `${where}, the dock back at its start`)
+  // Skipped: the targets partly outside the dock at both ends (a tab in a
+  // row wider than the dock, until it is scrolled across to).
+  return { ...t, measured: t.measured + end.measured, scrolled: end.scrolled, atEnd: end.measured }
 }
 
 const shotName = (...parts) => parts.join('-').replace(/[^a-z0-9-]+/gi, '-') + '.png'
@@ -534,6 +645,7 @@ try {
       let targets = 0
       await eachState(page, async (name) => {
         await settle(page, `${where}, ${name}`)
+        await dockAtStart(page, `${where}, ${name}`)
         states.push({ name, ...(await measure(page)) })
         targets += (await checkTargets(page, `${where}, ${name}`)).measured
         if (name === 'type-size' && vw === 320) {
@@ -586,18 +698,20 @@ try {
     await page.addStyleTag({ content: 'html { font-size: 200% }' })
     let n = 0
     let targets = 0
+    let returned = 0
     const visit = async (name) => {
       await settle(page, `${where}, ${name}`)
+      if (await dockAtStart(page, `${where}, ${name}`)) returned++
       n++
       for (const c of await page.evaluate(probeClipped)) check(false, `${where}, ${name}: ${c}`)
       const side = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
       check(side <= 0, `${where}, ${name}: the page scrolls sideways by ${side} px`)
-      targets += (await checkTargets(page, `${where}, ${name}`)).measured
+      targets += (await checkTargetsWholeDock(page, `${where}, ${name}`)).measured
     }
     await eachState(page, visit)
     await eachDialog(page, visit)
     check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
-    console.log(`${where}: ${n} states and dialogs, no text cut off, ${targets} targets measured`)
+    console.log(`${where}: ${n} states and dialogs, no text cut off, ${targets} targets measured (the dock put back at its start in ${returned})`)
     await ctx.close()
   }
 

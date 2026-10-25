@@ -45,6 +45,7 @@ npm run measure:export    # export time and desktop memory (informational)
 npm run build && npm run check:save   # the save flow in the built app, tapped
 npm run build && npm run check:touch  # tap-to-select on the sheet, touched
 npm run check:spike       # the device spike page still runs (see below)
+npm run check:encode      # the save's JPEG encoder, decoded by Chromium (fails over a bound)
 ```
 
 `scripts/device-spike/spike.html` is a page for a phone, not part of the app:
@@ -1416,15 +1417,28 @@ nothing else does. These went, and saved prints that used them still open
 Print Machine's own code is written for it. One part is translated from
 another project, and says so:
 
-- **The JPEG encoder's forward DCT** (`scripts/device-spike/spike.html`) is
-  `jpeg_fdct_float` from the Independent JPEG Group's `jfdctflt.c`, with the
-  scale table from `jcdctmgr.c` (`aanscalefactor`) and the quality scaling
-  from `jcparam.c` (`jpeg_quality_scaling`), libjpeg release 9f (14-Jan-2024),
-  translated to JavaScript with the same statements in float64. **This
-  software is based in part on the work of the Independent JPEG Group.** The
-  IJG's README, with its copyright and no-warranty notice unaltered, is
-  `src/engine/encode/IJG-README.txt`. The rest of the encoder is written from
-  ITU-T T.81 (the Annex K quantisation and Huffman tables are the standard's
-  data); the DCT's algorithm is Arai, Agui and Nakajima's (Trans. IEICE
-  E-71(11):1095), as described in Pennebaker and Mitchell's *JPEG Still Image
-  Data Compression Standard*.
+- **The JPEG encoder's forward DCT** (`src/engine/encode/jpeg.ts`, and its
+  copy in `scripts/device-spike/spike.html`) is `jpeg_fdct_float` from the
+  Independent JPEG Group's `jfdctflt.c`, with the scale table from
+  `jcdctmgr.c` (`aanscalefactor`) and the quality scaling from `jcparam.c`
+  (`jpeg_quality_scaling`), libjpeg release 9f (14-Jan-2024), translated to
+  TypeScript (and JavaScript) with the same statements in float64. What was
+  changed is said in `jpeg.ts`'s header: the samples arrive as floats already
+  level-shifted (the colour conversion keeps its fractions where libjpeg
+  rounds to 8-bit samples), so jfdctflt.c's `- 8 * CENTERJSAMPLE` on the DC
+  term is the conversion's `- 128`. **This software is based in part on the
+  work of the Independent JPEG Group.** The IJG's README, with its copyright
+  and no-warranty notice unaltered, is `src/engine/encode/IJG-README.txt`.
+  The rest of the encoder is written from ITU-T T.81 (the Annex K
+  quantisation and Huffman tables are the standard's data); the DCT's
+  algorithm is Arai, Agui and Nakajima's (Trans. IEICE E-71(11):1095), as
+  described in Pennebaker and Mitchell's *JPEG Still Image Data Compression
+  Standard*.
+
+The encoder (`JpegEncoder`) writes baseline JPEG with every colour component
+at full resolution (4:4:4) from rows pushed in any groups: the same bytes
+however they arrive, no sheet-sized buffer. `scripts/check-encode.mjs`
+decodes its files in Chromium and holds the error to bounds (at quality 95:
+RMSE 0.68 on a gradient; 3.84, largest 26, on a saturated halftone, where
+Chromium's own 4:2:0 file at 0.95 is 14.74, largest 77; 1.94, largest 33, on
+a real print). Save does not use it yet: it still encodes the canvas.

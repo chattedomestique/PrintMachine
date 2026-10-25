@@ -21,7 +21,8 @@
     "check:css": "node scripts/check-css.mjs",
     "check:save": "node scripts/check-save.mjs",
     "check:touch": "node scripts/check-touch.mjs",
-    "check:spike": "node scripts/check-spike.mjs"
+    "check:spike": "node scripts/check-spike.mjs",
+    "check:encode": "node scripts/check-encode.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

@@ -19,6 +19,7 @@
  */
 
 import { renderPrint, renderPrintAsync, type RenderCache } from '../../src/engine/render.ts'
+import { JpegEncoder } from '../../src/engine/encode/jpeg.ts'
 import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
 import type { PrintSettings } from '../../src/engine/types.ts'
 import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
@@ -351,6 +352,121 @@ async function press(format: ExportFormat = 'jpeg'): Promise<{ w: number; h: num
   return { w: pressed.plan.width, h: pressed.plan.height, bytes: pressed.blob.size, ms: performance.now() - t0 }
 }
 
+/**
+ * The save's encoders, checked by decoding what they write
+ * (scripts/check-encode.mjs). The pixels, by name: a smooth gradient; a
+ * saturated halftone (pink dots on paper with a little noise, 1023x771, not a
+ * multiple of 8 either way: the case 4:2:0 smears); a real print
+ * (photo-second-ink at 1000 px).
+ */
+async function encodeSource(kind: string): Promise<{ data: Uint8ClampedArray; w: number; h: number }> {
+  if (kind === 'print') return pixels('photo-second-ink', 1000)
+  if (kind === 'gradient') {
+    const w = 640
+    const h = 480
+    const data = new Uint8ClampedArray(w * h * 4)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) data.set([(x * 255) / (w - 1), (y * 255) / (h - 1), 128 + 60 * Math.sin((x + y) / 90), 255], (y * w + x) * 4)
+    }
+    return { data, w, h }
+  }
+  if (kind === 'halftone') {
+    const w = 1023
+    const h = 771
+    const data = new Uint8ClampedArray(w * h * 4)
+    let s = 1
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        s = (Math.imul(s, 1664525) + 1013904223) >>> 0
+        const u = (x * 0.7071 + y * 0.7071) / 12
+        const v = (x * 0.7071 - y * 0.7071) / 12
+        const dot = Math.hypot(u - Math.round(u), v - Math.round(v)) < 0.32 + 0.2 * Math.sin(x / 300)
+        const n = ((s >>> 24) - 128) * 0.05
+        data.set(dot ? [255 + n, 72 + n, 176 + n, 255] : [244 + n, 238 + n, 225 + n, 255], (y * w + x) * 4)
+      }
+    }
+    return { data, w, h }
+  }
+  throw new Error(`unknown pixels "${kind}"`)
+}
+
+/** Decoded by the browser, as RGBA. */
+async function decodeRgba(blob: Blob, w: number, h: number): Promise<Uint8ClampedArray> {
+  const bmp = await createImageBitmap(blob)
+  if (bmp.width !== w || bmp.height !== h) throw new Error(`decoded ${bmp.width}x${bmp.height}, not ${w}x${h}`)
+  const ctx = context(true)
+  ctx.canvas.width = w
+  ctx.canvas.height = h
+  ctx.drawImage(bmp, 0, 0)
+  bmp.close()
+  const data = ctx.getImageData(0, 0, w, h).data
+  ctx.canvas.width = 0
+  return data
+}
+
+/** RMSE and the largest error over the colour channels. */
+function errorOf(a: Uint8ClampedArray, b: Uint8ClampedArray): { rmse: number; max: number } {
+  let se = 0
+  let max = 0
+  let n = 0
+  for (let i = 0; i < a.length; i += 4) {
+    for (let k = 0; k < 3; k++) {
+      const e = a[i + k] - b[i + k]
+      se += e * e
+      if (Math.abs(e) > max) max = Math.abs(e)
+      n++
+    }
+  }
+  return { rmse: Math.sqrt(se / n), max }
+}
+
+/** The frame header's sampling factors, e.g. "11 11 11" for 4:4:4. */
+function samplingOf(bytes: Uint8Array): string {
+  for (let i = 2; i + 3 < bytes.length; ) {
+    if (bytes[i] !== 0xff) return '?'
+    const marker = bytes[i + 1]
+    const len = (bytes[i + 2] << 8) | bytes[i + 3]
+    if (marker === 0xc0 || marker === 0xc2) {
+      const n = bytes[i + 9]
+      return Array.from({ length: n }, (_, c) => bytes[i + 11 + 3 * c].toString(16)).join(' ')
+    }
+    i += 2 + len
+  }
+  return '?'
+}
+
+async function encodeCheck(kind: string) {
+  const { data, w, h } = await encodeSource(kind)
+  const chunks: Uint8Array[] = []
+  const t0 = performance.now()
+  const jpeg = new JpegEncoder(w, h, 95, (c) => chunks.push(c))
+  for (let y = 0; y < h; y += 64) {
+    const n = Math.min(64, h - y)
+    jpeg.push(data.subarray(y * w * 4, (y + n) * w * 4), n)
+  }
+  jpeg.finish()
+  const ms = performance.now() - t0
+  const blob = new Blob(chunks as BlobPart[], { type: 'image/jpeg' })
+  const ours = errorOf(data, await decodeRgba(blob, w, h))
+  // Chromium's own JPEG at 0.95, from a canvas of the same pixels.
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(data), w, h), 0, 0)
+  const theirs = await new Promise<Blob>((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/jpeg', 0.95))
+  c.width = 0
+  return {
+    kind,
+    w,
+    h,
+    bytes: blob.size,
+    msPerMP: Math.round(ms / ((w * h) / 1e6)),
+    ...ours,
+    sampling: samplingOf(new Uint8Array(await blob.arrayBuffer())),
+    chromium: { ...errorOf(data, await decodeRgba(theirs, w, h)), bytes: theirs.size, sampling: samplingOf(new Uint8Array(await theirs.arrayBuffer())) },
+  }
+}
+
 declare global {
   interface Window {
     H: {
@@ -360,9 +476,10 @@ declare global {
       save: typeof save
       prepare: typeof prepare
       press: typeof press
+      encodeCheck: typeof encodeCheck
       normalized: boolean
     }
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, save, prepare, press, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, save, prepare, press, encodeCheck, normalized: !!normalizeSettings }

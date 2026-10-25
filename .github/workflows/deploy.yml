@@ -94,6 +94,12 @@ jobs:
       - run: node scripts/check-spike.mjs
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
+      # The save's own encoders, decoded by the browser: the JPEG's error on
+      # a gradient, a saturated halftone and a real print, against bounds and
+      # against Chromium's own 4:2:0 JPEG; every frame 4:4:4.
+      - run: node scripts/check-encode.mjs
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
       # Time and resident memory of an export in desktop Chrome. Informational:
       # V8 frees what JavaScriptCore keeps, so measure-alloc is the gate.
       - run: node scripts/measure-export.mjs

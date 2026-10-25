@@ -460,7 +460,7 @@ function* pressWholeSteps(
     ws,
     coverage,
     // The torn tone of the whole sheet, every row: what a knockout cut from
-    // it whole (cutKnockout) reads.
+    // it whole (cutKnockoutRows over the whole sheet) reads.
     { cuts: true, torn: { a: 0, b: h } },
     at,
   )
@@ -683,30 +683,14 @@ export interface PlateHalo {
   cell: number
 }
 
-function haloOf(rMax: number, moves: boolean, dy: number, cell: number): Omit<PlateHalo, 'dx' | 'dy' | 'rMax' | 'cell'> {
-  const blur = 3 * rMax
-  const shift = moves ? Math.ceil(Math.abs(dy)) + 2 : 0
-  const grain = cell > 0 ? 3 * Math.ceil(cell) + 1 : 0
-  return { blur, shift, grain, total: blur + shift + grain }
-}
-
-/** The halo of one plate of a document, at its own offset. */
-export function plateHalo(press: PressProfile, plate: { fontSize: number; index: number }, seed: number, h: number): PlateHalo {
-  const g = plateGeometry(press, plate, seed, h)
-  return { ...haloOf(g.rMax, g.dx !== 0 || g.dy !== 0, g.dy, g.cell), dx: g.dx, dy: g.dy, rMax: g.rMax, cell: g.cell }
-}
-
-/** The largest halo a press can give a plate at this detail on a sheet `h`
- *  tall, whatever its seed and index: the offset at its bound,
- *  |dy| = misregistration x scale x sqrt(detail). */
-export function haloBound(press: PressProfile, h: number, detail = 1): PlateHalo {
-  const scale = h / REFERENCE_HEIGHT
-  const edge = edgeToRough(press.edge)
-  const tears = edge.roughness > 0 || edge.bleed > 0
-  const rMax = tears ? blurReach(TEAR_SCALE * scale * detail) : 0
-  const dy = press.misregistration * scale * Math.sqrt(detail)
-  const cell = press.method === 'grain' ? grainCell(press.screenPitch, scale) : 0
-  return { ...haloOf(rMax, dy !== 0, dy, cell), dx: 0, dy, rMax, cell }
+/** The halo of one plate, from its geometry (`plateGeometry`: its own
+ *  offset; or any geometry a caller makes, e.g. the offset at its bound,
+ *  |dy| = misregistration x scale x sqrt(detail)). */
+export function plateHalo(g: PlateGeometry): PlateHalo {
+  const blur = 3 * g.rMax
+  const shift = g.dx !== 0 || g.dy !== 0 ? Math.ceil(Math.abs(g.dy)) + 2 : 0
+  const grain = g.cell > 0 ? 3 * Math.ceil(g.cell) + 1 : 0
+  return { blur, shift, grain, total: blur + shift + grain, dx: g.dx, dy: g.dy, rMax: g.rMax, cell: g.cell }
 }
 
 /** Rows [a, b) of the sheet; empty when a >= b. */

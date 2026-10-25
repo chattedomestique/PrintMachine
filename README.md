@@ -222,10 +222,12 @@ turned reversed type to mush in the first cut:
   the type's own dots, so the light ink prints onto a still-black ground. A
   stencil has a solid hole in it.
 - It is cut from the **same pressed outline** the ink lands on: the plate's own
-  torn, bled tone and its own registration offset, which `pressPlate` hands to
-  `cutKnockout` (`engine/knockout.ts`) rather than the knockout roughening the
-  tone a second time. A hole a couple of pixels off the ink could only be
-  covered by spreading it, which at text size swells every counter shut.
+  torn, bled tone and its own registration offset, which the plate's press
+  hands to `cutKnockoutRows` (`engine/knockout.ts`, the one function that cuts
+  every knockout, a backing's and a second ink's alike) rather than the
+  knockout roughening the tone a second time. A hole a couple of pixels off
+  the ink could only be covered by spreading it, which at text size swells
+  every counter shut.
 
 There is **no trap**. The hole travels with the plate, so there is nothing to
 trap against — and what the eye reads as a reversed word is the *hole*, not the
@@ -435,7 +437,7 @@ pink type on a yellow backing comes out red-orange. That is what a real second
 pass does.
 
 The photo is **knocked back to paper under the block's own pressed outline**,
-by the same `cutKnockout` the second ink uses. Without it a pale block over a
+by the same `cutKnockoutRows` the second ink uses. Without it a pale block over a
 dark part of the photo would be invisible — a transparent yellow over black is
 black — so the block prints on paper wherever it is, and reads the same over any
 part of the picture.
@@ -775,9 +777,10 @@ output pixel.
   reads in the third (the blur's other half until then). Each pass works on
   a window of rows sized to what it reads (`windowsFor`), so the same buffers
   serve a press of the whole sheet or of a band of it. The knockout is cut
-  straight into the running bytes (its shift walks the sheet in the direction
-  it moves, so it never overwrites a pixel it still has to read), and the
-  second ink's light half takes the coverage's own buffer.
+  straight into the running bytes (`cutKnockoutRows`), the torn tone moved to
+  the plate's offset as it is read rather than in place, so a window of it can
+  serve more than one band and is never written; and the second ink's light
+  half takes the coverage's own buffer.
 - **Nothing the canvas holds is held twice.** The sheet is printed a band of
   rows at a time into one band-sized buffer, and each band is put on the
   canvas, instead of a full-size copy being put at the end; the knockout
@@ -796,9 +799,12 @@ output pixel.
   every band before the first is pressed, so every band height prints the
   same bytes (`banded.test.ts` against the digests recorded before, and the
   harness's `--bands` through the export's entry); everything a band needs is
-  made once, before the first, and no band allocates. Save still presses the
-  sheet as one band: pressing in bands lowers the memory only once the glyphs
-  and the photo are drawn a band at a time too, which is the step after.
+  made once, before the first, and no band allocates anything of 512 KiB or
+  more (`banded.test.ts`): what a band does make is a few arrays a row long
+  (the blur's column sums, per plate; the luminance's column lookup, per split
+  plate) and a few floats. Save still presses the sheet as one band:
+  pressing in bands lowers the memory only once the glyphs and the photo are
+  drawn a band at a time too, which is the step after.
 - **The ground's luminance on a small grid.** The second ink decides each
   glyph's ink from the photo's luminance blurred across about a word — a
   radius of 500 px on a 12 MP export, the press's slowest pass and a

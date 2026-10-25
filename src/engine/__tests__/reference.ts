@@ -1,15 +1,17 @@
 /**
- * Reference implementations, for the tests only: the plain versions of two
- * passes the press runs in place, kept as oracles (the app never imports this
- * folder, so the build never ships it).
+ * Reference implementations, for the tests only: the plain versions of
+ * passes the press runs in place or in bands, kept as oracles (the app never
+ * imports this folder, so the build never ships it).
  *
- *  - `shiftField`: the bilinear shift into a NEW field. `shiftInPlace`
- *    (ink.ts) gets the same numbers by walking against the shift, which is
- *    easy to get wrong for one direction; this is what it is checked against.
+ *  - `shiftField`: the bilinear shift of a whole field into a NEW field.
+ *    `shiftRows` (ink.ts) moves a window of rows at a time; this is what it is
+ *    checked against.
  *  - `knockoutMask`: the knockout as a float field of its own, where the
- *    press cuts it straight into the sheet's running bytes (`cutKnockout`).
- *    Its behaviour tests and the golden recorded when the knockout became a
- *    stage of its own are written against this shape.
+ *    press cuts it into the running bytes a band at a time
+ *    (`cutKnockoutRows`). Its behaviour tests and the golden recorded when
+ *    the knockout became a stage of its own are written against this shape.
+ *  - `groundLuma`: the ground's blurred luminance at every pixel, at full
+ *    resolution, as the press held it before the luminance grid.
  *  - `ditherWhole` and `lumaGridWhole`: grain and the ground's luminance grid
  *    as they were before the press could run in bands, over the whole field
  *    at once (dither.ts and media.ts at the commit before). The streaming
@@ -18,7 +20,7 @@
 
 import { blurInPlace, needsSpare } from '../blur.ts'
 import { holeAt, type KnockoutParams } from '../knockout.ts'
-import { groundLuma, lumaCell, luma, type LumaGrid } from '../media.ts'
+import { lumaCell, luma, type LumaGrid } from '../media.ts'
 
 export function shiftField(src: Float32Array, w: number, h: number, dx: number, dy: number): Float32Array {
   if (dx === 0 && dy === 0) return src.slice()
@@ -50,7 +52,7 @@ export function shiftField(src: Float32Array, w: number, h: number, dx: number, 
 }
 
 /** How much of the ground to take away under one plate, 0..1 per pixel, as a
- *  new float field (see knockout.ts `cutKnockout` for the rule). */
+ *  new float field (see knockout.ts `cutKnockoutRows` for the rule). */
 export function knockoutMask(roughened: Float32Array, groundLum: Float32Array | null, p: KnockoutParams): Float32Array {
   const { w, h } = p
   const moved = shiftField(roughened, w, h, p.dx, p.dy)
@@ -134,6 +136,20 @@ export function ditherWhole<T extends Float32Array | Uint8ClampedArray>(tone: Fl
     }
   }
   return out
+}
+
+/** The ground's luminance at every pixel, blurred at full resolution (the
+ *  press's `groundLuma` before the grid): transparent ground is bare paper,
+ *  the lightest thing there is. */
+export function groundLuma(rgba: Uint8ClampedArray, w: number, h: number, blurRadius: number): Float32Array {
+  const n = w * h
+  const lum = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    const a = rgba[i * 4 + 3] / 255
+    lum[i] = luma(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]) * a + (1 - a)
+  }
+  if (blurRadius > 0) blurInPlace(lum, w, h, blurRadius, new Float32Array(n), needsSpare(blurRadius) ? new Float32Array(n) : undefined)
+  return lum
 }
 
 /** The ground's luminance grid from the whole ground at once (media.ts

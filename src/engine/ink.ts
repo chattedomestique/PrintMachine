@@ -133,7 +133,9 @@ export function applyMottle(
 }
 
 /**
- * Resample a field by a sub-pixel offset, bilinearly.
+ * Resample a field by a sub-pixel offset, bilinearly: the sheet rows [y0, y1)
+ * of `src` moved by (dx, dy), into `out` (row y at out[(y - y0) * w]), each
+ * value the float32 it stores.
  *
  * This is half of misregistration: the *image* on the plate moves. The other
  * half is moving the screen lattice by the same offset (see ScreenOptions'
@@ -147,52 +149,12 @@ export function applyMottle(
  * that runs to the trim. A plate that slides down should reveal unprinted
  * paper at the top, because that is what it does.
  *
- * In place, with no second field. Every output pixel reads the source a
- * fraction of a pixel or more AGAINST the shift (at x - dx, y - dy). So
- * walking the rows and columns in the direction of the shift — from the far
- * end towards the near one — reaches every pixel's sources before it
- * overwrites them: a pixel is only ever overwritten after the last pixel that
- * reads it. The one pixel read from its own row and column is read before it
- * is written. (Checked against a plain shift into a new field: the tests'
- * `shiftField`, engine/__tests__/reference.ts.)
- */
-export function shiftInPlace(field: Float32Array, w: number, h: number, dx: number, dy: number): void {
-  if (dx === 0 && dy === 0) return
-  const at = (x: number, y: number): number => (x < 0 || x >= w || y < 0 || y >= h ? 0 : field[y * w + x])
-  const yDown = dy > 0
-  const xDown = dx > 0
-  for (let k = 0; k < h; k++) {
-    const y = yDown ? h - 1 - k : k
-    const sy = y - dy
-    const y0 = Math.floor(sy)
-    const fy = sy - y0
-    for (let j = 0; j < w; j++) {
-      const x = xDown ? w - 1 - j : j
-      const sx = x - dx
-      const x0 = Math.floor(sx)
-      const fx = sx - x0
-
-      const a = at(x0, y0)
-      const b = at(x0 + 1, y0)
-      const c = at(x0, y0 + 1)
-      const d = at(x0 + 1, y0 + 1)
-
-      const top = a + (b - a) * fx
-      const bot = c + (d - c) * fx
-      field[y * w + x] = top + (bot - top) * fy
-    }
-  }
-}
-
-/**
- * The sheet rows [y0, y1) of `src` moved by (dx, dy), into `out` (row y at
- * out[(y - y0) * w]): the bilinear read of `shiftInPlace`, into a field of its
- * own, from a WINDOW of the source. `src` holds the sheet's rows from
- * `srcRow0`; rows outside the sheet (above 0, from `fullH` on) and columns
- * outside [0, w) read as 0, as they do in place. The rows read are
- * [floor(y0 - dy), floor(y1 - 1 - dy) + 2), clamped to the sheet: the caller
- * hands in at least those. No shift copies the rows, as in place it leaves
- * them.
+ * From a WINDOW of the source: `src` holds the sheet's rows from `srcRow0`;
+ * rows outside the sheet (above 0, from `fullH` on) and columns outside
+ * [0, w) read as 0. The rows read are [floor(y0 - dy), floor(y1 - 1 - dy) + 2),
+ * clamped to the sheet (`shiftSource`): the caller hands in at least those.
+ * No shift copies the rows. (Checked against a plain shift of the whole field:
+ * the tests' `shiftField`, engine/__tests__/reference.ts.)
  */
 export function shiftRows(
   src: Float32Array,

@@ -9,13 +9,11 @@
  * away (0 keeps it, 1 is bare paper), which the renderer applies to the photo's
  * alpha so the paper underneath comes back through.
  *
- * Pure, and fed by the plate's OWN press: `roughened` is the torn, bled tone
- * `pressPlate` already made, and the offset is the one it moved the plate by.
+ * Pure, and fed by the plate's OWN press: `torn` is the torn, bled tone the
+ * plate's press already made, and the offset is the one it moved the plate by.
  * Re-roughening the tone here would cost a full blur pass for a field that is
  * already sitting in memory, byte for byte the same.
  */
-
-import { shiftInPlace } from './ink.ts'
 
 export interface KnockoutParams {
   w: number
@@ -42,11 +40,18 @@ export interface KnockoutParams {
 const HOLE = 0.14
 
 /**
- * How much of the ground to take away under one plate, cut straight into the
- * sheet's running knockout: bytes, 0..255 (0 keeps the photo, 255 is bare
- * paper), each pixel keeping the deepest cut any plate made there. Shifts
- * `roughened` IN PLACE to the plate's offset, so the caller hands over a
- * buffer it is done with.
+ * How much of the ground to take away under one plate, for the sheet rows
+ * [y0, y1), cut into the running knockout: bytes, 0..255 (0 keeps the photo,
+ * 255 is bare paper), each pixel keeping the deepest cut any plate made
+ * there. Backings and second inks alike are cut by this one function.
+ *
+ * `into`, `groundLum` and the split's mask hold the sheet's rows from
+ * `intoRow0` (a band's own buffers, or the whole sheet from 0); `torn`, the
+ * plate's torn tone, holds them from `tornRow0` and must cover the rows the
+ * shift reads (ink.ts `shiftSource`). The tone is moved to the plate's offset
+ * as it is read (the bilinear read of ink.ts `shiftRows`, each value the
+ * float32 it stores), never in place: a window of it can serve more than one
+ * band, so it is never written.
  *
  * The hole is cut from the plate's roughened TONE, not from its screened
  * coverage: knocking out with the halftone would leave the photo standing in
@@ -67,33 +72,6 @@ const HOLE = 0.14
  * second ink happens to be the light one. With the plate's own ink as its
  * second ink this reduces to "the photo is darker than the ink", which is how
  * one colour stays readable over a whole photograph the riso way.
- */
-export function cutKnockout(
-  into: Uint8ClampedArray,
-  roughened: Float32Array,
-  groundLum: Float32Array | null,
-  p: KnockoutParams,
-): void {
-  const { w, h } = p
-  shiftInPlace(roughened, w, h, p.dx, p.dy)
-  const split = groundLum ? p.split : undefined
-  const unit = split?.light instanceof Uint8ClampedArray ? 255 : 1
-  for (let i = 0; i < into.length; i++) {
-    const v = Math.fround(holeAt(roughened[i], groundLum, split, unit, i)) * 255
-    if (v > into[i]) into[i] = v
-  }
-}
-
-/**
- * `cutKnockout` for a band of the sheet, from a window of the torn tone: the
- * rows [y0, y1) of the plate's hole, moved to its offset, cut into `into`.
- *
- * `into`, `groundLum` and the split's mask hold the sheet's rows from
- * `intoRow0` (a band's own buffers); `torn` holds them from `tornRow0` and
- * must cover the rows the shift reads (ink.ts `shiftSource`). The tone is
- * moved as it is read, rather than in place: a window of it can serve more
- * than one band, so it is never written. The numbers are `cutKnockout`'s:
- * each moved value is the float32 the in-place shift would have stored.
  */
 export function cutKnockoutRows(
   into: Uint8ClampedArray,
@@ -137,7 +115,7 @@ export function cutKnockoutRows(
 }
 
 /** How much of the ground one pixel of a plate takes away, 0..1, from the
- *  plate's tone at that pixel once moved to its offset (see cutKnockout). */
+ *  plate's tone at that pixel once moved to its offset (see cutKnockoutRows). */
 export function holeAt(
   moved: number,
   groundLum: Float32Array | null,

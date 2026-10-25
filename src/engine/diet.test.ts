@@ -28,13 +28,13 @@ import {
   type ToneRows,
   type ToneSource,
 } from './render.ts'
-import { bandMask, groundLuma, groundLumaGrid, lumaCell, sampleLuma, splitInks } from './media.ts'
+import { bandMask, groundLumaGrid, lumaCell, sampleLumaRows, splitInks, type LumaGrid } from './media.ts'
 import { inkById, paperById } from './inks.ts'
 import { screenField } from './screen.ts'
 import { GrainStream, ditherField } from './dither.ts'
-import { cutKnockout } from './knockout.ts'
-import { knockoutMask, shiftField } from './__tests__/reference.ts'
-import { applyDensity, applyMottle, shiftInPlace, shiftRows } from './ink.ts'
+import { cutKnockoutRows } from './knockout.ts'
+import { groundLuma, knockoutMask, shiftField } from './__tests__/reference.ts'
+import { applyDensity, applyMottle, shiftRows } from './ink.ts'
 import { blurInPlace } from './blur.ts'
 import { roughenInPlace } from './rough.ts'
 import { clampByte, compositeLayers } from './composite.ts'
@@ -254,15 +254,14 @@ describe('step 3: every pass in place, in one workspace, to the same numbers', (
     return f
   }
 
-  it('shifting in place gives shiftField\'s field, for any offset either way', () => {
+  it('shifting the whole sheet gives shiftField\'s field, for any offset either way', () => {
     const w = 37
     const h = 29
     for (const dx of [0, 0.4, -0.4, 1, -1, 2.7, -3.25, 0.999]) {
       for (const dy of [0, 0.3, -0.3, 1, -2, 4.6, -1.01]) {
         const src = field(w, h)
-        const inPlace = src.slice()
-        shiftInPlace(inPlace, w, h, dx, dy)
-        expect(sha(inPlace)).toBe(sha(shiftField(src, w, h, dx, dy)))
+        const moved = shiftRows(src, w, 0, h, dx, dy, 0, h, new Float32Array(w * h))
+        expect(sha(moved)).toBe(sha(shiftField(src, w, h, dx, dy)))
       }
     }
   })
@@ -305,7 +304,7 @@ describe('step 3: every pass in place, in one workspace, to the same numbers', (
     }
   })
 
-  it('a knockout cut straight into the running bytes is knockoutMask, rounded, deepest cut kept', () => {
+  it('a knockout cut into the running bytes (the whole sheet as one band) is knockoutMask, rounded, deepest cut kept', () => {
     const w = 50
     const h = 40
     const rough = field(w, h, 0.3)
@@ -316,7 +315,7 @@ describe('step 3: every pass in place, in one workspace, to the same numbers', (
     const expected = into.slice()
     const k = knockoutMask(rough, lum, p)
     for (let i = 0; i < k.length; i++) expected[i] = Math.max(expected[i], Math.round(k[i] * 255))
-    cutKnockout(into, rough.slice(), lum, p)
+    cutKnockoutRows(into, 0, rough, 0, lum, { ...p, y0: 0, y1: h })
     expect(into).toEqual(expected)
   })
 
@@ -423,6 +422,8 @@ describe('step 4: nothing the canvas holds is held twice', () => {
 })
 
 describe('step 6: the ground\'s luminance on a small grid', () => {
+  /** The grid read back at every pixel of the sheet. */
+  const whole = (g: LumaGrid) => sampleLumaRows(g, 0, g.h, new Float32Array(g.w * g.h))
   /** The harness's test photo (a ramp with a zone plate in it), at sheet size. */
   const photo = (w: number, h: number) => {
     const d = new Uint8ClampedArray(w * h * 4)
@@ -442,13 +443,13 @@ describe('step 6: the ground\'s luminance on a small grid', () => {
     return d
   }
 
-  it('is groundLuma exactly where the blur is small (one-pixel cells)', () => {
+  it('is the full-resolution luminance (groundLuma) exactly where the blur is small (one-pixel cells)', () => {
     const w = 90
     const h = 70
     const g = photo(w, h)
     for (const r of [2, 15.5, 31.9]) {
       expect(lumaCell(r)).toBe(1)
-      expect(sampleLuma(groundLumaGrid(g, w, h, r), new Float32Array(w * h))).toEqual(groundLuma(g, w, h, r))
+      expect(whole(groundLumaGrid(g, w, h, r))).toEqual(groundLuma(g, w, h, r))
     }
     expect(lumaCell(32)).toBe(2)
     expect(lumaCell(510)).toBe(31)
@@ -478,7 +479,7 @@ describe('step 6: the ground\'s luminance on a small grid', () => {
         onLight[i] = (coverage[i] * mask[i]) / 255
       }
       const knockout = new Uint8ClampedArray(w * h)
-      cutKnockout(knockout, words.slice(), lum, { w, h, dx: 1.4, dy: -2.2, split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma } })
+      cutKnockoutRows(knockout, 0, words, 0, lum, { w, h, dx: 1.4, dy: -2.2, split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma }, y0: 0, y1: h })
       const out = new Uint8ClampedArray(w * h * 4)
       compositeLayers(out, w, h, { ...paper, base: ground, knockout, paperAmount: 1 }, [
         { coverage: onLight, rgb: split.onLight },
@@ -492,7 +493,7 @@ describe('step 6: the ground\'s luminance on a small grid', () => {
       const grid = groundLumaGrid(ground, w, h, r)
       expect(grid.cell).toBeGreaterThan(1)
       expect(grid.grid.length).toBeLessThanOrEqual((w * h) / 16)
-      const reduced = sampleLuma(grid, new Float32Array(w * h))
+      const reduced = whole(grid)
       let worst = 0
       for (let i = 0; i < w * h; i++) worst = Math.max(worst, Math.abs(full[i] - reduced[i]))
       expect(worst).toBeLessThan(0.01)
@@ -523,7 +524,7 @@ describe('step 6: the ground\'s luminance on a small grid', () => {
     const ground = photo(w, h)
     const r = 0.09 * h * 1.5
     const full = groundLuma(ground, w, h, r)
-    const reduced = sampleLuma(groundLumaGrid(ground, w, h, r), new Float32Array(w * h))
+    const reduced = whole(groundLumaGrid(ground, w, h, r))
     const cell = grainCell(9, h / 1800)
     for (const threshold of [0.35, 0.5, 0.65]) {
       const a = ditherField(bandMask(full, threshold), w, h, { scale: cell }, new Uint8ClampedArray(w * h))

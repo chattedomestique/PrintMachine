@@ -35,7 +35,7 @@ import {
   renderPrint,
   type ToneSource,
 } from './render.ts'
-import { knockoutMask, shiftField } from './__tests__/reference.ts'
+import { groundLuma, knockoutMask, shiftField } from './__tests__/reference.ts'
 import { MissingPhotoError, planPrint, savePrint } from './export.ts'
 import {
   bandMask,
@@ -44,7 +44,6 @@ import {
   SNAP_PX,
   snapRect,
   fromPanFraction,
-  groundLuma,
   type InkRgb,
   panBounds,
   panFraction,

@@ -233,37 +233,14 @@ export function luma(r: number, g: number, b: number): number {
  * lets the answer follow the picture's large shapes, which is what the eye is
  * actually weighing a word against.
  *
- * Returned rather than thresholded on the spot because the caller needs the
- * number itself, not just which side of a line it fell: whether an ink can
+ * Kept as the number itself rather than thresholded on the spot because the
+ * press needs it, not just which side of a line it fell: whether an ink can
  * darken what it lands on is a comparison against this, and a mask has already
  * thrown that away.
- */
-export function groundLuma(
-  rgba: Uint8ClampedArray,
-  w: number,
-  h: number,
-  blurRadius: number,
-  /** Buffers for the blur, if the caller has them (blur.ts `blurInPlace`). */
-  scratch?: Float32Array,
-  spare?: Float32Array,
-): Float32Array {
-  const n = w * h
-  const lum = new Float32Array(n)
-  for (let i = 0; i < n; i++) lum[i] = groundLumaAt(rgba, i * 4)
-  // Blurred where it lies: the luminance is this function's own, so it needs
-  // no copy, only the blur's scratch.
-  if (blurRadius > 0) {
-    const fractional = needsSpare(blurRadius)
-    blurInPlace(lum, w, h, blurRadius, scratch ?? new Float32Array(n), fractional ? (spare ?? new Float32Array(n)) : undefined)
-  }
-  return lum
-}
-
-/**
- * The ground's blurred luminance, held small: `groundLuma` computed on a grid
- * of `cell`-pixel squares (each the mean of its pixels' luminance), blurred
- * there by radius / cell, and read back at full resolution by bilinear
- * sampling (`sampleLuma`).
+ *
+ * Held small: the luminance is averaged on a grid of `cell`-pixel squares
+ * (each the mean of its pixels' luminance), blurred there by radius / cell,
+ * and read back at full resolution by bilinear sampling (`sampleLumaRows`).
  *
  * The blur runs across roughly a word (radius 1.5 em: about 500 px on a 12 MP
  * export), so the field has nothing finer than a few hundred pixels in it, and
@@ -274,7 +251,8 @@ export function groundLuma(
  * pixels (diet.test.ts), and only there.
  *
  * Where the radius is small (small type at preview size), the cell is one
- * pixel and this is `groundLuma` exactly.
+ * pixel: the grid is the luminance at every pixel, blurred at full
+ * resolution, as the press held it before the grid.
  */
 export interface LumaGrid {
   /** Blurred luminance per cell, gw * gh. */
@@ -322,7 +300,7 @@ const groundLumaAt = (rgba: Uint8ClampedArray, o: number): number => {
  *
  * At cell 1 (a blur under LUMA_GRID_SPAN pixels: small type on a small sheet)
  * the grid IS the luminance at every pixel, a sheet-sized float field, as
- * `groundLuma` has always held it.
+ * the press has always held it.
  */
 export class LumaAccumulator {
   readonly cell: number
@@ -391,15 +369,10 @@ export class LumaAccumulator {
   }
 }
 
-/** The grid read back at every pixel of the sheet, into `out` (w * h):
- *  bilinear between cell centres, held at the edge cells beyond them. */
-export function sampleLuma(g: LumaGrid, out: Float32Array): Float32Array {
-  return sampleLumaRows(g, 0, g.h, out)
-}
-
-/** `sampleLuma`'s rows [y0, y1) only, into `out` (row y at out[(y - y0) * w]):
- *  each pixel is read from the grid at its own sheet position, so a band is
- *  the same numbers as those rows of the whole sheet. */
+/** The grid read back at the sheet's rows [y0, y1), into `out` (row y at
+ *  out[(y - y0) * w]): bilinear between cell centres, held at the edge cells
+ *  beyond them. Each pixel is read from the grid at its own sheet position,
+ *  so a band is the same numbers as those rows of the whole sheet. */
 export function sampleLumaRows(g: LumaGrid, y0: number, y1: number, out: Float32Array): Float32Array {
   const { grid, gw, gh, cell, w } = g
   if (cell === 1) {

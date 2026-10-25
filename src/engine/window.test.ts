@@ -15,17 +15,17 @@ import { describe, expect, it } from 'vitest'
 import { blurInPlace, blurReach, needsSpare } from './blur.ts'
 import { compositeLayers, type CompositeLayer } from './composite.ts'
 import { GrainStream, cellStarts, ditherField, grainRows } from './dither.ts'
-import { applyMottle, registrationOffset, shiftInPlace, shiftRows, shiftSource } from './ink.ts'
-import { cutKnockout, cutKnockoutRows } from './knockout.ts'
-import { LumaAccumulator, groundLumaGrid, sampleLuma, sampleLumaRows } from './media.ts'
+import { applyMottle, registrationOffset, shiftRows, shiftSource } from './ink.ts'
+import { cutKnockoutRows } from './knockout.ts'
+import { LumaAccumulator, groundLumaGrid, sampleLumaRows } from './media.ts'
 import { paperField } from './paper.ts'
-import { haloBound, maxWindow, plateGeometry, plateHalo, windowsFor } from './render.ts'
+import { maxWindow, plateGeometry, plateHalo, windowsFor } from './render.ts'
 import { roughenInPlace, type RoughOptions } from './rough.ts'
 import { FbmSampler, fbm2D, mulberry32, type CellNoise } from './rng.ts'
 import { screenField } from './screen.ts'
 import { plateFontSize } from './text.ts'
 import type { PressProfile } from './types.ts'
-import { ditherWhole, lumaGridWhole, shiftField } from './__tests__/reference.ts'
+import { ditherWhole, knockoutMask, lumaGridWhole, shiftField } from './__tests__/reference.ts'
 import { makeGround } from './__tests__/fields.ts'
 
 /** Rows [a, b) of a field, as a new array of exactly those rows. */
@@ -222,10 +222,8 @@ describe('the shift on a window of rows', () => {
   ]
   for (const [dx, dy] of moves) {
     it(`(${dx}, ${dy}): rows from exactly shiftSource's rows equal the sheet's, and those rows are all needed`, () => {
-      const whole = src.slice()
-      shiftInPlace(whole, w, h, dx, dy)
-      expect(whole).toEqual(shiftField(src, w, h, dx, dy))
-      // The whole sheet through shiftRows, as through shiftInPlace.
+      const whole = shiftField(src, w, h, dx, dy)
+      // The whole sheet through shiftRows, as through the plain shift.
       expect(shiftRows(src, w, 0, h, dx, dy, 0, h, new Float32Array(w * h))).toEqual(whole)
       for (const B of [1, 23, h]) {
         for (const [y0, y1] of bandsOf(h, B)) {
@@ -369,7 +367,7 @@ describe('the ground luminance, accumulated band by band', () => {
   it('rows read back from the grid are the sheet read back, row for row', () => {
     for (const radius of [12.5, 70]) {
       const g = groundLumaGrid(ground, w, h, radius)
-      const whole = sampleLuma(g, new Float32Array(w * h))
+      const whole = sampleLumaRows(g, 0, h, new Float32Array(w * h))
       for (const [y0, y1] of bandsOf(h, 13)) {
         expect(sampleLumaRows(g, y0, y1, new Float32Array((y1 - y0) * w))).toEqual(whole.subarray(y0 * w, y1 * w))
       }
@@ -446,8 +444,8 @@ describe('the knockout of a band, from a window of the torn tone', () => {
     for (const split of [false, true]) {
       it(`(${dx}, ${dy})${split ? ', split by a second ink' : ''}: bands equal the sheet, and read only shiftSource's rows`, () => {
         const sp = split ? { light, onLightLuma: 0.3, onDarkLuma: 0.7 } : undefined
-        const whole = new Uint8ClampedArray(w * h)
-        cutKnockout(whole, torn.slice(), split ? lum : null, { w, h, dx, dy, split: sp })
+        // The plain knockout of the whole sheet, in bytes as the press keeps it.
+        const whole = Uint8ClampedArray.from(knockoutMask(torn, split ? lum : null, { w, h, dx, dy, split: sp }), (v) => v * 255)
         for (const B of [1, 31, h]) {
           for (const [y0, y1] of bandsOf(h, B)) {
             const { a, b } = shiftSource(dx, dy, y0, y1, h)
@@ -474,18 +472,23 @@ describe('halos and windows', () => {
   })
   const worst = press({ method: 'grain', screenPitch: 36, misregistration: 30, edge: 1, wear: 0.8 })
 
+  /** The halo at its bound: a plate at detail 1 (type at 0.16 of the sheet
+   *  or more), its offset at |dy| = misregistration x scale. */
+  const bound = (p: PressProfile, h: number) =>
+    plateHalo({ ...plateGeometry(p, { fontSize: 0.16 * h, index: 1 }, 12345, h), dx: 0, dy: p.misregistration * (h / 1800) })
+
   it('the halo bound, at detail 1 with |dy| at its bound: 41 and 218 rows at 40 MP, 50 and 268 at 61 MP', () => {
     // 40 MP, 7728x5152: u = 2.8622. Default: tear 3u = 8.587, reach 8, 24
     // rows; |dy| 5u = 14.31, 15 + 2. Worst: 24; |dy| 30u = 85.87, 86 + 2;
     // grain cell 12u = 34.35, 3 x 35 + 1.
-    expect(haloBound(press(), 5152)).toMatchObject({ blur: 24, shift: 17, grain: 0, total: 41 })
-    expect(haloBound(worst, 5152)).toMatchObject({ blur: 24, shift: 88, grain: 106, total: 218 })
+    expect(bound(press(), 5152)).toMatchObject({ blur: 24, shift: 17, grain: 0, total: 41 })
+    expect(bound(worst, 5152)).toMatchObject({ blur: 24, shift: 88, grain: 106, total: 218 })
     // 61 MP, 9504x6336: u = 3.52. Tear 10.56, reach 10, 30; |dy| 17.6 and 105.6;
     // cell 42.24.
-    expect(haloBound(press(), 6336)).toMatchObject({ blur: 30, shift: 20, grain: 0, total: 50 })
-    expect(haloBound(worst, 6336)).toMatchObject({ blur: 30, shift: 108, grain: 130, total: 268 })
+    expect(bound(press(), 6336)).toMatchObject({ blur: 30, shift: 20, grain: 0, total: 50 })
+    expect(bound(worst, 6336)).toMatchObject({ blur: 30, shift: 108, grain: 130, total: 268 })
     // No edge, no tear; no misregistration, no shift.
-    expect(haloBound(press({ edge: 0, misregistration: 0 }), 5152).total).toBe(0)
+    expect(bound(press({ edge: 0, misregistration: 0 }), 5152).total).toBe(0)
   })
 
   it("the default document's own plates at 40 MP: 18 rows (plate 1 never moves) and 27", () => {
@@ -493,13 +496,13 @@ describe('halos and windows', () => {
     const u = h / 1800
     // Plate 1, the headline at 0.09: 463.68 px, detail sqrt(463.68 / 824.32)
     // = 0.75, tear 3u x 0.75 = 6.44, reach 6.
-    const p0 = plateHalo(press(), { fontSize: plateFontSize({ size: 0.09 }, h), index: 0 }, 12345, h)
+    const p0 = plateHalo(plateGeometry(press(), { fontSize: plateFontSize({ size: 0.09 }, h), index: 0 }, 12345, h))
     expect(p0).toMatchObject({ blur: 18, shift: 0, grain: 0, total: 18, dx: 0, dy: 0, rMax: 6 })
     // Plate 2 at 0.06: detail sqrt(0.375) = 0.6124, tear 5.258, reach 5; its
     // offset from the seed at amount 5u sqrt(0.6124).
     const detail = Math.sqrt(0.375)
     const { dy } = registrationOffset(12345, 1, 5 * u * Math.sqrt(detail))
-    const p1 = plateHalo(press(), { fontSize: plateFontSize({ size: 0.06 }, h), index: 1 }, 12345, h)
+    const p1 = plateHalo(plateGeometry(press(), { fontSize: plateFontSize({ size: 0.06 }, h), index: 1 }, 12345, h))
     expect(p1.blur).toBe(15)
     expect(p1.shift).toBe(Math.ceil(Math.abs(dy)) + 2)
     expect(p1.total).toBe(27)
@@ -551,8 +554,7 @@ describe('halos and windows', () => {
       const plate = { fontSize: 1 + rand() * h * 0.3, index: Math.floor(rand() * 4) }
       const seed = Math.floor(rand() * 1e6)
       const geometry = plateGeometry(p, plate, seed, h)
-      const halo = plateHalo(p, plate, seed, h)
-      expect([halo.dx, halo.dy, halo.rMax]).toEqual([geometry.dx, geometry.dy, geometry.rMax])
+      const halo = plateHalo(geometry)
       const rows = geometry.grain ? cellStarts(h, geometry.cell) : undefined
       const B = 1 + Math.floor(rand() * 600)
       const cuts = rand() < 0.5

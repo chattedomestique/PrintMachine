@@ -215,6 +215,7 @@
     <p><strong>Crop</strong>: whether asking the browser to decode only part of an EXIF-rotated photo returns the part asked for. It decides whether a lighter-memory fallback is usable for portrait photos. The app does not use it today.</p>
     <p><strong>Font</strong>: the largest canvas font size this browser honours. Print Machine needs 9216 px for very large type on very large prints.</p>
     <p><strong>Canvas</strong>: whether canvases of these sizes really hold pixels. iOS hands back a blank canvas instead of an error when a canvas is too large.</p>
+    <p><strong>Compressor</strong>: whether this browser's built-in compressor has finished reading a piece of data by the time it says it has taken it. The lossless PNG save reuses its buffers on that promise; "exact" means every round trip came back unchanged after the buffer was overwritten.</p>
     <p><strong>Speed</strong>: how fast this phone runs Print Machine's JPEG encoder, in milliseconds per megapixel, and R, that figure divided by 126 (the developer machine's). A 40 MP save is estimated at about 33 s × R; that is a rough estimate, not a measurement of a save.</p>
   </section>
 
@@ -684,6 +685,7 @@ Please send bug reports, offers of help, etc. to jpeg-info@ijg.org.
     lines.push('(c) estimated 40 MP save = 33 s x R: ' + (hints.c || 'not run'))
     lines.push('(d) canvas font honoured at 9216 px: ' + (hints.d || 'not run'))
     lines.push('(e) cropped decode lands on the upright rect: ' + (hints.e || 'not run'))
+    lines.push('(f) a CompressionStream write resolves only once its chunk is taken: ' + (hints.f || 'not run'))
     return lines.join('\n')
   }
 
@@ -1186,6 +1188,48 @@ Please send bug reports, offers of help, etc. to jpeg-info@ijg.org.
     setHint('c', Math.round(est) + ' s (R ' + R.toFixed(2) + '): ' + action)
   }
 
+  // ─── Test: the compressor takes a chunk before its write resolves ───────
+  // The PNG encoder fills a batch again once its write to the
+  // CompressionStream has resolved, which the Compression Streams standard
+  // makes the moment the compressor has read it. Here: write a chunk, queue a
+  // second, overwrite the first once its write resolves, and decompress. The
+  // standard's behaviour gives back both chunks as written.
+  async function testDeflate() {
+    if (typeof CompressionStream !== 'function' || typeof DecompressionStream !== 'function') {
+      addRow('7', 'compressor takes on write', 'not available (iOS before 16.4): PNG saves use the uncompressed fallback', 'warn')
+      setHint('f', 'n/a (no CompressionStream)')
+      return
+    }
+    var sizes = [1000, 20000, 70000, 200000, 1500000], reps = 4, bad = 0, total = 0
+    begin('7', 'compressor takes on write', false)
+    for (var k = 0; k < sizes.length; k++) {
+      var size = sizes[k]
+      progress(k / sizes.length, 'Compressor, ' + size + '-byte chunks…')
+      await tick()
+      for (var rep = 0; rep < reps; rep++) {
+        var cs = new CompressionStream('deflate')
+        var w = cs.writable.getWriter(), r = cs.readable.getReader(), parts = []
+        var pump = (async function () { for (;;) { var x = await r.read(); if (x.done) return; parts.push(x.value) } })()
+        var buf = new Uint8Array(size)
+        for (var i = 0; i < size; i++) buf[i] = (i * 7 + rep) & 255
+        var orig = buf.slice()
+        var p1 = w.write(buf)
+        w.write(orig.slice())
+        await p1
+        buf.fill(0)
+        await w.close(); await pump
+        var back = new Uint8Array(await new Response(new Blob(parts).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer())
+        var same = back.length === 2 * size
+        for (i = 0; same && i < size; i++) if (back[i] !== orig[i] || back[size + i] !== orig[i]) same = false
+        total++
+        if (!same) bad++
+      }
+    }
+    end()
+    addRow('7', 'compressor takes on write', bad === 0 ? 'exact: ' + total + ' of ' + total + ' round trips unchanged (1 KB to 1.5 MB chunks)' : bad + ' of ' + total + ' round trips CHANGED by overwriting a chunk after its write resolved', bad === 0 ? 'ok' : 'bad')
+    setHint('f', bad === 0 ? 'PASS' : 'FAIL (' + bad + ' of ' + total + ')')
+  }
+
   // ─── Test: a synthetic large photo, made here ────────────────────────────
   async function testSynthetic(w, h) {
     var label = 'synthetic ' + w + 'x' + h
@@ -1230,6 +1274,7 @@ Please send bug reports, offers of help, etc. to jpeg-info@ijg.org.
     await step('canvas', testCanvases)
     await step('crop', testCrop)
     await step('speed', testSpeed)
+    await step('compressor', testDeflate)
     if (picked) {
       var file = picked
       await step('photo', function () { return testDecode('1', 'your photo', file, 'photo') })

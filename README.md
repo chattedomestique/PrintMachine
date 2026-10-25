@@ -1475,9 +1475,10 @@ go to the compressor in batches of 64 rows from a pool made with it, sized for
 the band height it is told (`bandRows`: 6 batches, 8.9 MB, at 7728 px wide);
 a batch is filled again once its write to the `CompressionStream` has
 resolved, which the Compression Streams standard makes the moment the
-compressor has read it. Every browser's follows the standard; node's does not
-(it can resolve first and read later), so the encoder also compares the zlib
-stream's closing Adler-32 with that of the batches it handed over, and refuses
-the file rather than write a wrong one. A compressed chunk is handed on
+compressor has read it. The standard requires that; Chromium is checked by
+`check:encode`, WebKit by the device spike's compressor row (`(f)`), and
+node's does not follow it (it can resolve first and read later), so the
+encoder also compares the zlib stream's closing Adler-32 with that of the
+batches it handed over, and refuses the file rather than write a wrong one. A compressed chunk is handed on
 between its IDAT header and CRC as it came, and a stored block is written in
 place into the chunk handed on: neither is copied.

@@ -22,6 +22,9 @@
  *     (a), on a line of their own, the picked photo's on another.
  *  5. "Copy results" puts the table on the clipboard; when the clipboard
  *     refuses, the whole table is selected for the system's Copy.
+ *     The compressor row (7, hint (f)) passes: a CompressionStream write
+ *     resolves only once its chunk is taken, which the PNG encoder's pool
+ *     relies on (Chromium here; WebKit when the page is run on a phone).
  *  6. It carries the Independent JPEG Group's README byte for byte (its
  *     licence asks for it wherever the encoder's source goes, and the page
  *     may be published on its own) and shows it, without a horizontal scroll.
@@ -141,7 +144,7 @@ try {
   const table = await page.inputValue('#table')
   console.log('\n' + table.replace(/^/gm, '    ') + '\n')
   const row = (id) => table.split('\n').find((l) => l.startsWith(id.padEnd(5)))
-  for (const id of ['1', '1b', '2', '2a', '2ab', '3', '4', '5', '6']) check(!!row(id), `row ${id} is there`)
+  for (const id of ['1', '1b', '2', '2a', '2ab', '3', '4', '5', '6', '7']) check(!!row(id), `row ${id} is there`)
   check(!/FAILED|DID NOT FINISH/.test(table), 'no row failed')
   check(/smoothing off: identical/.test(row('1b') ?? ''), 'blit of the picked photo: identical across origins, smoothing off')
   check(/smoothing off: identical/.test(row('2ab') ?? ''), 'blit of the 40 MP synthetic photo: identical across origins, smoothing off')
@@ -153,6 +156,7 @@ try {
   check(/\(a\) your photo: +not judged: 6\.0 MP, under 39 MP/.test(table), "rule (a): the picked 6 MP photo has its own line, not judged")
   check(/\(b\)[^\n]*PASS/.test(table) && /\(d\)[^\n]*PASS/.test(table), 'decision hints (b) and (d) pass here')
   check(/\(c\) estimated 40 MP save = 33 s x R: \d+ s/.test(table), 'decision hint (c) is computed')
+  check(/\(f\)[^\n]*: PASS$/m.test(table), 'decision hint (f): a CompressionStream write resolves only once its chunk is taken, here')
   console.log(`  (run all: ${(runMs / 1000).toFixed(1)} s)`)
 
   console.log('Copy results')

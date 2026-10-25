@@ -26,7 +26,7 @@ import { screenField } from './screen.ts'
 import { plateFontSize } from './text.ts'
 import type { PressProfile } from './types.ts'
 import { ditherWhole, knockoutMask, lumaGridWhole, shiftField } from './__tests__/reference.ts'
-import { makeGround } from './__tests__/fields.ts'
+import { makeGround, makeStrokes } from './__tests__/fields.ts'
 
 /** Rows [a, b) of a field, as a new array of exactly those rows. */
 const rowsOf = (f: Float32Array, w: number, a: number, b: number) => f.slice(a * w, b * w)
@@ -107,40 +107,9 @@ describe('the tear on a window of rows', { timeout: 60_000 }, () => {
     return { differ, worst }
   }
 
-  /** The blur alone: the floats the tear's threshold reads. */
-  function compareBlur(radius: number, B: number) {
-    const whole = tone.slice()
-    blurInPlace(whole, w, h, radius, new Float32Array(w * h), new Float32Array(w * h))
-    const reach = 3 * blurReach(radius)
-    let mid = 0
-    let any = 0
-    let worst = 0
-    for (const [y0, y1] of bandsOf(h, B)) {
-      const a = Math.max(0, y0 - reach)
-      const b = Math.min(h, y1 + reach)
-      const win = rowsOf(tone, w, a, b)
-      blurInPlace(win, w, b - a, radius, new Float32Array(win.length), needsSpare(radius) ? new Float32Array(win.length) : undefined)
-      for (let y = y0; y < y1; y++) {
-        for (let x = 0; x < w; x++) {
-          const got = win[(y - a) * w + x]
-          const want = whole[y * w + x]
-          if (got !== want) {
-            any++
-            worst = Math.max(worst, Math.abs(got - want))
-            if (want >= 0.02 && want <= 0.84) mid++
-          }
-        }
-      }
-    }
-    return { mid, any, worst }
-  }
-
   for (const radius of [0.5, 3.2, 8.6, 10.6, 14.7, 20]) {
-    it(`radius ${radius}: the torn tone is the sheet's, every float, and the blur's mid-range floats too`, () => {
-      for (const B of [1, 37, 301]) {
-        expect(compare(tear(radius), B)).toEqual({ differ: 0, worst: 0 })
-        expect(compareBlur(radius, B).mid).toBe(0)
-      }
+    it(`radius ${radius}: the torn tone is the sheet's, every float`, () => {
+      for (const B of [1, 37, 301]) expect(compare(tear(radius), B)).toEqual({ differ: 0, worst: 0 })
     })
   }
 
@@ -149,33 +118,103 @@ describe('the tear on a window of rows', { timeout: 60_000 }, () => {
     expect(compare(tear(8.6, { bleed: 0 }), 53)).toEqual({ differ: 0, worst: 0 })
   })
 
-  it('radius 33.5 (a sheet 20,000 px tall): not claimed; every difference is under 1e-8', () => {
-    const { mid, any, worst } = compareBlur(33.5, 37)
-    // Recorded, not asserted to be zero: the running sum seeded on another
-    // row has another float64 noise floor (README, "The same print at every
-    // size"). Printed so a change in it is visible.
-    console.log(`radius 33.5: ${any} blurred floats differ (${mid} in [0.02, 0.84]), largest ${worst.toExponential(2)}`)
-    expect(worst).toBeLessThan(1e-8)
-  })
-
-  it('the reach is necessary: a glyph window one row short changes the torn rows at its edge', () => {
+  it('the reach is necessary at each end: a glyph window one row short at its top, or at its bottom, changes the torn rows', () => {
     const opts = tear(8.6)
     const whole = tone.slice()
     roughenInPlace(whole, w, h, opts, new Float32Array(w * h), new Float32Array(w * h))
     const reach = 3 * blurReach(opts.scale)
-    let changed = 0
+    const changed = { top: 0, bottom: 0 }
     for (const [y0, y1] of bandsOf(h, 61)) {
       if (y0 - reach <= 0 || y1 + reach >= h) continue
-      for (const [a, b] of [
-        [y0 - reach + 1, y1 + reach],
-        [y0 - reach, y1 + reach - 1],
-      ]) {
+      for (const [end, a, b] of [
+        ['top', y0 - reach + 1, y1 + reach],
+        ['bottom', y0 - reach, y1 + reach - 1],
+      ] as const) {
         const win = rowsOf(tone, w, a, b)
         roughenInPlace(win, w, b - a, opts, new Float32Array(win.length), new Float32Array(win.length), a)
-        for (let y = y0; y < y1; y++) for (let x = 0; x < w; x++) if (win[(y - a) * w + x] !== whole[y * w + x]) changed++
+        for (let y = y0; y < y1; y++) for (let x = 0; x < w; x++) if (win[(y - a) * w + x] !== whole[y * w + x]) changed[end]++
       }
     }
-    expect(changed).toBeGreaterThan(0)
+    expect(changed.top).toBeGreaterThan(0)
+    expect(changed.bottom).toBeGreaterThan(0)
+  })
+})
+
+describe("the tear's blur on tall sheets: its float64 noise floor, and what the tear makes of it", { timeout: 60_000 }, () => {
+  // The vertical blur keeps a running sum per column in float64 (blur.ts
+  // boxV). A window's sums start on another row than the sheet's, so where
+  // the sums round, a blurred float can come out a last bit different: from
+  // a radius of about 10 px (a sheet over 6,000 px tall), on a sheet dense
+  // with type. The blobs above never show it; these strokes, quantised to
+  // bytes as a glyph canvas hands them back, do. Some of the floats that
+  // differ lie inside the range the tear's threshold reads ([0.02, 0.84]),
+  // so the tear's identity is not carried by the blur alone: it is measured
+  // here, on the torn tone itself, for the default edge and the roughest.
+  const w = 2000
+  const h = 1600
+  const tone = Float32Array.from(makeStrokes(w, h, 11), (v) => v / 255)
+  const B = 271
+  const edges: RoughOptions[] = [
+    { roughness: 0.55, bleed: 0.35, scale: 0, seed: 4242 },
+    { roughness: 1, bleed: 0.55, scale: 0, seed: 4242 },
+  ]
+
+  function floor(radius: number) {
+    const reach = 3 * blurReach(radius)
+    const spare = () => (needsSpare(radius) ? new Float32Array(w * h) : undefined)
+    const blurred = tone.slice()
+    blurInPlace(blurred, w, h, radius, new Float32Array(w * h), spare())
+    const torn = edges.map((e) => {
+      const t = tone.slice()
+      roughenInPlace(t, w, h, { ...e, scale: radius }, new Float32Array(w * h), spare())
+      return t
+    })
+    let any = 0
+    let mid = 0
+    let worst = 0
+    let tornDiffer = 0
+    for (const [y0, y1] of bandsOf(h, B)) {
+      const a = Math.max(0, y0 - reach)
+      const b = Math.min(h, y1 + reach)
+      const n = (b - a) * w
+      const win = rowsOf(tone, w, a, b)
+      blurInPlace(win, w, b - a, radius, new Float32Array(n), needsSpare(radius) ? new Float32Array(n) : undefined)
+      for (let y = y0; y < y1; y++) {
+        for (let x = 0; x < w; x++) {
+          const got = win[(y - a) * w + x]
+          const want = blurred[y * w + x]
+          if (got === want) continue
+          any++
+          worst = Math.max(worst, Math.abs(got - want))
+          if (want >= 0.02 && want <= 0.84) mid++
+        }
+      }
+      edges.forEach((e, k) => {
+        const t = rowsOf(tone, w, a, b)
+        roughenInPlace(t, w, b - a, { ...e, scale: radius }, new Float32Array(n), needsSpare(radius) ? new Float32Array(n) : undefined, a)
+        for (let y = y0; y < y1; y++) for (let x = 0; x < w; x++) if (t[(y - a) * w + x] !== torn[k][y * w + x]) tornDiffer++
+      })
+    }
+    // Printed, so a change in the floor is visible before anything fails.
+    console.log(`radius ${radius}: ${any} blurred floats differ (${mid} in [0.02, 0.84]), largest ${worst.toExponential(2)}; torn floats that differ: ${tornDiffer}`)
+    return { any, mid, worst, tornDiffer }
+  }
+
+  // 14.7 and 20 are the plan's; 15.84 is a 61 MP portrait on Original (9504
+  // px tall, type at 16% or more).
+  for (const radius of [14.7, 15.84, 20]) {
+    it(`radius ${radius}: the blur's floor shows, and the torn tone is the sheet's, every float`, () => {
+      const r = floor(radius)
+      expect(r.any).toBeGreaterThan(0)
+      expect(r.worst).toBeLessThan(1e-8)
+      expect(r.tornDiffer).toBe(0)
+    })
+  }
+
+  it('radius 33.5 (a sheet 20,000 px tall): recorded, not claimed; every difference is under 1e-8', () => {
+    const r = floor(33.5)
+    expect(r.any).toBeGreaterThan(0)
+    expect(r.worst).toBeLessThan(1e-8)
   })
 })
 

@@ -8,13 +8,75 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
-import { CHROMA_QUANT, HUFFMAN, JPEG_MAX_EDGE, JpegEncoder, LUMA_QUANT, fdct8, qualityScaling, quantTable } from './jpeg.ts'
+import { CHROMA_QUANT, JPEG_MAX_EDGE, JpegEncoder, LUMA_QUANT, fdct8, qualityScaling, quantTable } from './jpeg.ts'
 import { mulberry32 } from '../rng.ts'
 
 const ZIGZAG = [
   0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42,
   49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ]
+
+/**
+ * ITU-T T.81 Annex K, typed here from the standard rather than imported from
+ * the encoder, so that a slip in the encoder's tables (or here) shows.
+ * Tables K.1 (luminance) and K.2 (chrominance) quantisation, natural order.
+ */
+const T81_K1 = [
+  16, 11, 10, 16, 24, 40, 51, 61,
+  12, 12, 14, 19, 26, 58, 60, 55,
+  14, 13, 16, 24, 40, 57, 69, 56,
+  14, 17, 22, 29, 51, 87, 80, 62,
+  18, 22, 37, 56, 68, 109, 103, 77,
+  24, 35, 55, 64, 81, 104, 113, 92,
+  49, 64, 78, 87, 103, 121, 120, 101,
+  72, 92, 95, 98, 112, 100, 103, 99,
+]
+const T81_K2 = [
+  17, 18, 24, 47, 99, 99, 99, 99,
+  18, 21, 26, 66, 99, 99, 99, 99,
+  24, 26, 56, 99, 99, 99, 99, 99,
+  47, 66, 99, 99, 99, 99, 99, 99,
+  ...new Array<number>(32).fill(99),
+]
+const hex = (s: string) => s.trim().split(/\s+/).map((v) => parseInt(v, 16))
+/** Tables K.3 to K.6: BITS (how many codes of each length 1..16), then
+ *  HUFFVAL, as the DHT segment carries them (class and id first). */
+const T81_K3_K6: [number, number[], number[]][] = [
+  [0x00, hex('00 01 05 01 01 01 01 01 01 00 00 00 00 00 00 00'), hex('00 01 02 03 04 05 06 07 08 09 0a 0b')],
+  [
+    0x10,
+    hex('00 02 01 03 03 02 04 03 05 05 04 04 00 00 01 7d'),
+    hex(`
+      01 02 03 00 04 11 05 12 21 31 41 06 13 51 61 07 22 71 14 32 81 91 a1 08
+      23 42 b1 c1 15 52 d1 f0 24 33 62 72 82 09 0a 16 17 18 19 1a 25 26 27 28
+      29 2a 34 35 36 37 38 39 3a 43 44 45 46 47 48 49 4a 53 54 55 56 57 58 59
+      5a 63 64 65 66 67 68 69 6a 73 74 75 76 77 78 79 7a 83 84 85 86 87 88 89
+      8a 92 93 94 95 96 97 98 99 9a a2 a3 a4 a5 a6 a7 a8 a9 aa b2 b3 b4 b5 b6
+      b7 b8 b9 ba c2 c3 c4 c5 c6 c7 c8 c9 ca d2 d3 d4 d5 d6 d7 d8 d9 da e1 e2
+      e3 e4 e5 e6 e7 e8 e9 ea f1 f2 f3 f4 f5 f6 f7 f8 f9 fa`),
+  ],
+  [0x01, hex('00 03 01 01 01 01 01 01 01 01 01 00 00 00 00 00'), hex('00 01 02 03 04 05 06 07 08 09 0a 0b')],
+  [
+    0x11,
+    hex('00 02 01 02 04 04 03 04 07 05 04 04 00 01 02 77'),
+    hex(`
+      00 01 02 03 11 04 05 21 31 06 12 41 51 07 61 71 13 22 32 81 08 14 42 91
+      a1 b1 c1 09 23 33 52 f0 15 62 72 d1 0a 16 24 34 e1 25 f1 17 18 19 1a 26
+      27 28 29 2a 35 36 37 38 39 3a 43 44 45 46 47 48 49 4a 53 54 55 56 57 58
+      59 5a 63 64 65 66 67 68 69 6a 73 74 75 76 77 78 79 7a 82 83 84 85 86 87
+      88 89 8a 92 93 94 95 96 97 98 99 9a a2 a3 a4 a5 a6 a7 a8 a9 aa b2 b3 b4
+      b5 b6 b7 b8 b9 ba c2 c3 c4 c5 c6 c7 c8 c9 ca d2 d3 d4 d5 d6 d7 d8 d9 da
+      e2 e3 e4 e5 e6 e7 e8 e9 ea f2 f3 f4 f5 f6 f7 f8 f9 fa`),
+  ],
+]
+
+/** libjpeg's scaling of a base table at a quality (jcparam.c
+ *  jpeg_quality_scaling and jpeg_add_quant_table, force_baseline), written
+ *  out again here. */
+const scaled = (base: number[], q: number) => {
+  const scale = q < 50 ? Math.floor(5000 / q) : 200 - 2 * q
+  return base.map((v) => Math.min(255, Math.max(1, Math.floor((v * scale + 50) / 100))))
+}
 
 /** Encode, pushing the rows in groups of the sizes given, in turn. */
 function encode(rgba: Uint8ClampedArray, w: number, h: number, quality = 95, groups: number[] = [h], chunkSize?: number): Uint8Array {
@@ -99,39 +161,35 @@ describe('the JPEG encoder: what the file says', () => {
   })
 
   it('its quantisation tables are the Annex K tables scaled as libjpeg scales them, at 50, 90 and 95', () => {
-    expect(quantTable(LUMA_QUANT, 50)).toEqual(LUMA_QUANT)
-    expect(quantTable(CHROMA_QUANT, 50)).toEqual(CHROMA_QUANT)
+    expect(LUMA_QUANT).toEqual(T81_K1)
+    expect(CHROMA_QUANT).toEqual(T81_K2)
     // libjpeg's quality 95 luma table starts 2, 1, 1, 2, 2, 4, 5, 6.
     expect(quantTable(LUMA_QUANT, 95).slice(0, 8)).toEqual([2, 1, 1, 2, 2, 4, 5, 6])
     expect(qualityScaling(95)).toBe(10)
     expect(qualityScaling(30)).toBe(166) // 5000 / 30, integer division
     expect(qualityScaling(100)).toBe(0)
     expect(quantTable(LUMA_QUANT, 100).every((v) => v === 1)).toBe(true)
-    for (const q of [50, 90, 95]) {
+    for (const q of [10, 30, 50, 90, 95]) {
       const { segments } = parse(encode(image.gradient(16, 16), 16, 16, q))
       const [dq0, dq1] = [segments[1].data, segments[2].data]
       expect(dq0[0]).toBe(0)
       expect(dq1[0]).toBe(1)
-      expect(Array.from(dq0.subarray(1))).toEqual(ZIGZAG.map((k) => quantTable(LUMA_QUANT, q)[k]))
-      expect(Array.from(dq1.subarray(1))).toEqual(ZIGZAG.map((k) => quantTable(CHROMA_QUANT, q)[k]))
+      expect(Array.from(dq0.subarray(1))).toEqual(ZIGZAG.map((k) => scaled(T81_K1, q)[k]))
+      expect(Array.from(dq1.subarray(1))).toEqual(ZIGZAG.map((k) => scaled(T81_K2, q)[k]))
     }
   })
 
-  it('its Huffman tables are the standard ones (Annex K.3)', () => {
+  it('its Huffman tables are the standard ones (Annex K.3 to K.6)', () => {
     const { segments } = parse(encode(image.gradient(16, 16), 16, 16))
     const dht = segments.filter((s) => s.marker === 0xc4).map((s) => s.data)
-    const want = [
-      [0x00, HUFFMAN.dcLuma],
-      [0x10, HUFFMAN.acLuma],
-      [0x01, HUFFMAN.dcChroma],
-      [0x11, HUFFMAN.acChroma],
-    ] as const
+    expect(dht.length).toBe(4)
     dht.forEach((d, k) => {
-      expect(d[0]).toBe(want[k][0])
-      expect(Array.from(d.subarray(1, 17))).toEqual([...want[k][1].bits])
-      expect(Array.from(d.subarray(17))).toEqual([...want[k][1].vals])
+      const [id, bits, vals] = T81_K3_K6[k]
+      expect(d[0]).toBe(id)
+      expect(Array.from(d.subarray(1, 17))).toEqual(bits)
+      expect(Array.from(d.subarray(17))).toEqual(vals)
       // Every code length is accounted for.
-      expect(want[k][1].bits.reduce((a: number, b: number) => a + b, 0)).toBe(want[k][1].vals.length)
+      expect(bits.reduce((a, b) => a + b, 0)).toBe(vals.length)
     })
   })
 

@@ -802,9 +802,18 @@ output pixel.
   made once, before the first, and no band allocates anything of 512 KiB or
   more (`banded.test.ts`): what a band does make is a few arrays a row long
   (the blur's column sums, per plate; the luminance's column lookup, per split
-  plate) and a few floats. Save still presses the sheet as one band:
-  pressing in bands lowers the memory only once the glyphs and the photo are
-  drawn a band at a time too, which is the step after.
+  plate) and a few floats. One set of numbers in a band can differ from the
+  sheet's in its last bit: the tear's vertical blur keeps a float64 running
+  sum per column, and a window's sums start on another row, so where they
+  round (a blur of about 10 px or more: sheets over 6,000 px tall, dense with
+  type) a blurred float can come out a bit apart, some of them inside the
+  range the tear's threshold reads. The tear has turned every one measured
+  into the same torn tone (`window.test.ts`, up to a blur of 20 px, a sheet
+  12,000 px tall), so the bytes are the same; re-seeding the sums on fixed
+  rows of the sheet, at the price of a wider window, is the lever if one ever
+  does not. Save still presses the sheet as one band: pressing in bands
+  lowers the memory only once the glyphs and the photo are drawn a band at a
+  time too, which is the step after.
 - **The ground's luminance on a small grid.** The second ink decides each
   glyph's ink from the photo's luminance blurred across about a word — a
   radius of 500 px on a 12 MP export, the press's slowest pass and a

@@ -667,13 +667,22 @@ describe('a plate pressed in bands: every band height gives the bytes the whole 
   }, 120_000)
 
   it('asks for exactly the glyph rows windowsFor declares, and each end row of them is needed', () => {
-    // Random presses (seeded). The tone as floats, so a row can be poisoned:
-    // a NaN in the first or the last glyph row must reach the torn rows the
-    // band hands back (what its wear and its knockout read).
+    // Random presses (seeded). Sufficient: the press asks for those rows and
+    // no others, and the bands it presses from them are the whole sheet's
+    // (the tests above). Necessary, end by end: the first and the last glyph
+    // row each change a torn row the band hands back (what its wear and its
+    // knockout read) when their values change. Real values, not a NaN: a NaN
+    // in the blur's running sum never leaves it, so it would reach the torn
+    // rows from a row however far above them, and pass for a window much
+    // wider than needed. A changed value enters the sum and leaves it again
+    // 2r + 1 rows on, so it reaches only the rows the blur really carries it
+    // to: a glyph window one row wider than needed would show no change.
     const rand = mulberry32(2024)
     const w = 96
     const h = 1400
-    let checked = 0
+    const checked = { first: 0, last: 0 }
+    const changed = { first: 0, last: 0 }
+    const clone = (g: GrainStream | undefined) => (g ? (Object.assign(Object.create(Object.getPrototypeOf(g)), structuredClone({ ...g })) as GrainStream) : undefined)
     for (let k = 0; k < 12; k++) {
       const press = base({
         method: rand() < 0.5 ? 'grain' : 'halftone',
@@ -688,7 +697,13 @@ describe('a plate pressed in bands: every band height gives the bytes the whole 
       const s = defaultSettings()
       s.seed = seed
       const noise = sampledNoise(s, w, h)
-      const field = toneAsFloat(tone(w, h, 100 + k))
+      // Slanted stripes, as alpha bytes: every row crosses edges the tear's
+      // threshold moves, so a changed end row can show. (On the ellipses
+      // above, most rows of this narrow sheet are solid ink, where a change
+      // two rows away leaves the tear at 1.)
+      const fx = 0.2 + rand() * 0.3
+      const fy = 0.05 + rand() * 0.2
+      const field = toneAsFloat(Uint8Array.from({ length: w * h }, (_, i) => Math.round((0.5 + 0.5 * Math.sin((i % w) * fx + Math.floor(i / w) * fy)) * 255)))
       const geometry = plateGeometry(press, { fontSize, index }, seed, h)
       const B = 64 + Math.floor(rand() * 200)
       const ws = makeWorkspace(maxWindow([{ geometry, cuts: true }], B, h), w)
@@ -698,24 +713,31 @@ describe('a plate pressed in bands: every band height gives the bytes the whole 
       for (let y0 = 0; y0 < h; y0 += B) {
         const y1 = Math.min(h, y0 + B)
         const win = windowsFor({ y0, y1 }, geometry, h, true, rows)
-        const asked: [number, number][] = []
-        // The glyph rows, with the first and the last poisoned in turn, on
-        // copies of the stream so the real one runs on in order.
+        // The torn rows this band hands back, from a tone; on a copy of the
+        // stream so the real one runs on in order.
+        const tornOf = (f: Float32Array) => {
+          const r = pressPlateBand({ rows: exactRows(f, w), fontSize }, index, press, seed, noise, w, h, { y0, y1 }, makeWorkspace(win.glyph.b - win.glyph.a + B, w), new Uint8ClampedArray(B * w), { cuts: true, grain: clone(grain) })
+          return r.torn.slice((win.torn.a - r.tornRow0) * w, (win.torn.b - r.tornRow0) * w)
+        }
+        const asIs = win.glyph.b > win.glyph.a ? tornOf(field) : null
         for (const end of ['first', 'last'] as const) {
           const row = end === 'first' ? win.glyph.a : win.glyph.b - 1
-          if (win.glyph.b - win.glyph.a < 2 || (end === 'first' && row === 0) || (end === 'last' && row === h - 1)) continue
-          const poisoned = field.slice()
-          poisoned.fill(NaN, row * w, (row + 1) * w)
-          const probe = grain ? Object.assign(Object.create(Object.getPrototypeOf(grain)), structuredClone({ ...grain })) : undefined
-          const r = pressPlateBand({ rows: exactRows(poisoned, w), fontSize }, index, press, seed, noise, w, h, { y0, y1 }, makeWorkspace(win.glyph.b - win.glyph.a + B, w), new Uint8ClampedArray(B * w), { cuts: true, grain: probe })
-          const tornRows = r.torn.subarray((win.torn.a - r.tornRow0) * w, (win.torn.b - r.tornRow0) * w)
-          expect(tornRows.some(Number.isNaN), `press ${k}, band ${y0}, ${end} glyph row ${row}`).toBe(true)
-          checked++
+          // At the sheet's own edge a window cannot be shorter.
+          if (!asIs || (end === 'first' && row === 0) || (end === 'last' && row === h - 1)) continue
+          const other = field.slice()
+          for (let i = row * w; i < (row + 1) * w; i++) other[i] = 1 - other[i]
+          checked[end]++
+          if (tornOf(other).some((v, i) => v !== asIs[i])) changed[end]++
         }
+        const asked: [number, number][] = []
         pressPlateBand({ rows: exactRows(field, w, asked), fontSize }, index, press, seed, noise, w, h, { y0, y1 }, ws, out, { cuts: true, grain })
         expect(asked).toEqual(win.glyph.b > win.glyph.a ? [[win.glyph.a, win.glyph.b]] : [])
       }
     }
-    expect(checked).toBeGreaterThan(50)
+    // Each end changes the torn rows in every band. A window one row too
+    // wide at an end would show it in none.
+    expect(checked.first).toBeGreaterThan(50)
+    expect(checked.last).toBeGreaterThan(50)
+    expect(changed).toEqual(checked)
   }, 60_000)
 })

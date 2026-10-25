@@ -8,6 +8,10 @@
  *    with a one-pixel antialiased edge, sized by the font size, so the tear,
  *    the shift and the screen have real edges, counters and strokes to work
  *    on. With `backing`, the solid blocks behind those lines instead.
+ *  - `makeStrokes`: glyph-like strokes (discs and bars, a pixel of
+ *    antialiasing, quantised to alpha bytes) over the whole sheet: the tone
+ *    of a sheet dense with type, which is where the tear's float64 blur shows
+ *    its noise floor (window.test.ts).
  *  - `makeGround`: an RGBA photo at sheet size: a dark-to-light ramp (so a
  *    second ink switches both ways), a zone plate whose rings run to the pixel
  *    pitch, a little seeded grain, and a transparent hole with a soft rim
@@ -134,6 +138,38 @@ export function makeGlyphTone(w: number, h: number, seed: number, fontSize: numb
   const out = new Uint8Array(w * h)
   for (let i = 0; i < out.length; i++) out[i] = Math.round(cov[i] * 255)
   return out
+}
+
+/**
+ * Strokes over the whole sheet, one every 20,000 px of it: discs of radius 3
+ * to 63 and bars of 4 to 64 by 20 to 260 px, each with a one-pixel ramp,
+ * their alpha rounded to bytes (what a glyph canvas hands back).
+ */
+export function makeStrokes(w: number, h: number, seed: number): Uint8Array {
+  const t = new Uint8Array(w * h)
+  const rand = mulberry32(seed)
+  for (let k = Math.round((w * h) / 20000); k > 0; k--) {
+    const cx = rand() * w
+    const cy = rand() * h
+    const r = 3 + rand() * 60
+    const bar = rand() < 0.5
+    const bw = 2 + rand() * 30
+    const bh = 10 + rand() * 120
+    const x0 = Math.max(0, Math.floor(cx - (bar ? bw : r) - 2))
+    const x1 = Math.min(w, Math.ceil(cx + (bar ? bw : r) + 2))
+    const y0 = Math.max(0, Math.floor(cy - (bar ? bh : r) - 2))
+    const y1 = Math.min(h, Math.ceil(cy + (bar ? bh : r) + 2))
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const px = x + 0.5 - cx
+        const py = y + 0.5 - cy
+        const d = bar ? Math.max(Math.abs(px) - bw, Math.abs(py) - bh) : Math.sqrt(px * px + py * py) - r
+        const a = Math.round(Math.max(0, Math.min(1, 0.5 - d)) * 255)
+        if (a > t[y * w + x]) t[y * w + x] = a
+      }
+    }
+  }
+  return t
 }
 
 /**

@@ -60,9 +60,12 @@ async function png(w: number, h: number, rows: number, opts: { compression: 'def
 }
 
 /** What was made after construction that is not a piece of the file. */
-const kept = (r: Run) => {
-  const handedOn = new Set(r.chunks.map((c) => c.buffer))
-  return r.log.filter((a) => a.phase === 'push' && !handedOn.has(a.buffer))
+const kept = (r: Run): Allocation[] => {
+  const handedOn = new Set<ArrayBufferLike>(r.chunks.map((c) => c.buffer))
+  return r.log.filter((a) => {
+    const buffer = a.ref.deref()
+    return a.phase === 'push' && !(buffer && handedOn.has(buffer))
+  })
 }
 
 describe('the encoders allocate once', { timeout: 120_000 }, () => {

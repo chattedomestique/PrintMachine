@@ -47,7 +47,7 @@ vi.mock('./composite.ts', async (importOriginal) => {
 import { maxWindow, plateGeometry, printSheet, printSheetSteps, sampledNoise, type GroundRows, type ToneSource } from './render.ts'
 import type { PrintSettings, TextLayer } from './types.ts'
 import { lumaCell } from './media.ts'
-import { allocations } from './__tests__/alloc.ts'
+import { allocations, allocationsAsync, stillHeld } from './__tests__/alloc.ts'
 import { makeGround } from './__tests__/fields.ts'
 import { DOCS, SIZES, syntheticTones } from './__tests__/documents.ts'
 
@@ -202,7 +202,7 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
 
   /** A wide sheet (a band of 97 rows is over 512 KiB of bytes), a photo, a
    *  backing, two second inks; grain or halftone. */
-  function run(method: 'grain' | 'halftone', size: number, bandRows: number, h = 300) {
+  function inputs(method: 'grain' | 'halftone', size: number, h: number) {
     const w = 6000
     const s: PrintSettings = JSON.parse(JSON.stringify(DOCS.backing.settings))
     s.press.method = method
@@ -217,8 +217,11 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
       fields.set(`b${l.id}`, tones.backing(l) as { field: Uint8Array; fontSize: number })
     }
     const src: ToneSource = { type: (l) => fields.get(`t${l.id}`)!, backing: (l) => fields.get(`b${l.id}`)!, size: (l) => Math.max(1, l.size * h) }
-    const noise = sampledNoise(s, w, h)
-    const out = new Uint8ClampedArray(w * h * 4)
+    return { s, w, h, ground, src, noise: sampledNoise(s, w, h), out: new Uint8ClampedArray(w * h * 4) }
+  }
+
+  function run(method: 'grain' | 'halftone', size: number, bandRows: number, h = 300) {
+    const { s, w, ground, src, noise, out } = inputs(method, size, h)
     let bands = 0
     const log = allocations((phase) => {
       const steps = printSheetSteps(out, s, ground, src, noise, w, h, { bandRows })
@@ -282,5 +285,34 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
     const fover = f.log.filter((x) => x.bytes > f.E * f.w * 4)
     expect(fover.every((x) => x.phase === 'setup')).toBe(true)
     expect(fover.map((x) => x.bytes)).toEqual([f.w * f.h * 4, f.w * f.h * 4, f.w * f.h * 4])
+  })
+
+  it('...and released to one: after the gathering, one sheet-sized float is still held through the bands, none once printed', async () => {
+    // Type at 0.03 of a 300 px sheet (cell 1), in bands of 7: the field and
+    // the blur's other half are made; the other half is let go when the
+    // gathering returns, the field (the luminance itself) is read by every
+    // band and let go after the last.
+    const { s, w, h, ground, src, noise, out } = inputs('halftone', 0.03, 300)
+    const sheet = w * h * 4
+    let duringBands: number[] = []
+    let printed: number[] = []
+    const log = await allocationsAsync(async (phase, log) => {
+      const steps = printSheetSteps(out, s, ground, src, noise, w, h, { bandRows: 7 })
+      let first = true
+      for (;;) {
+        const next = steps.next()
+        if (next.done) break
+        phase.now = 'loop'
+        if (first) {
+          first = false
+          // Paused at the first band's first step, the gathering done.
+          duringBands = (await stillHeld(log)).filter((a) => a.bytes === sheet).map((a) => a.bytes)
+        }
+      }
+      printed = (await stillHeld(log)).filter((a) => a.bytes === sheet).map((a) => a.bytes)
+    })
+    expect(log.filter((a) => a.bytes === sheet).length).toBe(2)
+    expect(duringBands).toEqual([sheet])
+    expect(printed).toEqual([])
   })
 })

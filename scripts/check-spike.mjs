@@ -18,9 +18,13 @@
  *     default 40 MP synthetic photo, "Run all tests" finishes; no row failed;
  *     the 1:1 blit is identical across tile origins with smoothing off; the
  *     largest canvas font is at least 9216 px; every canvas sentinel reads
- *     back; the decode of the synthetic 40 MP photo passes rule (a).
+ *     back; the decode and first draw of the synthetic 40 MP photo pass rule
+ *     (a), on a line of their own, the picked photo's on another.
  *  5. "Copy results" puts the table on the clipboard; when the clipboard
  *     refuses, the whole table is selected for the system's Copy.
+ *  6. It carries the Independent JPEG Group's README byte for byte (its
+ *     licence asks for it wherever the encoder's source goes, and the page
+ *     may be published on its own) and shows it, without a horizontal scroll.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -44,6 +48,7 @@ const check = (ok, what) => {
 }
 
 const html = readFileSync(PAGE)
+const IJG = readFileSync(resolve(here, '../src/engine/encode/IJG-README.txt'), 'utf8')
 const server = createServer((req, res) => {
   if (req.url === '/spike.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -101,14 +106,28 @@ try {
   const opaque = (c) => c !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(c)
   check(opaque(light) && opaque(dark) && light !== dark, `body background ${light} light, ${dark} dark`)
 
+  console.log('The IJG licence')
+  const block = /\n<script type="text\/plain" id="ijg-readme">([\s\S]*?)<\/script>/.exec(html.toString('utf8'))?.[1]
+  check(block === IJG, `the page carries src/engine/encode/IJG-README.txt byte for byte (${block?.length ?? 0} of ${IJG.length} characters)`)
+  await page.click('summary')
+  const licence = await page.evaluate(() => ({
+    text: document.getElementById('ijg-readme-text').textContent,
+    open: document.querySelector('details').open,
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }))
+  check(licence.open && licence.text === IJG, 'opened under "Licence", it shows that README')
+  check(licence.scroll <= licence.client, `with it open, no horizontal scroll (${licence.scroll} <= ${licence.client})`)
+  await page.click('summary')
+
   console.log('A test the tab did not survive')
   await page.evaluate(() =>
-    sessionStorage.setItem('pm-spike-v1:inflight', JSON.stringify({ id: '2a', test: 'decode synthetic 7728x5152', decode: true })),
+    sessionStorage.setItem('pm-spike-v1:inflight', JSON.stringify({ id: '2a', test: 'decode synthetic 7728x5152', decode: 'synthetic' })),
   )
   await page.reload()
   await page.waitForFunction(() => document.body.dataset.state === 'ready')
   const afterReload = await page.inputValue('#table')
-  check(/DID NOT FINISH/.test(afterReload) && /\(a\)[^\n]*FAIL/.test(afterReload), 'after a reload mid-test the row says it did not finish, and (a) fails')
+  check(/DID NOT FINISH/.test(afterReload) && /\(a\) synthetic: +FAIL/.test(afterReload), "after a reload mid-test the row says it did not finish, and that photo's (a) fails")
   await page.click('#clear')
   check(!/DID NOT FINISH/.test(await page.inputValue('#table')), 'Clear results empties the table')
 
@@ -130,7 +149,9 @@ try {
   check(largest >= 9216, `largest canvas font honoured: ${largest} px (>= 9216)`)
   check((row('5') ?? '').split(';').every((p) => / ok$/.test(p.trim())), 'every canvas sentinel reads back')
   check(/7728x5152 \(39\.8 MP\)/.test(row('2a') ?? ''), 'the synthetic photo decodes at 7728x5152')
-  check(/\(a\)[^\n]*PASS/.test(table) && /\(b\)[^\n]*PASS/.test(table) && /\(d\)[^\n]*PASS/.test(table), 'decision hints (a), (b) and (d) pass here')
+  check(/\(a\) synthetic: +PASS: 39\.8 MP, decode \d+ ms \+ first draw \d+ ms = \d+ ms/.test(table), "rule (a): the synthetic 40 MP photo passes on decode and first draw together, both shown")
+  check(/\(a\) your photo: +not judged: 6\.0 MP, under 39 MP/.test(table), "rule (a): the picked 6 MP photo has its own line, not judged")
+  check(/\(b\)[^\n]*PASS/.test(table) && /\(d\)[^\n]*PASS/.test(table), 'decision hints (b) and (d) pass here')
   check(/\(c\) estimated 40 MP save = 33 s x R: \d+ s/.test(table), 'decision hint (c) is computed')
   console.log(`  (run all: ${(runMs / 1000).toFixed(1)} s)`)
 

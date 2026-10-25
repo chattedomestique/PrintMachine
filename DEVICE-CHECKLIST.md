@@ -216,7 +216,9 @@ Saving at full resolution (none of these can be automated):
 
 - [ ] **The device spike.** Open `scripts/device-spike/spike.html` on the
       phone (it is one self-contained file and makes no network request;
-      it can be published as a private page), pick a large photo from the
+      it can be published as a private page on its own: it carries the
+      Independent JPEG Group's README, which their licence asks for wherever
+      the encoder's source goes), pick a large photo from the
       camera roll if there is one (ideally 40 MP), tap **Run all tests**, then
       **Copy results**, and send the table back. It decodes the photo and a
       40 MP synthetic one as Save will, checks that a 1:1 blit is a copy at two

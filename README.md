@@ -59,7 +59,9 @@ one self-contained file, no network, that measures what only a device can
 answer before prints are saved at the photo's own pixels at any size (the
 decode of a 40 MP photo, whether a 1:1 blit is a copy, cropped decodes under
 EXIF rotation, the largest canvas font, canvas sizes, and the JPEG encoder's
-speed). It ends with a plain-text table to copy back. `check:spike` runs it
+speed). It ends with a plain-text table to copy back, and carries the
+Independent JPEG Group's README (its encoder is theirs in part; see
+"Licences and provenance"), so it can be published on its own. `check:spike` runs it
 in Chromium in CI so it cannot rot; the phone's numbers are what decide the
 steps that wait on them (DEVICE-CHECKLIST, "Limits to settle on a device").
 

@@ -4,7 +4,7 @@
  *
  *   node scripts/harness/run.mjs --out a.json
  *   node scripts/harness/run.mjs --out a.json --heights 300,1000 --docs plain,default
- *   node scripts/harness/run.mjs --out t.json --no-hashes --time photo-second-ink@3780 --photo-mp 12 --runs 3
+ *   node scripts/harness/run.mjs --out t.json --no-hashes --time photo-second-ink@3780 --photo-mp 12 --runs 3   (through the export entry)
  *   node scripts/harness/run.mjs --out a.json --heights 1000 --png shots/   (also writes each render as a PNG)
  *   node scripts/harness/run.mjs --out s.json --no-hashes --scale default@900,small-2@1800   (h against 2h)
  *   node scripts/harness/run.mjs --out p.json --no-hashes --parity 1000   (preview and export entry points agree; exits 1 if not)
@@ -178,9 +178,11 @@ try {
     const height = Number(h)
     const runs = []
     // A fresh page per run, so one render's garbage is not the next one's cost.
+    // Through the EXPORT entry (renderPrintAsync, no cache): a timing is of
+    // what Save runs, not of the preview's cached path.
     for (let i = 0; i < opts.runs; i++) {
       const { page, errors } = await openPage()
-      const r = await page.evaluate(([d, hh, mp]) => window.H.render(d, hh, { photo: mp }), [doc, height, opts.photoMp])
+      const r = await page.evaluate(([d, hh, mp]) => window.H.render(d, hh, { photo: mp, async: true }), [doc, height, opts.photoMp])
       if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
       runs.push(Math.round(r.ms))
       await page.close()

@@ -20,7 +20,8 @@
     "measure:fidelity": "node scripts/measure-fidelity.mjs",
     "check:css": "node scripts/check-css.mjs",
     "check:save": "node scripts/check-save.mjs",
-    "check:touch": "node scripts/check-touch.mjs"
+    "check:touch": "node scripts/check-touch.mjs",
+    "check:spike": "node scripts/check-spike.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

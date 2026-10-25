@@ -44,7 +44,17 @@ npm run measure:alloc     # what an export holds, per output pixel (fails over 3
 npm run measure:export    # export time and desktop memory (informational)
 npm run build && npm run check:save   # the save flow in the built app, tapped
 npm run build && npm run check:touch  # tap-to-select on the sheet, touched
+npm run check:spike       # the device spike page still runs (see below)
 ```
+
+`scripts/device-spike/spike.html` is a page for a phone, not part of the app:
+one self-contained file, no network, that measures what only a device can
+answer before prints are saved at the photo's own pixels at any size (the
+decode of a 40 MP photo, whether a 1:1 blit is a copy, cropped decodes under
+EXIF rotation, the largest canvas font, canvas sizes, and the JPEG encoder's
+speed). It ends with a plain-text table to copy back. `check:spike` runs it
+in Chromium in CI so it cannot rot; the phone's numbers are what decide the
+steps that wait on them (DEVICE-CHECKLIST, "Limits to settle on a device").
 
 The four that can fail run in CI after `verify`, `verify:offline` and
 `verify:geometry`, with the harness's parity gate (`npm run harness -- --out
@@ -1384,3 +1394,20 @@ nothing else does. These went, and saved prints that used them still open
 - **The thirds guides** and their header toggle: they informed but never acted.
   The selection crosshair stays.
 
+## Licences and provenance
+
+Print Machine's own code is written for it. One part is translated from
+another project, and says so:
+
+- **The JPEG encoder's forward DCT** (`scripts/device-spike/spike.html`) is
+  `jpeg_fdct_float` from the Independent JPEG Group's `jfdctflt.c`, with the
+  scale table from `jcdctmgr.c` (`aanscalefactor`) and the quality scaling
+  from `jcparam.c` (`jpeg_quality_scaling`), libjpeg release 9f (14-Jan-2024),
+  translated to JavaScript with the same statements in float64. **This
+  software is based in part on the work of the Independent JPEG Group.** The
+  IJG's README, with its copyright and no-warranty notice unaltered, is
+  `src/engine/encode/IJG-README.txt`. The rest of the encoder is written from
+  ITU-T T.81 (the Annex K quantisation and Huffman tables are the standard's
+  data); the DCT's algorithm is Arai, Agui and Nakajima's (Trans. IEICE
+  E-71(11):1095), as described in Pennebaker and Mitchell's *JPEG Still Image
+  Data Compression Standard*.

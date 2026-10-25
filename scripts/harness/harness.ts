@@ -31,10 +31,13 @@ import textFreePhoto from './docs/text-free-photo.json'
  * The frozen documents, plus some built live from the build under test:
  * `default` (whatever `defaultSettings()` is), `backing-photo` (the default
  * over the test photo, the first plate keeping its own ink as its second ink
- * and the second on a yellow backing), and `small-2` / `small-4` (the default
+ * and the second on a yellow backing), `small-2` / `small-4` (the default
  * with every plate at 20% / 40%, the band captions over a photo live in, where
- * the press's detail scaling is furthest from poster type). Those change on
- * purpose when the defaults do, which is the point of rendering them.
+ * the press's detail scaling is furthest from poster type), and four that
+ * reach the corners of the press: `grain-photo`, `backing-second-ink`,
+ * `press-max` and `native-photo` (each says what it is for below). Those
+ * change on purpose when the defaults do, which is the point of rendering
+ * them.
  */
 const DOCS: Record<string, () => unknown> = {
   plain: () => plain,
@@ -43,14 +46,53 @@ const DOCS: Record<string, () => unknown> = {
   'text-free-photo': () => textFreePhoto,
   default: () => defaultSettings(),
   'backing-photo': () => {
-    const s = defaultSettings()
-    s.media = makeMedia({ id: 'harness-photo', width: 1600, height: 1200 })
+    const s = withPhoto(defaultSettings(), 1600, 1200)
     s.layers[0] = { ...s.layers[0], contrastInkId: s.layers[0].inkId }
     s.layers[1] = { ...s.layers[1], backing: 'yellow' }
     return s
   },
   'small-2': () => smallType(0.02),
   'small-4': () => smallType(0.04),
+  // Grain over the test photo, both plates with a second ink: the grain
+  // stream feeds the switch mask as well as the plates.
+  'grain-photo': () => {
+    const s = withPhoto(defaultSettings(), 1600, 1200)
+    s.press = { ...s.press, method: 'grain' }
+    s.layers[0] = { ...s.layers[0], contrastInkId: 'blue' }
+    s.layers[1] = { ...s.layers[1], contrastInkId: s.layers[1].inkId }
+    return s
+  },
+  // Plate 1 on a backing; plate 2 (turned -4 degrees) with a second ink at a
+  // switch point of its own, 0.4.
+  'backing-second-ink': () => {
+    const s = withPhoto(defaultSettings(), 1600, 1200)
+    s.layers[0] = { ...s.layers[0], backing: 'yellow' }
+    s.layers[1] = { ...s.layers[1], contrastInkId: 'fluorescentpink', contrastThreshold: 0.4, rotation: -4 }
+    return s
+  },
+  // The press at its legal limits, over the photo: grain at screen 36,
+  // misregistration 30, edge 1, wear 0.8, every plate's type at 0.16 of the
+  // height (detail 1, so the tear and the shift reach their widest), the
+  // first plate with a second ink so the knockout rides the largest shift.
+  'press-max': () => {
+    const s = withPhoto(defaultSettings(), 1600, 1200)
+    s.press = { ...s.press, method: 'grain', screenPitch: 36, misregistration: 30, edge: 1, wear: 0.8 }
+    s.layers = s.layers.map((l) => ({ ...l, size: 0.16 }))
+    s.layers[0] = { ...s.layers[0], contrastInkId: 'blue' }
+    return s
+  },
+  // A 2400x3000 photo on 4:5: at a height of 3000 the export is the photo's
+  // own pixels, snapped (every other height resamples it).
+  'native-photo': () => withPhoto(defaultSettings(), 2400, 3000),
+}
+
+/** Every document is 4:5 (`defaultSettings`): at 1800 px tall a 4:5 sheet is
+ *  1440 px wide, one tile of the band engine's glyph grid. A document of
+ *  another shape needs its own check that the heights recorded stay one
+ *  tile. */
+function withPhoto(s: PrintSettings, width: number, height: number): PrintSettings {
+  s.media = makeMedia({ id: 'harness-photo', width, height })
+  return s
 }
 
 function smallType(size: number): PrintSettings {

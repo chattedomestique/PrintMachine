@@ -87,6 +87,13 @@ jobs:
       - run: node scripts/harness/run.mjs --out "$RUNNER_TEMP/parity.json" --no-hashes --parity 1000
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
+      # The device spike (scripts/device-spike/spike.html), the page a phone
+      # runs before the native-resolution save is built on it: it still
+      # loads, runs every test and prints its table, asking for nothing but
+      # itself.
+      - run: node scripts/check-spike.mjs
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
       # Time and resident memory of an export in desktop Chrome. Informational:
       # V8 frees what JavaScriptCore keeps, so measure-alloc is the gate.
       - run: node scripts/measure-export.mjs

@@ -214,6 +214,19 @@ Saving at full resolution (none of these can be automated):
 
 ## Limits to settle on a device
 
+- [ ] **The device spike.** Open `scripts/device-spike/spike.html` on the
+      phone (it is one self-contained file and makes no network request;
+      it can be published as a private page), pick a large photo from the
+      camera roll if there is one (ideally 40 MP), tap **Run all tests**, then
+      **Copy results**, and send the table back. It decodes the photo and a
+      40 MP synthetic one as Save will, checks that a 1:1 blit is a copy at two
+      tile origins, reads where a cropped decode of an EXIF-rotated JPEG lands,
+      the largest canvas font the engine honours, four canvas sizes, and the
+      JPEG encoder's speed against the developer machine's (R). If the tab
+      reloads during a test, run it again: the page says which test did not
+      finish, and that is a result. The building of prints over 16.7 MP waits
+      on this table: the tile ground on the blit, the decode wiring on the
+      decode.
 - [ ] **The canvas ceiling is an area.** The app has no edge cap, only the
       16.7 MP area (`MAX_AREA`; the 4096 edge is Borders' number, and
       WebKit's documented limit is an area). On an iPhone, with Safari's Web

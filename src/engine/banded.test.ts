@@ -270,6 +270,38 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
     })
   }
 
+  it('one band (what Save presses): one switch-mask buffer under grain too, however many switch points', () => {
+    // Three plates switching at 0.5, 0.4 and 0.3. Under grain in bands each
+    // point carries its stream and a buffer of the band's rows; pressed as
+    // one band, the mask is remade in one buffer when the point changes, as
+    // under halftone, as the parent held it.
+    const w = 400
+    const h = 300
+    const sheetBytes = (method: 'grain' | 'halftone', points: number[]) => {
+      const s: PrintSettings = JSON.parse(JSON.stringify(DOCS['switch-two'].settings))
+      s.press.method = method
+      s.layers = points.map((t, k) => ({ ...s.layers[k % s.layers.length], id: `p${k}`, contrastInkId: 'yellow', contrastThreshold: t, backing: null }))
+      const made = syntheticTones('masks', w, h)
+      const fields = new Map(s.layers.map((l) => [l.id, made.type(l) as { field: Uint8Array; fontSize: number }]))
+      const tones: ToneSource = { type: (l) => fields.get(l.id)!, backing: () => ({ field: new Uint8Array(0), fontSize: 1 }) }
+      const noise = sampledNoise(s, w, h)
+      const ground = makeGround(w, h, 3)
+      const out = new Uint8ClampedArray(w * h * 4)
+      const log = allocations(() => {
+        const steps = printSheetSteps(out, s, ground, tones, noise, w, h)
+        while (!steps.next().done);
+      })
+      // Arrays of a byte a sheet pixel: coverage and its dark half per plate,
+      // the knockout, the masks.
+      return log.filter((a) => a.bytes === w * h).length
+    }
+    const halftone = sheetBytes('halftone', [0.5, 0.4, 0.3])
+    expect(sheetBytes('grain', [0.5, 0.4, 0.3])).toBe(halftone)
+    expect(sheetBytes('grain', [0.5, 0.5, 0.5])).toBe(halftone)
+    // 3 plates x 2 halves, the knockout, one mask.
+    expect(halftone).toBe(3 * 2 + 1 + 1)
+  })
+
   it('the one exception, named and bounded: the luminance at one cell a pixel (small type), made before the first band', () => {
     // Type at 0.03 of a 300 px sheet: 9 px, a blur radius of 13.5, cell 1.
     const r = run('halftone', 0.03, 7)

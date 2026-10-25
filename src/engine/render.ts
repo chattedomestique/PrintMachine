@@ -910,17 +910,28 @@ function groundLuminance(ground: GroundRows, w: number, h: number, B: number, ra
 /** A band's switch mask rows, per switch point (see printSheetSteps). */
 type SwitchMasks = Map<number, { stream?: GrainStream; rows: Uint8ClampedArray; band: number }>
 
-/** One buffer of a band's rows for every switch point under grain (each
- *  point's own stream fills it once a band); one buffer for them all under
- *  halftone (a pure function of the point, remade when the point changes). */
+/** The grain cell a switch mask is dithered at. */
+const switchCell = (press: PressProfile, h: number) => grainCell(press.screenPitch, h / REFERENCE_HEIGHT)
+
+/**
+ * The switch masks' buffers. One buffer for every point, the mask remade in
+ * it when the point changes, wherever a remade mask is the same bits: under
+ * halftone always (a pure function of the point and the sheet's rows), and
+ * under grain when the sheet is pressed as one band (a fresh stream over the
+ * whole sheet is the dither the point's own stream would have run), which
+ * is what the parent held. Only grain in bands needs more: each point's
+ * stream emits each band's rows once, and plates can alternate points within
+ * a band (0.5, 0.4, 0.5), so each point has its stream and its own buffer
+ * for the band's rows.
+ */
 function switchMasks(plates: readonly Plate[], press: PressProfile, w: number, h: number, B: number): SwitchMasks {
   const masks: SwitchMasks = new Map()
-  const grain = press.method === 'grain'
-  const shared = grain ? null : new Uint8ClampedArray(B * w)
+  const perPoint = press.method === 'grain' && B < h
+  const shared = perPoint ? null : new Uint8ClampedArray(B * w)
   for (const p of plates) {
     if (!p.split || masks.has(p.layer.contrastThreshold)) continue
     masks.set(p.layer.contrastThreshold, {
-      stream: grain ? new GrainStream(w, h, grainCell(press.screenPitch, h / REFERENCE_HEIGHT)) : undefined,
+      stream: perPoint ? new GrainStream(w, h, switchCell(press, h)) : undefined,
       rows: shared ?? new Uint8ClampedArray(B * w),
       band: -1,
     })
@@ -1063,11 +1074,12 @@ export function* printSheetSteps(
   // The screened "ground is light" mask for a band. Every plate switches at
   // its own point; plates that share one (the default: all at 50%) share the
   // mask. A halftone mask is a function of the point and the sheet's rows,
-  // so one buffer is remade when the point changes; a grain mask is error
-  // diffusion, a stream run once per band, so each point has its own stream
-  // and its own buffer for the band's rows.
+  // so one buffer is remade when the point changes, and so is a grain mask
+  // on a sheet of one band; a grain mask in bands is error diffusion, a
+  // stream run once per band, so each point has its own stream and its own
+  // buffer for the band's rows (switchMasks).
   let masks = firstSplit ? switchMasks(plates, s.press, w, h, B) : undefined
-  /** Which point the shared halftone mask holds this band's rows for. */
+  /** Which point the shared mask holds this band's rows for. */
   let screened: number | undefined
 
   // The printed rows: straight into `out`, or a band at a time into its
@@ -1138,21 +1150,28 @@ export function* printSheetSteps(
     const threshold = p.layer.contrastThreshold
     const mask = masks.get(threshold)!
     const light = mask.rows.subarray(0, n)
+    // Grain: a stream reads its own rows (two cell rows ahead of the band):
+    // their luminance and their soft mask, in the workspace's other buffer.
+    const dither = (stream: GrainStream) => {
+      const need = stream.need(y0, y1)
+      const soft = ws.work.subarray(0, (need.b - need.a) * w)
+      bandMask(sampleLumaRows(lumaGrid!, need.a, need.b, soft), threshold, SWITCH_BAND, soft)
+      stream.run(soft, need.a, y0, y1, light)
+    }
     if (mask.stream) {
       if (mask.band !== band) {
-        // The grain stream reads its own rows (two cell rows ahead of the
-        // band): their luminance and their soft mask, in the workspace's
-        // other buffer.
-        const need = mask.stream.need(y0, y1)
-        const soft = ws.work.subarray(0, (need.b - need.a) * w)
-        bandMask(sampleLumaRows(lumaGrid, need.a, need.b, soft), threshold, SWITCH_BAND, soft)
-        mask.stream.run(soft, need.a, y0, y1, light)
+        dither(mask.stream)
         mask.band = band
       }
     } else if (screened !== threshold) {
-      const soft = bandMask(groundLum, threshold, SWITCH_BAND, ws.work.subarray(0, n))
-      light.fill(0)
-      screenField(soft, w, y1 - y0, { ...switchScreen(switchIndex, s.press, s.seed, scale), row0: y0 }, light)
+      if (s.press.method === 'grain') {
+        // One band: the whole sheet, by a fresh stream.
+        dither(new GrainStream(w, h, switchCell(s.press, h)))
+      } else {
+        const soft = bandMask(groundLum, threshold, SWITCH_BAND, ws.work.subarray(0, n))
+        light.fill(0)
+        screenField(soft, w, y1 - y0, { ...switchScreen(switchIndex, s.press, s.seed, scale), row0: y0 }, light)
+      }
       screened = threshold
     }
 

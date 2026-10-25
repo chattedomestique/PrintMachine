@@ -84,6 +84,58 @@ export function cutKnockout(
   }
 }
 
+/**
+ * `cutKnockout` for a band of the sheet, from a window of the torn tone: the
+ * rows [y0, y1) of the plate's hole, moved to its offset, cut into `into`.
+ *
+ * `into`, `groundLum` and the split's mask hold the sheet's rows from
+ * `intoRow0` (a band's own buffers); `torn` holds them from `tornRow0` and
+ * must cover the rows the shift reads (ink.ts `shiftSource`). The tone is
+ * moved as it is read, rather than in place: a window of it can serve more
+ * than one band, so it is never written. The numbers are `cutKnockout`'s:
+ * each moved value is the float32 the in-place shift would have stored.
+ */
+export function cutKnockoutRows(
+  into: Uint8ClampedArray,
+  intoRow0: number,
+  torn: Float32Array,
+  tornRow0: number,
+  groundLum: Float32Array | null,
+  p: KnockoutParams & { y0: number; y1: number },
+): void {
+  const { w, h, dx, dy, y0, y1 } = p
+  const split = groundLum ? p.split : undefined
+  const unit = split?.light instanceof Uint8ClampedArray ? 255 : 1
+  const still = dx === 0 && dy === 0
+  const at = (x: number, y: number): number => (x < 0 || x >= w || y < 0 || y >= h ? 0 : torn[(y - tornRow0) * w + x])
+  for (let y = y0; y < y1; y++) {
+    const sy = y - dy
+    const ya = Math.floor(sy)
+    const fy = sy - ya
+    const row = (y - intoRow0) * w
+    for (let x = 0; x < w; x++) {
+      let moved: number
+      if (still) {
+        moved = torn[(y - tornRow0) * w + x]
+      } else {
+        const sx = x - dx
+        const xa = Math.floor(sx)
+        const fx = sx - xa
+        const a = at(xa, ya)
+        const b = at(xa + 1, ya)
+        const c = at(xa, ya + 1)
+        const d = at(xa + 1, ya + 1)
+        const top = a + (b - a) * fx
+        const bot = c + (d - c) * fx
+        moved = Math.fround(top + (bot - top) * fy)
+      }
+      const i = row + x
+      const v = Math.fround(holeAt(moved, groundLum, split, unit, i)) * 255
+      if (v > into[i]) into[i] = v
+    }
+  }
+}
+
 /** How much of the ground one pixel of a plate takes away, 0..1, from the
  *  plate's tone at that pixel once moved to its offset (see cutKnockout). */
 export function holeAt(

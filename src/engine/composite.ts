@@ -80,6 +80,10 @@ export function clampByte(v: number): number {
  *   gives exactly the bytes printing it at once does.
  * @param outRow0 the sheet row `out` starts at: 0 when `out` is the whole
  *   sheet, `y0` when it holds only the band.
+ * @param rowBase the sheet row the ground (`paper.base`), the knockout and
+ *   every layer's coverage start at: 0 when they hold the whole sheet, the
+ *   band's first row when they hold only the band (a print pressed in bands
+ *   never holds a sheet of any of them).
  */
 export function compositeLayers(
   out: Uint8ClampedArray,
@@ -90,6 +94,7 @@ export function compositeLayers(
   y0 = 0,
   y1 = h,
   outRow0 = 0,
+  rowBase = 0,
 ): void {
   const n = y1 * w
   const pr = paper.rgb[0] / 255
@@ -113,6 +118,7 @@ export function compositeLayers(
   const base = paper.base
   const knockout = paper.knockout
   const outStart = outRow0 * w
+  const baseStart = rowBase * w
   const shade = paper.shade
   const shadeStart = (paper.shadeRow0 ?? 0) * w
   // Without a photo the paper *is* the ground, so the veil is fully on and the
@@ -124,15 +130,17 @@ export function compositeLayers(
     let g: number
     let b: number
 
+    // The pixel in the arrays that hold rows from `rowBase` on.
+    const j = i - baseStart
     if (base) {
-      const o = i * 4
+      const o = j * 4
       // Alpha, not just colour. A photo moved or scaled off the trim leaves
       // bare sheet, and getImageData hands those pixels back as transparent
       // *black* — reading the colour alone prints a black border round a photo
       // that has simply been panned. Uncovered sheet is paper, so the ground is
       // the photo composited over white and the veil is forced fully on there,
       // which is exactly the paper this function draws without a photo at all.
-      const a = (knockout ? clampByte(base[o + 3] * (1 - knockout[i] / 255)) : base[o + 3]) / 255
+      const a = (knockout ? clampByte(base[o + 3] * (1 - knockout[j] / 255)) : base[o + 3]) / 255
       const veil = amount * a + (1 - a)
       const s = 1 - veil * (1 - shade[i - shadeStart])
       r = ((base[o] / 255) * a + (1 - a)) * (1 - veil * (1 - pr)) * s
@@ -146,7 +154,7 @@ export function compositeLayers(
     }
 
     for (let l = 0; l < count; l++) {
-      let c = layers[l].coverage[i]
+      let c = layers[l].coverage[j]
       if (c <= 0) continue
       if (bytes[l]) c /= 255
       r *= 1 - c * absR[l]

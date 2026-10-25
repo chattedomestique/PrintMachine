@@ -249,12 +249,7 @@ export function groundLuma(
 ): Float32Array {
   const n = w * h
   const lum = new Float32Array(n)
-  for (let i = 0; i < n; i++) {
-    const o = i * 4
-    // Transparent ground is bare paper, which is the lightest thing there is.
-    const a = rgba[o + 3] / 255
-    lum[i] = luma(rgba[o], rgba[o + 1], rgba[o + 2]) * a + (1 - a)
-  }
+  for (let i = 0; i < n; i++) lum[i] = groundLumaAt(rgba, i * 4)
   // Blurred where it lies: the luminance is this function's own, so it needs
   // no copy, only the blur's scratch.
   if (blurRadius > 0) {
@@ -306,38 +301,109 @@ export function groundLumaGrid(
   scratch?: Float32Array,
   spare?: Float32Array,
 ): LumaGrid {
-  const cell = lumaCell(blurRadius)
-  if (cell === 1) return { grid: groundLuma(rgba, w, h, blurRadius, scratch, spare), gw: w, gh: h, cell, w, h }
-  const gw = Math.ceil(w / cell)
-  const gh = Math.ceil(h / cell)
-  const sum = new Float64Array(gw * gh)
-  for (let y = 0; y < h; y++) {
-    const row = Math.floor(y / cell) * gw
-    for (let x = 0; x < w; x++) {
-      const o = (y * w + x) * 4
-      const a = rgba[o + 3] / 255
-      sum[row + Math.floor(x / cell)] += luma(rgba[o], rgba[o + 1], rgba[o + 2]) * a + (1 - a)
+  const acc = new LumaAccumulator(w, h, blurRadius)
+  acc.addRows(rgba, 0, h)
+  return acc.finish(scratch, spare)
+}
+
+/** One pixel of the ground as its luminance: transparent ground is bare
+ *  paper, the lightest thing there is. */
+const groundLumaAt = (rgba: Uint8ClampedArray, o: number): number => {
+  const a = rgba[o + 3] / 255
+  return luma(rgba[o], rgba[o + 1], rgba[o + 2]) * a + (1 - a)
+}
+
+/**
+ * `groundLumaGrid`, fed a band of the ground's rows at a time, top to bottom:
+ * what a press that never holds the whole ground builds the grid with. The
+ * grid comes out the same to the bit as from the whole ground at once,
+ * because each cell is summed in the same order (its rows in turn, each row's
+ * pixels in turn, in float64) and blurred whole once every row is in.
+ *
+ * At cell 1 (a blur under LUMA_GRID_SPAN pixels: small type on a small sheet)
+ * the grid IS the luminance at every pixel, a sheet-sized float field, as
+ * `groundLuma` has always held it.
+ */
+export class LumaAccumulator {
+  readonly cell: number
+  readonly gw: number
+  readonly gh: number
+  /** Cell 1: the luminance itself. Otherwise: the cells' sums. */
+  private readonly field: Float32Array | null
+  private readonly sum: Float64Array | null
+  private nextRow = 0
+
+  constructor(
+    readonly w: number,
+    readonly h: number,
+    readonly blurRadius: number,
+  ) {
+    this.cell = lumaCell(blurRadius)
+    this.gw = this.cell === 1 ? w : Math.ceil(w / this.cell)
+    this.gh = this.cell === 1 ? h : Math.ceil(h / this.cell)
+    this.field = this.cell === 1 ? new Float32Array(w * h) : null
+    this.sum = this.cell === 1 ? null : new Float64Array(this.gw * this.gh)
+  }
+
+  /** The ground's rows [y0, y1), RGBA, row y at rgba[(y - y0) * w * 4]. Rows
+   *  come in order, each band starting where the last ended. */
+  addRows(rgba: Uint8ClampedArray, y0: number, y1: number): void {
+    if (y0 !== this.nextRow || y1 < y0 || y1 > this.h) throw new Error(`LumaAccumulator: rows [${y0}, ${y1}) after row ${this.nextRow}`)
+    this.nextRow = y1
+    const { w, cell, gw, field, sum } = this
+    for (let y = y0; y < y1; y++) {
+      const src = (y - y0) * w * 4
+      if (field) {
+        const row = y * w
+        for (let x = 0; x < w; x++) field[row + x] = groundLumaAt(rgba, src + x * 4)
+      } else {
+        const row = Math.floor(y / cell) * gw
+        for (let x = 0; x < w; x++) sum![row + Math.floor(x / cell)] += groundLumaAt(rgba, src + x * 4)
+      }
     }
   }
-  const grid = new Float32Array(gw * gh)
-  for (let j = 0; j < gh; j++) {
-    const rows = Math.min(h, (j + 1) * cell) - j * cell
-    for (let i = 0; i < gw; i++) {
-      const cols = Math.min(w, (i + 1) * cell) - i * cell
-      grid[j * gw + i] = sum[j * gw + i] / (rows * cols)
+
+  /** The finished grid, once every row is in: averaged and blurred. Cell 1
+   *  blurs the field where it lies, with the caller's buffers if given. */
+  finish(scratch?: Float32Array, spare?: Float32Array): LumaGrid {
+    if (this.nextRow !== this.h) throw new Error(`LumaAccumulator: finished at row ${this.nextRow} of ${this.h}`)
+    const { w, h, cell, gw, gh, blurRadius } = this
+    if (this.field) {
+      const lum = this.field
+      if (blurRadius > 0) {
+        const n = w * h
+        blurInPlace(lum, w, h, blurRadius, scratch ?? new Float32Array(n), needsSpare(blurRadius) ? (spare ?? new Float32Array(n)) : undefined)
+      }
+      return { grid: lum, gw: w, gh: h, cell, w, h }
     }
+    const sum = this.sum!
+    const grid = new Float32Array(gw * gh)
+    for (let j = 0; j < gh; j++) {
+      const rows = Math.min(h, (j + 1) * cell) - j * cell
+      for (let i = 0; i < gw; i++) {
+        const cols = Math.min(w, (i + 1) * cell) - i * cell
+        grid[j * gw + i] = sum[j * gw + i] / (rows * cols)
+      }
+    }
+    const r = blurRadius / cell
+    blurInPlace(grid, gw, gh, r, new Float32Array(gw * gh), needsSpare(r) ? new Float32Array(gw * gh) : undefined)
+    return { grid, gw, gh, cell, w, h }
   }
-  const r = blurRadius / cell
-  blurInPlace(grid, gw, gh, r, new Float32Array(gw * gh), needsSpare(r) ? new Float32Array(gw * gh) : undefined)
-  return { grid, gw, gh, cell, w, h }
 }
 
 /** The grid read back at every pixel of the sheet, into `out` (w * h):
  *  bilinear between cell centres, held at the edge cells beyond them. */
 export function sampleLuma(g: LumaGrid, out: Float32Array): Float32Array {
-  const { grid, gw, gh, cell, w, h } = g
+  return sampleLumaRows(g, 0, g.h, out)
+}
+
+/** `sampleLuma`'s rows [y0, y1) only, into `out` (row y at out[(y - y0) * w]):
+ *  each pixel is read from the grid at its own sheet position, so a band is
+ *  the same numbers as those rows of the whole sheet. */
+export function sampleLumaRows(g: LumaGrid, y0: number, y1: number, out: Float32Array): Float32Array {
+  const { grid, gw, gh, cell, w } = g
   if (cell === 1) {
-    out.set(grid)
+    out.set(grid.subarray(y0 * w, y1 * w))
     return out
   }
   const xs0 = new Int32Array(w)
@@ -349,18 +415,19 @@ export function sampleLuma(g: LumaGrid, out: Float32Array): Float32Array {
     xs1[x] = Math.min(gw - 1, xs0[x] + 1)
     fxs[x] = u - xs0[x]
   }
-  for (let y = 0; y < h; y++) {
+  for (let y = y0; y < y1; y++) {
     const v = Math.min(gh - 1, Math.max(0, (y + 0.5) / cell - 0.5))
-    const y0 = Math.floor(v)
-    const y1 = Math.min(gh - 1, y0 + 1)
-    const fy = v - y0
-    const r0 = y0 * gw
-    const r1 = y1 * gw
+    const ya = Math.floor(v)
+    const yb = Math.min(gh - 1, ya + 1)
+    const fy = v - ya
+    const r0 = ya * gw
+    const r1 = yb * gw
+    const o = (y - y0) * w
     for (let x = 0; x < w; x++) {
       const fx = fxs[x]
       const top = grid[r0 + xs0[x]] + (grid[r0 + xs1[x]] - grid[r0 + xs0[x]]) * fx
       const bot = grid[r1 + xs0[x]] + (grid[r1 + xs1[x]] - grid[r1 + xs0[x]]) * fx
-      out[y * w + x] = top + (bot - top) * fy
+      out[o + x] = top + (bot - top) * fy
     }
   }
   return out

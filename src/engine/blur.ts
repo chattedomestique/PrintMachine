@@ -85,6 +85,19 @@ export function needsSpare(radius: number): boolean {
 }
 
 /**
+ * How many rows (or columns) one pass of `blurInPlace` at this radius reaches
+ * either side: the larger of the integer radii it runs (a fraction under
+ * FRACTIONAL_BELOW mixes floor and floor + 1), 0 when it does nothing. Three
+ * passes reach three times this: a window of rows blurs exactly as the sheet
+ * does wherever its edge is at least that far away (or is the sheet's own).
+ */
+export function blurReach(radius: number): number {
+  if (radius <= 0.01) return 0
+  const lo = Math.floor(radius)
+  return radius - lo < 0.01 || lo >= FRACTIONAL_BELOW ? Math.max(1, lo) : lo + 1
+}
+
+/**
  * Blur a field by `radius` pixels, in place, with caller-owned buffers (an
  * export reuses one workspace for every plate): `scratch` is the box blur's
  * other half; `spare` holds the source for the second of two mixed blurs, and

@@ -54,6 +54,15 @@ export function tearNoise(w: number, scale: number, seed: number): FbmSampler {
  * else in the pipeline. The blur's buffers are the caller's (see blur.ts
  * `blurInPlace`; `needsSpare` says when `spare` is needed), so a press makes
  * no sheet-sized allocation here.
+ *
+ * `field` may be a WINDOW of the sheet: `h` rows starting at sheet row
+ * `row0`. The wander is read at the sheet's own rows (`y + row0`), so a
+ * window tears exactly as the sheet does at every row the blur's reach does
+ * not cross the window's edge: the blur clamps at the window's first and last
+ * rows, which is the sheet's own clamp only where those are the sheet's top
+ * and bottom. A caller that presses in bands widens each window by three
+ * times the blur's integer radius on any side that is not the sheet's edge
+ * (render.ts `plateHalo`), and uses only the rows inside.
  */
 export function roughenInPlace(
   field: Float32Array,
@@ -62,6 +71,7 @@ export function roughenInPlace(
   opts: RoughOptions,
   scratch: Float32Array,
   spare?: Float32Array,
+  row0 = 0,
 ): void {
   const { roughness, bleed, seed } = opts
   if (roughness <= 0 && bleed <= 0) return
@@ -112,7 +122,7 @@ export function roughenInPlace(
         continue
       }
 
-      const cut = wander ? base + (wander.at(x, y) - 0.5) * roughness * 0.55 : base
+      const cut = wander ? base + (wander.at(x, y + row0) - 0.5) * roughness * 0.55 : base
       const t = (s - (cut - e)) / (2 * e)
       out[i] = clamp01(t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t))
     }

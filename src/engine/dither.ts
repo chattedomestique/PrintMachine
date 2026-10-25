@@ -40,7 +40,9 @@ export interface DitherOptions {
 }
 
 /**
- * Grain a tone field into a coverage field.
+ * Grain a tone field into a coverage field: one `GrainStream` drained over the
+ * whole sheet, so a sheet grained at once and one grained in bands run the
+ * same code and print the same bytes.
  *
  * @param out where to write: a new float field of 0s and 1s by default, or a
  *            byte field of 0s and 255s.
@@ -53,44 +55,7 @@ export function ditherField<T extends Float32Array | Uint8ClampedArray = Float32
   opts: DitherOptions = {},
   out: T = new Float32Array(w * h) as T,
 ): T {
-  const cell = Math.max(1, opts.scale ?? 1)
-  const unit = out instanceof Uint8ClampedArray ? 255 : 1
-
-  if (cell === 1) return ditherAt(tone, w, h, out, unit)
-
-  // Reduce, dither, expand. Averaging on the way down matters: sampling one
-  // pixel per cell would dither the noise rather than the tone, and the result
-  // is speckle that does not track the artwork underneath it. The reduction
-  // and the expansion use one mapping (floor(x / cell)), so each pixel is
-  // averaged into exactly the cell it is later painted from.
-  const cols = cellStarts(w, cell)
-  const rows = cellStarts(h, cell)
-  const sw = cols.length - 1
-  const sh = rows.length - 1
-  const small = new Float32Array(sw * sh)
-  for (let y = 0; y < sh; y++) {
-    for (let x = 0; x < sw; x++) {
-      let sum = 0
-      let n = 0
-      for (let sy = rows[y]; sy < rows[y + 1]; sy++) {
-        for (let sx = cols[x]; sx < cols[x + 1]; sx++) {
-          sum += tone[sy * w + sx]
-          n++
-        }
-      }
-      small[y * sw + x] = n > 0 ? sum / n : 0
-    }
-  }
-
-  const dithered = ditherAt(small, sw, sh, new Float32Array(sw * sh), 1)
-  for (let y = 0; y < sh; y++) {
-    for (let sy = rows[y]; sy < rows[y + 1]; sy++) {
-      for (let x = 0; x < sw; x++) {
-        const v = dithered[y * sw + x] * unit
-        for (let sx = cols[x]; sx < cols[x + 1]; sx++) out[sy * w + sx] = v
-      }
-    }
-  }
+  new GrainStream(w, h, opts.scale ?? 1).run(tone, 0, 0, h, out)
   return out
 }
 
@@ -100,7 +65,7 @@ export function ditherField<T extends Float32Array | Uint8ClampedArray = Float32
  * runs from starts[k] up to (not including) starts[k + 1]. Every cell holds at
  * least one pixel, since cell >= 1.
  */
-function cellStarts(n: number, cell: number): Int32Array {
+export function cellStarts(n: number, cell: number): Int32Array {
   const count = Math.floor((n - 1) / cell) + 1
   const starts = new Int32Array(count + 1)
   let k = 0
@@ -112,28 +77,180 @@ function cellStarts(n: number, cell: number): Int32Array {
   return starts
 }
 
-function ditherAt<T extends Float32Array | Uint8ClampedArray>(tone: Float32Array, w: number, h: number, out: T, unit: number): T {
-  // Work on a scratch copy so the input field is not mutated — the caller may
-  // still need it (and shared engine inputs must stay pure).
-  const buf = Float32Array.from(tone)
+/** The cell row (index into `rows`, cellStarts' output) holding pixel row y. */
+export function cellRowOf(rows: Int32Array, y: number): number {
+  let lo = 0
+  let hi = rows.length - 2
+  while (lo < hi) {
+    const m = (lo + hi + 1) >> 1
+    if (rows[m] <= y) lo = m
+    else hi = m - 1
+  }
+  return lo
+}
 
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x
-      const old = buf[i]
+/** How many cell rows ahead of the one being grained must hold their tone:
+ *  Atkinson's kernel reaches two rows down. */
+const LOOK_AHEAD = 2
+
+/**
+ * The tone rows [a, b) a grain stream reads to deliver the sheet's rows
+ * [y0, y1), given that the band before ended at y0 (bands run top to bottom,
+ * each starting where the last ended): the cell rows from the first one not
+ * yet loaded through two past the band's last cell row, as pixel rows. Empty
+ * (a === b) when everything the band needs was loaded for an earlier band.
+ * A function of the grid and the band only, so a press can size its windows
+ * before it grains anything.
+ */
+export function grainRows(rows: Int32Array, y0: number, y1: number): { a: number; b: number } {
+  const last = rows.length - 2
+  const loaded = y0 <= 0 ? -1 : Math.min(last, cellRowOf(rows, y0 - 1) + LOOK_AHEAD)
+  const upTo = Math.min(last, cellRowOf(rows, y1 - 1) + LOOK_AHEAD)
+  if (upTo <= loaded) return { a: y0, b: y0 }
+  return { a: rows[loaded + 1], b: rows[upTo + 1] }
+}
+
+/**
+ * Atkinson grain, one band of rows at a time, with exactly the bytes graining
+ * the whole sheet at once gives.
+ *
+ * Error diffusion is the one stage of the press whose output at a pixel
+ * depends on everything above it, so a band cannot be grained on its own. It
+ * does not need the rows above, though, only what they left behind: the error
+ * they pushed into the next two cell rows. So the stream keeps those three
+ * cell rows (a ring of float32 rows, the one being grained and the two the
+ * kernel reaches) and the bits of the last cell row it grained, and a band
+ * picks up where the last one stopped.
+ *
+ * Each cell row's tone is loaded (its cells' means: the reduction graining
+ * always did) the moment it first comes within the kernel's reach, never
+ * earlier and never twice, which is why a band reads the tone two cell rows
+ * past its own end (`grainRows`). Loading before any error lands on a row,
+ * and adding the error in the same order, is what makes every float32
+ * addition the same as graining the whole field does.
+ *
+ * Bands must run top to bottom, each starting where the last ended.
+ */
+export class GrainStream {
+  readonly cell: number
+  /** Where each cell column and cell row starts (cellStarts). */
+  readonly cols: Int32Array
+  readonly rows: Int32Array
+  private readonly sw: number
+  private readonly sh: number
+  /** Cell rows j, j + 1 and j + 2 at ring[k % 3]. */
+  private readonly ring: [Float32Array, Float32Array, Float32Array]
+  /** The bits (0 or 1) of the last cell row grained, `next - 1`. */
+  private readonly last: Uint8Array
+  /** The first cell row not yet grained. */
+  private next = 0
+  /** The last cell row whose tone is loaded. */
+  private loaded = -1
+  /** Where the last band ended: the next must start there. */
+  private at = 0
+
+  constructor(
+    private readonly w: number,
+    h: number,
+    cell: number,
+  ) {
+    this.cell = Math.max(1, cell)
+    this.cols = cellStarts(w, this.cell)
+    this.rows = cellStarts(h, this.cell)
+    this.sw = this.cols.length - 1
+    this.sh = this.rows.length - 1
+    this.ring = [new Float32Array(this.sw), new Float32Array(this.sw), new Float32Array(this.sw)]
+    this.last = new Uint8Array(this.sw)
+  }
+
+  /** The tone rows this stream reads for the band [y0, y1) (`grainRows`). */
+  need(y0: number, y1: number): { a: number; b: number } {
+    return grainRows(this.rows, y0, y1)
+  }
+
+  /**
+   * Grain the sheet's rows [y0, y1) into `out` (row y at out[(y - y0) * w]),
+   * 0 or `unit` (255 for bytes, 1 for floats; by default from the array).
+   * `tone` holds the sheet's rows from `toneRow0` on and must cover
+   * `need(y0, y1)`; no other row of it is read.
+   */
+  run(
+    tone: Float32Array,
+    toneRow0: number,
+    y0: number,
+    y1: number,
+    out: Float32Array | Uint8ClampedArray,
+    unit: number = out instanceof Uint8ClampedArray ? 255 : 1,
+  ): void {
+    if (y0 !== this.at || y1 <= y0) throw new Error(`GrainStream: band [${y0}, ${y1}) does not follow row ${this.at}`)
+    this.at = y1
+    const { rows, sh, ring, last } = this
+    const j0 = cellRowOf(rows, y0)
+    const j1 = cellRowOf(rows, y1 - 1)
+    // A cell row the band before began: its bits are already made.
+    if (j0 < this.next) this.paint(j0, y0, y1, out, unit)
+    for (let j = this.next; j <= j1; j++) {
+      const reach = Math.min(sh - 1, j + LOOK_AHEAD)
+      for (let k = this.loaded + 1; k <= reach; k++) this.load(k, tone, toneRow0)
+      this.loaded = Math.max(this.loaded, reach)
+      const cur = ring[j % 3]
+      const r1 = ring[(j + 1) % 3]
+      const r2 = ring[(j + 2) % 3]
+      this.diffuse(j, cur, r1, r2, last)
+      this.next = j + 1
+      this.paint(j, y0, y1, out, unit)
+    }
+  }
+
+  /** Cell row k's tone: each cell the mean of its pixels, summed row by row. */
+  private load(k: number, tone: Float32Array, toneRow0: number): void {
+    const { w, cols, rows, sw } = this
+    const r = this.ring[k % 3]
+    for (let x = 0; x < sw; x++) {
+      let sum = 0
+      let n = 0
+      for (let sy = rows[k]; sy < rows[k + 1]; sy++) {
+        const row = (sy - toneRow0) * w
+        for (let sx = cols[x]; sx < cols[x + 1]; sx++) {
+          sum += tone[row + sx]
+          n++
+        }
+      }
+      r[x] = n > 0 ? sum / n : 0
+    }
+  }
+
+  /** Grain cell row j in raster order: its bits into `bits`, its error into
+   *  the row's remaining cells and the two rows below (Atkinson). */
+  private diffuse(j: number, cur: Float32Array, r1: Float32Array, r2: Float32Array, bits: Uint8Array): void {
+    const { sw, sh } = this
+    for (let x = 0; x < sw; x++) {
+      const old = cur[x]
       const next = old >= THRESHOLD ? 1 : 0
-      out[i] = next * unit
+      bits[x] = next
       const err = old - next
       if (err === 0) continue
-
       for (const [kx, ky, weight] of ATKINSON) {
         const nx = x + kx
-        const ny = y + ky
-        if (nx < 0 || nx >= w || ny >= h) continue
-        buf[ny * w + nx] += err * weight
+        if (nx < 0 || nx >= sw || j + ky >= sh) continue
+        const row = ky === 0 ? cur : ky === 1 ? r1 : r2
+        row[nx] += err * weight
       }
     }
   }
 
-  return out
+  /** Cell row j's bits, expanded to its pixels, for the rows of [y0, y1) it
+   *  covers. */
+  private paint(j: number, y0: number, y1: number, out: Float32Array | Uint8ClampedArray, unit: number): void {
+    const { w, cols, rows, sw, last } = this
+    const top = Math.max(rows[j], y0)
+    const bottom = Math.min(rows[j + 1], y1)
+    for (let y = top; y < bottom; y++) {
+      const o = (y - y0) * w
+      for (let x = 0; x < sw; x++) {
+        const v = last[x] * unit
+        for (let sx = cols[x]; sx < cols[x + 1]; sx++) out[o + sx] = v
+      }
+    }
+  }
 }

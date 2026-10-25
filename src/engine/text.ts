@@ -123,6 +123,16 @@ function placeLine(
 }
 
 /**
+ * The size a plate's type is set at on a sheet `h` px tall: the em, in
+ * pixels, never under one. The one spelling of it: the layout sets the type
+ * at this size, and the press reads it before any glyph is drawn (its detail
+ * factor, and the second ink's blur across a word).
+ */
+export function plateFontSize(layer: Pick<TextLayer, 'size'>, h: number): number {
+  return Math.max(1, layer.size * h)
+}
+
+/**
  * Lay out a text block. Lines break only where the text breaks them, and the
  * text is set exactly as typed — no case transform, no fitting: the stored size
  * is the size that prints (the Fit action writes one, see `fitSize`).
@@ -133,7 +143,7 @@ function placeLine(
 export function layoutText(layer: TextLayer, canvasHeight: number, measure: MeasureFn): TextLayout {
   const source = layer.text.split('\n')
 
-  const fontSize = Math.max(1, layer.size * canvasHeight)
+  const fontSize = plateFontSize(layer, canvasHeight)
   const tracking = layer.tracking * fontSize
 
   const placed = source.map((text) => placeLine(text, fontSize, tracking, measure))
@@ -331,7 +341,7 @@ function prepare(ctx: CanvasRenderingContext2D, layer: TextLayer, h: number): Pr
     ctx.font = cssFont(layerFont(layer, size))
   }
 
-  setFont(Math.max(1, layer.size * h))
+  setFont(plateFontSize(layer, h))
   const measure: MeasureFn = (text, fontSize) => {
     setFont(fontSize)
     return ctx.measureText(text).width

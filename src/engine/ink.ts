@@ -100,13 +100,21 @@ export function applyMottle(
   detail = 1,
   /** Where to write; `coverage` itself works (each pixel is read once). */
   out: Float32Array = new Float32Array(coverage.length),
+  /** When `coverage` is a window of the sheet: the sheet row its first row
+   *  is, and the sheet's full height. The mottle and the speckle are read at
+   *  the sheet's own rows, and the stride wraps at the sheet's height, never
+   *  the window's, so a window wears exactly as those rows of the sheet do.
+   *  (A cached mottle field is the whole sheet's, read at those rows too.) */
+  row0 = 0,
+  fullH = h,
 ): Float32Array {
   const step = detail >= 1 ? 1 : Math.max(1, Math.round(1 / detail))
   const field = mottle instanceof Float32Array ? mottle : null
   const sampler = field ? null : (mottle as FbmSampler)
 
   for (let y = 0; y < h; y++) {
-    const sy = step === 1 ? y : (y * step) % h
+    const Y = y + row0
+    const sy = step === 1 ? Y : (Y * step) % fullH
     for (let x = 0; x < w; x++) {
       const i = y * w + x
       const c = coverage[i]
@@ -117,7 +125,7 @@ export function applyMottle(
       const sx = step === 1 ? x : (x * step) % w
       const m = 1 + amount * ((field ? field[sy * w + sx] : sampler!.at(sx, sy)) * 2 - 1)
       let v = c * m
-      if (dropout > 0 && cellNoiseAt(speckle, x, y) < dropout) v *= 0.15
+      if (dropout > 0 && cellNoiseAt(speckle, x, Y) < dropout) v *= 0.15
       out[i] = clamp01(v)
     }
   }
@@ -174,6 +182,62 @@ export function shiftInPlace(field: Float32Array, w: number, h: number, dx: numb
       field[y * w + x] = top + (bot - top) * fy
     }
   }
+}
+
+/**
+ * The sheet rows [y0, y1) of `src` moved by (dx, dy), into `out` (row y at
+ * out[(y - y0) * w]): the bilinear read of `shiftInPlace`, into a field of its
+ * own, from a WINDOW of the source. `src` holds the sheet's rows from
+ * `srcRow0`; rows outside the sheet (above 0, from `fullH` on) and columns
+ * outside [0, w) read as 0, as they do in place. The rows read are
+ * [floor(y0 - dy), floor(y1 - 1 - dy) + 2), clamped to the sheet: the caller
+ * hands in at least those. No shift copies the rows, as in place it leaves
+ * them.
+ */
+export function shiftRows(
+  src: Float32Array,
+  w: number,
+  srcRow0: number,
+  fullH: number,
+  dx: number,
+  dy: number,
+  y0: number,
+  y1: number,
+  out: Float32Array,
+): Float32Array {
+  if (dx === 0 && dy === 0) {
+    out.set(src.subarray((y0 - srcRow0) * w, (y1 - srcRow0) * w))
+    return out
+  }
+  const at = (x: number, y: number): number => (x < 0 || x >= w || y < 0 || y >= fullH ? 0 : src[(y - srcRow0) * w + x])
+  for (let y = y0; y < y1; y++) {
+    const sy = y - dy
+    const ya = Math.floor(sy)
+    const fy = sy - ya
+    const o = (y - y0) * w
+    for (let x = 0; x < w; x++) {
+      const sx = x - dx
+      const xa = Math.floor(sx)
+      const fx = sx - xa
+      const a = at(xa, ya)
+      const b = at(xa + 1, ya)
+      const c = at(xa, ya + 1)
+      const d = at(xa + 1, ya + 1)
+      const top = a + (b - a) * fx
+      const bot = c + (d - c) * fx
+      out[o + x] = top + (bot - top) * fy
+    }
+  }
+  return out
+}
+
+/** The sheet rows `shiftRows` reads to make rows [y0, y1), clamped to the
+ *  sheet: [y0, y1) itself when nothing moves. */
+export function shiftSource(dx: number, dy: number, y0: number, y1: number, fullH: number): { a: number; b: number } {
+  if (y1 <= y0) return { a: y0, b: y0 }
+  if (dx === 0 && dy === 0) return { a: y0, b: y1 }
+  const a = Math.min(fullH, Math.max(0, Math.floor(y0 - dy)))
+  return { a, b: Math.min(fullH, Math.max(a, Math.floor(y1 - 1 - dy) + 2)) }
 }
 
 /**

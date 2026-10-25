@@ -26,6 +26,10 @@ export interface ScreenOptions {
    *  lattice travels with the plate, so shifting a plate shifts its dots. */
   originX: number
   originY: number
+  /** The sheet row the tone's first row is, when it holds a band of the
+   *  sheet: the lattice is placed by sheet rows, so a band is screened
+   *  exactly as the same rows of the whole sheet are. 0 by default. */
+  row0?: number
 }
 
 /** Smooth 1→0 ramp as `d` crosses `edge`, over `width` pixels. */
@@ -63,6 +67,7 @@ export function screenField<T extends CoverageField = Float32Array>(
   out: T = new Float32Array(w * h) as T,
 ): T {
   const { angle, softness, originX, originY } = opts
+  const row0 = opts.row0 ?? 0
   const pitch = Math.max(1.2, opts.pitch)
   const unit = out instanceof Uint8ClampedArray ? 255 : 1
 
@@ -72,7 +77,7 @@ export function screenField<T extends CoverageField = Float32Array>(
   const inv = 1 / pitch
 
   for (let y = 0; y < h; y++) {
-    const py = y - originY
+    const py = y + row0 - originY
     for (let x = 0; x < w; x++) {
       const i = y * w + x
       const t = tone[i]

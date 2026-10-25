@@ -33,9 +33,10 @@
  *    produce that.
  */
 
+import { blurReach } from './blur.ts'
 import { compositeLayers, type CompositeLayer, type PaperInput } from './composite.ts'
-import { ditherField } from './dither.ts'
-import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftInPlace, wearToMottle } from './ink.ts'
+import { cellStarts, ditherField, grainRows } from './dither.ts'
+import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftInPlace, shiftSource, wearToMottle } from './ink.ts'
 import { inkById, paperById } from './inks.ts'
 import { roughenInPlace } from './rough.ts'
 import { PaperSampler, paperField, type PaperField, type PaperOptions, type PaperSource } from './paper.ts'
@@ -496,6 +497,171 @@ function* pressPlateSteps(
     )
   }
   return { coverage, roughened: rough, dx, dy }
+}
+
+/**
+ * Where a plate lands and how far each of its stages reaches: what a press in
+ * bands sizes its windows from. Computed exactly as `pressPlate` computes it
+ * (the same detail factor, tear radius, offset and grain cell), so a window
+ * can never be cut to a reach the press does not have.
+ */
+export interface PlateGeometry {
+  /** detailFactor of the plate's type on this sheet. */
+  detail: number
+  /** The tear's blur radius (0 when the edge is off) and its per-pass reach
+   *  in whole rows (blur.ts `blurReach`). */
+  tearRadius: number
+  rMax: number
+  /** The plate's registration offset, in pixels. */
+  dx: number
+  dy: number
+  /** Grain (error diffusion) or halftone, and the grain's cell in pixels. */
+  grain: boolean
+  cell: number
+}
+
+export function plateGeometry(
+  press: PressProfile,
+  plate: { fontSize: number; index: number },
+  seed: number,
+  h: number,
+): PlateGeometry {
+  const scale = h / REFERENCE_HEIGHT
+  const detail = detailFactor(plate.fontSize, h)
+  const edge = edgeToRough(press.edge)
+  const tears = edge.roughness > 0 || edge.bleed > 0
+  const tearRadius = tears ? Math.max(0, TEAR_SCALE * scale * detail) : 0
+  const { dx, dy } = registrationOffset(seed, plate.index, press.misregistration * scale * Math.sqrt(detail))
+  const grain = press.method === 'grain'
+  return { detail, tearRadius, rMax: blurReach(tearRadius), dx, dy, grain, cell: grain ? grainCell(press.screenPitch, scale) : 0 }
+}
+
+/**
+ * How many rows past a band, each side, one plate's press reads: the tear's
+ * three blur passes, the shift (the offset and the bilinear's next row), and
+ * under grain a cell row to reach the cell grid plus the two cell rows the
+ * error diffuses into. A SIZING figure (memory estimates; what `windowsFor`'s
+ * exact windows are checked against), never what a window is cut to.
+ *
+ *   halo = 3 rMax + (ceil |dy| + 2, when the plate moves) + (3 ceil(cell) + 1, under grain)
+ */
+export interface PlateHalo {
+  blur: number
+  shift: number
+  grain: number
+  total: number
+  dx: number
+  dy: number
+  rMax: number
+  cell: number
+}
+
+function haloOf(rMax: number, moves: boolean, dy: number, cell: number): Omit<PlateHalo, 'dx' | 'dy' | 'rMax' | 'cell'> {
+  const blur = 3 * rMax
+  const shift = moves ? Math.ceil(Math.abs(dy)) + 2 : 0
+  const grain = cell > 0 ? 3 * Math.ceil(cell) + 1 : 0
+  return { blur, shift, grain, total: blur + shift + grain }
+}
+
+/** The halo of one plate of a document, at its own offset. */
+export function plateHalo(press: PressProfile, plate: { fontSize: number; index: number }, seed: number, h: number): PlateHalo {
+  const g = plateGeometry(press, plate, seed, h)
+  return { ...haloOf(g.rMax, g.dx !== 0 || g.dy !== 0, g.dy, g.cell), dx: g.dx, dy: g.dy, rMax: g.rMax, cell: g.cell }
+}
+
+/** The largest halo a press can give a plate at this detail on a sheet `h`
+ *  tall, whatever its seed and index: the offset at its bound,
+ *  |dy| = misregistration x scale x sqrt(detail). */
+export function haloBound(press: PressProfile, h: number, detail = 1): PlateHalo {
+  const scale = h / REFERENCE_HEIGHT
+  const edge = edgeToRough(press.edge)
+  const tears = edge.roughness > 0 || edge.bleed > 0
+  const rMax = tears ? blurReach(TEAR_SCALE * scale * detail) : 0
+  const dy = press.misregistration * scale * Math.sqrt(detail)
+  const cell = press.method === 'grain' ? grainCell(press.screenPitch, scale) : 0
+  return { ...haloOf(rMax, dy !== 0, dy, cell), dx: 0, dy, rMax, cell }
+}
+
+/** Rows [a, b) of the sheet; empty when a >= b. */
+export interface RowWindow {
+  a: number
+  b: number
+}
+
+const isEmpty = (r: RowWindow) => r.b <= r.a
+
+/** The smallest window holding both. */
+function hull(p: RowWindow, q: RowWindow): RowWindow {
+  if (isEmpty(p)) return q
+  if (isEmpty(q)) return p
+  return { a: Math.min(p.a, q.a), b: Math.max(p.b, q.b) }
+}
+
+/**
+ * The exact rows one plate's press reads to print the band [y0, y1), stage
+ * by stage, back from the output:
+ *
+ *  - `coverage`: the rows of the moved, worn tone the screen reads (the band)
+ *    or the grain stream reads (`grainRows`: the cell rows not yet loaded, up
+ *    to two past the band's; empty when an earlier band loaded them all);
+ *  - `worn`: the rows of the worn tone the shift reads to make those
+ *    (ink.ts `shiftSource`);
+ *  - `knockout`: the rows of the torn tone the knockout under this band
+ *    reads, when the plate cuts one (`cuts`);
+ *  - `torn`: both (the worn tone is the torn tone, density and wear applied
+ *    pixel by pixel);
+ *  - `glyph`: the torn rows widened by the tear's reach, 3 rMax, each side:
+ *    the glyph rows the tear reads.
+ *
+ * All clamped to the sheet. `rows` is the grain's cell rows (cellStarts of
+ * the sheet's height at the plate's cell) under grain.
+ */
+export interface PlateWindows {
+  coverage: RowWindow
+  worn: RowWindow
+  knockout: RowWindow
+  torn: RowWindow
+  glyph: RowWindow
+}
+
+export function windowsFor(
+  band: { y0: number; y1: number },
+  g: PlateGeometry,
+  h: number,
+  cuts: boolean,
+  rows?: Int32Array,
+): PlateWindows {
+  if (g.grain && !rows) throw new Error('windowsFor: a grain plate needs its cell rows')
+  const coverage = g.grain ? grainRows(rows!, band.y0, band.y1) : { a: band.y0, b: band.y1 }
+  const worn = shiftSource(g.dx, g.dy, coverage.a, coverage.b, h)
+  const knockout = cuts ? shiftSource(g.dx, g.dy, band.y0, band.y1, h) : { a: band.y0, b: band.y0 }
+  const torn = hull(worn, knockout)
+  const reach = 3 * g.rMax
+  const glyph = isEmpty(torn) ? torn : { a: Math.max(0, torn.a - reach), b: Math.min(h, torn.b + reach) }
+  return { coverage, worn, knockout, torn, glyph }
+}
+
+/**
+ * The rows a press in bands of `bandRows` must hold for its largest window:
+ * every band of the sheet walked once, for every plate, at set-up (a few
+ * thousand integer steps). The workspace is this many rows of the sheet's
+ * width, allocated once and reused by every band and every plate.
+ */
+export function maxWindow(
+  plates: readonly { geometry: PlateGeometry; cuts: boolean }[],
+  bandRows: number,
+  h: number,
+): number {
+  const B = Math.max(1, Math.min(h, bandRows))
+  let most = B
+  for (const p of plates) {
+    const rows = p.geometry.grain ? cellStarts(h, p.geometry.cell) : undefined
+    for (let y0 = 0; y0 < h; y0 += B) {
+      const win = windowsFor({ y0, y1: Math.min(h, y0 + B) }, p.geometry, h, p.cuts, rows)
+      most = Math.max(most, win.glyph.b - win.glyph.a, win.coverage.b - win.coverage.a)
+    }
+  }
+  return most
 }
 
 /**

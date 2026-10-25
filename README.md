@@ -974,10 +974,13 @@ state at 320, 375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
 fails if the sheet moves by a pixel, if a panel overflows, or if the page
 scrolls sideways. Each state is measured at rest, once its transitions and
 animations have run out and its scrollers have stopped, never after a fixed
-delay: a slower machine then measures what a faster one does (a sheet caught
-mid-rise once failed CI, see the gate's `settle`). Border Studio's README
-claims such a suite and has no file for it; this one is a file, and it checks
-more:
+delay, so the frame it is measured at does not depend on the machine's speed
+(a sheet caught mid-rise once failed CI, see the gate's `settle`). The one
+state with a clock of its own, a save's first moments with its 2.4 s toast
+up, is held there while it is measured: a press in progress keeps the main
+thread busy, and a slow machine came to rest only after the toast had gone.
+Border Studio's README claims such a suite and has no file for it; this one
+is a file, and it checks more:
 
 - **Targets** by the hit area each control still owns: from its centre, how
   far each way a tap lands on it (`elementFromPoint`), counting its `::after`
@@ -998,7 +1001,9 @@ more:
 - **The save states at 200% text** on a 320×640 and a 375×667 phone, with the
   dock closed and with the Photo tool open: a 5712×4284 photo on its own sheet
   (so the toast carries the longest reason the planner gives), pressing with
-  that toast up, ready, and the photo that could not be loaded. Cancel, Share,
+  that toast up (the press held at "loading the photo", its decode of the
+  original waiting until the state is measured), ready, and the photo that
+  could not be loaded. Cancel, Share,
   the card's × and Choose again each answer a tap at their centre, and the
   cards stay between the bar and the dock.
 

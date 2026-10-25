@@ -55,9 +55,12 @@
  *
  * Every state is measured at rest: once its transitions and animations have
  * run out and its scrollers have stopped (settle), never on a fixed delay, so
- * a slower machine measures the same thing. A target covered at its centre is
- * reported with what covers it, the scroll state of the scrollers around it,
- * its dialog's box and transform, and anything still moving.
+ * the frame a state is measured at does not depend on the machine's speed.
+ * The one state with a clock of its own, a save's first moments with its
+ * 2.4 s toast up, is held still while it is measured (checkSaveStates). A
+ * target covered at its centre is reported with what covers it, the scroll
+ * state of the scrollers around it, its dialog's box and transform, and
+ * anything still moving.
  *
  * The DOM contract it reads (src/features/shell/AppShell.tsx and the panels):
  * tool buttons `[data-tool]` with `aria-pressed`, the open panel
@@ -795,6 +798,8 @@ function probeSaveCard(sel) {
     column: `${Math.round(float.top)}..${Math.round(float.bottom)} (bar ends ${Math.round(bar.bottom)}, dock starts ${Math.round(dock.top)})`,
     action,
     toast: document.querySelector('.app__toast--show')?.textContent ?? null,
+    // How long the toast has been up (when the gate started a clock on it).
+    toastFor: typeof window.__toastAt === 'number' ? Math.round(performance.now() - window.__toastAt) : null,
     text: document.querySelector('.app__status-text')?.textContent ?? null,
   }
 }
@@ -809,14 +814,35 @@ function probeSaveCard(sel) {
  * shown: Cancel answers a tap. Ready: Share in the bar answers a tap, and so
  * does the card's ×. The stored photo gone: Choose again answers a tap. In
  * each, the cards stay between the bar and the dock.
+ *
+ * Pressing is measured with the press held in its first phase ("loading the
+ * photo"): the original's decode at Save waits until the measurement is
+ * taken. The toast is up for 2.4 s from the tap, and the page must be at rest
+ * to be measured; with the press running, the main thread is busy pressing
+ * plates, so coming to rest took 1.6 s here and 2.8 to 4.7 s with the CPU
+ * throttled 2x to 4x, and the toast was often gone by then. Held, the page is
+ * idle, comes to rest in a fraction of that whatever the machine's speed, and
+ * the state measured is the tallest stack there is: the press's card with the
+ * toast over it.
  */
 async function checkSaveStates(vw, vh, tool) {
   const where = `${vw}x${vh} at 200% text, ${tool ? `the ${tool} tool open` : 'the dock closed'}`
+  const failedBefore = failures.length
   const slowEncoder = `
     const real = HTMLCanvasElement.prototype.toBlob
     HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) { return real.call(this, (b) => setTimeout(() => cb(b), 3000), ...rest) }
     navigator.canShare = () => true
     navigator.share = async () => { window.__shared = (window.__shared ?? 0) + 1 }
+    // A full decode (no resize: the original's, at Save; the preview's copy
+    // is a resized one) waits while held, until released.
+    const decode = window.createImageBitmap
+    let held = null
+    window.__holdOriginal = () => { held = [] }
+    window.__releaseOriginal = () => { const go = held ?? []; held = null; go.forEach((f) => f()) }
+    window.createImageBitmap = (src, ...rest) =>
+      held && !rest.some((o) => o && typeof o === 'object' && 'resizeWidth' in o)
+        ? new Promise((f) => held.push(f)).then(() => decode(src, ...rest))
+        : decode(src, ...rest)
   `
   const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [5712, 4284], init: slowEncoder })
   const large = () => page.addStyleTag({ content: 'html { font-size: 200% }' })
@@ -835,10 +861,26 @@ async function checkSaveStates(vw, vh, tool) {
   await large()
   if (tool) await openTool(page, tool)
   else await closeTools(page)
+  await settle(page, `${where}, before Save`)
+  await page.evaluate(() => {
+    window.__holdOriginal()
+    // A clock on the toast: from when it shows (no toast is up before Save).
+    window.__toastAt = null
+    const shown = () => {
+      if (window.__toastAt === null && document.querySelector('.app__toast--show')) window.__toastAt = performance.now()
+    }
+    new MutationObserver(shown).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] })
+  })
   await page.locator('.app__save').click()
   await page.waitForFunction(() => document.querySelector('.app__status-text')?.textContent?.startsWith('Pressing'), null, { timeout: 60_000 })
-  // The press's first moments, with the save's toast up.
-  const pressing = await state('pressing', '.app__status .btn', (p) => p.toast?.includes('capped at 16.7 MP') === true)
+  // The press's first moments, held there (see above), with the save's toast
+  // up: both are required, so it is the tallest stack that is measured.
+  const pressing = await state(
+    'pressing',
+    '.app__status .btn',
+    (p) => p.toast?.includes('capped at 16.7 MP') === true && p.text?.includes('loading the photo') === true,
+  )
+  await page.evaluate(() => window.__releaseOriginal())
   await page.waitForFunction(() => document.querySelector('.app__save')?.textContent === 'Share', null, { timeout: 180_000 })
   await state('ready', '.app__save')
   await state('ready', '.app__status .btn')
@@ -867,7 +909,12 @@ async function checkSaveStates(vw, vh, tool) {
   await page.waitForFunction(() => document.querySelector('.app__status[data-action="choose"]'), null, { timeout: 30_000 })
   await state('missing-photo', '.app__status .btn')
   check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
-  console.log(`${where}: pressing (${pressing.text}, with the toast), ready and the missing photo: every action answers, the cards stay between bar and dock`)
+  const failed = failures.length - failedBefore
+  console.log(
+    failed
+      ? `${where}: ${failed} save-state check(s) failed (above)`
+      : `${where}: pressing ("${pressing.text}", with the toast, ${pressing.toastFor} ms into its 2400), ready and the missing photo: every action answers, the cards stay between bar and dock`,
+  )
   await ctx.close()
 }
 

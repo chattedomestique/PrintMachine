@@ -12,6 +12,27 @@
  * uncompressed in deflate's stored blocks, unfiltered: a valid PNG of about 3
  * bytes a pixel (`storedSize`).
  *
+ * What it allocates, so a 40 MP save makes no garbage the size of its pixels
+ * (JavaScriptCore keeps short-lived buffers that V8 frees): the batches are a
+ * pool, made at construction for the band height it is told (`bandRows`) and
+ * each handed back to the pool when the compressor has taken it, never made
+ * per batch; a compressed chunk is handed on as it came, between its IDAT
+ * length-and-type and its CRC (no copy); a stored block is written once, in
+ * place, into the IDAT chunk that is handed on. So once it is made, the only
+ * arrays it makes are pieces of the file.
+ *
+ * "Taken" is the Compression Streams standard's: a CompressionStream is a
+ * TransformStream whose transform compresses the chunk it is given, and a
+ * write's promise resolves once that transform has run, so a batch whose
+ * write has resolved has been read and may be filled again. Every browser's
+ * is built so (Chromium's is checked by scripts/check-encode.mjs). Node's is
+ * not: it can resolve a write before it has read the chunk. So the encoder
+ * also checks what the compressor read: the zlib stream ends with the
+ * Adler-32 of the bytes it compressed, and `finish` compares it with the
+ * Adler-32 of the batches as they were handed over. On a compressor that
+ * read a batch after it was filled again the file is refused (`finish`
+ * throws), never written wrong.
+ *
  * Written from ISO/IEC 15948 (PNG), RFC 1950 (zlib) and RFC 1951 (deflate's
  * stored blocks); no code is taken from anywhere else.
  *
@@ -29,6 +50,10 @@ const SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
 const BATCH_ROWS = 64
 /** The most a stored deflate block holds (RFC 1951 3.2.4). */
 const STORED_BLOCK = 65535
+/** The most one stored block's IDAT chunk takes: length and type, the zlib
+ *  header (first block only), the block's header, its data, the Adler-32
+ *  (last block only), the CRC. */
+const STORED_CHUNK = 8 + 2 + 5 + STORED_BLOCK + 4 + 4
 /** The largest width or height a PNG header can carry (2^31 - 1). */
 export const PNG_MAX_EDGE = 0x7fffffff
 
@@ -49,6 +74,8 @@ const IHDR = typeBytes('IHDR')
 const SRGB = typeBytes('sRGB')
 const IDAT = typeBytes('IDAT')
 const IEND = typeBytes('IEND')
+const IDAT_CRC = crc32(IDAT)
+const NO_DATA = new Uint8Array(0)
 
 /** A chunk: length, type, data, and the CRC-32 of type and data. */
 function chunk(type: Uint8Array, data: Uint8Array): Uint8Array {
@@ -87,22 +114,43 @@ export class PngEncoder {
   private aborted = false
   private failure: unknown = null
 
-  // CompressionStream: the batch being filled, the writer, the reader's pump.
+  // CompressionStream: the batch being filled, the batches free to fill, the
+  // writer, the reader's pump.
   private readonly writer: WritableStreamDefaultWriter<BufferSource> | null = null
   private readonly reader: ReadableStreamDefaultReader<Uint8Array> | null = null
   private readonly pump: Promise<void> = Promise.resolve()
   private pending: Promise<void> = Promise.resolve()
   private batch: Uint8Array<ArrayBuffer> | null = null
   private batchRows = 0
+  private readonly free: Uint8Array<ArrayBuffer>[] = []
+  /** The Adler-32 of the batches handed to the compressor, as they were
+   *  handed; and the last four bytes it gave back (its stream's Adler-32,
+   *  once it has ended). */
+  private adlerIn = 1
+  private tail = 0
 
-  // Stored: the block being filled, and the running Adler-32.
+  // Stored: the IDAT chunk being filled (its block's data from `blockAt`),
+  // and the running Adler-32.
   private readonly stored: boolean
   private block: Uint8Array | null = null
+  private blockAt = 0
   private blockN = 0
   private adler = 1
   private firstBlock = true
 
-  constructor(width: number, height: number, onChunk: (chunk: Uint8Array) => void, opts: { compression?: 'deflate' | 'stored' } = {}) {
+  /**
+   * `opts.bandRows`: the most rows pushed between two `settled()` calls (the
+   * band height a band loop pushes). The batches those rows can fill, with
+   * the one a band may begin part-way through, are made here; pushing then
+   * makes none. Without it one batch is made here, and more only if more rows
+   * than that are pushed before `settled()`; every batch is kept and reused.
+   */
+  constructor(
+    width: number,
+    height: number,
+    onChunk: (chunk: Uint8Array) => void,
+    opts: { compression?: 'deflate' | 'stored'; bandRows?: number } = {},
+  ) {
     if (!(Number.isInteger(width) && Number.isInteger(height) && width >= 1 && height >= 1 && width <= PNG_MAX_EDGE && height <= PNG_MAX_EDGE)) {
       throw new RangeError(`PNG: ${width}x${height} is not a size a PNG can hold`)
     }
@@ -124,9 +172,13 @@ export class PngEncoder {
     onChunk(chunk(SRGB, new Uint8Array([0]))) // rendering intent: perceptual
 
     if (this.stored) {
-      this.block = new Uint8Array(STORED_BLOCK)
+      this.openBlock()
       return
     }
+    // A band of B rows that begins with up to 63 rows already in the batch
+    // being filled touches at most ceil((B + 63) / 64) batches.
+    const rows = Math.max(1, Math.min(height, Math.floor(opts.bandRows ?? 1)))
+    for (let i = Math.ceil((rows + BATCH_ROWS - 1) / BATCH_ROWS); i > 0; i--) this.free.push(new Uint8Array(BATCH_ROWS * this.rowBytes))
     const cs = new CompressionStream('deflate')
     this.writer = cs.writable.getWriter()
     this.reader = cs.readable.getReader()
@@ -135,7 +187,8 @@ export class PngEncoder {
       for (;;) {
         const { done, value } = await reader.read()
         if (done) return
-        if (!this.aborted && value.length > 0) onChunk(chunk(IDAT, value))
+        for (let i = Math.max(0, value.length - 4); i < value.length; i++) this.tail = ((this.tail << 8) | value[i]) >>> 0
+        if (!this.aborted && value.length > 0) this.emitIdat(value)
       }
     })()
     this.pump.catch((err) => {
@@ -163,7 +216,7 @@ export class PngEncoder {
         this.storeBytes(cur)
       } else {
         if (!this.batch) {
-          this.batch = new Uint8Array(BATCH_ROWS * this.rowBytes)
+          this.batch = this.free.pop() ?? new Uint8Array(BATCH_ROWS * this.rowBytes)
           this.batchRows = 0
         }
         this.filterInto(this.batch, this.batchRows * this.rowBytes, w3)
@@ -200,8 +253,11 @@ export class PngEncoder {
       await this.writer!.close()
       await this.pump
       if (this.failure) throw this.failure
+      if (this.tail !== this.adlerIn) {
+        throw new Error("PNG: the compressor read rows after they were handed over (this engine's CompressionStream is not the standard's)")
+      }
     }
-    this.onChunk(chunk(IEND, new Uint8Array(0)))
+    this.onChunk(chunk(IEND, NO_DATA))
     this.done = true
   }
 
@@ -211,6 +267,7 @@ export class PngEncoder {
     if (this.done || this.aborted) return
     this.aborted = true
     this.batch = null
+    this.free.length = 0
     this.block = null
     if (this.writer) {
       this.writer.abort().catch(() => {})
@@ -259,42 +316,76 @@ export class PngEncoder {
     }
   }
 
-  /** Hands the batch to the compressor, without waiting for it. */
+  /** Hands the batch to the compressor, without waiting for it; the batch
+   *  goes back to the pool once the compressor has taken it. */
   private submit(): void {
-    const data = this.batch!.subarray(0, this.batchRows * this.rowBytes)
+    const batch = this.batch!
+    const data = batch.subarray(0, this.batchRows * this.rowBytes)
+    this.adlerIn = adler32(data, this.adlerIn)
     this.batch = null
     this.batchRows = 0
-    const write = this.writer!.write(data)
-    write.catch((err) => {
-      this.failure ??= err
-    })
-    this.pending = write.catch(() => {})
+    this.pending = this.writer!.write(data).then(
+      () => {
+        if (!this.aborted) this.free.push(batch)
+      },
+      (err) => {
+        this.failure ??= err
+      },
+    )
+  }
+
+  /** A compressed chunk as an IDAT, in three pieces: length and type, the
+   *  bytes as the compressor gave them, the CRC. */
+  private emitIdat(data: Uint8Array): void {
+    const head = new Uint8Array(8)
+    new DataView(head.buffer).setUint32(0, data.length)
+    head.set(IDAT, 4)
+    const crc = new Uint8Array(4)
+    new DataView(crc.buffer).setUint32(0, crc32(data, IDAT_CRC))
+    this.onChunk(head)
+    this.onChunk(data)
+    this.onChunk(crc)
+  }
+
+  /** A new IDAT chunk for the next stored block: its data starts after the
+   *  length, the type, the zlib header (first block only) and the block's
+   *  own header, which `emitBlock` writes. */
+  private openBlock(): void {
+    this.block = new Uint8Array(STORED_CHUNK)
+    this.blockAt = 8 + (this.firstBlock ? 2 : 0) + 5
+    this.blockN = 0
   }
 
   private storeByte(b: number): void {
-    if (this.blockN === STORED_BLOCK) this.emitBlock(false)
-    this.block![this.blockN++] = b
+    if (this.blockN === STORED_BLOCK) {
+      this.emitBlock(false)
+      this.openBlock()
+    }
+    this.block![this.blockAt + this.blockN++] = b
   }
 
   private storeBytes(bytes: Uint8Array): void {
     let i = 0
     while (i < bytes.length) {
-      if (this.blockN === STORED_BLOCK) this.emitBlock(false)
+      if (this.blockN === STORED_BLOCK) {
+        this.emitBlock(false)
+        this.openBlock()
+      }
       const n = Math.min(bytes.length - i, STORED_BLOCK - this.blockN)
-      this.block!.set(bytes.subarray(i, i + n), this.blockN)
+      this.block!.set(bytes.subarray(i, i + n), this.blockAt + this.blockN)
       this.blockN += n
       i += n
     }
   }
 
-  /** One stored block as an IDAT: the zlib header before the first, the
-   *  Adler-32 after the last. */
+  /** The stored block, finished in place and handed on as one IDAT: the zlib
+   *  header before the first block's, the Adler-32 after the last's. */
   private emitBlock(final: boolean): void {
-    const data = this.block!.subarray(0, this.blockN)
-    this.adler = adler32(data, this.adler)
-    const head = this.firstBlock ? 2 : 0
-    const out = new Uint8Array(head + 5 + data.length + (final ? 4 : 0))
-    let o = 0
+    const out = this.block!
+    const view = new DataView(out.buffer, out.byteOffset, out.byteLength)
+    const n = this.blockN
+    this.adler = adler32(out.subarray(this.blockAt, this.blockAt + n), this.adler)
+    let o = 8
     if (this.firstBlock) {
       // CMF 0x78: deflate, 32 KB window; FLG 0x01: no dictionary, fastest,
       // and (CMF x 256 + FLG) a multiple of 31.
@@ -302,15 +393,20 @@ export class PngEncoder {
       out[o++] = 0x01
     }
     out[o++] = final ? 1 : 0 // BFINAL, BTYPE 00 (stored)
-    out[o++] = data.length & 0xff
-    out[o++] = data.length >>> 8
-    out[o++] = ~data.length & 0xff
-    out[o++] = (~data.length >>> 8) & 0xff
-    out.set(data, o)
-    o += data.length
-    if (final) new DataView(out.buffer).setUint32(o, this.adler)
-    this.onChunk(chunk(IDAT, out))
+    out[o++] = n & 0xff
+    out[o++] = n >>> 8
+    out[o++] = ~n & 0xff
+    out[o++] = (~n >>> 8) & 0xff
+    o += n
+    if (final) {
+      view.setUint32(o, this.adler)
+      o += 4
+    }
+    view.setUint32(0, o - 8)
+    out.set(IDAT, 4)
+    view.setUint32(o, crc32(out.subarray(4, o)))
+    this.onChunk(out.subarray(0, o + 4))
+    this.block = null
     this.firstBlock = false
-    this.blockN = 0
   }
 }

@@ -197,7 +197,9 @@ export function fdct8(d: Float64Array): void {
  *
  * It holds one strip of 8 rows (three planes of floats, the width rounded up
  * to 8) and one chunk of output. Rows may come in any groups: the bytes are
- * the same however they are pushed.
+ * the same however they are pushed. Once it is made, the only arrays it makes
+ * are the chunks it hands on (`chunkSize` bytes each; the last is the part of
+ * its buffer it fills).
  */
 export class JpegEncoder {
   private readonly w: number
@@ -381,8 +383,9 @@ export class JpegEncoder {
     this.out[this.n++] = b
   }
 
+  /** The last chunk, as the part of the output buffer it fills (no copy). */
   private flush(): void {
-    if (this.n > 0) this.onChunk(this.out.slice(0, this.n))
+    if (this.n > 0) this.onChunk(this.out.subarray(0, this.n))
     this.n = 0
   }
 

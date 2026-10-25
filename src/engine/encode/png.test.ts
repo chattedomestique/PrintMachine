@@ -1,17 +1,71 @@
 /**
  * The streaming PNG encoder, read back: every chunk's CRC, the zlib stream
- * inflated and unfiltered gives the pixels back exactly, through the
- * browser's deflate (`CompressionStream`, node has it) and through the stored
- * fallback, however the rows arrive. That a browser decodes it the same is
- * checked in Chromium: scripts/check-encode.mjs.
+ * inflated and unfiltered gives the pixels back exactly, through deflate
+ * (`CompressionStream`) and through the stored fallback, however the rows
+ * arrive. That a browser decodes it the same is checked in Chromium:
+ * scripts/check-encode.mjs.
+ *
+ * The encoder fills a batch again once its write has resolved, which the
+ * Compression Streams standard (and every browser) makes safe: the chunk is
+ * read by the transform before the write resolves. Node's CompressionStream
+ * may resolve first and read later, so these tests run on `StandardDeflate`:
+ * node's deflate behind a TransformStream that reads each chunk when its
+ * write is processed, as the standard's does, and a little late, so a batch
+ * filled again too early would show.
  */
 
 import { inflateSync } from 'node:zlib'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { adler32, crc32 } from './crc32.ts'
 import { PngEncoder, storedSize } from './png.ts'
 import { mulberry32 } from '../rng.ts'
+
+const NodeCompressionStream = globalThis.CompressionStream
+
+const later = () => new Promise((r) => setTimeout(r, 1))
+
+/** A deflate that takes its chunk as the standard's does: read (here,
+ *  copied) when its write is processed, and only then resolved. */
+class StandardDeflate {
+  readonly readable: ReadableStream<Uint8Array>
+  readonly writable: WritableStream<BufferSource>
+  constructor(format: CompressionFormat) {
+    const real = new NodeCompressionStream(format)
+    const w = real.writable.getWriter()
+    this.readable = real.readable
+    this.writable = new WritableStream<BufferSource>({
+      async write(chunk) {
+        await later()
+        const v = chunk as Uint8Array
+        await w.write(new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice())
+      },
+      close: () => w.close(),
+      abort: (reason) => w.abort(reason),
+    })
+  }
+}
+
+/** One that does not: its write resolves at once, and it reads the chunk a
+ *  moment later. */
+class LateDeflate {
+  readonly readable: ReadableStream<Uint8Array>
+  readonly writable: WritableStream<BufferSource>
+  constructor(format: CompressionFormat) {
+    const real = new NodeCompressionStream(format)
+    const w = real.writable.getWriter()
+    let reads = Promise.resolve()
+    this.readable = real.readable
+    this.writable = new WritableStream<BufferSource>({
+      write(chunk) {
+        const v = chunk as Uint8Array
+        reads = reads.then(later).then(() => w.write(new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice()))
+      },
+      close: () => reads.then(() => w.close()),
+      abort: (reason) => w.abort(reason),
+    })
+  }
+}
 
 const join = (chunks: Uint8Array[]) => {
   const out = new Uint8Array(chunks.reduce((t, c) => t + c.length, 0))
@@ -25,9 +79,16 @@ const join = (chunks: Uint8Array[]) => {
 
 /** Encode, pushing the rows in groups of the sizes given, in turn, and
  *  waiting for the encoder between groups as a band loop does. */
-async function encode(rgba: Uint8ClampedArray, w: number, h: number, compression: 'deflate' | 'stored', groups: number[] = [h]): Promise<Uint8Array> {
+async function encode(
+  rgba: Uint8ClampedArray,
+  w: number,
+  h: number,
+  compression: 'deflate' | 'stored',
+  groups: number[] = [h],
+  bandRows?: number,
+): Promise<Uint8Array> {
   const chunks: Uint8Array[] = []
-  const png = new PngEncoder(w, h, (c) => chunks.push(c), { compression })
+  const png = new PngEncoder(w, h, (c) => chunks.push(c), { compression, bandRows })
   let y = 0
   for (let k = 0; y < h; k++) {
     const n = Math.min(groups[k % groups.length], h - y)
@@ -117,6 +178,7 @@ const make = (w: number, h: number, f: (typeof IMAGES)[number][3]) => {
 }
 
 describe('the PNG encoder', { timeout: 60_000 }, () => {
+  beforeEach(() => vi.stubGlobal('CompressionStream', StandardDeflate))
   afterEach(() => vi.unstubAllGlobals())
 
   it('writes the chunks in order, each with its CRC: IHDR (8-bit RGB), sRGB, IDAT..., IEND', async () => {
@@ -144,6 +206,23 @@ describe('the PNG encoder', { timeout: 60_000 }, () => {
       }
     })
   }
+
+  it('a band loop: bands of 150 rows, told or not, its batches filled again once taken, give the input exactly', async () => {
+    const [, w, h, f] = IMAGES[5]
+    const rgba = make(w, 700, f)
+    for (const bandRows of [undefined, 150]) {
+      const out = decode(await encode(rgba, w, 700, 'deflate', [150], bandRows))
+      expect(out.rgb).toEqual(rgbOf(rgba))
+    }
+    expect(h).toBe(65)
+  })
+
+  it("on a compressor that reads a batch after its write resolved, the file is refused, never written wrong", async () => {
+    vi.stubGlobal('CompressionStream', LateDeflate)
+    const [, w, , f] = IMAGES[5]
+    const rgba = make(w, 300, f)
+    await expect(encode(rgba, w, 300, 'deflate', [64])).rejects.toThrow(/compressor read rows after they were handed over/)
+  })
 
   it('deflated, each row takes the filter whose bytes weigh least: a gradient is not stored as None', async () => {
     const { filters } = decode(await encode(make(100, 80, IMAGES[1][3]), 100, 80, 'deflate'))

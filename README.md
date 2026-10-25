@@ -1450,3 +1450,17 @@ blocks (about 3 bytes a pixel, `storedSize`). check-encode decodes both to
 the input exactly; compressed, its file is 0.69 to 0.72 times the size of
 Chromium's own PNG of the same pixels. Save does not use either encoder yet:
 it still encodes the canvas.
+
+Both allocate once (`src/engine/encode/alloc.test.ts`, at 7728 px wide in
+bands of 271): once made, the only arrays either makes are pieces of the
+file it hands on. The JPEG's are its 256 KiB chunks. The PNG's filtered rows
+go to the compressor in batches of 64 rows from a pool made with it, sized for
+the band height it is told (`bandRows`: 6 batches, 8.9 MB, at 7728 px wide);
+a batch is filled again once its write to the `CompressionStream` has
+resolved, which the Compression Streams standard makes the moment the
+compressor has read it. Every browser's follows the standard; node's does not
+(it can resolve first and read later), so the encoder also compares the zlib
+stream's closing Adler-32 with that of the batches it handed over, and refuses
+the file rather than write a wrong one. A compressed chunk is handed on
+between its IDAT header and CRC as it came, and a stored block is written in
+place into the chunk handed on: neither is copied.

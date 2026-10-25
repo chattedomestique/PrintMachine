@@ -470,16 +470,20 @@ async function encodeCheck(kind: string) {
 
 /** The PNG encoder on the same pixels: decoded by the browser it must be the
  *  input exactly, compressed (CompressionStream) and stored; its size beside
- *  Chromium's own PNG of the same pixels. */
+ *  Chromium's own PNG of the same pixels. The rows go in as a band loop pushes
+ *  them, 150 at a time with `settled()` between, so each band fills several
+ *  batches that the encoder fills again once Chromium's compressor has taken
+ *  them. */
 async function pngCheck(kind: string) {
   const { data, w, h } = await encodeSource(kind)
   const result: Record<string, { bytes: number; ms: number; rmse: number; max: number }> = {}
+  const band = 150
   for (const compression of ['deflate', 'stored'] as const) {
     const chunks: Uint8Array[] = []
     const t0 = performance.now()
-    const png = new PngEncoder(w, h, (c) => chunks.push(c), { compression })
-    for (let y = 0; y < h; y += 64) {
-      const n = Math.min(64, h - y)
+    const png = new PngEncoder(w, h, (c) => chunks.push(c), { compression, bandRows: band })
+    for (let y = 0; y < h; y += band) {
+      const n = Math.min(band, h - y)
       png.push(data.subarray(y * w * 4, (y + n) * w * 4), n)
       await png.settled()
     }

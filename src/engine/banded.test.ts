@@ -47,6 +47,7 @@ vi.mock('./composite.ts', async (importOriginal) => {
 import { maxWindow, plateGeometry, printSheet, printSheetSteps, sampledNoise, type GroundRows, type ToneSource } from './render.ts'
 import type { PrintSettings, TextLayer } from './types.ts'
 import { lumaCell } from './media.ts'
+import { allocations } from './__tests__/alloc.ts'
 import { makeGround } from './__tests__/fields.ts'
 import { DOCS, SIZES, syntheticTones } from './__tests__/documents.ts'
 
@@ -197,36 +198,6 @@ describe('more documents, in bands: equal to the whole sheet', { timeout: 60_000
 })
 
 describe('a band allocates nothing', { timeout: 120_000 }, () => {
-  type Ctor = new (...args: unknown[]) => ArrayBufferView & { byteLength: number }
-  const NAMES = ['Float32Array', 'Float64Array', 'Uint8Array', 'Uint8ClampedArray', 'Int32Array', 'Uint32Array', 'Uint16Array', 'Int16Array'] as const
-
-  /** Every typed array made while `run` runs (views over existing buffers
-   *  excluded: they allocate nothing), with the phase it was made in. */
-  function allocations(run: (phase: { now: string }) => void): { bytes: number; phase: string }[] {
-    const g = globalThis as unknown as Record<string, Ctor>
-    const saved = NAMES.map((n) => [n, g[n]] as const)
-    const log: { bytes: number; phase: string }[] = []
-    const phase = { now: 'setup' }
-    for (const [name, Orig] of saved) {
-      const Tracked = class extends Orig {
-        constructor(...args: unknown[]) {
-          super(...args)
-          if (!(args[0] instanceof ArrayBuffer)) log.push({ bytes: this.byteLength, phase: phase.now })
-        }
-        static [Symbol.hasInstance](x: unknown) {
-          return x instanceof Orig
-        }
-      }
-      g[name] = Tracked
-    }
-    try {
-      run(phase)
-    } finally {
-      for (const [name, Orig] of saved) g[name] = Orig
-    }
-    return log
-  }
-
   const BIG = 512 * 1024
 
   /** A wide sheet (a band of 97 rows is over 512 KiB of bytes), a photo, a

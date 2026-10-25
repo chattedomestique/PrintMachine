@@ -19,7 +19,10 @@
  *  and every file's frame header says three components at 1x1 (4:4:4).
  *
  * And the PNG encoder (src/engine/encode/png.ts) on the halftone and the
- * real print, compressed and stored: decoded, the input exactly (the gate);
+ * real print, compressed and stored, its rows pushed in bands of 150 as a band
+ * loop pushes them (each band fills several batches, filled again once
+ * Chromium's CompressionStream has taken them): decoded, the input exactly
+ * (the gate);
  * its size beside Chromium's own PNG of the same pixels is printed, never
  * gated (looked into only above 1.5 times).
  *

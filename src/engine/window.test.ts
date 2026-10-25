@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import { blurInPlace, blurReach, needsSpare } from './blur.ts'
 import { compositeLayers, type CompositeLayer } from './composite.ts'
 import { GrainStream, cellStarts, ditherField, grainRows } from './dither.ts'
-import { applyMottle, registrationOffset, shiftRows, shiftSource } from './ink.ts'
+import { applyMottle, edgeToRough, registrationOffset, shiftRows, shiftSource } from './ink.ts'
 import { cutKnockoutRows } from './knockout.ts'
 import { LumaAccumulator, groundLumaGrid, sampleLumaRows } from './media.ts'
 import { paperField } from './paper.ts'
@@ -155,8 +155,8 @@ describe("the tear's blur on tall sheets: its float64 noise floor, and what the 
   const tone = Float32Array.from(makeStrokes(w, h, 11), (v) => v / 255)
   const B = 271
   const edges: RoughOptions[] = [
-    { roughness: 0.55, bleed: 0.35, scale: 0, seed: 4242 },
-    { roughness: 1, bleed: 0.55, scale: 0, seed: 4242 },
+    { ...edgeToRough(0.55), scale: 0, seed: 4242 },
+    { ...edgeToRough(1), scale: 0, seed: 4242 },
   ]
 
   function floor(radius: number) {
@@ -200,8 +200,9 @@ describe("the tear's blur on tall sheets: its float64 noise floor, and what the 
     return { any, mid, worst, tornDiffer }
   }
 
-  // 14.7 and 20 are the plan's; 15.84 is a 61 MP portrait on Original (9504
-  // px tall, type at 16% or more).
+  // 14.7 is a sheet about 8,800 px tall at full detail, 20 is 12,000 px (the
+  // limit the README states) and 15.84 a 61 MP portrait on Original (9504 px
+  // tall, type at 16% or more).
   for (const radius of [14.7, 15.84, 20]) {
     it(`radius ${radius}: the blur's floor shows, and the torn tone is the sheet's, every float`, () => {
       const r = floor(radius)

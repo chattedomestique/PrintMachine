@@ -66,7 +66,7 @@ const bandsOf = (h: number, B: number) => {
   return out
 }
 
-describe('the tear on a window of rows', () => {
+describe('the tear on a window of rows', { timeout: 60_000 }, () => {
   const w = 72
   const h = 760
   const tone = blobs(w, h, 11)

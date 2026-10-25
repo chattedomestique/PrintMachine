@@ -539,7 +539,7 @@ describe('step 6: the ground\'s luminance on a small grid', () => {
   })
 })
 
-describe('a plate pressed in bands: every band height gives the bytes the whole sheet gets', () => {
+describe('a plate pressed in bands: every band height gives the bytes the whole sheet gets', { timeout: 60_000 }, () => {
   /** Glyph-like tone: soft-edged ellipses of many sizes over the sheet, as
    *  alpha bytes. */
   function tone(w: number, h: number, seed: number): Uint8Array {

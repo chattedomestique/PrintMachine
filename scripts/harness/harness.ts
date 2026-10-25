@@ -199,9 +199,12 @@ async function render(
   name: string,
   height: number,
   /** `async`: through the export's entry point, renderPrintAsync, instead of
-   *  the preview's (the parity gate renders both). */
-  opts: { photo?: number; png?: boolean; async?: boolean } = {},
+   *  the preview's (the parity gate renders both). `bandRows`: the export
+   *  pressed that many rows at a time; only through the export's entry,
+   *  since the preview always presses its sheet whole. */
+  opts: { photo?: number; png?: boolean; async?: boolean; bandRows?: number } = {},
 ): Promise<RenderResult> {
+  if (opts.bandRows !== undefined && !opts.async) throw new Error('bandRows is an export option: render through the export entry ({ async: true })')
   const settings = load(name)
   const media = settings.media
     ? await photoBitmap(settings.media.width, settings.media.height, opts.photo)
@@ -211,7 +214,7 @@ async function render(
   const cacheRef: { current: RenderCache | null } = { current: null }
 
   const t0 = performance.now()
-  if (opts.async) await renderPrintAsync(out, scratch, settings, height, media)
+  if (opts.async) await renderPrintAsync(out, scratch, settings, height, media, { bandRows: opts.bandRows })
   else renderPrint(out, scratch, settings, cacheRef, null, height, media)
   const ms = performance.now() - t0
 

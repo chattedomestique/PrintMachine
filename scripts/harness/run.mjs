@@ -8,6 +8,8 @@
  *   node scripts/harness/run.mjs --out a.json --heights 1000 --png shots/   (also writes each render as a PNG)
  *   node scripts/harness/run.mjs --out s.json --no-hashes --scale default@900,small-2@1800   (h against 2h)
  *   node scripts/harness/run.mjs --out p.json --no-hashes --parity 1000   (preview and export entry points agree; exits 1 if not)
+ *   node scripts/harness/run.mjs --out b.json --no-hashes --bands 1,7,97,full --heights 600,1000   (the export pressed in bands of
+ *       each height gives the same bytes as pressed whole; bands of 1 and 7 only at heights up to 600; exits 1 if any differ)
  *
  * Then `node scripts/harness/compare.mjs a.json b.json`. Hashes of documents
  * with text depend on the installed fonts, so compare runs from ONE machine
@@ -28,7 +30,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 function parseArgs(argv) {
-  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], parity: null, photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
+  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], parity: null, bands: null, photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -42,6 +44,7 @@ function parseArgs(argv) {
     else if (a === '--time') opts.time.push(next())
     else if (a === '--scale') opts.scale.push(...next().split(','))
     else if (a === '--parity') opts.parity = Number(next())
+    else if (a === '--bands') opts.bands = next().split(',').map((b) => (b === 'full' ? null : Number(b)))
     else if (a === '--photo-mp') opts.photoMp = Number(next())
     else if (a === '--runs') opts.runs = Number(next())
     else if (a === '--no-hashes') opts.hashes = false
@@ -117,8 +120,11 @@ const result = {
   timings: {},
   scale: {},
   parity: {},
+  bands: {},
 }
 let failed = false
+let failure = ''
+
 
 try {
   if (opts.hashes) {
@@ -165,9 +171,40 @@ try {
       const a = await page.evaluate(([d, h]) => window.H.render(d, h), [doc, opts.parity])
       const b = await page.evaluate(([d, h]) => window.H.render(d, h, { async: true }), [doc, opts.parity])
       const same = a.sha256 === b.sha256 && a.w === b.w && a.h === b.h
-      if (!same) failed = true
+      if (!same) {
+        failed = true
+        failure = 'the preview and export entry points disagree'
+      }
       result.parity[`${doc}@${opts.parity}`] = { sync: a.sha256, async: b.sha256, same }
       console.log(`parity ${doc}@${opts.parity}`.padEnd(32), same ? 'SAME' : 'DIFFERS', a.sha256.slice(0, 12), b.sha256.slice(0, 12))
+    }
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
+  if (opts.bands) {
+    // Pressed in bands of every height asked for, through the export entry:
+    // each must give the bytes the sheet pressed whole (one band) gives.
+    // Bands of 1 and 7 only at heights up to 600 (a band of one row repeats
+    // the halo for every row).
+    const { page, errors } = await openPage()
+    const docs = opts.docs ?? (await page.evaluate(() => window.H.docs))
+    for (const doc of docs) {
+      for (const height of opts.heights) {
+        const hashes = []
+        for (const bandRows of opts.bands) {
+          if (bandRows !== null && bandRows < 8 && height > 600) continue
+          const r = await page.evaluate(([d, h, b]) => window.H.render(d, h, { async: true, ...(b === null ? {} : { bandRows: b }) }), [doc, height, bandRows])
+          hashes.push([bandRows ?? 'full', r.sha256])
+        }
+        const same = hashes.every(([, h]) => h === hashes[0][1])
+        if (!same) {
+          failed = true
+          failure = 'a band height prints different bytes'
+        }
+        result.bands[`${doc}@${height}`] = Object.fromEntries(hashes)
+        console.log(`bands ${doc}@${height}`.padEnd(36), same ? 'SAME' : 'DIFFERS', hashes.map(([b, h]) => `${b}:${h.slice(0, 8)}`).join(' '))
+      }
     }
     if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
     await page.close()
@@ -200,6 +237,6 @@ try {
 writeFileSync(opts.out, JSON.stringify(result, null, 2) + '\n')
 console.log(`wrote ${opts.out}`)
 if (failed) {
-  console.error('the preview and export entry points disagree')
+  console.error(failure)
   process.exit(1)
 }

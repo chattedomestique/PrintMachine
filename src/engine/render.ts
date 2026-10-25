@@ -35,16 +35,16 @@
 
 import { blurReach } from './blur.ts'
 import { compositeLayers, type CompositeLayer, type PaperInput } from './composite.ts'
-import { GrainStream, cellStarts, ditherField, grainRows } from './dither.ts'
+import { GrainStream, cellStarts, grainRows } from './dither.ts'
 import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftRows, shiftSource, wearToMottle } from './ink.ts'
 import { inkById, paperById } from './inks.ts'
 import { roughenInPlace } from './rough.ts'
 import { PaperSampler, paperField, type PaperField, type PaperOptions, type PaperSource } from './paper.ts'
 import { FbmSampler, fbm2D, type CellNoise } from './rng.ts'
 import { defaultAngle, screenField, type ScreenOptions } from './screen.ts'
-import { cutKnockout } from './knockout.ts'
-import { SWITCH_BAND, bandMask, coverRect, groundLumaGrid, sampleLuma, snapRect, splitInks, type DrawRect, type LumaGrid } from './media.ts'
-import { rasterizeBacking, rasterizeText } from './text.ts'
+import { cutKnockoutRows } from './knockout.ts'
+import { LumaAccumulator, SWITCH_BAND, bandMask, coverRect, sampleLumaRows, snapRect, splitInks, type DrawRect, type InkSplit, type LumaGrid } from './media.ts'
+import { plateFontSize, rasterizeBacking, rasterizeText } from './text.ts'
 import { REFERENCE_HEIGHT, passCount } from './limits.ts'
 import { sheetAspect, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
@@ -792,31 +792,6 @@ export function maxWindow(
 }
 
 /**
- * Turn a soft 0..1 mask into a hard one through whichever press is running.
- *
- * A soft mask crossfades, and a crossfade between two inks is an opacity
- * blend — both print at partial strength and neither reads. Screening the mask
- * makes the changeover a *pattern*: full-strength ink either side, with the
- * boundary broken into the same dots or diffusion the rest of the sheet is
- * using. That is what a real two-colour transition looks like.
- */
-function binarise(
-  mask: Float32Array,
-  index: number,
-  press: PressProfile,
-  seed: number,
-  w: number,
-  h: number,
-): Uint8ClampedArray {
-  const scale = h / REFERENCE_HEIGHT
-  // Hard either way (0 or 255): a dither is binary, and the switch screen has
-  // no softness.
-  const out = new Uint8ClampedArray(w * h)
-  if (press.method === 'grain') return ditherField(mask, w, h, { scale: grainCell(press.screenPitch, scale) }, out)
-  return screenField(mask, w, h, switchScreen(index, press, seed, scale), out)
-}
-
-/**
  * The halftone a switch mask is screened with. Its origin is a seed-chosen
  * offset in REFERENCE pixels, scaled with the sheet like every other offset,
  * so the mask's dots sit at the same place against the plate's at every
@@ -833,12 +808,22 @@ export function switchScreen(index: number, press: PressProfile, seed: number, s
   }
 }
 
+/** A plate's tone as a source hands it over: a field held whole, or rows
+ *  read as they are needed. */
+export type PlateTone = { field: ToneField; fontSize: number } | { rows: ToneRows; fontSize: number }
+
 /** Where each plate's tone comes from. The renderer rasterises glyphs into a
  *  canvas (and caches them); a test hands in fields it made itself. */
 export interface ToneSource {
-  type(layer: TextLayer): { field: ToneField; fontSize: number }
-  backing(layer: TextLayer): { field: ToneField; fontSize: number }
+  type(layer: TextLayer): PlateTone
+  backing(layer: TextLayer): PlateTone
+  /** The size the layer's type is set at, in pixels: what `type(layer)` and
+   *  `backing(layer)` report as `fontSize`, without drawing anything. A
+   *  source without it is asked for the tone itself. */
+  size?(layer: TextLayer): number
 }
+
+const rowsOfTone = (t: PlateTone, w: number): ToneRows => ('rows' in t ? t.rows : wholeTone(t.field, w))
 
 /**
  * Where a render has got to. Reported between its stages, which is where an
@@ -855,11 +840,27 @@ export interface RenderProgress {
    *  pass of its own). While printing, `pass` is `passes`. */
   pass: number
   passes: number
+  /** The band of rows being pressed or printed, from 0, of `bands`: every
+   *  band presses every pass and prints its rows. */
+  band?: number
+  bands?: number
 }
 
 /** Rows of the sheet printed between two yields: about a million pixels, a
  *  fraction of a second of compositing on a phone. */
 const PRINT_BAND_PIXELS = 1 << 20
+
+/** The photo's rows, a band at a time. */
+export interface GroundRows {
+  /** The ground's rows [y0, y1), RGBA, row y0 first: good until the next
+   *  call. */
+  rows(y0: number, y1: number): Uint8ClampedArray
+}
+
+/** The rows of a ground held whole: views of it, nothing copied. */
+export function wholeGround(rgba: Uint8ClampedArray, w: number): GroundRows {
+  return { rows: (a, b) => rgba.subarray(a * w * 4, b * w * 4) }
+}
 
 /**
  * Press every plate and print the sheet: everything after the type is
@@ -869,20 +870,22 @@ const PRINT_BAND_PIXELS = 1 << 20
  * of it.
  *
  * @param out    RGBA bytes, w*h*4, written in full.
- * @param ground the photo at sheet size (RGBA), or undefined with no photo;
- *               read, never written.
- * @returns every pass in print order, as composited.
+ * @param ground the photo at sheet size (RGBA, or its rows a band at a time),
+ *               or undefined with no photo; read, never written.
+ * @returns every pass in print order, as composited (the last band's rows,
+ *               when the sheet is pressed in more than one).
  */
 export function printSheet(
   out: Uint8ClampedArray,
   s: PrintSettings,
-  ground: Uint8ClampedArray | undefined,
+  ground: GroundRows | Uint8ClampedArray | undefined,
   tones: ToneSource,
   noise: SheetNoise,
   w: number,
   h: number,
+  opts: PrintOptions = {},
 ): CompositeLayer[] {
-  return drain(printSheetSteps(out, s, ground, tones, noise, w, h))
+  return drain(printSheetSteps(out, s, ground, tones, noise, w, h, opts))
 }
 
 /** Run a staged render to the end, synchronously, and hand back its result. */
@@ -893,91 +896,242 @@ function drain<T>(steps: Generator<RenderProgress, T>): T {
   }
 }
 
+export interface PrintOptions {
+  /** Rows pressed and printed at a time. The whole sheet (one band) by
+   *  default. A speed and memory knob only: every band height prints the
+   *  same bytes. */
+  bandRows?: number
+  /** Called once every plate is pressed for the last time, before the last
+   *  rows are printed: what pressed the plates (an export's glyph canvas)
+   *  may be let go. */
+  onPressed?: () => void
+}
+
+/**
+ * The ground's luminance grid (media.ts LumaGrid), gathered from every band
+ * of the photo in turn. A full-size blur (cell 1) takes the workspace when it
+ * is the sheet's size (one band), as it always has; a smaller one leaves it
+ * its own.
+ */
+function groundLuminance(ground: GroundRows, w: number, h: number, B: number, radius: number, ws: Workspace): LumaGrid {
+  const acc = new LumaAccumulator(w, h, radius)
+  for (let y0 = 0; y0 < h; y0 += B) {
+    const y1 = Math.min(h, y0 + B)
+    acc.addRows(ground.rows(y0, y1), y0, y1)
+  }
+  const whole = ws.scratch.length >= w * h
+  return acc.finish(whole ? ws.scratch : undefined, whole ? ws.work : undefined)
+}
+
+/** A band's switch mask rows, per switch point (see printSheetSteps). */
+type SwitchMasks = Map<number, { stream?: GrainStream; rows: Uint8ClampedArray; band: number }>
+
+/** One buffer of a band's rows for every switch point under grain (each
+ *  point's own stream fills it once a band); one buffer for them all under
+ *  halftone (a pure function of the point, remade when the point changes). */
+function switchMasks(plates: readonly Plate[], press: PressProfile, w: number, h: number, B: number): SwitchMasks {
+  const masks: SwitchMasks = new Map()
+  const grain = press.method === 'grain'
+  const shared = grain ? null : new Uint8ClampedArray(B * w)
+  for (const p of plates) {
+    if (!p.split || masks.has(p.layer.contrastThreshold)) continue
+    masks.set(p.layer.contrastThreshold, {
+      stream: grain ? new GrainStream(w, h, grainCell(press.screenPitch, h / REFERENCE_HEIGHT)) : undefined,
+      rows: shared ?? new Uint8ClampedArray(B * w),
+      band: -1,
+    })
+  }
+  return masks
+}
+
+/** One pass on the press, as the print sets it up. */
+interface Plate {
+  layer: TextLayer
+  /** A backing (the block behind the type's lines) or the type. */
+  kind: 'backing' | 'type'
+  /** The pass's index in print order: its screen angle and its offset. */
+  index: number
+  fontSize: number
+  geometry: PlateGeometry
+  /** It cuts the photo back to paper under itself (a backing, or a second
+   *  ink, over a photo). */
+  cuts: boolean
+  /** A second ink over a photo: which ink goes where. */
+  split?: InkSplit
+  /** Its grain stream, under grain: carried from band to band. */
+  grain?: GrainStream
+  /** Its coverage for the band, and its dark half's when it splits. */
+  coverage: Uint8ClampedArray
+  onDark?: Uint8ClampedArray
+  /** Its tone, from the first band it is pressed in to the last. */
+  tone?: ToneRows
+}
+
 /**
  * `printSheet`, in stages: it yields where it has got to between them. The
  * one implementation both entry points run — the preview drains it at once,
  * an export yields to the page at every step — so the two cannot print
  * different pixels.
+ *
+ * Band by band, top to bottom: for each band every plate is pressed in print
+ * order (pressPlateBand: only the rows that band reads), its knockout cut and
+ * its second ink split for those rows, and the band is printed. Nothing that
+ * depends on a band's place is computed from the band: every noise, screen
+ * and mask is keyed to the sheet's rows, error diffusion carries its state
+ * from band to band, and the photo's luminance is gathered from every band
+ * before the first is pressed. So every band height prints the same bytes,
+ * and one band (the default) is the sheet pressed whole.
+ *
+ * Everything a band needs is made once, before the first band, at the
+ * largest size any band needs, and reused (`maxWindow`): no band allocates.
  */
 export function* printSheetSteps(
   out: SheetOutput,
   s: PrintSettings,
-  ground: Uint8ClampedArray | undefined,
+  ground: GroundRows | Uint8ClampedArray | undefined,
   tones: ToneSource,
   noise: SheetNoise,
   w: number,
   h: number,
-  /** Called once every plate is pressed, before the sheet is printed. */
-  onPressed?: () => void,
+  opts: PrintOptions = {},
 ): Generator<RenderProgress, CompositeLayer[]> {
+  const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? h)))
+  const bands = Math.ceil(h / B)
+  const passes = passCount(s)
+  const scale = h / REFERENCE_HEIGHT
+  const groundRows = ground instanceof Uint8ClampedArray ? wholeGround(ground, w) : ground
+
   // Plate order is print order: a plate's backing goes down before its type,
   // so the type overprints the block into a third colour — what a real second
   // pass does.
-  const plates: CompositeLayer[] = []
-  let plateIndex = 0
-  const passes = passCount(s)
+  //
+  // A plate takes a backing OR a second ink, never both, and that is held in
+  // the reducer and the normaliser rather than decided here. The reason: the
+  // second ink picks each glyph's ink from the PHOTO's luminance, but over a
+  // backing the real ground is the block's ink on paper, so a light second
+  // ink chosen for a dark patch of photo would land on the block and vanish.
+  const sizeOf = (layer: TextLayer, kind: Plate['kind']) =>
+    tones.size?.(layer) ?? (kind === 'type' ? tones.type(layer) : tones.backing(layer)).fontSize
+  const plates: Plate[] = []
+  for (const layer of s.layers) {
+    for (const kind of layer.backing ? (['backing', 'type'] as const) : (['type'] as const)) {
+      const index = plates.length
+      const fontSize = sizeOf(layer, kind)
+      const geometry = plateGeometry(s.press, { fontSize, index }, s.seed, h)
+      const splits = kind === 'type' && !!layer.contrastInkId && !!groundRows
+      plates.push({
+        layer,
+        kind,
+        index,
+        fontSize,
+        geometry,
+        cuts: !!groundRows && (kind === 'backing' || splits),
+        // Which ink goes where is decided by what the inks *are*, not by which
+        // field they were typed into. Keying it to the slot assumes the first
+        // ink is the dark one, and the moment it isn't — white type over a
+        // photograph, which is the ordinary case — the switch runs and puts
+        // white on the sky and black on the water: both invisible, and worse
+        // than not switching at all. The darker of the pair belongs on light
+        // ground and the lighter on dark ground, whichever way round they were
+        // chosen. The plate's own ink as its second ink is the one-colour case:
+        // both halves print that ink, and the knockout keeps it readable.
+        split: splits ? splitInks(inkById(layer.inkId).rgb, inkById(layer.contrastInkId!).rgb) : undefined,
+        grain: geometry.grain ? new GrainStream(w, h, geometry.cell) : undefined,
+        coverage: new Uint8ClampedArray(B * w),
+      })
+    }
+  }
+  for (const p of plates) if (p.split) p.onDark = new Uint8ClampedArray(B * w)
 
-  // The ground's blurred luminance, held as a small grid (media.ts LumaGrid)
-  // and read back at full resolution into the workspace for each plate that
-  // switches.
-  let lumaGrid: LumaGrid | undefined
-  // The screened "ground is light" mask of the plate before, and the switch
-  // point it was made for. Every plate switches at its own point; plates that
-  // share one (the default: all at 50%) share the mask, so it is built once.
-  let light: { threshold: number; mask: Uint8ClampedArray } | undefined
-  // The screen index every switch mask is made at: the first one's. A mask
-  // is then a function of its switch point alone, so moving one plate's point
-  // can never turn another plate's dots — which it did while a rebuilt mask
-  // took the rebuilding plate's angle, and a shared one the first plate's.
-  let switchIndex: number | undefined
+  // One set of working buffers for every band and every plate (see
+  // Workspace), at the largest window any of them needs.
+  let ws = makeWorkspace(maxWindow(plates, B, h), w)
 
   // Where the photo is cut back to paper, accumulated across plates: under
   // the second ink wherever that ink cannot print on what is there, and under
   // every backing. A transparent light ink over a solid dark area is still a
   // solid dark area, so without this neither buys anything.
   // Held in bytes (0..255): only the anti-aliased skirt of a hole is between.
-  let knockout: Uint8ClampedArray | undefined
-  const knock = () => (knockout ??= new Uint8ClampedArray(w * h))
+  const knock = plates.some((p) => p.cuts) ? new Uint8ClampedArray(B * w) : undefined
 
-  // One set of working buffers for every plate (see Workspace). Let go, with
-  // everything else only the plates needed, before the sheet is printed.
-  let ws = makeWorkspace(h, w)
+  // The ground's blurred luminance, held as a small grid (media.ts LumaGrid),
+  // gathered from every band of the photo before the first is pressed, and
+  // read back a band at a time into the workspace for each plate that
+  // switches. Blurred across roughly a word of the FIRST plate that switches.
+  // Anything finer and the mask reads the photograph's own grain — the
+  // glitter on water is the same value as white ink and about the size of a
+  // letter, so a tighter blur decides light-or-dark differently inside a
+  // single word. A word is the unit legibility is actually judged in, so it
+  // is the unit that commits.
+  //
+  // (Made in functions of their own, here and below: a generator's suspended
+  // frame keeps every local it ever set, so a block-scoped accumulator or
+  // buffer here would be held through every band and the print.)
+  const firstSplit = plates.find((p) => p.split)
+  let lumaGrid = firstSplit && groundRows ? groundLuminance(groundRows, w, h, B, Math.max(2, firstSplit.fontSize * 1.5), ws) : undefined
+
+  // The screen index every switch mask is made at: the first one's (its
+  // index + 1: the pass after it, as it always was). A mask is then a
+  // function of its switch point alone, so moving one plate's point can never
+  // turn another plate's dots — which it did while a rebuilt mask took the
+  // rebuilding plate's angle, and a shared one the first plate's.
+  const switchIndex = firstSplit ? firstSplit.index + 1 : 0
+  // The screened "ground is light" mask for a band. Every plate switches at
+  // its own point; plates that share one (the default: all at 50%) share the
+  // mask. A halftone mask is a function of the point and the sheet's rows,
+  // so one buffer is remade when the point changes; a grain mask is error
+  // diffusion, a stream run once per band, so each point has its own stream
+  // and its own buffer for the band's rows.
+  let masks = firstSplit ? switchMasks(plates, s.press, w, h, B) : undefined
+  /** Which point the shared halftone mask holds this band's rows for. */
+  let screened: number | undefined
+
+  // The printed rows: straight into `out`, or a band at a time into its
+  // buffer and handed on (to the canvas), so the canvas, which already holds
+  // the print, is not held a second time in a full-size array.
+  const banded = out instanceof Uint8ClampedArray ? null : out
+  const printRows = Math.min(h, banded ? banded.rows : Math.max(1, Math.floor(PRINT_BAND_PIXELS / w)))
+  const sampled = noise.paper instanceof PaperSampler ? noise.paper : null
+  // A sampled paper is a band of shade at a time (a band's rows, or the
+  // output's if fewer). Made with everything else when there are bands to
+  // share it; for one band, once the plates are pressed and their workspace
+  // let go, as the print always made it.
+  const shadeRows = Math.min(B, printRows)
+  let shade = sampled && bands > 1 ? new Float32Array(shadeRows * w) : null
 
   // Each pass is pressed in a function of its own, so that what it holds — its
-  // tone, its coverage before the split, the luminance it read back — is let
-  // go when it returns. This generator's own locals would stay held, in its
-  // suspended frame, through every later plate and the print.
-
-  // A plate takes a backing OR a second ink, never both, and that is held in
-  // the reducer and the normaliser rather than decided here. The reason: the
-  // second ink picks each glyph's ink from the PHOTO's luminance, but over a
-  // backing the real ground is the block's ink on paper, so a light second
-  // ink chosen for a dark patch of photo would land on the block and vanish.
-  // (Generators themselves, so a pass can yield inside; each finishes, and
-  // lets go of what it held, before the next pass starts.)
-  function* pressBacking(layer: TextLayer, ink: string): Generator<RenderProgress, void> {
-    const at: RenderProgress = { step: 'press', pass: plateIndex + 1, passes }
+  // luminance rows, its mask's soft rows — is let go when it returns. This
+  // generator's own locals would stay held, in its suspended frame, through
+  // every later band and the print.
+  function* pressBand(p: Plate, y0: number, y1: number, band: number): Generator<RenderProgress, void> {
+    const at: RenderProgress = { step: 'press', pass: p.index + 1, passes, band, bands }
     yield at
-    const backing = yield* pressWholeSteps(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h, ws, at)
-    plates.push({ coverage: backing.coverage, rgb: inkById(ink).rgb })
-    // The block prints on paper: the photo is cut back under its own torn,
-    // misregistered outline, so a pale block over a dark photo still reads.
-    if (ground) cutKnockout(knock(), backing.roughened, null, { w, h, dx: backing.dx, dy: backing.dy })
-    plateIndex++
-  }
+    p.tone ??= rowsOfTone(p.kind === 'type' ? tones.type(p.layer) : tones.backing(p.layer), w)
+    const pressed = yield* pressPlateBandSteps(
+      { rows: p.tone, fontSize: p.fontSize },
+      p.index,
+      s.press,
+      s.seed,
+      noise,
+      w,
+      h,
+      { y0, y1 },
+      ws,
+      p.coverage,
+      { cuts: p.cuts, grain: p.grain },
+      at,
+    )
+    // Its last band: the tone is let go.
+    if (y1 === h) p.tone = undefined
+    const n = (y1 - y0) * w
 
-  function* pressType(layer: TextLayer): Generator<RenderProgress, void> {
-    const at: RenderProgress = { step: 'press', pass: plateIndex + 1, passes }
-    yield at
-    const tone = tones.type(layer)
-    const pressed = yield* pressWholeSteps(tone, plateIndex, s.press, s.seed, noise, w, h, ws, at)
-    plateIndex++
-    const coverage = pressed.coverage
-
-    if (!layer.contrastInkId || !ground) {
-      plates.push({ coverage, rgb: inkById(layer.inkId).rgb })
+    if (p.kind === 'backing') {
+      // The block prints on paper: the photo is cut back under its own torn,
+      // misregistered outline, so a pale block over a dark photo still reads.
+      if (knock) cutKnockoutRows(knock, y0, pressed.torn, pressed.tornRow0, null, { w, h, dx: pressed.dx, dy: pressed.dy, y0, y1 })
       return
     }
+    if (!p.split || !lumaGrid || !masks || !knock || !p.onDark) return
 
     // One pass whose ink changes with what is under it — a split fountain
     // driven by the image rather than by position across the drum. Pressed
@@ -985,62 +1139,47 @@ export function* printSheetSteps(
     // would misregister the two halves against each other and tear every
     // glyph that happens to straddle the boundary.
     //
-    // Which ink goes where is decided by what the inks *are*, not by which
-    // field they were typed into. Keying it to the slot assumes the first
-    // ink is the dark one, and the moment it isn't — white type over a
-    // photograph, which is the ordinary case — the switch runs and puts
-    // white on the sky and black on the water: both invisible, and worse
-    // than not switching at all. The darker of the pair belongs on light
-    // ground and the lighter on dark ground, whichever way round they were
-    // chosen. The plate's own ink as its second ink is the one-colour case:
-    // both halves print that ink, and the knockout keeps it readable.
-    const split = splitInks(inkById(layer.inkId).rgb, inkById(layer.contrastInkId).rgb)
-
-    if (!lumaGrid) {
-      // Blurred across roughly a word. Anything finer and the mask reads the
-      // photograph's own grain — the glitter on water is the same value as
-      // white ink and about the size of a letter, so a tighter blur decides
-      // light-or-dark differently inside a single word. A word is the unit
-      // legibility is actually judged in, so it is the unit that commits.
-      // (The workspace's spare buffers do a full-size blur: the plate is
-      // screened.)
-      lumaGrid = groundLumaGrid(ground, w, h, Math.max(2, tone.fontSize * 1.5), ws.scratch, ws.work)
-    }
-    // Read back at every pixel into the workspace's scratch, free now that
-    // the plate is pressed; it stays there through this plate's mask and
-    // knockout.
-    const groundLum = sampleLuma(lumaGrid, ws.scratch)
+    // The ground's luminance for the band, read back into the workspace's
+    // scratch, free now that the plate is pressed; it stays there through
+    // this plate's mask and knockout.
+    const groundLum = sampleLumaRows(lumaGrid, y0, y1, ws.scratch.subarray(0, n))
     yield at
-    if (!light || light.threshold !== layer.contrastThreshold) {
-      // Screened, not left soft. A soft mask makes *both* inks print at
-      // partial coverage through the transition, which is an opacity
-      // crossfade wearing a print's clothes — and it is why the switch point
-      // read as a fade rather than as a switch. Running the mask through the
-      // same screen or dither the press is already using makes the changeover
-      // a real pattern: each ink lands at full strength, and the boundary
-      // breaks up into dots the way a two-colour job actually does.
-      //
-      // Made for THIS plate's switch point. (It used to be made once, from
-      // the first split plate, so every later plate's Switch point did
-      // nothing.) One mask is held at a time: a plate with its own point
-      // costs a rebuild, and the old mask is let go before the new one is
-      // made, so two masks are never held together.
-      light = undefined
-      switchIndex ??= plateIndex
-      const threshold = layer.contrastThreshold
-      const soft = bandMask(groundLum, threshold, SWITCH_BAND, ws.work)
-      light = { threshold, mask: binarise(soft, switchIndex, s.press, s.seed, w, h) }
+    // Screened, not left soft. A soft mask makes *both* inks print at
+    // partial coverage through the transition, which is an opacity
+    // crossfade wearing a print's clothes — and it is why the switch point
+    // read as a fade rather than as a switch. Running the mask through the
+    // same screen or dither the press is already using makes the changeover
+    // a real pattern: each ink lands at full strength, and the boundary
+    // breaks up into dots the way a two-colour job actually does.
+    const threshold = p.layer.contrastThreshold
+    const mask = masks.get(threshold)!
+    const light = mask.rows.subarray(0, n)
+    if (mask.stream) {
+      if (mask.band !== band) {
+        // The grain stream reads its own rows (two cell rows ahead of the
+        // band): their luminance and their soft mask, in the workspace's
+        // other buffer.
+        const need = mask.stream.need(y0, y1)
+        const soft = ws.work.subarray(0, (need.b - need.a) * w)
+        bandMask(sampleLumaRows(lumaGrid, need.a, need.b, soft), threshold, SWITCH_BAND, soft)
+        mask.stream.run(soft, need.a, y0, y1, light)
+        mask.band = band
+      }
+    } else if (screened !== threshold) {
+      const soft = bandMask(groundLum, threshold, SWITCH_BAND, ws.work.subarray(0, n))
+      light.fill(0)
+      screenField(soft, w, y1 - y0, { ...switchScreen(switchIndex, s.press, s.seed, scale), row0: y0 }, light)
+      screened = threshold
     }
-    const mask = light.mask
+
     // The mask is hard (0 or 255), so each half is the coverage or nothing.
     // The light half takes the coverage's own buffer.
-    const onDark = new Uint8ClampedArray(w * h)
-    for (let i = 0; i < coverage.length; i++) {
-      onDark[i] = (coverage[i] * (255 - mask[i])) / 255
-      coverage[i] = (coverage[i] * mask[i]) / 255
+    const coverage = p.coverage
+    const onDark = p.onDark
+    for (let i = 0; i < n; i++) {
+      onDark[i] = (coverage[i] * (255 - light[i])) / 255
+      coverage[i] = (coverage[i] * light[i]) / 255
     }
-    plates.push({ coverage, rgb: split.onLight })
-    plates.push({ coverage: onDark, rgb: split.onDark })
 
     // Cut from the *same artwork the plate is*, torn by the same stencil and
     // moved by the same paper feed — the plate's own roughened tone and
@@ -1048,59 +1187,77 @@ export function* printSheetSteps(
     // the raw tone instead leaves the hole a couple of pixels off, and the
     // only way to cover that gap is to spread the hole: on a poster a trap,
     // at text size a flood that swells every counter shut.
-    cutKnockout(knock(), pressed.roughened, groundLum, {
+    cutKnockoutRows(knock, y0, pressed.torn, pressed.tornRow0, groundLum, {
       w,
       h,
       dx: pressed.dx,
       dy: pressed.dy,
-      split: { light: mask, onLightLuma: split.onLightLuma, onDarkLuma: split.onDarkLuma },
+      y0,
+      y1,
+      split: { light, onLightLuma: p.split.onLightLuma, onDarkLuma: p.split.onDarkLuma },
     })
   }
 
-  for (const layer of s.layers) {
-    if (layer.backing) yield* pressBacking(layer, layer.backing)
-    yield* pressType(layer)
-  }
-
-  // Pressed: the working buffers, the ground's luminance and the switch mask
-  // are let go (a suspended generator would otherwise hold them through the
-  // print), and the caller may let go of whatever it pressed with.
-  ws = RELEASED
-  lumaGrid = undefined
-  light = undefined
-  onPressed?.()
-
-  // The photo is the ground, so knocking out means taking its alpha down and
-  // letting the paper underneath come back through. That alpha path is also
-  // what a transparent PNG's own transparency takes: both read as paper. Done
-  // as each pixel is printed (compositeLayers), not on a copy of the ground.
-  const ground_ = ground ? { base: ground, knockout, paperAmount: s.paperVeil ? 1 : 0 } : {}
-
-  // Printed in bands, so an export can hand the page a moment between them —
-  // and so a sampled paper is only ever a band of shade, and the printed
-  // pixels only ever a band before they are on the canvas.
-  const banded = out instanceof Uint8ClampedArray ? null : out
-  const band = banded ? banded.rows : Math.max(1, Math.floor(PRINT_BAND_PIXELS / w))
-  const sampled = noise.paper instanceof PaperSampler ? noise.paper : null
-  const bandShade = sampled ? new Float32Array(Math.min(h, band) * w) : null
-  for (let y = 0; y < h; y += band) {
-    yield { step: 'print', pass: passes, passes }
-    const y1 = Math.min(h, y + band)
-    let paper: PaperInput
-    if (sampled && bandShade) {
-      sampled.rows(y, y1, bandShade)
-      paper = { shade: bandShade, shadeRow0: y, rgb: sampled.rgb, ...ground_ }
+  // The plates as composited, in print order: a split plate is two.
+  const layers: CompositeLayer[] = []
+  for (const p of plates) {
+    if (p.split && p.onDark) {
+      layers.push({ coverage: p.coverage, rgb: p.split.onLight })
+      layers.push({ coverage: p.onDark, rgb: p.split.onDark })
     } else {
-      paper = { ...(noise.paper as PaperField), ...ground_ }
-    }
-    if (banded) {
-      compositeLayers(banded.band, w, h, paper, plates, y, y1, y)
-      banded.put(y, y1)
-    } else {
-      compositeLayers(out as Uint8ClampedArray, w, h, paper, plates, y, y1)
+      layers.push({ coverage: p.coverage, rgb: inkById(p.kind === 'backing' ? p.layer.backing! : p.layer.inkId).rgb })
     }
   }
-  return plates
+
+  for (let band = 0; band < bands; band++) {
+    const y0 = band * B
+    const y1 = Math.min(h, y0 + B)
+    if (knock) knock.fill(0, 0, (y1 - y0) * w)
+    screened = undefined
+    for (const p of plates) yield* pressBand(p, y0, y1, band)
+
+    if (y1 === h) {
+      // Pressed for the last time: the working buffers, the ground's
+      // luminance, the masks and the streams are let go (a suspended
+      // generator would otherwise hold them through the print), and the
+      // caller may let go of whatever it pressed with.
+      ws = RELEASED
+      lumaGrid = undefined
+      masks = undefined
+      for (const p of plates) p.grain = undefined
+      opts.onPressed?.()
+    }
+
+    // The photo is the ground, so knocking out means taking its alpha down and
+    // letting the paper underneath come back through. That alpha path is also
+    // what a transparent PNG's own transparency takes: both read as paper. Done
+    // as each pixel is printed (compositeLayers), not on a copy of the ground.
+    const base = groundRows?.rows(y0, y1)
+    const ground_ = base ? { base, knockout: knock, paperAmount: s.paperVeil ? 1 : 0 } : {}
+    if (sampled) shade ??= new Float32Array(shadeRows * w)
+    // Printed in rows of the output's band (or about a million pixels), so an
+    // export hands the page a moment between them, a sampled paper is only
+    // ever a band of shade, and the printed pixels only ever a band before
+    // they are on the canvas.
+    for (let p0 = y0; p0 < y1; p0 += shadeRows) {
+      yield { step: 'print', pass: passes, passes, band, bands }
+      const p1 = Math.min(y1, p0 + shadeRows)
+      let paper: PaperInput
+      if (sampled && shade) {
+        sampled.rows(p0, p1, shade)
+        paper = { shade, shadeRow0: p0, rgb: sampled.rgb, ...ground_ }
+      } else {
+        paper = { ...(noise.paper as PaperField), ...ground_ }
+      }
+      if (banded) {
+        compositeLayers(banded.band, w, h, paper, layers, p0, p1, p0, y0)
+        banded.put(p0, p1)
+      } else {
+        compositeLayers(out as Uint8ClampedArray, w, h, paper, layers, p0, p1, 0, y0)
+      }
+    }
+  }
+  return layers
 }
 
 /**
@@ -1162,6 +1319,9 @@ export interface AsyncRenderOptions {
   onProgress?: (progress: RenderProgress) => void
   /** As renderPrint's `onGround`. */
   onGround?: () => void
+  /** Rows pressed and printed at a time (`PrintOptions.bandRows`); the whole
+   *  sheet by default. Every band height prints the same bytes. */
+  bandRows?: number
 }
 
 /**
@@ -1181,7 +1341,7 @@ export async function renderPrintAsync(
   media: CanvasImageSource | null,
   opts: AsyncRenderOptions = {},
 ): Promise<void> {
-  const steps = renderSteps(ctx, scratch, s, null, null, height, media, opts.onGround)
+  const steps = renderSteps(ctx, scratch, s, null, null, height, media, opts.onGround, opts.bandRows)
   try {
     for (;;) {
       throwIfAborted(opts.signal)
@@ -1221,6 +1381,7 @@ function* renderSteps(
   height: number,
   media: CanvasImageSource | null,
   onGround: (() => void) | undefined,
+  bandRows?: number,
 ): Generator<RenderProgress, void> {
   const { w, h } = outputSize(sheetAspect(s), height)
 
@@ -1265,22 +1426,27 @@ function* renderSteps(
       ? {
           type: (layer) => cachedTone(scratch, layer, cache, w, h),
           backing: (layer) => cachedBackingTone(scratch, layer, cache, w, h),
+          size: (layer) => plateFontSize(layer, h),
         }
       : {
           type: (layer) => toneOf(rasterizeText(scratch, layer, w, h)),
           backing: (layer) => toneOf(rasterizeBacking(scratch, layer, w, h)),
+          size: (layer) => plateFontSize(layer, h),
         },
     noise,
     w,
     h,
-    // An export's glyph canvas is done once the plates are: let it go before
-    // the print and the encode (4 bytes a pixel). The preview keeps its own
-    // for the next frame.
-    cache
-      ? undefined
-      : () => {
-          scratch.canvas.width = 0
-        },
+    {
+      bandRows,
+      // An export's glyph canvas is done once the plates are: let it go before
+      // the print and the encode (4 bytes a pixel). The preview keeps its own
+      // for the next frame.
+      onPressed: cache
+        ? undefined
+        : () => {
+            scratch.canvas.width = 0
+          },
+    },
   )
 
   if (overlay) drawOverlay(ctx, s, overlay, w, h)

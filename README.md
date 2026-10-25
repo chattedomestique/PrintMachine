@@ -785,6 +785,19 @@ output pixel.
 - **Let go as soon as done.** Once the plates are pressed the workspace, the
   ground's luminance and the switch mask are dropped, and an export's glyph
   canvas is emptied (its width set to 0), before the print and the encode.
+- **Pressed in bands, the same bytes.** The print can be pressed a band of
+  rows at a time (`printSheet`'s `bandRows`): each band presses every plate,
+  reading only the rows its stages reach (the tear's three blur passes, the
+  shift, the grain's two cell rows of look-ahead: `windowsFor`), cuts its
+  knockout and splits its second ink, and is printed. Every noise, screen and
+  mask is keyed to the sheet's own rows, the grain carries its error from
+  band to band (`GrainStream`), and the photo's luminance is gathered from
+  every band before the first is pressed, so every band height prints the
+  same bytes (`banded.test.ts` against the digests recorded before, and the
+  harness's `--bands` through the export's entry); everything a band needs is
+  made once, before the first, and no band allocates. Save still presses the
+  sheet as one band: pressing in bands lowers the memory only once the glyphs
+  and the photo are drawn a band at a time too, which is the step after.
 - **The ground's luminance on a small grid.** The second ink decides each
   glyph's ink from the photo's luminance blurred across about a word — a
   radius of 500 px on a 12 MP export, the press's slowest pass and a

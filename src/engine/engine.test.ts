@@ -1046,8 +1046,8 @@ describe('the blit is pixel-exact when the sheet holds the photo at its own pixe
     expect(snapRect(preview, 4032, 3024, 800, 1000)).toBe(preview)
     const zoomed = coverRect({ width: 4032, height: 3024 }, 2419, 3024, { scale: 1.5, x: 0.5, y: 0.5 })
     expect(snapRect(zoomed, 4032, 3024, 2419, 3024)).toBe(zoomed)
-    // At the zoom's own native height (the plan's 1613x2016) it is 1:1, and
-    // snaps like any other.
+    // At the zoom's own native height (the export plan's 1613x2016) it is
+    // 1:1, and snaps like any other.
     const zoomedNative = coverRect({ width: 4032, height: 3024 }, 1613, 2016, { scale: 1.5, x: 0.5, y: 0.5 })
     expect(zoomedNative.dx).toBeCloseTo(-1209.5, 9)
     expect(snapRect(zoomedNative, 4032, 3024, 1613, 2016)).toEqual({ dx: -1209, dy: -504, dw: 4032, dh: 3024 })
@@ -1487,7 +1487,7 @@ describe('the preview is sized by a pixel budget, not a height', () => {
     }
   })
 
-  it('gives the plan\'s rows', () => {
+  it('gives 333x1000 on 1:3, 800x1000 on 4:5, 1000x1000 on 1:1, 1155x866 on 4:3 and 1731x577 on 3:1', () => {
     expect(previewSize(1 / 3)).toEqual({ w: 333, h: 1000 })
     expect(previewSize(4 / 5)).toEqual({ w: 800, h: 1000 })
     expect(previewSize(1)).toEqual({ w: 1000, h: 1000 })

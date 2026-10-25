@@ -96,7 +96,8 @@ So:
       visibly re-randomise
 - [ ] One slider drag is one undo step; adding a plate is its own step; a
       drag that comes back to where it started, or a double tap on a slider
-      already at its default, leaves no step (Undo stays unavailable)
+      already at its default, adds no step: one Undo still takes back the
+      change made before it (from a fresh launch, Undo stays unavailable)
 - [ ] Re-roll → a different sheet (tear, mottle, registration); Undo brings the
       previous one back
 - [ ] Background the app for 5 minutes → return → the document is still there

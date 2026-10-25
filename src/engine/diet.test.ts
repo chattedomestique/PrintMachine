@@ -658,8 +658,9 @@ describe('a plate pressed in bands: every band height gives the bytes the whole 
     for (const index of [1, 3]) {
       const r = compare(worst, index, 0.16 * 6336, 260, 6336, bands)
       expect(r.results).toEqual(clean(bands))
-      // The largest window, bands of 541: 728 rows, as the ruling measured
-      // (dy -78.8 and +30.1 there, plates 2 and 3 at this seed).
+      // The largest window, bands of 541: 728 rows (the band, the tear's
+      // three passes, the shift of dy -78.8 or +30.1 for plates 2 and 3 at
+      // this seed, and the grain's alignment and look-ahead).
       expect(r.windows[541]).toBe(728)
     }
   }, 120_000)

@@ -535,11 +535,42 @@ describe('halos and windows', () => {
     expect(() => windowsFor({ y0: 0, y1: 50 }, gg, h, false)).toThrow()
   })
 
-  it('the largest window, walked band by band: the plan\'s sheets', () => {
+  it('the halo is a bound: no window windowsFor cuts reaches further past its band, either side (random presses)', () => {
+    // plateHalo sizes memory; the windows are what is cut. The formula may be
+    // generous (the shift's "+ 2" is the bilinear's next row and its
+    // rounding, which one side or the other never needs), never short.
+    const rand = mulberry32(77)
+    for (let k = 0; k < 300; k++) {
+      const p = press({
+        method: rand() < 0.5 ? 'grain' : 'halftone',
+        screenPitch: 2 + Math.floor(rand() * 35),
+        misregistration: rand() * 30,
+        edge: rand() < 0.1 ? 0 : rand(),
+      })
+      const h = 300 + Math.floor(rand() * 9000)
+      const plate = { fontSize: 1 + rand() * h * 0.3, index: Math.floor(rand() * 4) }
+      const seed = Math.floor(rand() * 1e6)
+      const geometry = plateGeometry(p, plate, seed, h)
+      const halo = plateHalo(p, plate, seed, h)
+      expect([halo.dx, halo.dy, halo.rMax]).toEqual([geometry.dx, geometry.dy, geometry.rMax])
+      const rows = geometry.grain ? cellStarts(h, geometry.cell) : undefined
+      const B = 1 + Math.floor(rand() * 600)
+      const cuts = rand() < 0.5
+      for (let y0 = 0; y0 < h; y0 += B) {
+        const y1 = Math.min(h, y0 + B)
+        const win = windowsFor({ y0, y1 }, geometry, h, cuts, rows)
+        if (win.glyph.b <= win.glyph.a) continue
+        expect(y0 - win.glyph.a, `press ${k}, band ${y0}`).toBeLessThanOrEqual(halo.total)
+        expect(win.glyph.b - y1, `press ${k}, band ${y0}`).toBeLessThanOrEqual(halo.total)
+      }
+    }
+  })
+
+  it('the largest window, walked band by band: the sheets of a 40 and a 61 MP photo', () => {
     // Every plate with a second ink (a knockout), the bands of the pixel rule
-    // (2^21 pixels over the width). The ruling's model gave 308 and 263 for
-    // the default document: it took the shift's extra row for plate 1 too,
-    // which never moves, so reads its own rows only.
+    // (2^21 pixels over the width). Plate 1 never moves, so its knockout
+    // reads its own rows only: counting the shift's extra row for it too
+    // would give 308 and 263 for the default document.
     const doc = (p: PressProfile, sizes: number[], h: number) =>
       sizes.map((size, index) => ({ geometry: plateGeometry(p, { fontSize: plateFontSize({ size }, h), index }, 12345, h), cuts: true }))
     expect(maxWindow(doc(press(), [0.09, 0.06], 5152), Math.floor(2 ** 21 / 7728), 5152)).toBe(307)

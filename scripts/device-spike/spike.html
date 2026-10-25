@@ -270,7 +270,7 @@
     lines.push(pad('id', 5) + pad('test', 30) + 'result')
     rows.forEach(function (r) { lines.push(pad(r.id, 5) + pad(r.test, 30) + r.result) })
     lines.push('')
-    lines.push('decision hints (plan 4.D)')
+    lines.push('decision hints')
     lines.push('(a) decode of a 40 MP+ photo in <= 8 s, tab kept: ' + (hints.a || 'not run'))
     lines.push('(b) 1:1 blit identical across origins, smoothing off: ' + (hints.b || 'not run'))
     lines.push('(c) estimated 40 MP save = 33 s x R: ' + (hints.c || 'not run'))

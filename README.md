@@ -48,6 +48,12 @@ npm run check:spike       # the device spike page still runs (see below)
 npm run check:encode      # the save's JPEG and PNG encoders, decoded by Chromium (fails over a bound)
 ```
 
+The six that can fail run in CI after `verify`, `verify:offline` and
+`verify:geometry`, with the harness's parity gate (`npm run harness -- --out
+p.json --no-hashes --parity 1000`: the preview's entry point and the export's
+give the same bytes); `measure:export` runs there too, for the record (see
+"Every pixel of the photo, measured" and "What an export holds").
+
 `scripts/device-spike/spike.html` is a page for a phone, not part of the app:
 one self-contained file, no network, that measures what only a device can
 answer before prints are saved at the photo's own pixels at any size (the
@@ -56,12 +62,6 @@ EXIF rotation, the largest canvas font, canvas sizes, and the JPEG encoder's
 speed). It ends with a plain-text table to copy back. `check:spike` runs it
 in Chromium in CI so it cannot rot; the phone's numbers are what decide the
 steps that wait on them (DEVICE-CHECKLIST, "Limits to settle on a device").
-
-The four that can fail run in CI after `verify`, `verify:offline` and
-`verify:geometry`, with the harness's parity gate (`npm run harness -- --out
-p.json --no-hashes --parity 1000`: the preview's entry point and the export's
-give the same bytes); `measure:export` runs there too, for the record (see
-"Every pixel of the photo, measured" and "What an export holds").
 
 `verify` is one script rather than four commands so that "it's green" means the
 same thing locally as it does in CI. Running the steps by hand once let a

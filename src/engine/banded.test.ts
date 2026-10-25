@@ -231,9 +231,8 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
 
   /** A wide sheet (a band of 97 rows is over 512 KiB of bytes), a photo, a
    *  backing, two second inks; grain or halftone. */
-  function run(method: 'grain' | 'halftone', size: number, bandRows: number) {
+  function run(method: 'grain' | 'halftone', size: number, bandRows: number, h = 300) {
     const w = 6000
-    const h = 300
     const s: PrintSettings = JSON.parse(JSON.stringify(DOCS.backing.settings))
     s.press.method = method
     s.layers = s.layers.map((l) => ({ ...l, size }))
@@ -306,5 +305,11 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
     // the sheet cannot lend it): two sheet-sized floats, no more.
     expect(over.map((x) => x.bytes)).toEqual([r.w * r.h * 4, r.w * r.h * 4])
     expect(r.log.filter((x) => x.phase === 'loop' && x.bytes >= BIG).length).toBe(0)
+    // A blur under 4 px with a fraction mixes two blurs: a third sheet-sized
+    // float, the spare. Type at 0.01 of a 260 px sheet: 2.6 px, radius 3.9.
+    const f = run('halftone', 0.01, 7, 260)
+    const fover = f.log.filter((x) => x.bytes > f.E * f.w * 4)
+    expect(fover.every((x) => x.phase === 'setup')).toBe(true)
+    expect(fover.map((x) => x.bytes)).toEqual([f.w * f.h * 4, f.w * f.h * 4, f.w * f.h * 4])
   })
 })

@@ -1040,8 +1040,12 @@ back, so it leaves no undo step, and nor does a drag that ends where it
 began. The reset joins only the step its first tap's move opened: when that
 move left none (a press on the thumb that wobbled a step and came back), or
 anything else became a step in between, the reset is a step of its own, so
-one Undo never also takes back the change made before the double tap. A panel with several settings shows one at a time: tap its name, or
-swipe up from it, for the others (Border Studio 4860519). Size, Rotation and
+one Undo never also takes back a step made before the double tap. A drag
+released less than half a second before the first tap is still part of that
+tap's step, and one Undo takes it back with the reset.
+
+A panel with several settings shows one at a time: tap its name, or swipe up
+from it, for the others (Border Studio 4860519). Size, Rotation and
 Position have two ranges: the slider spans where people work (10–100%, ±45°,
 the sheet) while a pinch, the keys, a nudge and a typed value reach the whole
 range (1200%, ±180°, 30% past the trim); the thumb then pins at the end and

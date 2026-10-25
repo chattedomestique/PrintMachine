@@ -88,7 +88,8 @@ So:
       240%; pinch past 100% → the thumb stays at the end and the readout says
       the real value (e.g. 240%), and [−] then reads 239%; double-tap the track
       anywhere → 40% (not where the finger was), and one Undo → back to the
-      size before the double tap; the same on a print with a photo, where the
+      size before the double tap (wait a moment after any drag first: a drag
+      released under half a second before the first tap goes with it); the same on a print with a photo, where the
       preview takes a moment to redraw after the first tap; change the
       typeface, then double-tap ON the thumb (the first tap may nudge it and
       back) → 40%, and one Undo takes back only the reset (the typeface stays)

@@ -20,6 +20,7 @@
 
 import { renderPrint, renderPrintAsync, type RenderCache } from '../../src/engine/render.ts'
 import { JpegEncoder } from '../../src/engine/encode/jpeg.ts'
+import { PngEncoder } from '../../src/engine/encode/png.ts'
 import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
 import type { PrintSettings } from '../../src/engine/types.ts'
 import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
@@ -467,6 +468,35 @@ async function encodeCheck(kind: string) {
   }
 }
 
+/** The PNG encoder on the same pixels: decoded by the browser it must be the
+ *  input exactly, compressed (CompressionStream) and stored; its size beside
+ *  Chromium's own PNG of the same pixels. */
+async function pngCheck(kind: string) {
+  const { data, w, h } = await encodeSource(kind)
+  const result: Record<string, { bytes: number; ms: number; rmse: number; max: number }> = {}
+  for (const compression of ['deflate', 'stored'] as const) {
+    const chunks: Uint8Array[] = []
+    const t0 = performance.now()
+    const png = new PngEncoder(w, h, (c) => chunks.push(c), { compression })
+    for (let y = 0; y < h; y += 64) {
+      const n = Math.min(64, h - y)
+      png.push(data.subarray(y * w * 4, (y + n) * w * 4), n)
+      await png.settled()
+    }
+    await png.finish()
+    const ms = performance.now() - t0
+    const blob = new Blob(chunks as BlobPart[], { type: 'image/png' })
+    result[compression] = { bytes: blob.size, ms: Math.round(ms), ...errorOf(data, await decodeRgba(blob, w, h)) }
+  }
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(data), w, h), 0, 0)
+  const theirs = await new Promise<Blob>((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'))
+  c.width = 0
+  return { kind, w, h, deflate: result.deflate, stored: result.stored, chromiumBytes: theirs.size }
+}
+
 declare global {
   interface Window {
     H: {
@@ -477,9 +507,10 @@ declare global {
       prepare: typeof prepare
       press: typeof press
       encodeCheck: typeof encodeCheck
+      pngCheck: typeof pngCheck
       normalized: boolean
     }
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, save, prepare, press, encodeCheck, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, normalized: !!normalizeSettings }

@@ -18,6 +18,11 @@
  *      and the largest error <= 45;
  *  and every file's frame header says three components at 1x1 (4:4:4).
  *
+ * And the PNG encoder (src/engine/encode/png.ts) on the halftone and the
+ * real print, compressed and stored: decoded, the input exactly (the gate);
+ * its size beside Chromium's own PNG of the same pixels is printed, never
+ * gated (looked into only above 1.5 times).
+ *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
 
@@ -78,6 +83,17 @@ try {
   check(print.rmse <= 2.6 && print.max <= 45, `(c) a real print: ${fmt(print)} (RMSE <= 2.6, largest <= 45)`)
 
   for (const r of [gradient, halftone, print]) check(r.sampling === '11 11 11', `${r.kind}: SOF0 sampling ${r.sampling} (4:4:4)`)
+
+  console.log('PNG')
+  for (const kind of ['halftone', 'print']) {
+    const r = await page.evaluate((k) => window.H.pngCheck(k), kind)
+    const ratio = r.deflate.bytes / r.chromiumBytes
+    console.log(
+      `  ${kind} ${r.w}x${r.h}: ${r.deflate.bytes} bytes in ${r.deflate.ms} ms (Chromium's own PNG ${r.chromiumBytes}: x${ratio.toFixed(2)}${ratio > 1.5 ? ', over 1.5: look into the filter choice' : ''}); stored ${r.stored.bytes} bytes`,
+    )
+    check(r.deflate.max === 0, `${kind}: the PNG decodes to the input exactly (largest error ${r.deflate.max})`)
+    check(r.stored.max === 0, `${kind}: the stored PNG (no CompressionStream) decodes to the input exactly (largest error ${r.stored.max})`)
+  }
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
 } finally {
   await browser.close()

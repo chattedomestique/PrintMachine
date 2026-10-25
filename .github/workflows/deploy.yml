@@ -96,7 +96,8 @@ jobs:
           CHROMIUM_PATH: /usr/bin/google-chrome
       # The save's own encoders, decoded by the browser: the JPEG's error on
       # a gradient, a saturated halftone and a real print, against bounds and
-      # against Chromium's own 4:2:0 JPEG; every frame 4:4:4.
+      # against Chromium's own 4:2:0 JPEG, every frame 4:4:4; the PNG,
+      # compressed and stored, the input exactly.
       - run: node scripts/check-encode.mjs
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome

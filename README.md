@@ -45,7 +45,7 @@ npm run measure:export    # export time and desktop memory (informational)
 npm run build && npm run check:save   # the save flow in the built app, tapped
 npm run build && npm run check:touch  # tap-to-select on the sheet, touched
 npm run check:spike       # the device spike page still runs (see below)
-npm run check:encode      # the save's JPEG encoder, decoded by Chromium (fails over a bound)
+npm run check:encode      # the save's JPEG and PNG encoders, decoded by Chromium (fails over a bound)
 ```
 
 `scripts/device-spike/spike.html` is a page for a phone, not part of the app:
@@ -1441,4 +1441,12 @@ however they arrive, no sheet-sized buffer. `scripts/check-encode.mjs`
 decodes its files in Chromium and holds the error to bounds (at quality 95:
 RMSE 0.68 on a gradient; 3.84, largest 26, on a saturated halftone, where
 Chromium's own 4:2:0 file at 0.95 is 14.74, largest 77; 1.94, largest 33, on
-a real print). Save does not use it yet: it still encodes the canvas.
+a real print). The PNG encoder (`PngEncoder`, `src/engine/encode/png.ts`) is
+written from ISO/IEC 15948, RFC 1950 and RFC 1951 alone: 8-bit RGB, each row
+filtered with whichever of None, Sub, Up and Paeth weighs least (libpng's
+heuristic), compressed by the browser's own `CompressionStream`, or, where
+there is none (Safari before 16.4), stored uncompressed in deflate's stored
+blocks (about 3 bytes a pixel, `storedSize`). check-encode decodes both to
+the input exactly; compressed, its file is 0.69 to 0.72 times the size of
+Chromium's own PNG of the same pixels. Save does not use either encoder yet:
+it still encodes the canvas.

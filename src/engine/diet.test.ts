@@ -11,19 +11,35 @@ import { describe, expect, it } from 'vitest'
 
 import { FbmSampler, ValueNoiseSampler, fbm2D, mulberry32, mulberryAt, valueNoise2D } from './rng.ts'
 import { PaperSampler, paperField } from './paper.ts'
-import { ensureCache, grainCell, makeWorkspace, pressPlate, printSheet, printSheetSteps, sampledNoise, switchScreen, toneAsFloat, type ToneSource } from './render.ts'
+import {
+  ensureCache,
+  grainCell,
+  makeWorkspace,
+  maxWindow,
+  plateGeometry,
+  pressPlate,
+  pressPlateBand,
+  printSheet,
+  printSheetSteps,
+  sampledNoise,
+  switchScreen,
+  toneAsFloat,
+  windowsFor,
+  type ToneRows,
+  type ToneSource,
+} from './render.ts'
 import { bandMask, groundLuma, groundLumaGrid, lumaCell, sampleLuma, splitInks } from './media.ts'
 import { inkById, paperById } from './inks.ts'
 import { screenField } from './screen.ts'
-import { ditherField } from './dither.ts'
+import { GrainStream, ditherField } from './dither.ts'
 import { cutKnockout } from './knockout.ts'
 import { knockoutMask, shiftField } from './__tests__/reference.ts'
-import { applyDensity, applyMottle, shiftInPlace } from './ink.ts'
+import { applyDensity, applyMottle, shiftInPlace, shiftRows } from './ink.ts'
 import { blurInPlace } from './blur.ts'
 import { roughenInPlace } from './rough.ts'
 import { clampByte, compositeLayers } from './composite.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
-import type { PrintSettings } from './types.ts'
+import type { PressProfile, PrintSettings } from './types.ts'
 
 describe('step 1: an export reads its noise where it prints it, the same numbers as the arrays', () => {
   it("mulberryAt is mulberry32's n-th draw, read directly", () => {
@@ -329,7 +345,7 @@ describe('step 3: every pass in place, in one workspace, to the same numbers', (
     ] as const) {
       const s = defaultSettings()
       const noise = ensureCache(null, s, w, h)
-      const ws = makeWorkspace(w * h)
+      const ws = makeWorkspace(h, w)
       for (const method of ['halftone', 'grain'] as const) {
         for (const [edge, wear] of [
           [0.55, 0.22],
@@ -521,4 +537,183 @@ describe('step 6: the ground\'s luminance on a small grid', () => {
       expect(Math.abs(ib / ia - 1)).toBeLessThan(0.002)
     }
   })
+})
+
+describe('a plate pressed in bands: every band height gives the bytes the whole sheet gets', () => {
+  /** Glyph-like tone: soft-edged ellipses of many sizes over the sheet, as
+   *  alpha bytes. */
+  function tone(w: number, h: number, seed: number): Uint8Array {
+    const t = new Uint8Array(w * h)
+    const rand = mulberry32(seed)
+    for (let k = 0; k < 60; k++) {
+      const cx = rand() * w
+      const cy = rand() * h
+      const r = 4 + rand() * rand() * 160
+      const ar = 0.3 + rand() * 1.5
+      for (let y = Math.max(0, Math.floor(cy - r * ar - 2)); y < Math.min(h, cy + r * ar + 2); y++) {
+        for (let x = Math.max(0, Math.floor(cx - r - 2)); x < Math.min(w, cx + r + 2); x++) {
+          const d = Math.hypot(x - cx, (y - cy) / ar) - r
+          t[y * w + x] = Math.max(t[y * w + x], Math.round(Math.max(0, Math.min(1, 0.5 - d)) * 255))
+        }
+      }
+    }
+    return t
+  }
+
+  /** The tone, handed out a window at a time as a NEW array of exactly the
+   *  rows asked for (a read past them is a NaN), recording what was asked. */
+  function exactRows(field: Uint8Array | Float32Array, w: number, asked?: [number, number][]): ToneRows {
+    return {
+      rows: (a, b) => {
+        asked?.push([a, b])
+        return field.slice(a * w, b * w)
+      },
+    }
+  }
+
+  const base = (over: Partial<PressProfile> = {}): PressProfile => ({
+    method: 'halftone',
+    screenPitch: 9,
+    density: 0.84,
+    misregistration: 5,
+    edge: 0.55,
+    wear: 0.22,
+    ...over,
+  })
+
+  /** The nine presses: [name, press, plate index, font size at 2630 px]. */
+  const PRESSES: [string, PressProfile, number, number][] = [
+    ['halftone, plate 2, big type', base(), 1, 280],
+    ['halftone, plate 1 (never moves), small type (detail < 1)', base(), 0, 30],
+    ['halftone, misregistration 30, plate 3', base({ misregistration: 30 }), 2, 90],
+    ['halftone, screen 36, plate 4', base({ screenPitch: 36 }), 3, 120],
+    ['grain, plate 2', base({ method: 'grain' }), 1, 280],
+    ['grain at screen 36, misregistration 30, plate 3', base({ method: 'grain', screenPitch: 36, misregistration: 30 }), 2, 90],
+    ['grain at screen 3 (cell 1), small type', base({ method: 'grain', screenPitch: 3 }), 1, 40],
+    ['edge 0 (no tear), wear 0.8', base({ edge: 0, wear: 0.8 }), 1, 100],
+    ['edge 1, wear 0', base({ edge: 1, wear: 0 }), 1, 200],
+  ]
+
+  /** Press one plate whole and in bands of B; count the coverage bytes and
+   *  the shifted torn floats (what a knockout under it reads) that differ. */
+  function compare(press: PressProfile, index: number, fontSize: number, w: number, h: number, bands: number[], seed = 42) {
+    const s = defaultSettings()
+    s.seed = seed
+    const noise = sampledNoise(s, w, h)
+    const field = tone(w, h, 11 + index)
+    const whole = pressPlate({ field, fontSize }, index, press, seed, noise, w, h)
+    const knock = shiftField(whole.roughened, w, h, whole.dx, whole.dy)
+    const geometry = plateGeometry(press, { fontSize, index }, seed, h)
+    const results: string[] = []
+    const windows: Record<number, number> = {}
+    for (const B of bands) {
+      const rows = maxWindow([{ geometry, cuts: true }], B, h)
+      windows[B] = rows
+      const ws = makeWorkspace(rows, w)
+      const grain = geometry.grain ? new GrainStream(w, h, geometry.cell) : undefined
+      const out = new Uint8ClampedArray(Math.min(B, h) * w)
+      const moved = new Float32Array(Math.min(B, h) * w)
+      let cov = 0
+      let kn = 0
+      for (let y0 = 0; y0 < h; y0 += B) {
+        const y1 = Math.min(h, y0 + B)
+        const r = pressPlateBand({ rows: exactRows(field, w), fontSize }, index, press, seed, noise, w, h, { y0, y1 }, ws, out, { cuts: true, grain })
+        expect(r.dx).toBe(whole.dx)
+        expect(r.dy).toBe(whole.dy)
+        for (let i = 0; i < (y1 - y0) * w; i++) if (r.coverage[i] !== whole.coverage[y0 * w + i]) cov++
+        const m = shiftRows(r.torn, w, r.tornRow0, h, r.dx, r.dy, y0, y1, moved.subarray(0, (y1 - y0) * w))
+        for (let i = 0; i < (y1 - y0) * w; i++) if (m[i] !== knock[y0 * w + i]) kn++
+      }
+      results.push(`${B}:${cov}/${kn}`)
+    }
+    return { results, windows }
+  }
+
+  const clean = (bands: number[]) => bands.map((B) => `${B}:0/0`)
+
+  for (const [name, press, index, fontSize] of PRESSES) {
+    it(`${name}: 520x2630 (scale 1.46) in bands of 16 to the whole sheet`, () => {
+      const bands = [16, 97, 301, 512, 541, 2630]
+      expect(compare(press, index, fontSize, 520, 2630, bands).results).toEqual(clean(bands))
+    })
+    it(`${name}: a small sheet in bands of 1 and 3`, () => {
+      // Bands of one row repeat the halo for every row, so they run on a
+      // small sheet: 160x620, the type scaled with it.
+      const bands = [1, 3, 620]
+      expect(compare(press, index, Math.max(4, Math.round((fontSize * 620) / 2630)), 160, 620, bands).results).toEqual(clean(bands))
+    })
+  }
+
+  it('a narrow sheet 6336 tall (scale 3.52): the default press and grain at 36', () => {
+    const bands = [97, 541, 6336]
+    expect(compare(base(), 1, 600, 120, 6336, bands).results).toEqual(clean(bands))
+    expect(compare(base({ method: 'grain', screenPitch: 36, misregistration: 30 }), 2, 300, 120, 6336, bands).results).toEqual(clean(bands))
+  })
+
+  it('the true worst halo: detail 1, grain at 36, misregistration 30, edge 1, wear 0.8, on 260x6336', () => {
+    // Type at 0.16 of the height or more is detail 1: the tear at 3 x 3.52 =
+    // 10.56 px (reach 10), |dy| up to 30 x 3.52 = 105.6, the grain cell 42.24.
+    const worst = base({ method: 'grain', screenPitch: 36, misregistration: 30, edge: 1, wear: 0.8 })
+    const bands = [7, 97, 271, 541, 6336]
+    for (const index of [1, 3]) {
+      const r = compare(worst, index, 0.16 * 6336, 260, 6336, bands)
+      expect(r.results).toEqual(clean(bands))
+      // The largest window, bands of 541: 728 rows, as the ruling measured
+      // (dy -78.8 and +30.1 there, plates 2 and 3 at this seed).
+      expect(r.windows[541]).toBe(728)
+    }
+  }, 120_000)
+
+  it('asks for exactly the glyph rows windowsFor declares, and each end row of them is needed', () => {
+    // Random presses (seeded). The tone as floats, so a row can be poisoned:
+    // a NaN in the first or the last glyph row must reach the torn rows the
+    // band hands back (what its wear and its knockout read).
+    const rand = mulberry32(2024)
+    const w = 96
+    const h = 1400
+    let checked = 0
+    for (let k = 0; k < 12; k++) {
+      const press = base({
+        method: rand() < 0.5 ? 'grain' : 'halftone',
+        screenPitch: 3 + Math.floor(rand() * 34),
+        misregistration: Math.floor(rand() * 31),
+        edge: 0.2 + rand() * 0.8,
+        wear: rand() * 0.8,
+      })
+      const index = 1 + Math.floor(rand() * 3)
+      const fontSize = 20 + rand() * 300
+      const seed = Math.floor(rand() * 1e6)
+      const s = defaultSettings()
+      s.seed = seed
+      const noise = sampledNoise(s, w, h)
+      const field = toneAsFloat(tone(w, h, 100 + k))
+      const geometry = plateGeometry(press, { fontSize, index }, seed, h)
+      const B = 64 + Math.floor(rand() * 200)
+      const ws = makeWorkspace(maxWindow([{ geometry, cuts: true }], B, h), w)
+      const out = new Uint8ClampedArray(B * w)
+      const rows = geometry.grain ? new GrainStream(w, h, geometry.cell).rows : undefined
+      const grain = geometry.grain ? new GrainStream(w, h, geometry.cell) : undefined
+      for (let y0 = 0; y0 < h; y0 += B) {
+        const y1 = Math.min(h, y0 + B)
+        const win = windowsFor({ y0, y1 }, geometry, h, true, rows)
+        const asked: [number, number][] = []
+        // The glyph rows, with the first and the last poisoned in turn, on
+        // copies of the stream so the real one runs on in order.
+        for (const end of ['first', 'last'] as const) {
+          const row = end === 'first' ? win.glyph.a : win.glyph.b - 1
+          if (win.glyph.b - win.glyph.a < 2 || (end === 'first' && row === 0) || (end === 'last' && row === h - 1)) continue
+          const poisoned = field.slice()
+          poisoned.fill(NaN, row * w, (row + 1) * w)
+          const probe = grain ? Object.assign(Object.create(Object.getPrototypeOf(grain)), structuredClone({ ...grain })) : undefined
+          const r = pressPlateBand({ rows: exactRows(poisoned, w), fontSize }, index, press, seed, noise, w, h, { y0, y1 }, makeWorkspace(win.glyph.b - win.glyph.a + B, w), new Uint8ClampedArray(B * w), { cuts: true, grain: probe })
+          const tornRows = r.torn.subarray((win.torn.a - r.tornRow0) * w, (win.torn.b - r.tornRow0) * w)
+          expect(tornRows.some(Number.isNaN), `press ${k}, band ${y0}, ${end} glyph row ${row}`).toBe(true)
+          checked++
+        }
+        pressPlateBand({ rows: exactRows(field, w, asked), fontSize }, index, press, seed, noise, w, h, { y0, y1 }, ws, out, { cuts: true, grain })
+        expect(asked).toEqual(win.glyph.b > win.glyph.a ? [[win.glyph.a, win.glyph.b]] : [])
+      }
+    }
+    expect(checked).toBeGreaterThan(50)
+  }, 60_000)
 })

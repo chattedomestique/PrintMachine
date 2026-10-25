@@ -769,10 +769,14 @@ output pixel.
 - **One workspace, every pass in place.** A plate used to make a dozen
   sheet-sized arrays of its own (the tone, the blur's ping-pong, the torn
   tone, density, wear, the shift, the knockout); now three float buffers are
-  made once per render and every pass works in them, to the same numbers (the
-  shift walks the sheet in the direction it moves, so it never overwrites a
-  pixel it still has to read). The knockout is cut straight into the running
-  bytes, and the second ink's light half takes the coverage's own buffer.
+  made once per render and every pass works in them, to the same numbers: the
+  tear in the first, the worn tone in the second, the moved tone the screen
+  reads in the third (the blur's other half until then). Each pass works on
+  a window of rows sized to what it reads (`windowsFor`), so the same buffers
+  serve a press of the whole sheet or of a band of it. The knockout is cut
+  straight into the running bytes (its shift walks the sheet in the direction
+  it moves, so it never overwrites a pixel it still has to read), and the
+  second ink's light half takes the coverage's own buffer.
 - **Nothing the canvas holds is held twice.** The sheet is printed a band of
   rows at a time into one band-sized buffer, and each band is put on the
   canvas, instead of a full-size copy being put at the end; the knockout

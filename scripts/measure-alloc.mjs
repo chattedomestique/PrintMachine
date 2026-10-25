@@ -73,6 +73,9 @@ function track() {
       constructor(...args) {
         super(...args)
         if (!meter.on) return
+        // A view over a buffer that already exists (`subarray`, or a typed
+        // array made on another's buffer) allocates nothing.
+        if (args[0] instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && args[0] instanceof SharedArrayBuffer)) return
         meter.total += this.byteLength
         if (this.byteLength >= meter.threshold) sample()
       }

@@ -35,8 +35,8 @@
 
 import { blurReach } from './blur.ts'
 import { compositeLayers, type CompositeLayer, type PaperInput } from './composite.ts'
-import { cellStarts, ditherField, grainRows } from './dither.ts'
-import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftInPlace, shiftSource, wearToMottle } from './ink.ts'
+import { GrainStream, cellStarts, ditherField, grainRows } from './dither.ts'
+import { applyDensity, applyMottle, edgeToRough, registrationOffset, shiftRows, shiftSource, wearToMottle } from './ink.ts'
 import { inkById, paperById } from './inks.ts'
 import { roughenInPlace } from './rough.ts'
 import { PaperSampler, paperField, type PaperField, type PaperOptions, type PaperSource } from './paper.ts'
@@ -336,17 +336,21 @@ export function toneAsFloat(tone: ToneField, out: Float32Array = new Float32Arra
 }
 
 /**
- * The press's working buffers: three float fields the size of the sheet, made
- * once per render and reused by every plate, where each plate used to make a
- * dozen of its own (tone, blur ping-pong, roughened, density, mottle, shift,
- * knockout...). Every pass that used them now works on these in place, to the
- * same numbers.
+ * The press's working buffers: three float windows of `rows` rows of the
+ * sheet (all of it, for a press of the whole sheet), made once per render and
+ * reused by every band and every plate, where each plate used to make a dozen
+ * sheet-sized arrays of its own (tone, blur ping-pong, roughened, density,
+ * mottle, shift, knockout...). Every pass works on views of these, sized
+ * exactly to its window, to the same numbers.
  *
- *  - `rough`: the tone, then the torn tone (handed back as `roughened`, valid
- *    until the next plate is pressed);
- *  - `work`: the second blur's source, then the worn, shifted tone the screen
- *    reads; between plates, the switch mask before it is screened;
- *  - `scratch`: the blur's other half.
+ *  - `rough`: the glyph window's tone, then the torn tone (handed back as
+ *    `torn`, valid until the next plate is pressed);
+ *  - `work`: the second blur's source, then the worn tone; between plates,
+ *    the switch mask before it is screened;
+ *  - `scratch`: the blur's other half, then the moved (shifted) tone the
+ *    screen or the grain reads.
+ *
+ * `rows` is the largest window any band of any plate needs (`maxWindow`).
  */
 export interface Workspace {
   rough: Float32Array
@@ -354,12 +358,13 @@ export interface Workspace {
   scratch: Float32Array
 }
 
-export function makeWorkspace(n: number): Workspace {
+export function makeWorkspace(rows: number, w: number): Workspace {
+  const n = rows * w
   return { rough: new Float32Array(n), work: new Float32Array(n), scratch: new Float32Array(n) }
 }
 
 /** No workspace: what a render holds once its plates are pressed. */
-const RELEASED: Workspace = makeWorkspace(0)
+const RELEASED: Workspace = makeWorkspace(0, 0)
 
 /** A plate after the press, and what a knockout under it has to match. */
 export interface PressedPlate {
@@ -374,15 +379,44 @@ export interface PressedPlate {
 }
 
 /**
- * Run the press over one tone field: everything from the stencil edge to the
- * screen. Shared by type and by backings — a backing that skipped this would be
- * the one clean, undistressed rectangle on an otherwise convincingly printed
- * sheet.
+ * A plate's glyph tone, read a window of rows at a time: the whole field (a
+ * test's, or the preview's cached raster) or, for an export, rows drawn as
+ * they are needed.
+ */
+export interface ToneRows {
+  /** Rows [a, b) of the tone: exactly (b - a) * w values, row a first. */
+  rows(a: number, b: number): ToneField
+}
+
+/** The tone of a field held whole. */
+export function wholeTone(field: ToneField, w: number): ToneRows {
+  return { rows: (a, b) => field.subarray(a * w, b * w) }
+}
+
+/** One band of one plate, pressed. */
+export interface PlateBand {
+  /** Screened coverage of the band's rows [y0, y1), bytes: the `out` given. */
+  coverage: Uint8ClampedArray
+  /** The torn tone, the sheet's rows from `tornRow0` on: a view of the
+   *  workspace's `rough`, good until the next plate is pressed. It covers
+   *  every row the knockout under this band reads (`windowsFor`). */
+  torn: Float32Array
+  tornRow0: number
+  dx: number
+  dy: number
+  detail: number
+}
+
+/**
+ * Run the press over one plate: everything from the stencil edge to the
+ * screen. Shared by type and by backings — a backing that skipped this would
+ * be the one clean, undistressed rectangle on an otherwise convincingly
+ * printed sheet.
  *
- * Returns the screened coverage, and with it the two things a knockout under
- * this plate has to match exactly: the roughened tone (the plate's torn, bled
- * outline, before density and wear) and the offset the plate landed at. Handing
- * them on is what lets the knockout follow the plate without pressing it twice.
+ * The whole sheet: `pressPlateBand` over the one band [0, h). Returns the
+ * screened coverage, and with it the two things a knockout under this plate
+ * has to match exactly: the roughened tone (the plate's torn, bled outline,
+ * before density and wear) and the offset the plate landed at.
  *
  * Exported so tests can drive it without a canvas.
  */
@@ -396,18 +430,13 @@ export function pressPlate(
   h: number,
   /** Reused buffers (a render passes one for all its plates); fresh ones by
    *  default. */
-  ws: Workspace = makeWorkspace(w * h),
+  ws: Workspace = makeWorkspace(h, w),
 ): PressedPlate {
-  return drain(pressPlateSteps(plate, index, s, seed, noise, w, h, ws, { step: 'press', pass: index + 1, passes: index + 1 }))
+  return drain(pressWholeSteps(plate, index, s, seed, noise, w, h, ws, { step: 'press', pass: index + 1, passes: index + 1 }))
 }
 
-/**
- * `pressPlate`, in stages: it yields `at` after the tear and after the wear,
- * so an export hands the page a moment inside a pass as well as between them
- * (a pass on a 12 MP sheet is seconds of work on a phone, and a Cancel tapped
- * meanwhile waits for the next yield).
- */
-function* pressPlateSteps(
+/** `pressPlate`, in stages (see `pressPlateBandSteps`). */
+function* pressWholeSteps(
   plate: { field: ToneField; fontSize: number },
   index: number,
   s: PressProfile,
@@ -418,32 +447,105 @@ function* pressPlateSteps(
   ws: Workspace,
   at: RenderProgress,
 ): Generator<RenderProgress, PressedPlate> {
-  const rough = toneAsFloat(plate.field, ws.rough)
-  const scale = h / REFERENCE_HEIGHT
-  const detail = detailFactor(plate.fontSize, h)
-  const edge = edgeToRough(s.edge)
-  const wear = wearToMottle(s.wear)
-
-  // Ragged stencil edge + ink spread, before anything downstream sees the
-  // outline. Seeded per plate so two plates don't tear identically. In place:
-  // the tone becomes the torn tone.
-  roughenInPlace(
-    rough,
+  const coverage = new Uint8ClampedArray(w * h)
+  const band = yield* pressPlateBandSteps(
+    { rows: wholeTone(plate.field, w), fontSize: plate.fontSize },
+    index,
+    s,
+    seed,
+    noise,
     w,
     h,
-    {
-    roughness: edge.roughness,
-    // Unfloored: roughenInPlace needs the size that was actually asked for,
-    // not a whole number, or it cannot tell a fine tear from a clamped one.
-    scale: TEAR_SCALE * scale * detail,
-    // Bleed is a threshold offset, so at small sizes it eats the counters —
-    // the holes in a, e, o fill and the word turns into a row of blobs.
-    bleed: edge.bleed * detail,
-    seed: seed ^ (index * 0x9e3779b9),
-    },
-    ws.scratch,
-    ws.work,
+    { y0: 0, y1: h },
+    ws,
+    coverage,
+    // The torn tone of the whole sheet, every row: what a knockout cut from
+    // it whole (cutKnockout) reads.
+    { cuts: true, torn: { a: 0, b: h } },
+    at,
   )
+  return { coverage, roughened: band.torn, dx: band.dx, dy: band.dy }
+}
+
+/**
+ * Press one band of one plate: the rows [y0, y1) of its screened coverage,
+ * with exactly the bytes pressing the whole sheet gives them.
+ *
+ * Each stage reads only the rows it needs (`windowsFor`, from the plate's own
+ * geometry), and every value is keyed to the sheet's rows, never the band's:
+ * the glyph rows the tear reaches; the tear on them (the wander at sheet
+ * rows); density and wear on the rows the shift reads (mottle and speckle at
+ * sheet rows, the stride wrapping at the sheet's height); the shift into the
+ * rows the screen reads; the screen placed by sheet rows, or the grain stream
+ * carrying its error from the band before. The torn tone is handed back over
+ * the rows a knockout under the band reads, when the plate cuts one (`cuts`).
+ *
+ * It yields `at` after the tear and after the wear, so an export hands the
+ * page a moment inside a pass as well as between them.
+ *
+ * @param out  the band's coverage, at least (y1 - y0) * w bytes; written in
+ *             full for the band's rows.
+ * @param opts.grain the plate's grain stream (one per plate, run band after
+ *             band from the top); made here for a press of the whole sheet.
+ * @param opts.torn rows the torn tone must cover besides the knockout's (a
+ *             press of the whole sheet asks for every row).
+ */
+export function* pressPlateBandSteps(
+  plate: { rows: ToneRows; fontSize: number },
+  index: number,
+  s: PressProfile,
+  seed: number,
+  noise: SheetNoise,
+  w: number,
+  h: number,
+  band: { y0: number; y1: number },
+  ws: Workspace,
+  out: Uint8ClampedArray,
+  opts: { cuts: boolean; grain?: GrainStream; torn?: RowWindow },
+  at: RenderProgress,
+): Generator<RenderProgress, PlateBand> {
+  const { y0, y1 } = band
+  const scale = h / REFERENCE_HEIGHT
+  const g = plateGeometry(s, { fontSize: plate.fontSize, index }, seed, h)
+  const { detail, dx, dy } = g
+  const grain = g.grain ? (opts.grain ?? (y0 === 0 && y1 === h ? new GrainStream(w, h, g.cell) : null)) : null
+  if (g.grain && !grain) throw new Error('pressPlateBand: a band of a grain plate needs the plate\'s stream')
+  if (grain && grain.cell !== Math.max(1, g.cell)) throw new Error('pressPlateBand: the stream is for another cell')
+  const win = windowsFor(band, g, h, opts.cuts, grain?.rows)
+  const torn = opts.torn ? hullOf(win.torn, opts.torn) : win.torn
+  const glyph = isEmpty(torn) ? torn : { a: Math.max(0, torn.a - 3 * g.rMax), b: Math.min(h, torn.b + 3 * g.rMax) }
+  const edge = edgeToRough(s.edge)
+  const wear = wearToMottle(s.wear)
+  const rows = glyph.b - glyph.a
+  const n = Math.max(0, rows) * w
+  const rough = ws.rough.subarray(0, n)
+
+  if (n > 0) {
+    // The glyph rows the tear reaches, as floats, then torn in place.
+    const tone = plate.rows.rows(glyph.a, glyph.b)
+    if (tone.length !== n) throw new Error(`pressPlateBand: ${tone.length} tone values for rows [${glyph.a}, ${glyph.b})`)
+    toneAsFloat(tone, rough)
+    // Ragged stencil edge + ink spread, before anything downstream sees the
+    // outline. Seeded per plate so two plates don't tear identically.
+    roughenInPlace(
+      rough,
+      w,
+      rows,
+      {
+        roughness: edge.roughness,
+        // Unfloored: roughenInPlace needs the size that was actually asked for,
+        // not a whole number, or it cannot tell a fine tear from a clamped one.
+        scale: TEAR_SCALE * scale * detail,
+        // Bleed is a threshold offset, so at small sizes it eats the counters —
+        // the holes in a, e, o fill and the word turns into a row of blobs.
+        bleed: edge.bleed * detail,
+        seed: seed ^ (index * 0x9e3779b9),
+      },
+      ws.scratch.subarray(0, n),
+      ws.work.subarray(0, n),
+      glyph.a,
+    )
+  }
 
   // ── Wear, applied to TONE and therefore before the screen ───────────
   //
@@ -461,30 +563,37 @@ function* pressPlateSteps(
   // blotch cell is about the height of a letter, so unscaled wear stops
   // texturing the ink and starts eating the letterform.
   yield at
-  const worn = applyDensity(rough, s.density, ws.work)
-  applyMottle(worn, noise.mottle, noise.speckle, wear.mottle * detail, wear.dropout * detail, w, h, detail, worn)
+  const { worn: wornRows, coverage: covRows } = win
+  const worn = ws.work.subarray(0, Math.max(0, wornRows.b - wornRows.a) * w)
+  if (worn.length > 0) {
+    applyDensity(rough.subarray((wornRows.a - glyph.a) * w, (wornRows.b - glyph.a) * w), s.density, worn)
+    applyMottle(worn, noise.mottle, noise.speckle, wear.mottle * detail, wear.dropout * detail, w, wornRows.b - wornRows.a, detail, worn, wornRows.a, h)
+  }
 
   // Misregistration is a paper-feed error, physically the same for the whole
   // sheet — but at 5px it obliterates 20px type while barely showing on a
-  // poster. Scaled by sqrt so it stays visible on small type without eating it.
-  const { dx, dy } = registrationOffset(seed, index, s.misregistration * scale * Math.sqrt(detail))
-  shiftInPlace(worn, w, h, dx, dy)
-  const shifted = worn
+  // poster. Scaled by sqrt so it stays visible on small type without eating it
+  // (plateGeometry). The rows the screen reads are moved into a window of
+  // their own: a band reads its source a few rows away.
+  const still = dx === 0 && dy === 0
+  const moved = still ? worn : ws.scratch.subarray(0, Math.max(0, covRows.b - covRows.a) * w)
+  if (!still && moved.length > 0) shiftRows(worn, w, wornRows.a, h, dx, dy, covRows.a, covRows.b, moved)
   yield at
 
   // Screened straight into bytes: the dot's soft edge is kept to half a
   // level, and every pass held until the print costs a quarter of a float.
-  const coverage = new Uint8ClampedArray(w * h)
-  if (s.method === 'grain') {
+  const coverage = out.subarray(0, (y1 - y0) * w)
+  if (grain) {
     // The grain cell rides the render scale like every other spatial
     // quantity, so the preview and the export show the same texture rather
     // than the same pixel count.
-    ditherField(shifted, w, h, { scale: grainCell(s.screenPitch, scale) }, coverage)
+    grain.run(moved, covRows.a, y0, y1, coverage)
   } else {
+    coverage.fill(0)
     screenField(
-      shifted,
+      moved,
       w,
-      h,
+      y1 - y0,
       {
         pitch: Math.max(1.2, s.screenPitch * scale * detail),
         // Each plate gets its own angle; the beat between them is the rosette.
@@ -492,11 +601,29 @@ function* pressPlateSteps(
         softness: DOT_SOFTNESS * scale * detail,
         originX: dx,
         originY: dy,
+        row0: y0,
       },
       coverage,
     )
   }
-  return { coverage, roughened: rough, dx, dy }
+  return { coverage, torn: rough, tornRow0: glyph.a, dx, dy, detail }
+}
+
+/** `pressPlateBandSteps`, run to the end. */
+export function pressPlateBand(
+  plate: { rows: ToneRows; fontSize: number },
+  index: number,
+  s: PressProfile,
+  seed: number,
+  noise: SheetNoise,
+  w: number,
+  h: number,
+  band: { y0: number; y1: number },
+  ws: Workspace,
+  out: Uint8ClampedArray,
+  opts: { cuts: boolean; grain?: GrainStream; torn?: RowWindow },
+): PlateBand {
+  return drain(pressPlateBandSteps(plate, index, s, seed, noise, w, h, band, ws, out, opts, { step: 'press', pass: index + 1, passes: index + 1 }))
 }
 
 /**
@@ -591,7 +718,7 @@ export interface RowWindow {
 const isEmpty = (r: RowWindow) => r.b <= r.a
 
 /** The smallest window holding both. */
-function hull(p: RowWindow, q: RowWindow): RowWindow {
+function hullOf(p: RowWindow, q: RowWindow): RowWindow {
   if (isEmpty(p)) return q
   if (isEmpty(q)) return p
   return { a: Math.min(p.a, q.a), b: Math.max(p.b, q.b) }
@@ -635,7 +762,7 @@ export function windowsFor(
   const coverage = g.grain ? grainRows(rows!, band.y0, band.y1) : { a: band.y0, b: band.y1 }
   const worn = shiftSource(g.dx, g.dy, coverage.a, coverage.b, h)
   const knockout = cuts ? shiftSource(g.dx, g.dy, band.y0, band.y1, h) : { a: band.y0, b: band.y0 }
-  const torn = hull(worn, knockout)
+  const torn = hullOf(worn, knockout)
   const reach = 3 * g.rMax
   const glyph = isEmpty(torn) ? torn : { a: Math.max(0, torn.a - reach), b: Math.min(h, torn.b + reach) }
   return { coverage, worn, knockout, torn, glyph }
@@ -814,7 +941,7 @@ export function* printSheetSteps(
 
   // One set of working buffers for every plate (see Workspace). Let go, with
   // everything else only the plates needed, before the sheet is printed.
-  let ws = makeWorkspace(w * h)
+  let ws = makeWorkspace(h, w)
 
   // Each pass is pressed in a function of its own, so that what it holds — its
   // tone, its coverage before the split, the luminance it read back — is let
@@ -831,7 +958,7 @@ export function* printSheetSteps(
   function* pressBacking(layer: TextLayer, ink: string): Generator<RenderProgress, void> {
     const at: RenderProgress = { step: 'press', pass: plateIndex + 1, passes }
     yield at
-    const backing = yield* pressPlateSteps(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h, ws, at)
+    const backing = yield* pressWholeSteps(tones.backing(layer), plateIndex, s.press, s.seed, noise, w, h, ws, at)
     plates.push({ coverage: backing.coverage, rgb: inkById(ink).rgb })
     // The block prints on paper: the photo is cut back under its own torn,
     // misregistered outline, so a pale block over a dark photo still reads.
@@ -843,7 +970,7 @@ export function* printSheetSteps(
     const at: RenderProgress = { step: 'press', pass: plateIndex + 1, passes }
     yield at
     const tone = tones.type(layer)
-    const pressed = yield* pressPlateSteps(tone, plateIndex, s.press, s.seed, noise, w, h, ws, at)
+    const pressed = yield* pressWholeSteps(tone, plateIndex, s.press, s.seed, noise, w, h, ws, at)
     plateIndex++
     const coverage = pressed.coverage
 

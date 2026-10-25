@@ -32,7 +32,8 @@ export interface ChangeHow {
    *  to that tap's undo step, even when that step's burst has ended. The two
    *  taps are timed by when they touched, so the second can be handled long
    *  after the first (behind a slow preview render) and after the burst's
-   *  idle timer has run. */
+   *  idle timer has run. The history decides whether that step is still
+   *  there to join; when it is not, the reset is a step of its own. */
   joins?: boolean
 }
 
@@ -184,11 +185,13 @@ export const resetChange = (p: Param): Change => change(p, p.def, true)
  * drag does (a coalesced step); the reset then joins that step, and one Undo
  * goes back past both (Border Studio's history, which coalesces by time,
  * gives the same). It joins it by name (`joins`), not by arriving in time: the
- * second tap may be handled after the first tap's burst is over. A first tap
- * that moved nothing leaves the reset a step of its own.
+ * second tap may be handled after the first tap's burst is over. The reset
+ * itself is a step (`discrete`), never part of a drag: a first tap that moved
+ * nothing leaves it a step of its own, and so does the history when the first
+ * tap's run left no step to join (it wobbled and came back).
  */
 export const doubleTapReset = (p: Param, firstTapMoved: boolean): Change => {
-  const c = change(p, p.def, !firstTapMoved)
+  const c = change(p, p.def, true)
   return c && firstTapMoved ? { ...c, joins: true } : c
 }
 

@@ -89,7 +89,9 @@ So:
       the real value (e.g. 240%), and [−] then reads 239%; double-tap the track
       anywhere → 40% (not where the finger was), and one Undo → back to the
       size before the double tap; the same on a print with a photo, where the
-      preview takes a moment to redraw after the first tap
+      preview takes a moment to redraw after the first tap; change the
+      typeface, then double-tap ON the thumb (the first tap may nudge it and
+      back) → 40%, and one Undo takes back only the reset (the typeface stays)
 - [ ] Drag a press slider → the preview keeps up, and the grain does **not**
       visibly re-randomise
 - [ ] One slider drag is one undo step; adding a plate is its own step; a

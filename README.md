@@ -1022,7 +1022,10 @@ it still counts, and still joins the first tap's step (`check:touch` does it
 with real touch input, also on a CPU throttled 4x with the second tap handled
 late). On a setting already at its default the double tap goes there and
 back, so it leaves no undo step, and nor does a drag that ends where it
-began. A panel with several settings shows one at a time: tap its name, or
+began. The reset joins only the step its first tap's move opened: when that
+move left none (a press on the thumb that wobbled a step and came back), or
+anything else became a step in between, the reset is a step of its own, so
+one Undo never also takes back the change made before the double tap. A panel with several settings shows one at a time: tap its name, or
 swipe up from it, for the others (Border Studio 4860519). Size, Rotation and
 Position have two ranges: the slider spans where people work (10–100%, ±45°,
 the sheet) while a pinch, the keys, a nudge and a typed value reach the whole

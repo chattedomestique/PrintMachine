@@ -25,9 +25,12 @@ import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits
 
 /**
  * `coalesce`: part of a burst (a drag, typing) that is one undo step. `join`:
- * part of the undo step of the change just before it, even if that step's
+ * part of the undo step the last coalescing run opened, even if that run's
  * burst is over: a double tap's reset joins the move its first tap made, and
- * the second tap can be handled long after the first (behind a render).
+ * the second tap can be handled long after the first (behind a render). Only
+ * that step: when the run left none (it ended where it began, or changed
+ * nothing), or anything else has happened since, a join is a step of its own.
+ * A join never opens or extends a burst.
  */
 export type SettingsAction =
   | { type: 'patch'; patch: Partial<PrintSettings>; coalesce?: boolean; join?: boolean }
@@ -52,6 +55,11 @@ export interface HistoryState {
   future: PrintSettings[]
   /** True while a run of coalescing actions is still open. */
   bursting: boolean
+  /** True while the last step in `past` is the one a coalescing run opened
+   *  and nothing else has happened since: no other step, no Undo or Redo, the
+   *  run not dropped, no new run that opened nothing. It outlives the burst
+   *  (`endBurst` leaves it): it is what a `join` may merge into. */
+  joinable: boolean
 }
 
 const LIMIT = 60
@@ -233,7 +241,7 @@ function sameData(a: unknown, b: unknown): boolean {
 }
 
 export function initHistory(settings: PrintSettings): HistoryState {
-  return { past: [], present: settings, future: [], bursting: false }
+  return { past: [], present: settings, future: [], bursting: false, joinable: false }
 }
 
 export function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
@@ -246,6 +254,7 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
         present: previous,
         future: [state.present, ...state.future],
         bursting: false,
+        joinable: false,
       }
     }
 
@@ -257,6 +266,7 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
         present: next,
         future: rest,
         bursting: false,
+        joinable: false,
       }
     }
 
@@ -265,16 +275,25 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
 
     default: {
       const next = applySettings(state.present, action)
+      const wantsJoin = 'join' in action && action.join === true
+      // A join is a reset, never part of a drag: it does not open a burst.
+      const coalesce = 'coalesce' in action && action.coalesce === true && !wantsJoin
+
       // A change that changes nothing is not an undo step. A drag on a photo
       // that cannot move (100% on its own sheet: every patch clamps back to
       // where it is) or a second reset of a value already at its default
-      // used to push one, and Undo then seemed to do nothing.
-      if (next === state.present || sameData(next, state.present)) return state
+      // used to push one, and Undo then seemed to do nothing. Such a change
+      // that starts a run (the burst is over) opened no step, so a double
+      // tap's reset after it has no step of its own run to join.
+      if (next === state.present || sameData(next, state.present)) {
+        return coalesce && !state.bursting && state.joinable ? { ...state, joinable: false } : state
+      }
 
-      const coalesce = 'coalesce' in action && action.coalesce === true
-      // Joining the step before: there must be one, and nothing undone since
-      // (after an Undo the step before is no longer the change it joins).
-      const join = 'join' in action && action.join === true && state.past.length > 0 && state.future.length === 0
+      // Joining: only the step the last coalescing run opened, while nothing
+      // else has happened since (`joinable`). Not just the last step: a run
+      // that was dropped (below) leaves an unrelated step last, and after an
+      // Undo the last step is no longer the change it joins.
+      const join = wantsJoin && state.joinable && state.past.length > 0 && state.future.length === 0
 
       // Mid-burst: replace the present without growing the history, so the
       // whole drag reads as a single step. A join does the same after the
@@ -283,20 +302,24 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
         // A run that ends where it began (a drag back to its start; a double
         // tap on a setting already at its default, whose first tap moved the
         // thumb) is no step at all: drop the step it opened, and end the
-        // burst, so a move after it opens a step of its own.
+        // burst, so a move after it opens a step of its own. The step now
+        // last is someone else's: nothing may join it.
         const start = state.past[state.past.length - 1]
         if (start !== undefined && sameData(next, start)) {
-          return { past: state.past.slice(0, -1), present: start, future: [], bursting: false }
+          return { past: state.past.slice(0, -1), present: start, future: [], bursting: false, joinable: false }
         }
-        return { ...state, present: next, future: [], bursting: state.bursting || coalesce }
+        return { ...state, present: next, future: [], joinable: true }
       }
 
+      // A step of its own. Only a coalescing run's step may be joined later;
+      // a join that found nothing to join is a plain step.
       const past = [...state.past, state.present]
       return {
         past: past.length > LIMIT ? past.slice(past.length - LIMIT) : past,
         present: next,
         future: [],
         bursting: coalesce,
+        joinable: coalesce,
       }
     }
   }

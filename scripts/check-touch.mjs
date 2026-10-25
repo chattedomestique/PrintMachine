@@ -30,7 +30,9 @@
  *     touches stamped 100 ms apart by their own timestamp, the second
  *     handled late (as behind a slow preview render), still reset. On a
  *     setting already at its default a double tap (touch or mouse) leaves
- *     no undo step: it went there and back.
+ *     no undo step: it went there and back. And after a typeface change, a
+ *     double press whose first press wobbled Size's thumb a step and back
+ *     (no step) resets as a step of its own: one Undo keeps the typeface.
  *  8. A double tap on a plate that is not selected only picks it (Border
  *     Studio's tap-to-select; nothing moves, no undo step); a double tap on
  *     the selected plate centres it and zeroes its turn; a mouse's
@@ -393,6 +395,86 @@ try {
       check(now === was && !(await undoEnabled(page)), `Press › Screen size at its default, a mouse double-click: ${was} -> ${now}, and no undo step`)
       await ctx2.close()
     }
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
+
+  console.log('7c. A double tap whose first press wobbled the thumb and came back joins nothing: an earlier step survives')
+  {
+    // Type › Face › Serif (a step), then a mouse double press on Size's
+    // thumb: the first press grabs it, moves it a step and back (a run that
+    // ends where it began, so it leaves no step), the second press resets.
+    // The reset may join only its own run's step, and there is none: one
+    // Undo takes back the reset alone and the typeface stays. Every event is
+    // stamped (CDP's own timestamp), so the two presses are 150 ms apart by
+    // the events' own time however long this machine takes to send them.
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    const cdp = await ctx.newCDPSession(page)
+    await page.locator('[data-tool="type"]').click()
+    await page.locator('.controls__section[data-tool="type"] [role=tab][data-tab="face"]').click()
+    await page.waitForSelector('.controls__panel[data-sub="face"]')
+    const font0 = (await stored(page)).layers[0].fontId
+    const font1 = font0 === 'serif' ? 'mono' : 'serif'
+    await page.locator(`.controls__panel[data-sub="face"] input[type=radio][value="${font1}"]`).check({ force: true })
+    check((await stored(page)).layers[0].fontId === font1, `Type › Face: ${font0} -> ${font1} (a step)`)
+    await page.locator('.controls__section[data-tool="type"] [role=tab][data-tab="size"]').click()
+    const panel = '.controls__panel[data-sub="size"]'
+    await page.waitForSelector(panel)
+    const readout = () => page.locator(`${panel} .controls__value`).first().textContent()
+    const was = await readout()
+    const size0 = (await stored(page)).layers[0].size
+    const input = page.locator(`${panel} .slider__input`)
+    const track = await input.boundingBox()
+    const p = await input.evaluate((el) => (Number(el.value) - Number(el.min)) / (Number(el.max) - Number(el.min)))
+    // The thumb's centre (the style guide's thumb is 24 px wide).
+    const x0 = track.x + 12 + p * (track.width - 24)
+    const y = track.y + track.height / 2
+    const t0 = Date.now() / 1000
+    let t = t0
+    const mouse = (type, x, buttons, dt) => {
+      t += dt
+      return cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1, timestamp: t })
+    }
+    await mouse('mousePressed', x0, 1, 0)
+    await mouse('mouseMoved', x0 + 5, 1, 0.02)
+    const wob = await page
+      .waitForFunction(([sel, was]) => document.querySelector(sel)?.textContent !== was, [`${panel} .controls__value`, was], { timeout: 5000 })
+      .then(() => readout(), () => readout())
+    // Back to exactly where it was (the grab point need not be the thumb's
+    // centre, so try the pixels around it).
+    let back = null
+    for (const dx of [0, -0.5, 0.5, -1, 1, -1.5, 1.5, -2, 2, -2.5, -3]) {
+      await mouse('mouseMoved', x0 + dx, 1, 0.005)
+      await page.waitForTimeout(60)
+      back = await readout()
+      if (back === was) break
+    }
+    await mouse('mouseReleased', x0, 0, 0.01)
+    await mouse('mousePressed', x0, 1, Math.max(0.01, t0 + 0.15 - t))
+    const apart = t - t0
+    await mouse('mouseReleased', x0, 0, 0.03)
+    await page
+      .waitForFunction(([sel]) => document.querySelector(sel)?.textContent === '40%', [`${panel} .controls__value`], { timeout: 5000 })
+      .catch(() => undefined)
+    const reset = await readout()
+    check(
+      wob !== was && back === was && reset === '40%' && apart < 0.32,
+      `the first press wobbled the thumb ${was} -> ${wob} -> ${back}, the second (${Math.round(apart * 1000)} ms after the first by the events' time) reset it: ${reset}`,
+    )
+    await page.locator('.app__bar button[aria-label="Undo"]').click()
+    await page
+      .waitForFunction(([k, from]) => JSON.parse(localStorage.getItem(k) ?? 'null')?.layers?.[0]?.size === from, [KEY, size0], { timeout: 5000 })
+      .catch(() => undefined)
+    const after = (await stored(page)).layers[0]
+    check(
+      (await readout()) === was && after.size === size0 && after.fontId === font1 && (await undoEnabled(page)),
+      `one Undo takes back the reset alone: Size ${await readout()} (want ${was}), the typeface ${after.fontId} (want ${font1}), Undo still on for it`,
+    )
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
   }

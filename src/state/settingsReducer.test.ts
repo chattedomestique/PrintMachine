@@ -17,6 +17,7 @@ import {
   initHistory,
   overPhotoOf,
   overPhotoPatch,
+  type HistoryState,
 } from './settingsReducer.ts'
 
 const doc = (layers: TextLayer[]): PrintSettings => ({ ...defaultSettings(), layers })
@@ -267,14 +268,14 @@ describe('the undo history', () => {
     const def = h.present.press.screenPitch
     h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: 19.5 }, coalesce: true })
     expect(h.past).toHaveLength(1)
-    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: def }, coalesce: true, join: true })
+    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: def }, join: true })
     expect(h.past).toHaveLength(0)
     expect(h.present.press.screenPitch).toBe(def)
     expect(h.bursting).toBe(false)
     // The same when the second tap is handled after the burst is over.
     h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: 19.5 }, coalesce: true })
     h = historyReducer(h, { type: 'endBurst' })
-    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: def }, coalesce: true, join: true })
+    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: def }, join: true })
     expect(h.past).toHaveLength(0)
   })
 
@@ -286,7 +287,7 @@ describe('the undo history', () => {
     let h = initHistory(doc([l]))
     h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.082 }, coalesce: true })
     h = historyReducer(h, { type: 'endBurst' })
-    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, coalesce: true, join: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, join: true })
     expect(h.past).toHaveLength(1)
     expect(h.present.layers[0].size).toBe(0.04)
     h = historyReducer(h, { type: 'undo' })
@@ -297,13 +298,92 @@ describe('the undo history', () => {
   it('a join is a step of its own when there is no step to join, or one was undone since', () => {
     const l = makeLayer({ size: 0.09 })
     let h = initHistory(doc([l]))
-    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, coalesce: true, join: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, join: true })
     expect(h.past).toHaveLength(1)
     h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.05 } })
     h = historyReducer(h, { type: 'undo' })
-    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.06 }, coalesce: true, join: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.06 }, join: true })
     expect(h.past).toHaveLength(2)
     h = historyReducer(h, { type: 'undo' })
     expect(h.present.layers[0].size).toBe(0.04)
+  })
+
+  it('an earlier step survives a double tap whose first tap\'s run was dropped', () => {
+    // The typeface, then Size: the first tap lands on the thumb and the finger
+    // wobbles a step and back (a run that ends where it began: dropped), and
+    // the second tap resets. The reset has no step of its run to join, so it
+    // is one of its own: one Undo takes back the reset and keeps the typeface.
+    const l = makeLayer({ size: 0.09, fontId: 'poster' })
+    let h = initHistory(doc([l]))
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { fontId: 'serif' } })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.091 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.09 }, coalesce: true })
+    expect(h.past).toHaveLength(1)
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, join: true })
+    expect(h.past).toHaveLength(2)
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.layers[0].size).toBe(0.09)
+    expect(h.present.layers[0].fontId).toBe('serif')
+    // The same when the reset is handled after the burst is over.
+    h = initHistory(doc([l]))
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { fontId: 'serif' } })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.091 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.09 }, coalesce: true })
+    h = historyReducer(h, { type: 'endBurst' })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, join: true })
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.layers[0].fontId).toBe('serif')
+  })
+
+  it('a join merges only into the step a coalescing run opened, with nothing else since', () => {
+    const l = makeLayer({ size: 0.09, fontId: 'poster' })
+    const run = (h: HistoryState) => historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.082 }, coalesce: true })
+    const reset = (h: HistoryState) => historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, join: true })
+    // A plain step after the run: the reset no longer joins the run.
+    let h = run(initHistory(doc([l])))
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { fontId: 'serif' } })
+    h = reset(h)
+    expect(h.past).toHaveLength(3)
+    // Undo then Redo of the run: the run's step is back, but it is no longer
+    // the change a reset arriving now belongs to.
+    h = run(initHistory(doc([l])))
+    h = historyReducer(historyReducer(h, { type: 'undo' }), { type: 'redo' })
+    h = reset(h)
+    expect(h.past).toHaveLength(2)
+    // A step that is not a run's (the typeface) is never joined.
+    h = historyReducer(initHistory(doc([l])), { type: 'patchLayer', id: l.id, patch: { fontId: 'serif' } })
+    h = reset(h)
+    expect(h.past).toHaveLength(2)
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.layers[0].fontId).toBe('serif')
+  })
+
+  it('a run that opened no step leaves nothing to join', () => {
+    // A Size drag, its burst over; then a drag on a photo that cannot move (a
+    // run whose every change clamps back: no step); then a reset that says it
+    // joins. The Size drag is not its step.
+    const l = makeLayer({ size: 0.09 })
+    let h = initHistory(doc([l]))
+    h = historyReducer(h, { type: 'setMedia', media: landscape })
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.082 }, coalesce: true })
+    h = historyReducer(h, { type: 'endBurst' })
+    const before = h.present
+    h = historyReducer(h, { type: 'patchMedia', patch: { x: 0.9 }, coalesce: true })
+    expect(h.present).toBe(before)
+    h = historyReducer(h, { type: 'patchPress', patch: { screenPitch: 19.5 }, join: true })
+    expect(h.past).toHaveLength(3)
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.layers[0].size).toBe(0.082)
+  })
+
+  it('a join opens no burst: a drag after a reset that found nothing to join is a step of its own', () => {
+    const l = makeLayer({ size: 0.09 })
+    let h = initHistory(doc([l]))
+    // Even if a caller marks it coalescing.
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.04 }, coalesce: true, join: true })
+    expect(h.past).toHaveLength(1)
+    expect(h.bursting).toBe(false)
+    h = historyReducer(h, { type: 'patchLayer', id: l.id, patch: { size: 0.05 }, coalesce: true })
+    expect(h.past).toHaveLength(2)
   })
 })

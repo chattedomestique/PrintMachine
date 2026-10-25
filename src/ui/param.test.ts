@@ -128,8 +128,10 @@ describe('two ranges: the slider spans one, the setting holds the other', () => 
   })
 
   it('a double-tap reset joins the step its first tap opened (the thumb jumped to it), so one Undo undoes the double tap', () => {
-    // The first tap moved the thumb (a drag's coalesced step): the reset joins it.
-    expect(doubleTapReset(size(0.082), true)).toEqual({ value: 0.04, discrete: false, joins: true })
+    // The first tap moved the thumb (a drag's coalesced step): the reset joins
+    // it. The reset itself is a step, never part of a drag: when the history
+    // finds no such step to join, it is one of its own.
+    expect(doubleTapReset(size(0.082), true)).toEqual({ value: 0.04, discrete: true, joins: true })
     // It moved nothing (a tap on the thumb): the reset is a step of its own.
     expect(doubleTapReset(size(0.09), false)).toEqual({ value: 0.04, discrete: true })
     expect(doubleTapReset(size(0.04), true)).toBeNull()
@@ -145,7 +147,7 @@ describe('two ranges: the slider spans one, the setting holds the other', () => 
     applyChange(p, doubleTapReset(p, false))
     applyChange(p, dragChange(p, 0.05))
     expect(calls).toEqual([
-      [0.04, { discrete: false, joins: true }],
+      [0.04, { discrete: true, joins: true }],
       [0.04, { discrete: true }],
       [0.05, { discrete: false }],
     ])

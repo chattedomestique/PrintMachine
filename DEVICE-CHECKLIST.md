@@ -274,7 +274,9 @@ holds"). What only a phone can settle:
       under about 450 MB; the worst legal press (grain at screen 36,
       misregistration 30) at 61 MP under about 540 MB. `measure-alloc` holds
       what it counts (the typed arrays, the canvases, the decoded photo and
-      the file at 1.4 bytes a pixel) under those: 339, 425 and 518 MB
+      the file at 1.4 bytes a pixel, which covers photographs up to about
+      ±16 levels of noise; a grainier photo's file is larger) under those:
+      339, 425 and 518 MB
       measured. Write down the phone's own peak beside them; what the
       browser holds besides is what only a phone shows.
 - [ ] **Font clamp.** A 61 MP portrait photo on its own sheet (9504 px tall),

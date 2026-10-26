@@ -58,14 +58,16 @@ const child = args[0] === '--case'
 /** The same-width gate: the taller sheet's peak typed bytes over the shorter's. */
 const SAME_WIDTH = 1.15
 /**
- * The file, in bytes an output pixel: what the app's own encoder (q95,
- * 4:4:4) writes for a photograph with ±32 levels of noise in every pixel and
- * every channel, 1.40, the noisiest ground a camera's photo comes near
- * (sensor noise of sigma 8 in every channel, with no noise reduction, is
- * 0.89; a 40 MP photo with per-pixel noise over fine detail, saved through
- * the app, 1.00). Pure noise, which no camera writes, is 2.42: 96 MB at
- * 40 MP, about 58 MB over this bound. Measured on 2048x2048 grounds pushed
- * in bands as Save pushes them.
+ * The file, in bytes an output pixel, so the gate does not depend on how
+ * well the fake print compresses. 1.40 is what the app's own encoder (q95,
+ * 4:4:4) writes for FLAT GREY with ±32 levels of uniform noise in every
+ * pixel and channel. Real photographs saved through the app write less
+ * unless they are grainy: 0.54-0.70 clean, about 1.18 with ±16 levels of
+ * added noise, 1.49 with ±32. So the bound covers photographs with up to
+ * about ±16 levels of noise per channel. Above it: a ±32-noise photograph
+ * (1.49) adds about 4 MB at 40 MP, the synthetic fine-detail ground (1.76)
+ * about 14 MB, which would put case 6 just over its 350 MB gate, and pure
+ * noise, which no camera writes (2.42), about 41 MB.
  */
 const FILE_BOUND = 1.4
 if (!child) {

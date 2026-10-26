@@ -958,14 +958,15 @@ moment before the press, the photo already decoded):
 | 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 -> 8.3 | 120 -> 37 -> 14.0 (235 MB) | 65.6 -> 18.7 -> 15.6 s | +1484 -> +445 -> +232 MB |
 
 And the sizes the band engine made possible, every one a photo at its own
-pixels (the file counted at 1.4 bytes an output pixel, what the app's
-encoder writes for a photograph with ±32 levels of noise in every pixel and
-channel, noisier than a camera's photo comes: sigma 8 of sensor noise in
-every channel is 0.89, and a 40 MP photo with per-pixel noise over fine
-detail saved through the app 1.00; so the number does not depend on how well
-the test print compresses. Pure noise, 2.42 bytes a pixel, is no photograph
-and is not covered: it would put case 6 at about 379 MB. The gate in
-brackets):
+pixels (the file counted at 1.4 bytes an output pixel, so the number does
+not depend on how well the test print compresses. 1.4 is what the app's
+encoder writes for flat grey with ±32 levels of uniform noise. Real
+photographs saved through the app write 0.54-0.70 clean, about 1.18 with ±16
+levels of noise and 1.49 with ±32, so the bound covers photographs up to
+about ±16 levels of noise per channel. A ±32-noise photograph adds about
+4 MB at 40 MP; the synthetic fine-detail ground, 1.76 bytes a pixel, adds
+about 14 MB and would put case 6 just over its gate; pure noise, 2.42, is no
+photograph and would put case 6 at about 379 MB. The gate in brackets):
 
 | Case | Sheet | Typed arrays, peak | With canvases, the decoded photo and the file | Chromium time: ms/MP (press + encoder) | Chromium RSS |
 |---|---|---|---|---|---|

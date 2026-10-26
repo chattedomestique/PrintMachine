@@ -802,10 +802,11 @@ try {
 
 /**
  * The save states, for the review set: pressing with Cancel and then ready to
- * Share (an encoder slowed to 3 s, as a phone's is), waiting for the photo (a
- * preview decode held back), the photo that could not be loaded (its stored
- * bytes deleted), the smaller-copy question (canvases over 5 MP read back
- * blank) and the save that did not finish (the in-flight mark left set).
+ * Share (the file's writing held 3 s, as a phone's can take), waiting for the
+ * photo (a preview decode held back), the photo that could not be loaded (its
+ * stored bytes deleted), the smaller-copy question (canvases wider than
+ * 2000 px read back blank) and the save that did not finish (the in-flight
+ * mark left set).
  */
 async function shootSaveStates(vw, vh, scheme) {
   const shoot = async (page, name) => {
@@ -813,17 +814,19 @@ async function shootSaveStates(vw, vh, scheme) {
     await page.waitForTimeout(300)
     await page.screenshot({ path: join(SHOTS, shotName(vw, scheme, 'save', name)) })
   }
+  // The file's writing held 3 s (the test seam, README "Test seams").
   const slowEncoder = `
-    const real = HTMLCanvasElement.prototype.toBlob
-    HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) { return real.call(this, (b) => setTimeout(() => cb(b), 3000), ...rest) }
+    window.__PM_TEST__ = { finishDelayMs: 3000 }
     navigator.canShare = () => true
     navigator.share = async () => {}
   `
-  const blankAbove5MP = `
+  // Detached canvases wider than 2000 px read back blank: the press's tiles
+  // (2880 wide) and its first smaller copy's (2160); the next copy fits.
+  const blankWide = `
     const real = CanvasRenderingContext2D.prototype.getImageData
     CanvasRenderingContext2D.prototype.getImageData = function (...a) {
       const d = real.apply(this, a)
-      if (!this.canvas.isConnected && this.canvas.width * this.canvas.height > 5e6) d.data.fill(0)
+      if (!this.canvas.isConnected && this.canvas.width > 2000) d.data.fill(0)
       return d
     }
   `
@@ -837,14 +840,14 @@ async function shootSaveStates(vw, vh, scheme) {
   {
     const { ctx, page } = await newPage({ width: vw, height: vh, scheme, photo: null, init: slowEncoder })
     await page.locator('.app__save').click()
-    await page.waitForFunction(() => document.querySelector('.app__status-text')?.textContent?.includes('plate'), null, { timeout: 60_000 })
+    await page.waitForFunction(() => /%|writing the file/.test(document.querySelector('.app__status-text')?.textContent ?? ''), null, { timeout: 60_000 })
     await shoot(page, 'pressing')
     await page.waitForFunction(() => document.querySelector('.app__save')?.textContent === 'Share', null, { timeout: 120_000 })
     await shoot(page, 'ready')
     await ctx.close()
   }
   {
-    const { ctx, page } = await newPage({ width: vw, height: vh, scheme, photo: null, init: blankAbove5MP })
+    const { ctx, page } = await newPage({ width: vw, height: vh, scheme, photo: null, init: blankWide })
     await page.locator('.app__save').click()
     await page.waitForFunction(() => document.querySelector('dialog.savequestion')?.open, null, { timeout: 120_000 })
     await shoot(page, 'smaller-copy')
@@ -920,14 +923,14 @@ function probeSaveCard(sel) {
 
 /**
  * The save states at 200% text on a small phone, where the cards are taller
- * than the room between the bar and the dock: a 5712×4284 photo on its own
- * sheet (the longest reason the planner gives: "capped at 16.7 MP, ...;
- * photo is 5712×4284", in the toast as the press starts), its encoder slowed
- * to 3 s as a phone's is, with the dock closed and with the Photo tool open
- * (where it is right after a photo is chosen). Pressing, with that toast
- * shown: Cancel answers a tap. Ready: Share in the bar answers a tap, and so
- * does the card's ×. The stored photo gone: Choose again answers a tap. In
- * each, the cards stay between the bar and the dock.
+ * than the room between the bar and the dock: a 1600×1200 photo on its own
+ * sheet zoomed to 300% (the longest reason a real document gives: "photo is
+ * 1600×1200 at 300% zoom: upscaled 4.5x", in the toast as the press starts),
+ * the file's writing held 3 s as a phone's can take, with the dock closed and
+ * with the Photo tool open (where it is right after a photo is chosen).
+ * Pressing, with that toast shown: Cancel answers a tap. Ready: Share in the
+ * bar answers a tap, and so does the card's ×. The stored photo gone: Choose
+ * again answers a tap. In each, the cards stay between the bar and the dock.
  *
  * Pressing is measured with the press held in its first phase ("loading the
  * photo"): the original's decode at Save waits until the measurement is
@@ -943,8 +946,7 @@ async function checkSaveStates(vw, vh, tool) {
   const where = `${vw}x${vh} at 200% text, ${tool ? `the ${tool} tool open` : 'the dock closed'}`
   const failedBefore = failures.length
   const slowEncoder = `
-    const real = HTMLCanvasElement.prototype.toBlob
-    HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) { return real.call(this, (b) => setTimeout(() => cb(b), 3000), ...rest) }
+    window.__PM_TEST__ = { finishDelayMs: 3000 }
     navigator.canShare = () => true
     navigator.share = async () => { window.__shared = (window.__shared ?? 0) + 1 }
     // A full decode (no resize: the original's, at Save; the preview's copy
@@ -958,7 +960,21 @@ async function checkSaveStates(vw, vh, tool) {
         ? new Promise((f) => held.push(f)).then(() => decode(src, ...rest))
         : decode(src, ...rest)
   `
-  const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [5712, 4284], init: slowEncoder })
+  const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [1600, 1200], init: slowEncoder })
+  // Zoomed to 300% (what the Photo tool's Zoom stores), read back from
+  // storage as a reload does. Set as the reloaded page starts, before the
+  // app reads it: the page being left writes its own document on `pagehide`.
+  await page.addInitScript(() => {
+    const key = 'printmachine:settings:v1'
+    const s = JSON.parse(localStorage.getItem(key) ?? 'null')
+    if (s?.media && s.media.scale !== 3) {
+      s.media.scale = 3
+      localStorage.setItem(key, JSON.stringify(s))
+    }
+  })
+  await page.reload()
+  await page.waitForSelector('.sheet canvas')
+  await page.waitForFunction(() => document.querySelector('.app__save') && !document.querySelector('.app__save[aria-disabled="true"]'), null, { timeout: 30_000 })
   const large = () => page.addStyleTag({ content: 'html { font-size: 200% }' })
   const shoot = async (name) => {
     if (SHOTS) await page.screenshot({ path: join(SHOTS, shotName(vw, 'light', '200pct', tool ?? 'closed', 'save', name)) })
@@ -992,7 +1008,7 @@ async function checkSaveStates(vw, vh, tool) {
   const pressing = await state(
     'pressing',
     '.app__status .btn',
-    (p) => p.toast?.includes('capped at 16.7 MP') === true && p.text?.includes('loading the photo') === true,
+    (p) => p.toast?.includes('% zoom: upscaled') === true && p.text?.includes('loading the photo') === true,
   )
   await page.evaluate(() => window.__releaseOriginal())
   await page.waitForFunction(() => document.querySelector('.app__save')?.textContent === 'Share', null, { timeout: 180_000 })

@@ -514,9 +514,9 @@ async function save(
   const media = settings.media ? await createImageBitmap(photoCanvas(settings.media.width, settings.media.height)) : null
   const steps: string[] = []
   const t0 = performance.now()
-  const pressed = await savePrint(context(false), context(true), settings, media, {
+  const pressed = await savePrint(settings, media, {
     format: opts.format,
-    onProgress: (p) => steps.push(`${p.step} ${p.pass}/${p.passes}`),
+    onProgress: (p) => steps.push(`${p.step} ${p.band}/${p.bands}`),
     onGround: () => media?.close(),
   })
   const ms = performance.now() - t0
@@ -544,14 +544,109 @@ async function prepare(settings: PrintSettings): Promise<void> {
 }
 
 /** Press the prepared document through the real savePrint; the photo is
- *  closed once it is in the ground, as Save does. */
-async function press(format: ExportFormat = 'jpeg'): Promise<{ w: number; h: number; bytes: number; ms: number }> {
+ *  closed once its last rows are in the print, as Save does. `pressMs` is
+ *  the time to the last band, `ms` to the file. */
+async function press(format: ExportFormat = 'jpeg'): Promise<{ w: number; h: number; bytes: number; ms: number; pressMs: number }> {
   if (!prepared) throw new Error('nothing prepared')
   const { settings, media } = prepared
   prepared = null
   const t0 = performance.now()
-  const pressed = await savePrint(context(false), context(true), settings, media, { format, onGround: () => media?.close() })
-  return { w: pressed.plan.width, h: pressed.plan.height, bytes: pressed.blob.size, ms: performance.now() - t0 }
+  let pressMs = 0
+  const pressed = await savePrint(settings, media, {
+    format,
+    onGround: () => media?.close(),
+    onProgress: (p) => {
+      if (p.step === 'write') pressMs = performance.now() - t0
+    },
+  })
+  return { w: pressed.plan.width, h: pressed.plan.height, bytes: pressed.blob.size, ms: performance.now() - t0, pressMs }
+}
+
+/** The RGBA a file decodes to, and its sha256. */
+async function fileDigest(blob: Blob): Promise<{ sha256: string; w: number; h: number }> {
+  const bmp = await createImageBitmap(blob)
+  const { width: w, height: h } = bmp
+  const ctx = context(true)
+  ctx.canvas.width = w
+  ctx.canvas.height = h
+  ctx.drawImage(bmp, 0, 0)
+  bmp.close()
+  const data = ctx.getImageData(0, 0, w, h).data
+  ctx.canvas.width = 0
+  return { sha256: hex(await crypto.subtle.digest('SHA-256', data)), w, h }
+}
+
+/**
+ * File == canvas (P-5): the real savePrint, as a PNG (lossless), no taller
+ * than `height`, decoded, against the export entry painting the same print
+ * into a canvas at that height. The same pixels, or the file is not the
+ * print the press made.
+ */
+async function fileParity(name: string, height: number): Promise<{ file: string; canvas: string; same: boolean; w: number; h: number }> {
+  const settings = load(name)
+  const media = settings.media ? await photoBitmap(settings.media.width, settings.media.height) : null
+  const pressed = await savePrint(settings, media, { format: 'png', maxHeight: height })
+  const file = await fileDigest(pressed.blob)
+  const canvas = await render(name, pressed.plan.height, { async: true })
+  return { file: file.sha256, canvas: canvas.sha256, same: file.sha256 === canvas.sha256 && file.w === canvas.w && file.h === canvas.h, w: file.w, h: file.h }
+}
+
+/**
+ * The allocation retry (P-6): the real savePrint with the typed-array
+ * constructors made to throw a RangeError ONCE, at set-up (the first array
+ * of a megabyte or more) or mid-press (the first of 256 KB or more once the
+ * second band has begun), against the same save with no fault. The same
+ * file, pressed again from the first band in bands half as tall.
+ */
+async function retry(
+  name: string,
+  height: number,
+  at: 'setup' | 'mid',
+): Promise<{ clean: string; faulted: string; same: boolean; thrown: boolean; cleanBands: number; faultedBands: number }> {
+  const run = async (fault: boolean) => {
+    const settings = load(name)
+    const media = settings.media ? await createImageBitmap(photoCanvas(settings.media.width, settings.media.height)) : null
+    let bands = 0
+    let band = 0
+    let thrown = false
+    const names = ['Float32Array', 'Float64Array', 'Uint8Array', 'Uint8ClampedArray', 'Int32Array'] as const
+    const g = globalThis as unknown as Record<string, new (...a: unknown[]) => { byteLength: number }>
+    const saved = names.map((n) => [n, g[n]] as const)
+    if (fault) {
+      for (const [n, Orig] of saved) {
+        g[n] = class extends (Orig as unknown as new (...a: unknown[]) => { byteLength: number }) {
+          constructor(...a: unknown[]) {
+            super(...a)
+            const big = at === 'setup' ? this.byteLength >= 1 << 20 : this.byteLength >= 1 << 18 && band >= 1
+            if (!thrown && big && !(a[0] instanceof ArrayBuffer)) {
+              thrown = true
+              throw new RangeError('Array buffer allocation failed (injected)')
+            }
+          }
+          static [Symbol.hasInstance](x: unknown) {
+            return x instanceof (Orig as unknown as typeof Object)
+          }
+        } as unknown as new (...a: unknown[]) => { byteLength: number }
+      }
+    }
+    try {
+      const pressed = await savePrint(settings, media, {
+        maxHeight: height,
+        onGround: () => media?.close(),
+        onProgress: (p) => {
+          band = p.band
+          bands = p.bands
+        },
+      })
+      const bytes = new Uint8Array(await pressed.blob.arrayBuffer())
+      return { sha: hex(await crypto.subtle.digest('SHA-256', bytes)), thrown, bands }
+    } finally {
+      for (const [n, Orig] of saved) g[n] = Orig
+    }
+  }
+  const clean = await run(false)
+  const faulted = await run(true)
+  return { clean: clean.sha, faulted: faulted.sha, same: clean.sha === faulted.sha, thrown: faulted.thrown, cleanBands: clean.bands, faultedBands: faulted.bands }
 }
 
 /**
@@ -709,6 +804,8 @@ declare global {
       render: typeof render
       seam: typeof seam
       fontCap: typeof fontCap
+      fileParity: typeof fileParity
+      retry: typeof retry
       scaleCorrelation: typeof scaleCorrelation
       save: typeof save
       prepare: typeof prepare
@@ -720,4 +817,4 @@ declare global {
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, seam, fontCap, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, seam, fontCap, fileParity, retry, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, normalized: !!normalizeSettings }

@@ -353,8 +353,8 @@ all; there is no HEIC decoder, so a format the browser cannot open is refused
 with "That image could not be read." A test holds the stored bytes equal to
 the file's at every size, from 12 MP to 48 MP.
 
-The size limits belong to canvases, not to a stored file, so they live where
-canvases are made:
+The size limits belong to canvases and memory, not to a stored file, so they
+live where those are used:
 
 - **The preview** decodes a *working copy* sized to what it shows
   (`previewArea`, `features/media/decode.ts`). At 100% that is 4 MP (2048 x
@@ -362,7 +362,7 @@ canvases are made:
   copy the app used to keep); a 24 MP photo held decoded for a one-megapixel
   preview would be 98 MB of a phone's memory for pixels nobody sees. Zoomed in
   to crop, the copy grows in tiers that double (8.4 MP, then 16.8 MP, the
-  canvas ceiling, or the whole photo if it is smaller), so the preview shows
+  preview's largest, or the whole photo if it is smaller), so the preview shows
   the photo at one copy pixel or more to each of its own pixels at any zoom: a
   fixed 4 MP copy of a 12 MP photo on 4:5 was stretched past 1:1 from 177% and
   2.26x at 400%. The photo is decoded again only when the zoom (or the
@@ -374,22 +374,18 @@ canvases are made:
   it did from the fixed copy). The largest copy is 67 MB, held
   through a save, but a save from that far in is small: the print shrinks with
   the zoom squared, since fewer of the photo's pixels land on the sheet (a
-  24 MP photo on its own sheet at 400% saves 2400x1800; at 100%, 4729x3547).
+  24 MP photo on its own sheet at 400% saves 2400x1800; at 100%, 5712x4284).
   Nothing reads the copy's size: the cover fit, the pan and the export all use
   the photo's true size from the document, and the copy is drawn scaled into
   the same rectangle, so the preview places the photo exactly where the print
   does.
 - **Save** decodes the *original*, in full (4 bytes a pixel of the photo, about
-  98 MB for 24 MP), and closes it the moment the photo is in the ground, so the
-  print is drawn from the original's pixels, never from the preview's copy.
-- **The export canvas** is the one ceiling a photo can meet: 16.7 MP of area
-  (`MAX_AREA`, `engine/exportPlan.ts`), the most a browser canvas is guaranteed
-  to hold, and no edge cap. A print whose photo would land above it pixel for
-  pixel (a 24 MP photo on its own Original sheet) is the one resample, made at
-  Save and stated before the tap; the stored photo keeps every pixel, and the
-  same photo on a 4:5 sheet saves at its own 3427x4284. Saving above the
-  ceiling would need tiled rendering and a JavaScript encoder, which are not
-  built.
+  98 MB for 24 MP, 159 MB for 40 MP), and closes it the moment its last rows
+  are in the print, so the print is drawn from the original's pixels, never
+  from the preview's copy. There is no export ceiling: the print is pressed a
+  band of rows at a time and each band is written straight into the file
+  ("Saving at the photo's own pixels"), so no canvas, array or file buffer is
+  ever the sheet's size, and a 40 MP photo saves at its own 7728x5152.
 
 Photos saved by an older build are the 2048 px copies it made; the originals
 are gone. Such a photo (no `native` flag, a long edge of exactly 2048) carries
@@ -630,33 +626,46 @@ so an Original sheet of any photo's proportions sizes the same way.
 
 Save presses the print at the size the planner gives (`engine/exportPlan.ts`),
 never at the preview's: the height at which the photo lands on the sheet pixel
-for pixel. A 12 MP landscape photo on 4:5 saves at 2419×3024, the same photo
-upright at 3024×3780, a 24 MP iPhone capture on 4:5 at its own 3427×4284. A
-photo with fewer pixels than the reference height is enlarged rather than the
-print made smaller (never under 1800 px tall); a print with no photo saves at
-3600 px tall. The one ceiling is the export canvas's area, 16.7 MP: a 24 MP
-photo on its own Original sheet saves at 4729×3547, and says so.
+for pixel, whatever the photo's size. A 12 MP landscape photo on 4:5 saves at
+2419×3024, the same photo upright at 3024×3780, a 24 MP iPhone capture on 4:5
+at its own 3427×4284 and on its own Original sheet at 5712×4284; a 40 MP
+photo (7728×5152) at 7728×5152 on Original, 4122×5152 on 4:5 and 5152×5152 on
+1:1; a 61 MP one (9504×6336) at 9504×6336 on Original. A photo with fewer
+pixels than the reference height is enlarged rather than the print made
+smaller (never under 1800 px tall); a print with no photo saves at 3600 px
+tall. There is no ceiling: the print is pressed in bands and each band goes
+straight into the file (`render.ts` `pressToSink`, the encoders in
+`engine/encode/`), so nothing the sheet's size is ever made. (Until the band
+engine, the export was one canvas and was capped at its area; a 40 MP photo
+on its own sheet saved at 42% of its pixels.) The one limit left is the JPEG
+format's own: 65,535 px a side, which only a photo wider than that meets;
+Save then says so and offers the PNG, which has none.
 
 It says so **before** the tap. The More sheet's first row reads "Saves
 2419×3024", and when the print is not the photo's own pixels, why, in numbers:
-"photo is 1600×1200: upscaled 1.5x", or "capped at 16.7 MP, the most a browser
-canvas is guaranteed to hold; photo is 5712×4284". Save's own name carries the
-size ("Save 2419×3024 JPEG"), the toast repeats size and reason the moment a
-save starts, and the confirmation repeats the size. Save itself stays one word,
-so the app bar never wraps. Nothing falls back to a smaller file: a press that
-fails stops, with the reason and the numbers, and a smaller copy is only ever
-one the person chose.
+"photo is 1600×1200: upscaled 1.5x", or, zoomed in, "photo is 1600×1200 at
+300% zoom: upscaled 4.5x" (the longest reason a real document gives). Save's
+own name carries the size ("Save 2419×3024 JPEG"), the toast repeats size and
+reason the moment a save starts, and the confirmation repeats the size. Save
+itself stays one word, so the app bar never wraps. Nothing falls back to a
+smaller file: a press that fails stops, with the reason and the numbers, and
+a smaller copy is only ever one the person chose.
 
 A print at the photo's own resolution is seconds of work on a phone, so Save
 is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
 
 - **Pressing.** Save reads **Saving** before any work starts (two painted
-  frames), and the status card above the dock says "Pressing 3024×3780, plate
-  2 of 3", with **Cancel**. The press runs through `renderPrintAsync`, which
-  runs the very stages the preview runs and yields to the page between them,
-  so the progress paints and Cancel works, up to the file itself: a Cancel
-  tapped while the file is being encoded (a second or more on a phone) leaves
-  no file. The preview stops rendering meanwhile (a full-size press and a
+  frames), and the status card above the dock says what the press is doing,
+  with **Cancel**: "Pressing 7728×5152: loading the photo" (the original's
+  decode), "...: reading the photo" (its luminance, when a plate has a second
+  ink), "Pressing 7728×5152, 43%" (the bands: the percent is the band reached
+  of all of them) and "...: writing the file". The press runs through
+  `pressToSink`, which runs the very stages the preview runs and yields to the
+  page between them (after every plate of every band), so the progress paints
+  and Cancel works, up to the file itself: a Cancel tapped while the file is
+  being written leaves no file. While it presses, the app asks the screen to
+  stay on (the Wake Lock, where there is one: iOS 16.4 and later), since a
+  screen that sleeps suspends the page. The preview stops rendering meanwhile (a full-size press and a
   preview frame never hold their buffers together), and the rest of the page
   is inert (the status card and its Cancel aside), keyboard undo included, so
   the document cannot change under the press and the file is the print on
@@ -676,26 +685,40 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   the button: in a home-screen app it never falls through to a download, which
   on iOS navigates to the image and takes the app with it. On a desktop with
   no share sheet the file downloads.
-- **The file.** JPEG at quality 0.95 (measured on the harness fixture: 1.20x
-  to 1.37x the bytes of 0.92, for cleaner dot edges). Below quality 1.0
-  browsers store JPEG colour at half resolution (4:2:0), the one loss a quality
-  setting cannot remove, so **Save lossless PNG** is in the More sheet.
+- **The file.** A JPEG at quality 95 with every colour sample kept (4:4:4:
+  full-resolution colour), written by the app's own encoder
+  (`engine/encode/jpeg.ts`), band by band: a browser's own canvas encoder below
+  quality 1.0 stores the colour at half resolution (4:2:0, measured in
+  Chromium), which smears saturated ink at the dot edges, so it is not used.
+  **Save lossless PNG** in the More sheet writes every pixel exactly
+  (`engine/encode/png.ts`, compressed by the browser's `CompressionStream`;
+  where there is none, iOS before 16.4, it is stored uncompressed, about 3
+  bytes a pixel, and the PNG row says how big: "(about 120 MB)" at 40 MP).
 - **Too big for this device.** Over its limit an iOS canvas does not throw: it
-  hands back a blank one, and the print would come out as empty paper. So both
-  of the press's canvases are proved at full size before any work — a sentinel
-  pixel (rgb 1, 2, 3) written at the last pixel and read back (`fitsCanvas`,
-  `engine/export.ts`) — and a canvas that fails, an encoder that returns
-  nothing, or memory running out is one error, `CanvasLimitError`, with the
-  plan in it. Save then asks, in numbers and with the reason: "This device
-  couldn't press 2419×3024 (a canvas that size came back blank). Save a
-  smaller 1814×2268 copy instead?" (a reason in the browser's own words — "Out
-  of memory" — is shown as it came, so a fault that is not about size cannot
-  hide behind the offer). The copy offered is the
-  largest that proves itself here, stepping down by three quarters of the
-  height at a time (the sheet's shape kept) and never under 600 px; when none
-  does, it says this device cannot save the print. Nothing is pressed until the
-  person picks Save smaller, and the confirmation names what was saved
-  ("Saved 1814×2268, a smaller copy").
+  hands back a blank one, and the print would come out as empty paper. The
+  press makes no canvas wider than 4096 px or larger than 2^22 pixels (a tile)
+  and one a band tall for the photo, and each is proved at the size the press
+  will make it before any work — a sentinel pixel (rgb 1, 2, 3) written at its
+  last pixel and read back (`fitsCanvas`, `engine/export.ts`). Memory that runs
+  out for a typed array (a `RangeError`) anywhere in the press presses it again
+  from the first band in bands half as tall (the same file, more slowly), up to
+  four times, while the photo is still held. What still cannot be pressed — a
+  canvas that comes back blank, memory out at the smallest band, or an original
+  that cannot be decoded whole while a smaller decode of it can (the import
+  already read it, so that is this device's memory) — is one error,
+  `CanvasLimitError`, with the plan in it. Save then asks, in numbers and with
+  the reason: "This device couldn't press 2419×3024 (a canvas came back blank).
+  Save a smaller 1814×2268 copy instead?" (a reason in the browser's own words
+  — "Out of memory" — is shown as it came, so a fault that is not about size
+  cannot hide behind the offer). The copy offered is the largest that proves
+  itself here, its canvases first and then its photo decoded at its size,
+  stepping down by three quarters of the height at a time (the sheet's shape
+  kept) and never under 600 px; when none does, it says this device cannot
+  save the print. A file that cannot be decoded at any size is a plain failure
+  ("The photo could not be decoded to save: ..."), never an offer. Nothing is
+  pressed until the person picks Save smaller; the copy's photo is decoded
+  straight to the copy's size, once, and drawn at its own pixels; and the
+  confirmation names what was saved ("Saved 1814×2268, a smaller copy").
 - **A save that did not finish.** iOS evicts a tab that holds too much without
   a word, and the app restarts as if nothing happened. Save marks itself in
   `localStorage` before it decodes the photo (the height and the format) and
@@ -720,18 +743,17 @@ pixel at the corners, where any resampling shows.
 | 4032x3024 | 4:5 | 2419x3024 | 1.0000 | 1.0000 | 0 |
 | 6000x4500 (above the old 4096 cap) | 4:5 | 3600x4500 | 1.0000 | 1.0000 | 0 |
 | 5712x4284 (an iPhone's 24 MP) | 4:5 | 3427x4284 | 1.0000 | 1.0000 | 0 |
+| 5712x4284 | Original | 5712x4284 | 1.0000 | 1.0000 | 0 |
 | 2268x4032 (a tall 16:9), zoomed to 113% | Original | 2008x3569 | 1.0000 | 1.0000 | 0 |
 | *control: drawn half a pixel off* | 4:5 | 2419x3024 | 0.79 | 0.927 | |
 | *control: from a 2048 px copy (the old import)* | 4:5 | 2419x3024 | 0.13 | 0.875 | |
 
 The gates are a Laplacian energy (the finest detail, which any resampling takes
 down) of at least 0.98 of the original's and a correlation of at least 0.999,
-with the file the size the plan says and the stored photo the picked file byte
-for byte; the two controls are the ways this app used to draw a photo, and the
-script fails if either passes. The same 5712x4284 photo on its own Original
-sheet meets the one ceiling and is saved at 4729x3547, saying "capped
-at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is
-5712×4284". A JPEG whose EXIF says to rotate it saves upright, a PNG's
+with the file the size the plan says, the stored photo the picked file byte
+for byte, and Save's caption giving no reason; the two controls are the ways
+this app used to draw a photo, and the script fails if either passes. A JPEG
+whose EXIF says to rotate it saves upright, a PNG's
 transparent hole prints as paper (never black), a document whose stored photo
 is gone is refused rather than printed on bare paper, and the default print
 and two documents of small type correlate with themselves at twice the height
@@ -740,23 +762,38 @@ and two documents of small type correlate with themselves at twice the height
 
 `scripts/check-save.mjs` taps the same flow in the built app: a 12 MP photo on
 4:5 (Save reads Saving and the card offers Cancel within 100 ms, the card
-counts the press, the file is the size the More sheet and Save's name
-promised), a device whose canvases come back blank
-above 5 MP (the smaller-copy question before anything is pressed, then that
-file), a tab closed mid-press (the notice at the next launch, its choices
-waiting, and saying so, until the photo is back), a stored photo
-deleted (the card and Save say so, and no file), a Cancel tapped while the file is
-encoded (no file, with a share sheet or without), Ctrl+Z pressed during a
-press (the document stays as it was, and the file is that print), where
-focus is while it presses, and the gesture hint across two saves (its card
-hides, its words are not read out again).
+counts the press in percent and says when it writes the file, the file is the
+size the More sheet and Save's name promised), a device whose canvases come
+back blank wider than 2000 px (the smaller-copy question before anything is
+pressed, then that file), a tab closed mid-press (the notice at the next
+launch, its choices waiting, and saying so, until the photo is back), a stored
+photo deleted (the card and Save say so, and no file), a Cancel tapped while
+the file is written (no file, with a share sheet or without), Ctrl+Z pressed
+during a press (the document stays as it was, and the file is that print),
+where focus is while it presses, and the gesture hint across two saves (its
+card hides, its words are not read out again).
+
+#### Test seams
+
+The gates need a press slow enough to tap Cancel in, and small tiles on a small
+sheet. Save reads `globalThis.__PM_TEST__` once per press (`engine/export.ts`),
+and nothing else reads it; absent, it does nothing:
+
+- `finishDelayMs`: the file's writing waits this long after the last band
+  (check-save and verify-geometry hold it 1.5 to 3 s, as a phone's can take);
+- `onFinishStart`: called as the file's writing starts (check-save times its
+  Cancel from it);
+- `tileBudget: { edge, pixels }`: the tile grid's budget instead of 4096 and
+  2^22.
 
 ### What an export holds
 
-An export at a photo's own resolution is 11-17 MP, so every sheet-sized buffer
-would be 45-67 MB of a phone's memory, and an iPhone evicts a tab that holds
-too much. `scripts/measure-alloc.mjs` counts it exactly: it runs the export
-path in node with every typed-array constructor wrapped and, at every
+An export at a photo's own resolution is 11 to 61 MP (and more), so a
+sheet-sized buffer would be 45 to 240 MB of a phone's memory, and an iPhone
+evicts a tab that holds too much. So an export holds nothing the sheet's size
+but the decoded photo itself. `scripts/measure-alloc.mjs` counts it exactly:
+it runs the export path (`pressToSink` into the real JPEG encoder) in node
+with every typed-array constructor wrapped and, at every
 allocation of a quarter of the sheet's pixels or more and at every step of the
 press, collects the garbage and reads back what is still live — the same on
 every run, unlike a browser's resident memory. Its gate is 35 bytes per output
@@ -788,18 +825,20 @@ pixel.
   the plate's offset as it is read rather than in place, so a window of it can
   serve more than one band and is never written; and the second ink's light
   half takes the coverage's own buffer.
-- **Nothing the canvas holds is held twice.** The sheet is printed a band of
-  rows at a time into one band-sized buffer, and each band is put on the
-  canvas, instead of a full-size copy being put at the end; the knockout
-  takes the photo's alpha down as each pixel is printed, instead of on a copy
-  of the photo; every read-back of a canvas (glyphs, the photo) is done in
-  pieces of at most a megabyte, straight into a buffer made once
-  (`engine/readback.ts`).
+- **No sheet-sized canvas, no sheet-sized file buffer.** The sheet is printed
+  a band of rows at a time into one band-sized buffer, and each band goes
+  straight into the encoder (`RowSink`), which keeps an 8-row strip (JPEG) or a
+  few batches of 64 rows (PNG) and hands its file on in chunks: the file is
+  never assembled in one buffer until it is a Blob, after the photo is let
+  go. The knockout takes the photo's alpha down as each pixel is printed,
+  instead of on a copy of the photo; every read-back of a canvas (glyphs, the
+  photo) is done in pieces of at most a megabyte, straight into a buffer made
+  once (`engine/readback.ts`).
 - **Let go as soon as done.** Once the plates are pressed for the last time
-  and the photo's last rows are read, the workspace, the ground's luminance,
-  the switch mask and the tile rings are dropped, and an export's tile canvas
-  is emptied (its width set to 0), before the last rows are printed and the
-  encode.
+  and the photo's last rows are read, the decoded photo is closed, the
+  workspace, the ground's luminance, the switch mask and the tile rings are
+  dropped, and an export's canvases are emptied (their width set to 0), before
+  the last rows are printed and the file is finished.
 - **Pressed in bands, the same bytes.** The print is pressed a band of rows
   at a time (`printSheet`'s `bandRows`; by default `bandHeight`: 2^21 output
   pixels over the sheet's width, at least 32 rows, so a preview, at most a
@@ -881,26 +920,30 @@ pixel.
   keeps painting and Cancel is taken within a stage.
 
 Measured (`node scripts/measure-alloc.mjs`, `node scripts/measure-export.mjs`;
-before the diet -> after it -> pressed in bands on the tile grid; the last
-column's canvases are the sheet-sized output canvas, the largest tile and,
-for a photo at its own pixels, the band it is blitted into):
+before the diet -> after it, one canvas encoded by the browser -> pressed in
+bands into this app's encoder; the last column's canvases are the largest tile
+and, for a photo at its own pixels, the band it is blitted into, and its file
+is the JPEG's bytes as written):
 
-| Case | Sheet | Typed arrays, peak | With canvases and the decoded photo | Chromium time | Chromium RSS |
+| Case | Sheet | Typed arrays, peak | With canvases, the decoded photo and the file | Chromium time | Chromium RSS |
 |---|---|---|---|---|---|
-| 1. 12 MP portrait, 4:5, second ink | 3024x3780 | 68.4 -> 23.4 -> 6.5 B/px | 76 -> 31 -> 17.0 B/px (194 MB) | 12.5 -> 5.8 -> 4.1 s | +707 -> +311 -> +213 MB |
-| 2. 3 plates, 4 passes, 4096x4096 | 16.8 MP | 92.7 -> 25.3 -> 5.7 | 101 -> 33 -> 15.2 (255 MB) | 39.2 -> 11.9 -> 8.4 s | +1094 -> +491 -> +258 MB |
-| 3. No photo | 2880x3600 | 44.5 -> 15.4 -> 5.6 | 53 -> 23 -> 11.2 (116 MB) | 7.8 -> 3.8 -> 2.5 s | +388 -> +278 -> +174 MB |
-| 4. Grain, 4096x4096 | 16.8 MP | 68.1 -> 23.3 -> 4.5 | 76 -> 31 -> 14.0 (235 MB) | 21.7 -> 8.0 -> 5.9 s | +1104 -> +394 -> +283 MB |
-| 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 -> 7.7 | 120 -> 37 -> 17.2 (289 MB) | 65.6 -> 18.7 -> 12.7 s | +1484 -> +445 -> +288 MB |
+| 1. 12 MP portrait, 4:5, second ink | 3024x3780 | 68.4 -> 23.4 -> 7.3 B/px | 76 -> 31 -> 14.0 B/px (160 MB) | 12.5 -> 5.8 -> 5.6 s | +707 -> +311 -> +190 MB |
+| 2. 3 plates, 4 passes, 4096x4096 | 16.8 MP | 92.7 -> 25.3 -> 6.3 | 101 -> 33 -> 12.0 (201 MB) | 39.2 -> 11.9 -> 9.7 s | +1094 -> +491 -> +199 MB |
+| 3. No photo | 2880x3600 | 44.5 -> 15.4 -> 6.4 | 53 -> 23 -> 8.2 (85 MB) | 7.8 -> 3.8 -> 3.5 s | +388 -> +278 -> +170 MB |
+| 4. Grain, 4096x4096 | 16.8 MP | 68.1 -> 23.3 -> 5.1 | 76 -> 31 -> 10.8 (181 MB) | 21.7 -> 8.0 -> 6.8 s | +1104 -> +394 -> +184 MB |
+| 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 -> 8.3 | 120 -> 37 -> 14.0 (235 MB) | 65.6 -> 18.7 -> 14.9 s | +1484 -> +445 -> +232 MB |
 
 The gate is the typed-array column (35 B/px, cases 1-4); desktop Chromium's
 memory is informational (V8 frees short-lived buffers far more eagerly than an
 iPhone's JavaScriptCore), and the phone's own is a DEVICE-CHECKLIST item. The
 legacy five-plate print (kept whole: see "The plate budget") costs a third
 more typed memory than the worst print the budget allows, well inside the
-margin. Pressed in bands, what is left is mostly what does not depend on the
-press: the decoded photo (4 B a photo pixel) and the output canvas (4 B a
-sheet pixel), the one sheet-sized canvas left.
+margin. Pressed in bands, the largest part of what is left is the decoded
+photo (4 B a photo pixel), which does not depend on the press. The time is
+about the same as the browser's own canvas and encoder took: the band engine
+is faster (the halo it re-presses is a fifth of a band at these sizes), and
+this app's JPEG encoder, in JavaScript and keeping every colour sample, is
+slower than the browser's native one (about 100 ms a megapixel here).
 
 ### The same print at every size
 
@@ -1381,50 +1424,51 @@ share sheet actually puts the file in Photos" are claims only an iPhone can
 settle. See `DEVICE-CHECKLIST.md`.
 
 **Down-rezzing, in numbers.** The photo itself never is: it is stored byte
-for byte as picked, at any size. A print is saved at the photo's own pixels up
-to 16.7 MP, the one ceiling (the export canvas, below): a 12 MP photo saves at
-its own pixels on every sheet, and a 24 MP iPhone photo on 4:5 at its own
-3427×4284. Two losses remain on the default path, and Save says the first:
+for byte as picked, at any size. A print is saved at the photo's own pixels at
+any size: a 12 MP photo on every sheet, a 24 MP iPhone photo at its own
+5712×4284 on its own sheet, a 40 MP one at 7728×5152 (4122×5152 on 4:5,
+5152×5152 on 1:1), a 61 MP one at 9504×6336. The default file is a JPEG at
+quality 95 with its colour at full resolution (4:4:4), so its one loss is the
+JPEG's own quantisation (on a real print at 7.2 MP: RMSE 2.17, the largest
+error 35 levels, where a browser's 4:2:0 JPEG at the same quality errs by up
+to 112 at the dot edges); **Save lossless PNG**, in More, keeps every pixel
+exactly.
 
-- a photo over 16.7 MP on its own Original sheet saves smaller than itself —
-  a 24 MP iPhone photo (5712×4284) at 4729×3547, 69% of its pixels;
-- the default file is a JPEG at quality 0.95, which Chromium stores with its
-  colour at half resolution each way (4:2:0; Safari's is unverified).
-  **Save lossless PNG**, in More, keeps every pixel's colour. (Measured in
-  Chromium 141 on a 2419×3024 print over a photo-like ground: 5.3 MB at 0.95,
-  4:2:0; 16.7 MB at quality 1.0, the only quality it stores 4:4:4; 16.6 MB as
-  PNG.)
-
-A saved print is a few megabytes, in proportion to its pixels (on the harness
-fixture: 1.9 MB for 2419×3024, 2.8 MB for 3024×3780, against the ~300 KB the
-playbook cites for a photograph). A halftone screen over paper grain is close
+A saved print is megabytes, in proportion to its pixels (on the harness
+fixture: about 2 MB for 2419×3024 and 3 MB for 3024×3780; 11 to 38 MB for
+40 MP, between a smooth photo and a ground of pure noise; against the ~300 KB
+the playbook cites for a photograph). A halftone screen over paper grain is close
 to worst case for JPEG — high-frequency detail in every block — and lowering
 the quality to compensate smears the dots, so the size stands as a deliberate
 trade. PNG, the lossless choice, is several times larger again.
 
 **Limits.**
 
-- **16.7 MP.** The export canvas, by area (`MAX_AREA`, 16,777,216 px), is the
-  one ceiling: a print above it would need tiled rendering and a JavaScript
-  encoder, which are not built (the follow-up, if a print bigger than 16.7 MP
-  is ever wanted). The number is Borders', which also caps an edge at 4096;
-  WebKit's documented canvas limit is an area, so this app has no edge cap,
-  and nothing at all applies at import. It is not yet verified on an iPhone.
-  A wrong guess cannot break Save quietly: every canvas the press uses is
-  proved with a sentinel pixel first, and a canvas that comes back blank gets
-  the smaller-copy question, in numbers. The DEVICE-CHECKLIST experiment
-  probes the widest and tallest canvases the ceiling allows on a device.
+- **No size ceiling.** A print is pressed in bands and written as it is
+  pressed, so its size is not bounded by any canvas: the press's canvases are
+  at most 4096 px wide and 2^22 pixels (Borders' 4096 edge, which every
+  browser has honoured; an iPhone read back a sentinel at 4096x1024,
+  4096x512, 2048x2048 and 4096x4096 in the device spike), whatever the print.
+  What bounds a save is the phone's memory: the decoded photo (4 bytes a
+  pixel: 159 MB at 40 MP, 241 MB at 61 MP) and the press's buffers (about a
+  hundred megabytes at 40 MP, "What an export holds"). A device that runs out
+  gets the smaller-copy question, in numbers, never a quieter file. The only
+  format limit is the JPEG's 65,535 px a side.
 - **Colour.** A wide-gamut (Display P3) photo is converted to sRGB when it is
   decoded; the engine, its canvases and the file are sRGB. That is a gamut
   loss, not a resolution one.
-- **Metadata.** The file is a canvas encode: no ICC profile and no EXIF. The
-  photo's orientation is applied to the pixels; the camera's metadata is not
-  copied.
+- **Metadata.** The file carries no ICC profile (untagged is read as sRGB,
+  which it is) and no EXIF. The photo's orientation is applied to the pixels;
+  the camera's metadata is not copied.
 - **Unverified on a device** (claims for an iPhone to settle, in
-  DEVICE-CHECKLIST.md): how much memory a tab may hold, whether the share
-  sheet still opens after a press of several seconds (the second tap is there
-  for when it does not), Safari's JPEG chroma, EXIF orientation on the oldest
-  supported iOS, and Blobs kept in IndexedDB across launches.
+  DEVICE-CHECKLIST.md): a 40 MP photo SAVED on a phone (the device spike
+  decoded a real 40 MP camera file, portrait and EXIF-rotated, upright in
+  438 ms and drew it in 61 ms on an iPhone with iOS 18.7; no full Save has
+  run there yet), how much memory a
+  tab may hold during a 40 MP save, how long one takes, whether the share
+  sheet still opens after a press of a minute (the second tap is there for
+  when it does not), EXIF orientation on the oldest supported iOS, and Blobs
+  kept in IndexedDB across launches.
 
 ## Removed on purpose
 
@@ -1498,6 +1542,10 @@ another project, and says so:
   term is the conversion's `- 128`. **This software is based in part on the
   work of the Independent JPEG Group.** The IJG's README, with its copyright
   and no-warranty notice unaltered, is `src/engine/encode/IJG-README.txt`.
+  The deployed site, whose Save writes every JPEG with this encoder, ships the
+  same sentence and that README beside the app (`public/licences.txt`, served
+  as `licences.txt`), the documentation the IJG's licence asks for where only
+  the program is distributed.
   The rest of the encoder is written from ITU-T T.81 (the Annex K
   quantisation and Huffman tables are the standard's data); the DCT's
   algorithm is Arai, Agui and Nakajima's (Trans. IEICE E-71(11):1095), as
@@ -1517,8 +1565,8 @@ heuristic), compressed by the browser's own `CompressionStream`, or, where
 there is none (Safari before 16.4), stored uncompressed in deflate's stored
 blocks (about 3 bytes a pixel, `storedSize`). check-encode decodes both to
 the input exactly; compressed, its file is 0.69 to 0.72 times the size of
-Chromium's own PNG of the same pixels. Save does not use either encoder yet:
-it still encodes the canvas.
+Chromium's own PNG of the same pixels. Save writes every file with them,
+band by band (`savePrint`, `engine/export.ts`).
 
 Both allocate once (`src/engine/encode/alloc.test.ts`, at 7728 px wide in
 bands of 271): once made, the only arrays either makes are pieces of the
@@ -1528,8 +1576,9 @@ the band height it is told (`bandRows`: 6 batches, 8.9 MB, at 7728 px wide);
 a batch is filled again once its write to the `CompressionStream` has
 resolved, which the Compression Streams standard makes the moment the
 compressor has read it. The standard requires that; Chromium is checked by
-`check:encode`, WebKit by the device spike's compressor row (`(f)`), and
-node's does not follow it (it can resolve first and read later), so the
+`check:encode`, WebKit by the device spike's compressor row (`(f)`: exact,
+20 of 20 round trips, on an iPhone with iOS 18.7), and node's does not follow
+it (it can resolve first and read later), so the
 encoder also compares the zlib stream's closing Adler-32 with that of the
 batches it handed over, and refuses the file rather than write a wrong one. A compressed chunk is handed on
 between its IDAT header and CRC as it came, and a stored block is written in

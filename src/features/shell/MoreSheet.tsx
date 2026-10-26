@@ -21,6 +21,7 @@ export default function MoreSheet({
   open,
   onClose,
   caption,
+  pngSize,
   swState,
   canSavePng,
   onSavePng,
@@ -29,6 +30,9 @@ export default function MoreSheet({
   onClose: () => void
   /** What Save makes, or why it cannot (useSave.ts moreCaption). */
   caption: MoreCaption
+  /** What the lossless PNG makes ("2419×3024", and its file's size where it
+   *  is stored uncompressed); null when no size is promised. */
+  pngSize: string | null
   swState: SWState
   canSavePng: boolean
   onSavePng: () => void
@@ -67,7 +71,7 @@ export default function MoreSheet({
       >
         <Icon name="download" />
         Save lossless PNG
-        {caption.size && <span className="menu__meta num">{caption.size}</span>}
+        {caption.size && pngSize && <span className="menu__meta num">{pngSize}</span>}
       </button>
     </ActionSheet>
   )

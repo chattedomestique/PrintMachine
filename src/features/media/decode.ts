@@ -1,26 +1,28 @@
 /**
- * Decoding a stored photo, three ways, one rule each.
+ * Decoding a stored photo, four ways, one rule each.
  *
  *  - At import, in full, only to learn its true size the right way up (and
  *    that this browser can read it at all); the decode is closed at once.
  *  - For the preview, a WORKING copy as large as the preview needs at the
  *    photo's zoom (`previewArea`): 4 MP at 100%, more as the person zooms in
- *    to crop, never more than MAX_AREA or the photo itself. The preview is at
+ *    to crop, never more than PREVIEW_PHOTO_AREA_LARGEST or the photo itself. The preview is at
  *    most a megapixel on screen, and a 24 MP photo held decoded for it at
  *    100% would be 98 MB of the phone's memory for pixels nobody sees.
  *    Geometry never reads this copy's size — the cover fit, the pan and the
  *    export plan all use the photo's TRUE size from the document, and the
  *    copy is drawn scaled into that same rectangle.
  *  - For Save, the ORIGINAL in full, so the print is drawn from the original's
- *    pixels, never from the preview's copy. Closed as soon as the ground is
- *    drawn.
+ *    pixels, never from the preview's copy. Closed as soon as its last rows
+ *    are in the print.
+ *  - For a smaller copy the person chose, the photo decoded straight to the
+ *    copy's rectangle (`decodeResized`), so it is resampled once, by the
+ *    decoder, and drawn 1:1.
  *
  * Every decode applies the photo's EXIF orientation, so the size the document
  * stores and every bitmap drawn from it agree on which way up it is.
  */
 
 import { MissingPhotoError } from '../../engine/export.ts'
-import { MAX_AREA } from '../../engine/limits.ts'
 import { previewSize } from '../../engine/render.ts'
 import { getMedia } from '../../state/mediaStore.ts'
 
@@ -34,9 +36,17 @@ import { getMedia } from '../../state/mediaStore.ts'
 export const PREVIEW_PHOTO_AREA = 4_194_304
 
 /**
+ * The largest working copy the preview decodes, zoomed far in: 16,777,216 px
+ * (16.8 MP, 67 MB). A memory bound for the preview alone; the print is pressed
+ * from the original, whatever its size.
+ */
+export const PREVIEW_PHOTO_AREA_LARGEST = 16_777_216
+
+/**
  * The working copy's size for a photo at its zoom on a sheet: enough pixels
  * that the preview shows the photo one copy pixel or more to each preview
- * pixel, in tiers that double from PREVIEW_PHOTO_AREA up to MAX_AREA (4.2,
+ * pixel, in tiers that double from PREVIEW_PHOTO_AREA up to
+ * PREVIEW_PHOTO_AREA_LARGEST (4.2,
  * 8.4, 16.8 MP; a photo smaller than its tier is decoded as it is).
  *
  * Zooming in to crop is ordinary, and a copy fixed at 4 MP went soft under the
@@ -58,7 +68,7 @@ export function previewArea(photo: { width: number; height: number; scale: numbe
   const s = Math.max(w / mw, h / mh) * Math.max(1, photo.scale)
   const needed = mw * mh * s * s
   let area = PREVIEW_PHOTO_AREA
-  while (area < needed && area < MAX_AREA) area = Math.min(MAX_AREA, area * 2)
+  while (area < needed && area < PREVIEW_PHOTO_AREA_LARGEST) area = Math.min(PREVIEW_PHOTO_AREA_LARGEST, area * 2)
   return area
 }
 
@@ -106,14 +116,49 @@ export async function decodePreview(id: string, width: number, height: number, a
   return bmp
 }
 
-/** The original, in full, for Save. The caller closes it. A failure says
- *  which photo step failed, with the browser's reason. */
+/** A decode for Save that failed: which photo step, with the browser's own
+ *  reason (`reason`, e.g. WebKit's "Cannot create an image buffer from the
+ *  argument to createImageBitmap"). */
+export class PhotoDecodeError extends Error {
+  constructor(readonly reason: string) {
+    super(`The photo could not be decoded to save: ${reason}`)
+    this.name = 'PhotoDecodeError'
+  }
+}
+
+const reasonOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+/** The original, in full, for Save. The caller closes it. */
 export async function decodeOriginal(id: string): Promise<ImageBitmap> {
   const blob = await getMedia(id)
   if (!blob) throw new MissingPhotoError()
   try {
     return await decodeOriented(blob)
   } catch (err) {
-    throw new Error(`The photo could not be decoded to save: ${err instanceof Error ? err.message : String(err)}`)
+    throw new PhotoDecodeError(reasonOf(err))
   }
+}
+
+/**
+ * The photo decoded straight to `width` x `height` (its oriented shape at
+ * that size), for a smaller copy: one resample, by the decoder, at 'high'.
+ * Unlike the preview's copy it has no fallback to a full decode (the very
+ * thing that may just have failed): a decode of any other size is an error.
+ * The caller closes it.
+ */
+export async function decodeResized(id: string, width: number, height: number): Promise<ImageBitmap> {
+  const blob = await getMedia(id)
+  if (!blob) throw new MissingPhotoError()
+  let bmp: ImageBitmap
+  try {
+    bmp = await createImageBitmap(blob, { imageOrientation: 'from-image', resizeWidth: width, resizeHeight: height, resizeQuality: 'high' })
+  } catch (err) {
+    throw new PhotoDecodeError(reasonOf(err))
+  }
+  if (bmp.width !== width || bmp.height !== height) {
+    const got = `${bmp.width}×${bmp.height}`
+    bmp.close()
+    throw new PhotoDecodeError(`it decoded at ${got}, not the ${width}×${height} asked for`)
+  }
+  return bmp
 }

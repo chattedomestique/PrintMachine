@@ -153,8 +153,9 @@ async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format
   const plan = planPrint(s)
   const original = await decodeOriginal(layer.id)
   const t0 = performance.now()
-  // The two canvases as Save makes them (useSave.ts).
-  const pressed = await savePrint(canvas(0, 0, false), canvas(0, 0), s, original, { format, onGround: () => original.close() })
+  // As Save presses it (useSave.ts): its own canvases, the photo closed once
+  // its last rows are in the print.
+  const pressed = await savePrint(s, original, { format, onGround: () => original.close() })
   const ms = performance.now() - t0
   return { layer, byteForByte, s, plan, pressed, ms }
 }
@@ -337,8 +338,13 @@ async function missingPhoto() {
   )
   const s = photoOnly(layer, '4:5')
   s.layers = defaultSettings().layers
-  const out = canvas(0, 0)
-  const saveError = await savePrint(out, canvas(0, 0), s, null).then(
+  let canvases = 0
+  const saveError = await savePrint(s, null, {
+    makeCanvas: () => {
+      canvases++
+      return canvas(0, 0)
+    },
+  }).then(
     () => null,
     (e: unknown) => e,
   )
@@ -346,8 +352,8 @@ async function missingPhoto() {
     decodeRefused: decodeError instanceof MissingPhotoError,
     saveRefused: saveError instanceof MissingPhotoError,
     message: saveError instanceof Error ? saveError.message : null,
-    // Refused before any canvas was sized: nothing was pressed.
-    canvasTouched: out.canvas.width !== 0,
+    // Refused before any canvas was made: nothing was pressed.
+    canvasTouched: canvases !== 0,
   }
 }
 

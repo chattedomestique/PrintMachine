@@ -3,7 +3,8 @@ import Canvas from '../editor/Canvas.tsx'
 import Controls from '../controls/Controls.tsx'
 import { FIRST_SUBS, TOOLS, type Subs, type ToolId } from '../controls/tools.ts'
 import { Icon } from '../../ui/ui.tsx'
-import { describePlan, planPrint } from '../../engine/export.ts'
+import { describePlan, fileSize, planPrint } from '../../engine/export.ts'
+import { pngCompresses, storedSize } from '../../engine/encode/png.ts'
 import { sheetAspect } from '../../engine/types.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
@@ -218,6 +219,11 @@ export default function AppShell() {
   // own pixels. Said in the More sheet (unless the photo cannot be loaded:
   // moreCaption), in Save's name, and in the toast when a save starts.
   const caption = useMemo(() => describePlan(planPrint(settings), settings.media), [settings])
+  // The lossless PNG's: the same but past a JPEG's edge (65,535 px), and its
+  // file's size where this browser cannot compress (stored, 3 bytes a pixel).
+  const pngPlan = useMemo(() => planPrint(settings, { format: 'png' }), [settings])
+  const pngCaption = useMemo(() => describePlan(pngPlan, settings.media), [pngPlan, settings.media])
+  const pngMeta = pngCompresses() ? pngCaption.size : `${pngCaption.size} (about ${fileSize(storedSize(pngPlan.width, pngPlan.height))})`
   const button = saveButton(save.state, mediaState)
   const status = saveStatus(save.state, mediaState)
   // A save that cannot go on unasked: a print too big for this device, or one
@@ -226,7 +232,8 @@ export default function AppShell() {
 
   const startSave = (format: 'jpeg' | 'png') => {
     if (!canStart(save.state, mediaState)) return
-    announce(`Saving ${caption.size} ${format.toUpperCase()}${caption.reason ? `: ${caption.reason}` : ''}`, 'info')
+    const c = format === 'png' ? pngCaption : caption
+    announce(`Saving ${c.size} ${format.toUpperCase()}${c.reason ? `: ${c.reason}` : ''}`, 'info')
     void save.start(format)
   }
   const onSave = () => {
@@ -438,6 +445,7 @@ export default function AppShell() {
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
         caption={moreCaption(mediaState, caption, settings.media !== null)}
+        pngSize={mediaState === 'failed' ? null : pngMeta}
         swState={swState}
         canSavePng={canStart(save.state, mediaState)}
         onSavePng={() => startSave('png')}
@@ -449,8 +457,8 @@ export default function AppShell() {
         canAnswer={canStart(save.state, mediaState)}
         onAnswer={(height) => {
           // The size the answer saves, said as the save starts.
-          const c = describePlan(planPrint(settings, { maxHeight: height }), settings.media)
           const format = save.state.kind === 'tooBig' || save.state.kind === 'interrupted' ? save.state.format : 'jpeg'
+          const c = describePlan(planPrint(settings, { maxHeight: height, format }), settings.media)
           announce(`Saving ${c.size} ${format.toUpperCase()}${c.reason ? `: ${c.reason}` : ''}`, 'info')
           save.answer(height)
         }}

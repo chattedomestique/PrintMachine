@@ -47,7 +47,7 @@ import { LumaAccumulator, SWITCH_BAND, bandMask, coverRect, sampleLumaRows, snap
 import { drawBacking, drawGlyphs, planGlyphs, plateFontSize, rasterizeBacking, rasterizeText, type GlyphPlan, type SheetPart } from './text.ts'
 import { readAlpha, readRgba } from './readback.ts'
 import { TILE_BUDGET, TileRowCache, ringRows, rowsFromTiles, tileAt, tileGrid, type TileBudget, type TileGrid } from './tiles.ts'
-import { REFERENCE_HEIGHT, bandHeight, passCount } from './limits.ts'
+import { REFERENCE_HEIGHT, bandHeight } from './limits.ts'
 import { sheetAspect, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
@@ -432,7 +432,7 @@ export function pressPlate(
    *  default. */
   ws: Workspace = makeWorkspace(h, w),
 ): PressedPlate {
-  return drain(pressWholeSteps(plate, index, s, seed, noise, w, h, ws, { step: 'press', pass: index + 1, passes: index + 1 }))
+  return drain(pressWholeSteps(plate, index, s, seed, noise, w, h, ws, { step: 'press', band: 0, bands: 1 }))
 }
 
 /** `pressPlate`, in stages (see `pressPlateBandSteps`). */
@@ -623,7 +623,7 @@ export function pressPlateBand(
   out: Uint8ClampedArray,
   opts: { cuts: boolean; grain?: GrainStream; torn?: RowWindow },
 ): PlateBand {
-  return drain(pressPlateBandSteps(plate, index, s, seed, noise, w, h, band, ws, out, opts, { step: 'press', pass: index + 1, passes: index + 1 }))
+  return drain(pressPlateBandSteps(plate, index, s, seed, noise, w, h, band, ws, out, opts, { step: 'press', band: 0, bands: 1 }))
 }
 
 /**
@@ -822,23 +822,25 @@ const rowsOfTone = (t: PlateTone, w: number): ToneRows => ('rows' in t ? t.rows 
 
 /**
  * Where a render has got to. Reported between its stages, which is where an
- * export yields to the page (`renderPrintAsync`): before the photo is laid
- * down, before each pass on the press and between its slow steps (after the
- * tear, after the wear, after the switch's luminance), and between bands of
- * the final print.
+ * export yields to the page (`pressToSink`, `renderPrintAsync`): at every
+ * band of the photo's luminance pass, before each pass on the press and
+ * between its slow steps (after the tear, after the wear, after the switch's
+ * luminance), and before each band's rows are printed.
  */
 export interface RenderProgress {
-  /** `photo`: laying the photo down; `press`: a pass on the press; `print`:
-   *  printing the passes onto the sheet. */
-  step: 'photo' | 'press' | 'print'
-  /** The pass being pressed, from 1, and how many there are (a backing is a
-   *  pass of its own). While printing, `pass` is `passes`. */
-  pass: number
-  passes: number
-  /** The band of rows being pressed or printed, from 0, of `bands`: every
-   *  band presses every pass and prints its rows. */
-  band?: number
-  bands?: number
+  /**
+   *  - `photo`: reading the photo, a band at a time, for the second ink's
+   *    luminance (before the first band is pressed; only when a plate has a
+   *    second ink over a photo);
+   *  - `press`: pressing and printing band `band`;
+   *  - `write`: every band done, the file being written (said by the save,
+   *    not the engine).
+   */
+  step: 'photo' | 'press' | 'write'
+  /** The band of rows, from 0, of `bands`: every band presses every pass and
+   *  prints its rows. */
+  band: number
+  bands: number
 }
 
 /** Rows of the sheet printed between two yields: about a million pixels, a
@@ -907,17 +909,23 @@ export interface PrintOptions {
   /** Every band's planes as they are composited, rows [y0, y1) of the sheet
    *  from row y0 on (the harness's seam report reads what was inked). */
   onBand?: (layers: readonly CompositeLayer[], y0: number, y1: number) => void
+  /** Where the photo's luminance grid is kept between two presses of the
+   *  same print (a save's retry at a smaller band): taken from here when it
+   *  is there, left here when it is made. It does not depend on the band. */
+  luma?: { grid?: LumaGrid }
 }
 
 /**
  * The ground's luminance grid (media.ts LumaGrid), gathered from every band
- * of the photo in turn. A full-size blur (cell 1) takes the workspace when it
- * is the sheet's size (one band), as it always has; a smaller one leaves it
- * its own.
+ * of the photo in turn, yielding at each. A full-size blur (cell 1) takes the
+ * workspace when it is the sheet's size (one band), as it always has; a
+ * smaller one leaves it its own.
  */
-function groundLuminance(ground: GroundRows, w: number, h: number, B: number, radius: number, ws: Workspace): LumaGrid {
+function* groundLuminance(ground: GroundRows, w: number, h: number, B: number, radius: number, ws: Workspace): Generator<RenderProgress, LumaGrid> {
   const acc = new LumaAccumulator(w, h, radius)
+  const bands = Math.ceil(h / B)
   for (let y0 = 0; y0 < h; y0 += B) {
+    yield { step: 'photo', band: y0 / B, bands }
     const y1 = Math.min(h, y0 + B)
     acc.addRows(ground.rows(y0, y1), y0, y1)
   }
@@ -1011,7 +1019,6 @@ export function* printSheetSteps(
 ): Generator<RenderProgress, CompositeLayer[]> {
   const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? bandHeight(w, h))))
   const bands = Math.ceil(h / B)
-  const passes = passCount(s)
   const scale = h / REFERENCE_HEIGHT
   const groundRows = ground instanceof Uint8ClampedArray ? wholeGround(ground, w) : ground
 
@@ -1086,7 +1093,10 @@ export function* printSheetSteps(
   // frame keeps every local it ever set, so a block-scoped accumulator or
   // buffer here would be held through every band and the print.)
   const firstSplit = plates.find((p) => p.split)
-  let lumaGrid = firstSplit && groundRows ? groundLuminance(groundRows, w, h, B, Math.max(2, firstSplit.fontSize * 1.5), ws) : undefined
+  let lumaGrid = firstSplit && groundRows ? (opts.luma?.grid ?? (yield* groundLuminance(groundRows, w, h, B, Math.max(2, firstSplit.fontSize * 1.5), ws))) : undefined
+  // Kept for a press run again (a retry at another band height): the grid
+  // does not depend on the band.
+  if (opts.luma && lumaGrid) opts.luma.grid = lumaGrid
 
   // The screen index every switch mask is made at: the first one's (its
   // index + 1: the pass after it, as it always was). A mask is then a
@@ -1123,7 +1133,7 @@ export function* printSheetSteps(
   // generator's own locals would stay held, in its suspended frame, through
   // every later band and the print.
   function* pressBand(p: Plate, y0: number, y1: number, band: number): Generator<RenderProgress, void> {
-    const at: RenderProgress = { step: 'press', pass: p.index + 1, passes, band, bands }
+    const at: RenderProgress = { step: 'press', band, bands }
     yield at
     p.tone ??= rowsOfTone(p.kind === 'type' ? tones.type(p.layer) : tones.backing(p.layer), w)
     const pressed = yield* pressPlateBandSteps(
@@ -1271,7 +1281,7 @@ export function* printSheetSteps(
     // ever a band of shade, and the printed pixels only ever a band before
     // they are on the canvas.
     for (let p0 = y0; p0 < y1; p0 += shadeRows) {
-      yield { step: 'print', pass: passes, passes, band, bands }
+      yield { step: 'press', band, bands }
       const p1 = Math.min(y1, p0 + shadeRows)
       let paper: PaperInput
       if (sampled && shade) {
@@ -1324,7 +1334,7 @@ export function isNativeRect(r: DrawRect, mw: number, mh: number): boolean {
 
 /** The pixel size of something drawImage draws, when it says (an ImageBitmap,
  *  a canvas, an image); 0 when it does not. */
-function sourceSize(media: CanvasImageSource): { width: number; height: number } {
+export function sourceSize(media: CanvasImageSource): { width: number; height: number } {
   const m = media as { width?: unknown; height?: unknown }
   return { width: typeof m.width === 'number' ? m.width : 0, height: typeof m.height === 'number' ? m.height : 0 }
 }
@@ -1532,6 +1542,12 @@ export interface ExportPressOptions {
   /** The plates' layouts, by layer id: made on first use and kept here, so
    *  a press run again (a retry) does not lay the type out again. */
   plans?: Map<string, GlyphPlan>
+  /** See PrintOptions.luma. */
+  luma?: PrintOptions['luma']
+  /** Where the photo lands, when not where the document puts it: a smaller
+   *  copy, decoded to the integer rectangle it fills (media.ts
+   *  `snapCopyRect`), so it is drawn at its own pixels. */
+  rect?: DrawRect
 }
 
 /**
@@ -1558,8 +1574,7 @@ function* exportSteps(
   let ground: GroundRows | undefined
   let piece: CanvasRenderingContext2D | null = null
   if (media && s.media) {
-    yield { step: 'photo', pass: 0, passes: passCount(s) }
-    const r = groundRect(s.media, w, h)
+    const r = opts.rect ?? groundRect(s.media, w, h)
     const size = sourceSize(media)
     if (isNativeRect(r, size.width, size.height)) {
       if (!canvases.piece) throw new Error('A photo at its own pixels is pressed a band at a time, on a canvas the export hands over.')
@@ -1576,6 +1591,7 @@ function* exportSteps(
     bandRows: B,
     onGround: opts.onGround,
     onBand: opts.onBand,
+    luma: opts.luma,
     // The tiles are done once the plates are and the photo is read: the
     // rings and the tile canvas go before the last rows are printed.
     onPressed: () => {
@@ -1628,17 +1644,18 @@ export interface AsyncRenderOptions extends ExportPressOptions {
 }
 
 /**
- * Render a full print for an export: the export's press (`exportSteps`: the
- * band engine on the tile grid), painted into `ctx` a band at a time, with a
- * yield to the event loop between its steps, so a render of many seconds
- * leaves the page able to paint its progress and take a Cancel. Never an
+ * Render a full print for the parity gate and the harness: the export's
+ * press (`exportSteps`: the band engine on the tile grid, what Save runs
+ * through `pressToSink`), painted into `ctx` a band at a time instead of
+ * encoded, with a yield to the event loop between its steps. Never an
  * overlay, and no cache: a one-shot render reads its noise where it prints it
  * (bit for bit the preview's arrays) and keeps nothing for a next frame.
  *
  * On a sheet of one tile (up to 4.19 MP, at most 4096 wide: every height the
  * preview and the harness record) it prints exactly the pixels the preview
  * does (harness `--parity`). Above that the export rasterises type on the
- * tile grid, which the preview never does (README "Pressed in bands").
+ * tile grid, which the preview never does (README "The glyphs and a resampled
+ * photo on a tile grid").
  *
  * @param scratch the tile canvas (`ExportCanvases.tile`).
  */
@@ -1658,7 +1675,65 @@ export async function renderPrintAsync(
   const rows = Math.max(1, Math.min(h, Math.floor(PRINT_BAND_PIXELS / w)))
   const image = ctx.createImageData(w, rows)
   const out: SheetOutput = { band: image.data, rows, put: (y0, y1) => ctx.putImageData(image, 0, y0, 0, 0, w, y1 - y0) }
-  const steps = exportSteps(out, s, height, media, { tile: scratch, piece: opts.makeCanvas }, opts)
+  await drive(exportSteps(out, s, height, media, { tile: scratch, piece: opts.makeCanvas }, opts), opts)
+}
+
+/**
+ * Where an export's printed rows go, a band at a time: the save's encoder.
+ *
+ *  - `put(rgba, rows)` takes `rows` rows of RGBA from `rgba[0]` BEFORE it
+ *    returns: the band buffer is reused at once;
+ *  - `settled()` resolves once what was put has been taken (a compressor's
+ *    backpressure: the press waits on it after every step, so at most a band
+ *    is ever queued);
+ *  - `finish()` ends the file; `abort()` drops it and leaves nothing pending.
+ */
+export interface RowSink {
+  put(rgba: Uint8ClampedArray, rows: number): void
+  settled(): Promise<void>
+  finish(): Promise<void>
+  abort(): void
+}
+
+export interface PressOptions extends ExportPressOptions {
+  /** Checked at every step; once aborted, the press stops there and rejects
+   *  with an AbortError. */
+  signal?: AbortSignal
+  /** Where the press has got to, at every step. */
+  onProgress?: (progress: RenderProgress) => void
+  /** What the press draws on. */
+  canvases: ExportCanvases
+}
+
+/**
+ * Press a print for Save: the export's press (`exportSteps`), its printed
+ * rows handed to `sink` a band at a time, with a yield to the page and the
+ * sink's backpressure awaited between its steps, so a press of minutes leaves
+ * the page painting its progress and taking a Cancel. No canvas, array or
+ * file buffer of the sheet's size: the band buffer here (`bandRows` rows) is
+ * the only output the press holds. `sink.finish()` is the caller's.
+ */
+export async function pressToSink(
+  s: PrintSettings,
+  height: number,
+  media: CanvasImageSource | null,
+  sink: RowSink,
+  opts: PressOptions,
+): Promise<void> {
+  const { w, h } = outputSize(sheetAspect(s), height)
+  const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? bandHeight(w, h))))
+  const band = new Uint8ClampedArray(B * w * 4)
+  const out: SheetOutput = { band, rows: B, put: (y0, y1) => sink.put(band.subarray(0, (y1 - y0) * w * 4), y1 - y0) }
+  await drive(exportSteps(out, s, height, media, opts.canvases, { ...opts, bandRows: B }), opts, () => sink.settled())
+}
+
+/** Run a press's steps, yielding to the page (and awaiting `settled`, when
+ *  given) after every one; stopped by the signal. */
+async function drive(
+  steps: Generator<RenderProgress, void>,
+  opts: { signal?: AbortSignal; onProgress?: (progress: RenderProgress) => void },
+  settled?: () => Promise<void>,
+): Promise<void> {
   try {
     for (;;) {
       throwIfAborted(opts.signal)
@@ -1666,9 +1741,10 @@ export async function renderPrintAsync(
       if (next.done) return
       opts.onProgress?.(next.value)
       await yieldToPage()
+      if (settled) await settled()
     }
   } finally {
-    // An abandoned render runs its generator's cleanup too.
+    // An abandoned press runs its generator's cleanup too.
     steps.return(undefined)
   }
 }
@@ -1710,7 +1786,7 @@ function* previewSteps(
   // immediately after.
   let ground: Uint8ClampedArray | undefined
   if (media && s.media) {
-    yield { step: 'photo', pass: 0, passes: passCount(s) }
+    yield { step: 'photo', band: 0, bands: 1 }
     drawGroundPart(scratch, media, groundRect(s.media, w, h), { x0: 0, y0: 0, w, h })
     ground = new Uint8ClampedArray(w * h * 4)
     readRgba(scratch, w, h, ground, w)

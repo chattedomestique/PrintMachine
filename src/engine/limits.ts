@@ -6,7 +6,9 @@
  * import from `features/`. The normaliser reads them from here as well, so a
  * stored value, a fitted value and a gesture can never disagree about what a
  * valid size is. The export's numbers live here for the same reason: the
- * planner (exportPlan.ts) and the renderer must agree on them.
+ * planner (exportPlan.ts), the band engine and the save must agree on them.
+ * There is no ceiling on a print's size: it is pressed in bands and encoded
+ * as it is pressed, so nothing of the sheet's size is ever made.
  */
 
 /**
@@ -16,17 +18,6 @@
  * however few pixels its photo has.
  */
 export const REFERENCE_HEIGHT = 1800
-
-/**
- * The export canvas's ceiling, by AREA: 16,777,216 px (4096 x 4096), the most
- * a browser canvas is guaranteed to hold — WebKit's documented limit is an
- * area. Over it, an iOS canvas does not throw; it hands back a blank one.
- * There is no separate edge cap: a 3:1 sheet may be 7092 px wide. The photo
- * itself is never capped (it is stored as imported); only the sheet it is
- * pressed into is. Exporting above this needs tiled rendering and a JS
- * encoder, which are not built.
- */
-export const MAX_AREA = 16_777_216
 
 /**
  * The band engine's knobs. Every one is a MEMORY or SPEED knob: no value of

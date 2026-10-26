@@ -11,6 +11,8 @@
  *   node scripts/harness/run.mjs --out b.json --no-hashes --bands 1,7,97,full --heights 600,1000   (the export pressed in bands of
  *       each height gives the same bytes as pressed whole; bands of 1 and 7 only at heights up to 600; exits 1 if any differ)
  *   ... --bands 1,7,97,full --tile 512,65536   (the same on a grid of forced 512x128 tiles: --tile edge,pixels)
+ *   node scripts/harness/run.mjs --out f.json --no-hashes --file-parity 1000 --retry   (P-5: the real savePrint's PNG decodes to
+ *       the export entry's canvas, every document; P-6: a RangeError injected once at set-up and once mid-press gives the same file)
  *   node scripts/harness/run.mjs --out s.json --no-hashes --seam photo-second-ink@3000,default@3600 [--tile 512,65536]
  *       (tiles against one canvas: the export on the tile grid, the real one or --tile's, against the same on a single tile;
  *       prints the differing pixels against the inked ones and the plates whose box crosses a seam; exits 1 outside the bounds)
@@ -34,7 +36,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 function parseArgs(argv) {
-  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], seam: [], parity: null, bands: null, tile: null, photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
+  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], seam: [], parity: null, fileParity: null, retry: false, bands: null, tile: null, photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -48,6 +50,8 @@ function parseArgs(argv) {
     else if (a === '--time') opts.time.push(next())
     else if (a === '--scale') opts.scale.push(...next().split(','))
     else if (a === '--parity') opts.parity = Number(next())
+    else if (a === '--file-parity') opts.fileParity = Number(next())
+    else if (a === '--retry') opts.retry = true
     else if (a === '--bands') opts.bands = next().split(',').map((b) => (b === 'full' ? null : Number(b)))
     else if (a === '--tile') opts.tile = next().split(',').map(Number)
     else if (a === '--seam') opts.seam.push(...next().split(','))
@@ -126,6 +130,8 @@ const result = {
   timings: {},
   scale: {},
   parity: {},
+  fileParity: {},
+  retry: {},
   bands: {},
   seam: {},
 }
@@ -184,6 +190,45 @@ try {
       }
       result.parity[`${doc}@${opts.parity}`] = { sync: a.sha256, async: b.sha256, same }
       console.log(`parity ${doc}@${opts.parity}`.padEnd(32), same ? 'SAME' : 'DIFFERS', a.sha256.slice(0, 12), b.sha256.slice(0, 12))
+    }
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
+  if (opts.fileParity) {
+    // P-5: the file is the canvas. The real savePrint as a PNG no taller than
+    // the height, decoded, against the export entry at the same height.
+    const { page, errors } = await openPage()
+    const docs = opts.docs ?? (await page.evaluate(() => window.H.docs))
+    for (const doc of docs) {
+      const r = await page.evaluate(([d, h]) => window.H.fileParity(d, h), [doc, opts.fileParity])
+      if (!r.same) {
+        failed = true
+        failure = 'a saved file is not the print the export entry paints'
+      }
+      result.fileParity[`${doc}@${opts.fileParity}`] = r
+      console.log(`file ${doc}@${opts.fileParity}`.padEnd(32), r.same ? 'SAME' : 'DIFFERS', `${r.w}x${r.h}`, r.file.slice(0, 12), r.canvas.slice(0, 12))
+    }
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
+  if (opts.retry) {
+    // P-6: an allocation that fails once, at set-up or mid-press, is pressed
+    // again in bands half as tall: the same file.
+    const { page, errors } = await openPage()
+    for (const [doc, h] of [['photo-second-ink', 3000], ['grain-photo', 3000], ['default', 3600]]) {
+      for (const at of ['setup', 'mid']) {
+        const r = await page.evaluate(([d, hh, a]) => window.H.retry(d, hh, a), [doc, h, at])
+        // Pressed again in bands half as tall: more of them.
+        const ok = r.same && r.thrown && r.faultedBands > r.cleanBands
+        if (!ok) {
+          failed = true
+          failure = 'a press that ran out of memory once did not give the same file'
+        }
+        result.retry[`${doc}@${h} ${at}`] = r
+        console.log(`retry ${doc}@${h} ${at}`.padEnd(32), ok ? 'SAME' : 'FAILED', `${r.cleanBands} bands, after the fault ${r.faultedBands}`, r.clean.slice(0, 12), r.faulted.slice(0, 12))
+      }
     }
     if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
     await page.close()

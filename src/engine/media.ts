@@ -218,6 +218,20 @@ export function snapRect(r: DrawRect, mw: number, mh: number, sheetW: number, sh
   }
 }
 
+/**
+ * The rectangle a smaller copy is drawn at: the photo's rectangle on the
+ * smaller sheet (`r`, from the cover fit: fractional), rounded UP to whole
+ * pixels and placed at a whole-pixel offset, kept covering the sheet. The
+ * copy's photo is decoded at exactly this size (decode.ts `decodeResized`)
+ * and drawn 1:1, so a smaller copy is resampled once, by the decoder, and
+ * never again by a fractional blit.
+ */
+export function snapCopyRect(r: DrawRect, sheetW: number, sheetH: number): DrawRect {
+  const dw = Math.max(Math.ceil(r.dw - 1e-9), sheetW)
+  const dh = Math.max(Math.ceil(r.dh - 1e-9), sheetH)
+  return { dx: clampTo(Math.round(r.dx), sheetW - dw, 0), dy: clampTo(Math.round(r.dy), sheetH - dh, 0), dw, dh }
+}
+
 /** Rec. 709 luma, 0..1. The channel weights a print separation actually uses. */
 export function luma(r: number, g: number, b: number): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255

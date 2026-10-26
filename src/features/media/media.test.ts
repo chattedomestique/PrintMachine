@@ -11,8 +11,7 @@ import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { SWEEP_AFTER_MS, mediaCreatedAt, sweepMedia, type SweepStore } from '../../state/mediaStore.ts'
 import { isReducedCopy } from '../../engine/media.ts'
 import { importMedia, type ImportDeps } from './importMedia.ts'
-import { PREVIEW_PHOTO_AREA, previewArea, workingSize } from './decode.ts'
-import { MAX_AREA } from '../../engine/limits.ts'
+import { PREVIEW_PHOTO_AREA, PREVIEW_PHOTO_AREA_LARGEST, previewArea, workingSize } from './decode.ts'
 import { coverRect } from '../../engine/media.ts'
 import { previewSize } from '../../engine/render.ts'
 import { mulberry32 } from '../../engine/rng.ts'
@@ -154,11 +153,11 @@ describe("the preview's working copy follows the zoom", () => {
     expect(row(1.78)).toEqual({ width: 3344, height: 2508 })
     expect(row(2.51)).toEqual({ width: 4032, height: 3024 })
     expect(row(4)).toEqual({ width: 4032, height: 3024 })
-    // A 24 MP one stops at the canvas ceiling, MAX_AREA.
+    // A 24 MP one stops at the preview's largest copy, 16.8 MP.
     expect(copyOf(5712, 4284, 4, 4 / 5).copy).toEqual({ width: 4729, height: 3547 })
   })
 
-  it('over 3000 random photos, sheets and zooms: 1:1 or better, never past MAX_AREA, never twice what is needed', () => {
+  it('over 3000 random photos, sheets and zooms: 1:1 or better, never past the largest copy, never twice what is needed', () => {
     const rand = mulberry32(0xc8)
     for (let i = 0; i < 3000; i++) {
       const w = Math.round(400 + rand() * 11600)
@@ -169,9 +168,9 @@ describe("the preview's working copy follows the zoom", () => {
       const p = previewSize(a)
       const r = coverRect({ width: w, height: h }, p.w, p.h, { scale: z, x: 0.5, y: 0.5 })
       const needed = r.dw * r.dh
-      expect(area).toBeLessThanOrEqual(MAX_AREA)
-      expect(copy.width * copy.height).toBeLessThanOrEqual(Math.min(MAX_AREA, w * h))
-      if (needed <= MAX_AREA) {
+      expect(area).toBeLessThanOrEqual(PREVIEW_PHOTO_AREA_LARGEST)
+      expect(copy.width * copy.height).toBeLessThanOrEqual(Math.min(PREVIEW_PHOTO_AREA_LARGEST, w * h))
+      if (needed <= PREVIEW_PHOTO_AREA_LARGEST) {
         // As many pixels as the preview draws the photo at (or all it has),
         // to the pixel the floor can take.
         expect(copy.width).toBeGreaterThanOrEqual(Math.min(w, r.dw) - 1)
@@ -194,7 +193,7 @@ describe('the copy is decoded again only where the zoom rests, and never for the
     expect(at(3)).toBe('4032x3024')
     expect(at(4)).toBe(at(3))
     // A photo smaller than every tier is always itself.
-    expect(copyKey(1600, 1200, PREVIEW_PHOTO_AREA)).toBe(copyKey(1600, 1200, MAX_AREA))
+    expect(copyKey(1600, 1200, PREVIEW_PHOTO_AREA)).toBe(copyKey(1600, 1200, PREVIEW_PHOTO_AREA_LARGEST))
   })
 
   it('a new photo, or the first one, at once', () => {

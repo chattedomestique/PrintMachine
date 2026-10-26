@@ -1,13 +1,15 @@
 /**
- * The export planner: a saved print follows its photo, pixel for pixel, and
- * only the export canvas's area ceiling can bring it below its photo — said
- * out loud in `limit`.
+ * The export planner: a saved print follows its photo, pixel for pixel,
+ * whatever its size. Nothing caps it but a JPEG's own edge (65,535 px), which
+ * is said out loud in `limit`, with a PNG that has no such edge.
  */
 
 import { describe, expect, it } from 'vitest'
 
 import { planExport, type PlanPhoto } from './exportPlan.ts'
-import { MAX_AREA, NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+import { NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'
 import { SNAP_PX, coverRect } from './media.ts'
 import { groundRect } from './render.ts'
 import { mulberry32 } from './rng.ts'
@@ -47,41 +49,67 @@ describe('a 12 MP photo exports at its own pixels', () => {
   })
 })
 
-describe('a 24 MP photo (the default iPhone capture, 5712x4284) is never reduced to fit an edge', () => {
-  it('exports at its native 3427x4284 on a 4:5 sheet: 14.7 MP, under the ceiling, not capped', () => {
+describe('no ceiling: a photo of any size exports at its own pixels', () => {
+  it('a 24 MP iPhone photo (5712x4284): 3427x4284 on 4:5, and its own 5712x4284 on its own sheet', () => {
     const plan = planExport(SHEETS['4:5'], photo(5712, 4284))
     expect(plan).toMatchObject({ width: 3427, height: 4284, limit: 'native', nativeHeight: 4284 })
     expect(plan.width * plan.height).toBe(14_681_268)
+    expect(planExport(5712 / 4284, photo(5712, 4284))).toMatchObject({ width: 5712, height: 4284, limit: 'native', upscale: 1 })
+    // Turned upright, on its own sheet and on 4:5.
+    expect(dims(planExport(4284 / 5712, photo(4284, 5712)))).toBe('4284x5712')
+    expect(planExport(SHEETS['4:5'], photo(4284, 5712))).toMatchObject({ width: 4284, height: 5355, limit: 'native' })
   })
 
-  it('on its own Original sheet, exports at the area ceiling and says so: 4729x3547', () => {
-    const plan = planExport(5712 / 4284, photo(5712, 4284))
-    expect(plan).toMatchObject({ width: 4729, height: 3547, limit: 'ceiling', nativeHeight: 4284 })
-    expect(plan.width * plan.height).toBeLessThanOrEqual(MAX_AREA)
-    // The share of the photo's pixels that fit: about 0.83 a side, 68.5% in all.
-    expect(plan.upscale).toBeCloseTo(3547 / 4284, 3)
-    // The same photo turned upright, on its own sheet and on 4:5.
-    expect(dims(planExport(4284 / 5712, photo(4284, 5712)))).toBe('3547x4729')
-    expect(planExport(SHEETS['4:5'], photo(4284, 5712))).toMatchObject({ width: 3663, height: 4579, limit: 'ceiling' })
-  })
-})
-
-describe('the ceiling is an area, floored', () => {
-  it('lets a 4096-square photo through at exactly the area, and caps one pixel more', () => {
-    const at = planExport(1, photo(4096, 4096))
-    expect(at).toMatchObject({ width: 4096, height: 4096, limit: 'native' })
-    expect(at.width * at.height).toBe(MAX_AREA)
-    expect(planExport(1, photo(4097, 4097))).toMatchObject({ width: 4096, height: 4096, limit: 'ceiling' })
+  it('a 40 MP photo (7728x5152): 7728x5152 on its own sheet, 4122x5152 on 4:5, 5152x5152 on 1:1; upright, 5152x7728 and 5152x6440', () => {
+    const p = photo(7728, 5152)
+    expect(planExport(7728 / 5152, p)).toMatchObject({ width: 7728, height: 5152, limit: 'native', upscale: 1 })
+    expect(planExport(SHEETS['4:5'], p)).toMatchObject({ width: 4122, height: 5152, limit: 'native' })
+    expect(planExport(SHEETS['1:1'], p)).toMatchObject({ width: 5152, height: 5152, limit: 'native' })
+    expect(dims(planExport(5152 / 7728, photo(5152, 7728)))).toBe('5152x7728')
+    expect(dims(planExport(SHEETS['4:5'], photo(5152, 7728)))).toBe('5152x6440')
   })
 
-  it('has no edge cap: the widest and the tallest sheets go past 4096 on their long side', () => {
-    const wide = planExport(3, photo(9000, 3000))
-    expect(wide).toMatchObject({ width: 7092, height: 2364, limit: 'ceiling' })
-    // 1:3: sqrt(MAX_AREA x 3) floors to 7094, whose rounded width (2365)
-    // would overshoot the area by 94 px; the height is walked down to 7093.
-    const tall = planExport(1 / 3, photo(3000, 9000))
-    expect(tall).toMatchObject({ width: 2364, height: 7093, limit: 'ceiling' })
-    for (const p of [wide, tall]) expect(p.width * p.height).toBeLessThanOrEqual(MAX_AREA)
+  it('a 61 MP photo (9504x6336): 9504x6336 on its own sheet, 5069x6336 on 4:5, 6336x6336 on 1:1', () => {
+    const p = photo(9504, 6336)
+    expect(planExport(9504 / 6336, p)).toMatchObject({ width: 9504, height: 6336, limit: 'native' })
+    expect(planExport(SHEETS['4:5'], p)).toMatchObject({ width: 5069, height: 6336, limit: 'native' })
+    expect(planExport(SHEETS['1:1'], p)).toMatchObject({ width: 6336, height: 6336, limit: 'native' })
+  })
+
+  it('a 200 MP photo, and the widest and tallest Original sheets: native, past 4096 and past 16.8 MP alike', () => {
+    expect(planExport(16384 / 12288, photo(16384, 12288))).toMatchObject({ width: 16384, height: 12288, limit: 'native' })
+    expect(planExport(1, photo(4097, 4097))).toMatchObject({ width: 4097, height: 4097, limit: 'native' })
+    expect(planExport(3, photo(12000, 4000))).toMatchObject({ width: 12000, height: 4000, limit: 'native' })
+    // (The width binds there: 11,999 rows already make it 4000 wide.)
+    expect(planExport(1 / 3, photo(4000, 12000))).toMatchObject({ width: 4000, height: 11999, limit: 'native' })
+  })
+
+  it('a JPEG holds at most 65,535 px a side: past it, the largest JPEG, said; a PNG keeps the photo\'s size', () => {
+    const p = photo(120_000, 40_000)
+    const jpeg = planExport(3, p, { format: 'jpeg' })
+    expect(jpeg).toMatchObject({ width: 65535, height: 21845, limit: 'format' })
+    expect(jpeg.upscale!).toBeLessThan(1)
+    expect(planExport(3, p, { format: 'png' })).toMatchObject({ width: 120_000, height: 40_000, limit: 'native' })
+    expect(planExport(3, p)).toMatchObject({ width: 120_000, height: 40_000, limit: 'native' })
+    // A tall one: the height binds.
+    expect(planExport(1 / 3, photo(30_000, 90_000), { format: 'jpeg' })).toMatchObject({ width: 21845, height: 65535, limit: 'format' })
+    // At the edge exactly, it fits.
+    expect(planExport(1, photo(65535, 65535), { format: 'jpeg' })).toMatchObject({ width: 65535, height: 65535, limit: 'native' })
+  })
+
+  it('the export ceiling is gone from the source: its constant is nowhere in src/', () => {
+    // Spelled in two pieces, so this file is not a match itself.
+    const name = new RegExp(`\\bMAX_${'AREA'}\\b`)
+    const found: string[] = []
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const path = join(dir, entry)
+        if (statSync(path).isDirectory()) walk(path)
+        else if (/\.(ts|tsx)$/.test(entry) && name.test(readFileSync(path, 'utf8'))) found.push(path)
+      }
+    }
+    walk(join(import.meta.dirname, '..'))
+    expect(found).toEqual([])
   })
 })
 
@@ -138,7 +166,6 @@ describe('native follows the photo (every photo, zoom and sheet)', () => {
           const { width: W, height: H } = plan
           expect(H).toBeGreaterThanOrEqual(REFERENCE_HEIGHT)
           expect(W).toBe(Math.round(H * a))
-          expect(W * H).toBeLessThanOrEqual(MAX_AREA)
           expect(H).toBeLessThanOrEqual(previous)
           previous = H
 
@@ -166,18 +193,17 @@ describe('native follows the photo (every photo, zoom and sheet)', () => {
 })
 
 describe('every plan, over 2000 random photos, sheets and zooms', () => {
-  it('is within the area, keeps the sheet, and only reduces a photo at the ceiling', () => {
+  it('keeps the sheet, never reduces a photo, and is native or at the floor', () => {
     const rand = mulberry32(0x5eed)
     for (let i = 0; i < 2000; i++) {
       const a = Math.exp((rand() * 2 - 1) * Math.log(3)) // 1/3 .. 3
       const p = photo(Math.round(200 + rand() * 9800), Math.round(200 + rand() * 9800), 1 + rand() * 3)
       const plan = planExport(a, p)
       const { width: W, height: H } = plan
-      expect(W * H).toBeLessThanOrEqual(MAX_AREA)
       expect(W).toBe(Math.round(H * a))
-      expect(H).toBeGreaterThanOrEqual(Math.min(REFERENCE_HEIGHT, Math.floor(Math.sqrt(MAX_AREA / a)) - 1))
-      if (plan.limit === 'ceiling') expect(plan.upscale!).toBeLessThan(1)
-      else expect(plan.upscale!).toBeGreaterThanOrEqual(1)
+      expect(H).toBeGreaterThanOrEqual(REFERENCE_HEIGHT)
+      expect(['native', 'floor']).toContain(plan.limit)
+      expect(plan.upscale!).toBeGreaterThanOrEqual(1)
       if (plan.limit === 'native') {
         expect(H).toBe(plan.nativeHeight)
         // ...and the smallest such height: one row less samples the photo down.

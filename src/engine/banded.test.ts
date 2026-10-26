@@ -228,9 +228,10 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
       for (;;) {
         const next = steps.next()
         if (next.done) break
-        // From the first yield on, the press is in its band loop.
-        phase.now = 'loop'
-        bands = Math.max(bands, (next.value.band ?? 0) + 1)
+        // From the first step of the press on (the photo's luminance pass,
+        // the 'photo' steps, is set-up), the press is in its band loop.
+        if (next.value.step === 'press') phase.now = 'loop'
+        if (next.value.step === 'press') bands = Math.max(bands, next.value.band + 1)
       }
     })
     // The largest window any band of any plate reads, as the print sized it.
@@ -334,6 +335,7 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
       for (;;) {
         const next = steps.next()
         if (next.done) break
+        if (next.value.step !== 'press') continue
         phase.now = 'loop'
         if (first) {
           first = false

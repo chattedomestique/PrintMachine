@@ -278,3 +278,13 @@ const GOLDEN = {
   noise: 'a14f3c2d47c9244a6cf87d85d4ecb52ef50d87eaddd770f181e6cff910470adb',
   halftone: 'bd286a35766172a2f095e402ecdf42aff800c936ec351fbe72c50cb6e206084a',
 }
+
+describe('the licence that travels with the encoder', () => {
+  it('the site ships the acknowledgement and the IJG README unaltered (public/licences.txt)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const readme = readFileSync(new URL('./IJG-README.txt', import.meta.url), 'utf8')
+    const shipped = readFileSync(new URL('../../../public/licences.txt', import.meta.url), 'utf8')
+    expect(shipped).toContain('This software is based in part on the work of the Independent JPEG Group.')
+    expect(shipped.endsWith(readme)).toBe(true)
+  })
+})

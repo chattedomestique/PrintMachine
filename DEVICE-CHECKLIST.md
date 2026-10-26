@@ -117,19 +117,18 @@ So:
       preview sharpens (the photo is decoded again, whole) and reads as crisp
       as the photo itself; back at 100% nothing reloads
 - [ ] Save it: completes without a tab reload (Save decodes the original,
-      about 98 MB, for the length of the blit) and the file shows the photo,
-      upright
+      about 98 MB, until its last rows are in the print) and the file shows
+      the photo, upright
 - [ ] A transparent PNG: paper shows through where it is transparent
 - [ ] Remove the photo → Undo: it comes back (not bare paper, no alert)
 - [ ] A print saved by an older build (its photo cut to 2048 px) shows the
       "saved at reduced size" note in Photo › File
 
 > The photo is stored and decoded whole, at any size: nothing here should ever
-> show a photo cut down on import. What bounds a saved print is the export
-> canvas, by area (16.7 MP, `MAX_AREA`, the most a browser canvas is
-> guaranteed to hold; WebKit's limit is an area, and there is no edge cap).
-> Saving above it would need tiled rendering and a JavaScript encoder, which
-> are not built.
+> show a photo cut down on import, and nothing caps a saved print: it is
+> pressed in bands and written as it is pressed, at the photo's own pixels
+> whatever their number. What bounds a save is the phone's memory (section
+> "Native resolution at any size", below).
 
 ## Save
 
@@ -137,9 +136,10 @@ So:
       on 4:5), and why when it is not the photo's own pixels; VoiceOver reads
       Save as "Save 2419×3024 JPEG"
 - [ ] Tap Save → within a moment Save reads "Saving", a toast repeats the size,
-      and a card above the dock reads "Pressing 3024×3780, plate 1 of 2" and
-      moves on, with Cancel; the preview holds still and nothing else answers
-      a tap
+      and a card above the dock reads "Pressing 3024×3780: loading the photo",
+      then (with a second ink) "...: reading the photo", then "Pressing
+      3024×3780, 0%" and on in percent, then "...: writing the file", with
+      Cancel; the preview holds still and nothing else answers a tap
 - [ ] Cancel mid-press → back to Save, no error, nothing saved
 - [ ] A press that takes more than a second → Save reads "Share" and the card
       "3024×3780 is ready (… MB)" → tap Share → the native share sheet appears
@@ -158,8 +158,9 @@ So:
       shows no card at all)
 - [ ] At 320 px wide (an iPhone SE) and at the largest text size, the app bar
       stays one row: Save becomes an icon rather than wrapping
-- [ ] Same phone, largest text size, a 24 MP photo on its own Original sheet
-      (the longest reason: "capped at 16.7 MP …"), Save: while it presses, the
+- [ ] Same phone, largest text size, a 1600×1200 photo on its own Original
+      sheet zoomed to 300% (the longest reason a real document gives: "photo
+      is 1600×1200 at 300% zoom: upscaled 4.5x"), Save: while it presses, the
       card's Cancel is on screen and stops the press; when Save reads Share,
       no card covers it and one tap on it opens the share sheet. Again with
       the Photo tool open
@@ -170,29 +171,33 @@ So:
       with Try again, Save smaller (1814×2268) and Cancel; Try again completes;
       a launch after that one says nothing
 - [ ] If Save ever says "This device couldn't press W×H (reason). Save a
-      smaller W'×H' copy instead?" (a canvas came back blank, or memory ran
-      out): note the device, both sizes and the reason; Save smaller → the file
-      in Photos is W'×H', and the confirmation says so. Nothing is saved until
-      Save smaller is tapped
+      smaller W'×H' copy instead?" (a canvas came back blank, memory ran out
+      at the smallest band, or the photo could not be decoded whole): note the
+      device, both sizes and the reason; Save smaller → the file in Photos is
+      W'×H', and the confirmation says so. Nothing is saved until Save smaller
+      is tapped
 - [ ] The saved file has **no** selection crosshair in it (the thirds guides are
       gone; the crosshair is the one editing aid left, and it must never print)
-- [ ] File size: a few MB, in proportion to the pixels (a 12 MP photo on 4:5:
-      about 2-7 MB as JPEG); PNG several times that
+- [ ] File size: megabytes, in proportion to the pixels (a 12 MP photo on 4:5:
+      about 2-7 MB as JPEG; a 40 MP photo on its own sheet: 15 to 30 MB for a
+      real photograph, 11 to 38 MB between a smooth photo and pure noise); PNG
+      several times that
 - [ ] Memory, the hard gate a desktop cannot give (`measure-alloc.mjs` counts
       it; desktop memory is not a phone's): with Safari's Web Inspector
       attached (Timelines > Memory), Save a 12 MP portrait on 4:5 with the
       second ink on — the page's peak stays under about 450 MB (the count is
-      194 MB: typed arrays, the canvases and the decoded photo, pressed in
-      bands), and the tab is not reloaded
+      160 MB: typed arrays, the canvases, the decoded photo and the file,
+      pressed in bands), and the tab is not reloaded
 - [ ] The heaviest print the budget allows: a 4096x4096 photo on 1:1, three
       plates, two with a second ink and one with a backing — Save completes
-      without a tab reload (counted: 255 MB at peak)
+      without a tab reload (counted: 201 MB at peak)
 
 > Expect megabytes, not the ~300 KB the playbook cites for photographs: the
-> print is saved at the photo's own pixels, and a halftone screen over paper
-> grain is close to worst-case for JPEG's DCT. Dropping quality to compensate
-> smears the dots, which is the one thing this app exists to render, so the
-> size stands.
+> print is saved at the photo's own pixels (15 to 30 MB for a 40 MP
+> photograph), with every colour sample kept (4:4:4), and a halftone screen
+> over paper grain is close to worst-case for JPEG's DCT. Dropping quality to
+> compensate smears the dots, which is the one thing this app exists to
+> render, so the size stands.
 
 Saving at full resolution (none of these can be automated):
 
@@ -203,8 +208,8 @@ Saving at full resolution (none of these can be automated):
 - [ ] Save in Low Power Mode: completes (slower is fine)
 - [ ] Time from the tap to the share sheet, written down with the device and
       the size, so a slower build shows
-- [ ] A square 4096×4096 photo (16.8 MP, the ceiling exactly) on 1:1: Save
-      survives, or shows the explicit smaller-copy question, never a reload
+- [ ] A square 4096×4096 photo (16.8 MP) on 1:1: Save completes at
+      4096×4096, or shows the explicit smaller-copy question, never a reload
 - [ ] The share sheet appears after a press of more than 10 seconds (the
       "Share" tap is there for when the first tap's activation has run out;
       check that it works)
@@ -212,50 +217,100 @@ Saving at full resolution (none of these can be automated):
 - [ ] An EXIF-rotated portrait (a photo taken holding the phone upright) is
       upright in the preview and in the saved file
 
-## Limits to settle on a device
+## Native resolution at any size
 
-- [x] **The device spike**, run twice on 2026-10-25 on an iPhone (iOS 18.7,
-      in the Claude app's in-app browser: WKWebView, Safari's WebKit; 430x932
-      CSS px, DPR 3, 4 cores), with no photo picked, so the 40 MP decode is of
-      the page's own synthetic 7728x5152 JPEG. Measured: that file decoded in
-      277 and 306 ms, first drawn in 55 and 50 ms, the tab kept; a 1:1 blit of
-      it identical across two tile origins with smoothing off and with it
-      'high'; a cropped decode of an EXIF-rotated JPEG landing on the
-      requested rect of the upright image at orientations 1, 3, 6 and 8;
-      every canvas font up to 12,000 px honoured; the sentinel pixel read back
-      at 4096x1024, 4096x512, 2048x2048 and 4096x4096; the JPEG encoder at 62
-      and 65 ms/MP (R 0.49 and 0.52 against this repository's reference
-      machine); and (second run) a CompressionStream write resolving only once
-      its chunk is taken, 20 of 20 round trips exact. The tile grid and the
-      per-band blit of a photo at its own pixels are built on the blit row.
+A print is pressed in bands of rows, its type and any resampled photo drawn on a
+grid of tiles (at most 4096 px wide and 2^22 pixels), and written into the file
+band by band (README "Saving at the photo's own pixels", "What an export
+holds"). What only a phone can settle:
+
+- [x] **The device spike**, run three times on 2026-10-25 on an iPhone (iOS
+      18.7, in the Claude app's in-app browser: WKWebView, Safari's WebKit;
+      430x932 CSS px, DPR 3, 4 cores). Measured: the page's own synthetic
+      7728x5152 JPEG decoded in 277, 306 and 258 ms, first drawn in 55, 50
+      and 47 ms, the tab kept; a 1:1 blit of it identical across two tile
+      origins with smoothing off and with it 'high'; a cropped decode of an
+      EXIF-rotated JPEG landing on the requested rect of the upright image at
+      orientations 1, 3, 6 and 8; every canvas font up to 12,000 px honoured;
+      the sentinel pixel read back at 4096x1024, 4096x512, 2048x2048 and
+      4096x4096; the JPEG encoder at 62, 65 and 62 ms/MP (R 0.49, 0.52 and
+      0.49 against this repository's reference machine); and (second and
+      third runs) a CompressionStream write resolving only once its chunk is
+      taken, 20 of 20 round trips exact. The tile grid and the per-band blit
+      of a photo at its own pixels are built on the blit row, Save's one held
+      decode of the original on the decode row, and the lossless PNG's reuse
+      of its batches on the compressor row.
       The page is `scripts/device-spike/spike.html` (self-contained, no
       network request; it carries the Independent JPEG Group's README, which
       their licence asks for wherever the encoder's source goes, so it can be
       published as a private page on its own).
-- [ ] **The spike with a real 40 MP camera file.** Run the spike again with a
-      40 MP (or larger) photo from the camera roll picked: line (a) "your
-      photo" must PASS (decode and first draw in 8 s or less, the tab kept).
-      Only the synthetic file has been decoded on the phone so far.
-- [ ] **The canvas ceiling is an area.** The app has no edge cap, only the
-      16.7 MP area (`MAX_AREA`; the 4096 edge is Borders' number, and
-      WebKit's documented limit is an area). On an iPhone, with Safari's Web
-      Inspector attached, run this in the console on the deployed app:
+- [x] **The spike with a real 40 MP camera file.** Third run: the user's own
+      camera photo, portrait and EXIF-rotated, 5152x7728 (39.8 MP), decoded
+      upright in 438 ms and first drawn in 61 ms, the tab kept (line (a)
+      "your photo": PASS); a 1:1 blit of it identical across two tile origins
+      with smoothing off and with it 'high'. What the spike cannot show (a
+      full Save of such a photo: its peak memory, the share sheet with the
+      file, the time from the tap to "Share", backgrounding) is in the items
+      below.
+- [ ] **Save a 40 MP JPEG.** Import a 7728x5152 photo (and an 8064x6048 48 MP
+      camera-app JPEG, and a 9504x6336 one if one exists) from the camera roll;
+      Save on Original: the file is 7728x5152 (or the photo's own size). No tab
+      reload; note the device, the time from the tap to "Share", and whether
+      the full decode (`createImageBitmap`, 159 to 241 MB) is what fails when
+      something does. WebKit makes the decode's buffer at full size and, if it
+      cannot, rejects with "Cannot create an image buffer from the argument to
+      createImageBitmap": write down the message the device gives. If it
+      fails, "This device couldn't press ... (...)" must appear with a smaller
+      copy, never a reload.
+- [ ] **Peak memory.** Safari Web Inspector (Timelines > Memory) during a 40 MP
+      save on Original: the peak stays under about 350 MB; during a 61 MP save
+      under about 450 MB; the worst legal press (grain at screen 36,
+      misregistration 30) at 61 MP under about 540 MB.
+- [ ] **Tile canvases.** In the console on the deployed app, for [4096, 1024],
+      [4096, 512] and [2048, 2048], write a sentinel pixel at the last pixel
+      and read it back:
 
       ```js
-      for (const [w, h] of [[4729, 3547], [7092, 2364], [2364, 7093]]) {
+      for (const [w, h] of [[4096, 1024], [4096, 512], [2048, 2048]]) {
         const c = document.createElement('canvas'); c.width = w; c.height = h
         const g = c.getContext('2d'); g.fillStyle = 'rgb(1, 2, 3)'; g.fillRect(w - 1, h - 1, 1, 1)
         console.log(w, h, [...g.getImageData(w - 1, h - 1, 1, 1).data].join()); c.width = 0
       }
       ```
 
-      4729×3547 is a 24 MP 4:3 photo on its own sheet (the area ceiling);
-      7092×2364 and 2364×7093 are the widest and the tallest prints the area
-      allows (3:1 and 1:3 sheets). Each should print `1,2,3,255`. If one
-      does not, Save still cannot fail quietly (the same probe runs before
-      every press, and a blank canvas gets the smaller-copy question), but
-      write down the device and the size: the README's Limits paragraph is
-      wrong for it, and the planner needs that device's limit.
+      Each should print `1,2,3,255` (the device spike read these back in the
+      Claude app's WebKit view). The export never makes a canvas wider than
+      4096 or larger than 2^22 pixels (a glyph tile; a photo's band canvas is
+      at most 4096 x a band, about 2 MP), and every one is proved this way
+      before a press.
+- [ ] **Font clamp.** A 61 MP portrait photo on its own sheet (9504 px tall),
+      type at 120%: the glyphs in the file are as wide as the preview shows
+      them, not 17 to 38% narrower (the device spike read every font up to
+      12,000 px honoured; type over 9216 px is drawn scaled anyway).
+- [ ] **Share sheet with a big file.** A 20 to 40 MB JPEG (a 40 MP save) and a
+      PNG of 70 MB or more (Save lossless PNG): the card reads "... is ready
+      (N MB)", the tap on Share opens the sheet, Save Image puts the file in
+      Photos at the pixel size More said. Also AirDrop and Files. Note any size
+      at which the share fails.
+- [ ] **JPEG colour.** Open a saved file at 100% in Photos on a saturated
+      halftone (the pink ink): no colour smear at the dot edges; the colours
+      match the preview (no ICC profile in the file: untagged is sRGB).
+- [ ] **Time.** Write down, per device: 12 MP, 24 MP and 40 MP+ saves, from the
+      tap to "Share", and in Low Power Mode. Estimated from the device spike's
+      encoder speed (twice this repository's reference machine's): about 16 to
+      17 s for 40 MP; a real save also decodes, presses and blits.
+- [ ] **Backgrounding and the screen.** Start a 40 MP save and let the screen
+      auto-lock (the Wake Lock should keep it on: iOS 16.4 and later); then
+      switch to another app for 10 s and return: either it finished, or the
+      "did not finish" notice shows; never a corrupt file.
+- [ ] **A killed tab at 61 MP.** If iOS evicts the tab mid-press, the next
+      launch shows the notice with Try again and Save smaller.
+- [ ] **PNG on an old iOS.** On iOS before 16.4 (no `CompressionStream`), More
+      says "Save lossless PNG" with the size and "(about N MB)", and the file
+      is a valid PNG that size; or skip if no such device exists.
+- [ ] **Poster type across a tile seam.** A 40 MP print with type at 30% of the
+      height, turned -4 degrees, opened at 100% in Photos across the rows
+      1024, 2048, ...: no visible seam in a glyph's edge.
 - [ ] **Settled preview sharpness.** On a 3x iPhone, compare the settled
       preview with the saved file viewed at the same on-screen size. If the
       preview reads visibly softer, build the recorded fallback: one idle

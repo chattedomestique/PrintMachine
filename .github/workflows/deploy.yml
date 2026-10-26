@@ -83,8 +83,10 @@ jobs:
           CHROMIUM_PATH: /usr/bin/google-chrome
       # The preview is a true picture of the print: every harness document
       # through the preview's entry point and the export's, at one height,
-      # must give the same bytes (it fails if any differs).
-      - run: node scripts/harness/run.mjs --out "$RUNNER_TEMP/parity.json" --no-hashes --parity 1000
+      # must give the same bytes; the file Save writes (a PNG) decodes to the
+      # export's canvas; and a save whose memory runs out once, at set-up or
+      # mid-press, writes the same file (it fails if any differs).
+      - run: node scripts/harness/run.mjs --out "$RUNNER_TEMP/parity.json" --no-hashes --parity 1000 --file-parity 1000 --retry
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
       # The device spike (scripts/device-spike/spike.html), the page a phone

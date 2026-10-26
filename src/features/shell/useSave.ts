@@ -7,19 +7,22 @@ import {
   canShareFile,
   deliverFile,
   dims,
-  findSmallerPlan,
+  findSmallerPlanAsync,
   fitsCanvas,
   fileSize,
   planPrint,
+  pressCanvases,
   printFile,
   saveMessage,
   savePrint,
   type ExportFormat,
+  type PressedPrint,
 } from '../../engine/export.ts'
 import type { ExportPlan } from '../../engine/exportPlan.ts'
-import type { RenderProgress } from '../../engine/render.ts'
+import { snapCopyRect, type DrawRect } from '../../engine/media.ts'
+import { groundRect, type RenderProgress } from '../../engine/render.ts'
 import type { PrintSettings } from '../../engine/types.ts'
-import { decodeOriginal } from '../media/decode.ts'
+import { PhotoDecodeError, decodeOriginal, decodeResized } from '../media/decode.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
 import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../../state/persist.ts'
 
@@ -32,7 +35,7 @@ import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../
  * which is seconds of work on a phone, and the share sheet needs the tap that
  * opened it to be recent (WebKit's window is short and undocumented). So:
  *
- *   idle ──tap──▶ loadingPhoto ──▶ pressing (pass i of n) ──▶ ready ──tap──▶ sharing ──▶ idle
+ *   idle ──tap──▶ loadingPhoto ──▶ pressing (band i of n) ──▶ ready ──tap──▶ sharing ──▶ idle
  *                                                         └──(under a second)──▶ sharing
  *
  * A press that finished within a second of the tap shares at once; a longer
@@ -51,7 +54,8 @@ export type SaveState =
   | { kind: 'sharing'; file: File; plan: ExportPlan }
   | { kind: 'error'; message: string }
   /** This device could not press `failed` (`why`: a canvas came back blank,
-   *  the encoder gave nothing, memory ran out — the browser's own words);
+   *  the photo could not be decoded whole, memory ran out — the browser's own
+   *  words);
    *  `smaller` is the largest copy it can (null: none it can). Asked, never
    *  done unasked. */
   | { kind: 'tooBig'; format: ExportFormat; failed: ExportPlan; why: string; smaller: ExportPlan | null }
@@ -344,12 +348,12 @@ export function progressText(state: SaveState): string | null {
     case 'pressing': {
       const p = state.progress
       const size = dims(state.plan.width, state.plan.height)
-      // Before the first step the press has said nothing yet: a print with no
-      // photo never lays one down.
+      // Before the first step the press has said nothing yet.
       if (!p) return `Pressing ${size}`
-      if (p.step === 'photo') return `Pressing ${size}: laying down the photo`
-      if (p.step === 'print') return `Pressing ${size}: printing the sheet`
-      return `Pressing ${size}, plate ${p.pass} of ${p.passes}`
+      // The photo read for the second ink, before the first band.
+      if (p.step === 'photo') return `Pressing ${size}: reading the photo`
+      if (p.step === 'write') return `Pressing ${size}: writing the file`
+      return `Pressing ${size}, ${Math.floor((100 * p.band) / Math.max(1, p.bands))}%`
     }
     case 'ready':
       return `${dims(state.plan.width, state.plan.height)} is ready.`
@@ -377,16 +381,145 @@ const painted = () =>
 
 const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError'
 
-/** Whether both of the press's canvases can be this size here (each proved
- *  by a sentinel pixel), then let go. */
-function canvasesFit(w: number, h: number): boolean {
-  const a = document.createElement('canvas').getContext('2d')
-  const b = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+/** What a press for Save needs from the page: the decodes and the press
+ *  itself (a test hands in its own). */
+export interface SaveDeps {
+  decodeOriginal(id: string): Promise<ImageBitmap>
+  decodeResized(id: string, width: number, height: number): Promise<ImageBitmap>
+  savePrint: typeof savePrint
+  /** Whether a canvas of w x h works here (a sentinel pixel read back), then
+   *  let go. */
+  canvasFits(w: number, h: number): boolean
+}
+
+/** The page's own. */
+export const PAGE: SaveDeps = {
+  decodeOriginal,
+  decodeResized,
+  savePrint,
+  canvasFits: (w, h) => {
+    const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+    try {
+      return !!ctx && fitsCanvas(ctx, w, h)
+    } finally {
+      if (ctx) ctx.canvas.width = 0
+    }
+  },
+}
+
+/** The rectangle a smaller copy's photo is decoded to and drawn at, 1:1. */
+export function copyRect(settings: PrintSettings, plan: ExportPlan): DrawRect | null {
+  return settings.media ? snapCopyRect(groundRect(settings.media, plan.width, plan.height), plan.width, plan.height) : null
+}
+
+/**
+ * Whether this device can press a smaller copy `plan`, in two steps, the
+ * second only if the first holds: (1) every canvas the press of it makes, at
+ * its real size, reads its sentinel pixel back; (2) the photo decodes at the
+ * copy's size (closed at once). A photo decoded whole for every candidate
+ * would be the very thing that failed.
+ */
+export async function copyFits(settings: PrintSettings, plan: ExportPlan, deps: SaveDeps): Promise<boolean> {
+  for (const c of pressCanvases(plan, settings.media !== null)) if (!deps.canvasFits(c.w, c.h)) return false
+  const r = copyRect(settings, plan)
+  if (!settings.media || !r) return true
   try {
-    return !!a && !!b && fitsCanvas(a, w, h) && fitsCanvas(b, w, h)
+    ;(await deps.decodeResized(settings.media.id, r.dw, r.dh)).close()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** What a press for Save came to: a file, or a print this device cannot
+ *  press, with the largest smaller copy it can (null: none). */
+export type SaveResult = { kind: 'pressed'; pressed: PressedPrint } | { kind: 'tooBig'; failed: ExportPlan; why: string; smaller: ExportPlan | null }
+
+/**
+ * The press behind Save, with no UI in it: decode the photo, press, and, when
+ * this device cannot, find the copy it can.
+ *
+ *  - A print at the photo's own size decodes the ORIGINAL in full. If that
+ *    fails, it is a question of size only when a smaller decode of the same
+ *    file succeeds (the import already decoded it once): then the largest
+ *    copy this device can press is offered, with the browser's reason; a
+ *    file that cannot be decoded at any size stays a plain failure.
+ *  - A smaller copy (`plan.limit === 'smaller'`) decodes the photo straight
+ *    to the copy's integer rectangle (`copyRect`) and presses it 1:1.
+ *  - A CanvasLimitError from the press offers the largest copy that fits.
+ *
+ * Rejects with the press's AbortError on Cancel, and with an Error that says
+ * why on any other failure. The photo is closed by the time it settles.
+ */
+export async function pressForSave(
+  run: {
+    settings: PrintSettings
+    format: ExportFormat
+    maxHeight?: number
+    signal?: AbortSignal
+    onPhotoLoaded?: () => void
+    onProgress?: (progress: RenderProgress) => void
+  },
+  deps: SaveDeps = PAGE,
+): Promise<SaveResult> {
+  const { settings, format, maxHeight, signal } = run
+  const plan = planPrint(settings, { maxHeight, format })
+  const smaller = (height: number) => findSmallerPlanAsync(settings, height, (p) => copyFits(settings, p, deps), format)
+  let photo: ImageBitmap | null = null
+  try {
+    let rect: DrawRect | undefined
+    if (settings.media) {
+      if (plan.limit === 'smaller') {
+        rect = copyRect(settings, plan) ?? undefined
+        photo = await deps.decodeResized(settings.media.id, rect!.dw, rect!.dh)
+      } else {
+        try {
+          photo = await deps.decodeOriginal(settings.media.id)
+        } catch (err) {
+          if (!(err instanceof PhotoDecodeError)) throw err
+          // Decoded at import, so a whole decode that fails now is this
+          // device's memory if, and only if, a smaller one works.
+          const copy = await smaller(plan.height)
+          if (copy) return { kind: 'tooBig', failed: plan, why: err.reason, smaller: copy }
+          throw err
+        }
+      }
+    }
+    if (signal?.aborted) throw new DOMException('The save was cancelled.', 'AbortError')
+    run.onPhotoLoaded?.()
+    const decoded = photo
+    try {
+      const pressed = await deps.savePrint(settings, decoded, {
+        format,
+        maxHeight,
+        signal,
+        rect,
+        onProgress: run.onProgress,
+        onGround: () => decoded?.close(),
+      })
+      return { kind: 'pressed', pressed }
+    } catch (err) {
+      if (!(err instanceof CanvasLimitError)) throw err
+      // Offered, never taken unasked: the largest smaller copy whose canvases
+      // and photo this device proves it can hold.
+      photo?.close()
+      photo = null
+      return { kind: 'tooBig', failed: err.plan, why: err.why, smaller: await smaller(err.plan.height) }
+    }
   } finally {
-    if (a) a.canvas.width = 0
-    if (b) b.canvas.width = 0
+    photo?.close()
+  }
+}
+
+/** Ask the screen to stay on while the print is pressed (a screen that sleeps
+ *  suspends the page's timers, and a two-minute press is when it would). Best
+ *  effort: null where there is no Wake Lock (iOS before 16.4) or it is
+ *  refused. */
+async function keepAwake(): Promise<{ release(): Promise<void> } | null> {
+  try {
+    return (await navigator.wakeLock?.request('screen')) ?? null
+  } catch {
+    return null
   }
 }
 
@@ -447,53 +580,45 @@ export function useSave(
     async (format: ExportFormat, maxHeight?: number) => {
       if (runningRef.current || !canStart(stateRef.current, media)) return
       runningRef.current = true
-      const plan = planPrint(settings, { maxHeight })
+      const plan = planPrint(settings, { maxHeight, format })
       const tapped = performance.now()
       const controller = new AbortController()
       abortRef.current = controller
       dispatch({ type: 'start', format, plan, photo: settings.media !== null })
-      let photo: ImageBitmap | null = null
+      let awake: { release(): Promise<void> } | null = null
       try {
         // The label changes before any work: two frames, so it is painted.
         await painted()
-        // Fresh offscreen surfaces so the export can never read back the
-        // visible canvas, which carries the selection crosshair (N8).
-        const out = document.createElement('canvas').getContext('2d')
-        const scratch = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-        if (!out || !scratch) throw new Error('Could not open a canvas to press the print.')
         // Marked for the next launch to find, should the tab die from here
         // (the original's decode included).
         markExportInFlight({ height: plan.height, format })
+        awake = await keepAwake()
         // The ORIGINAL, decoded now and in full (4 bytes a pixel of the photo,
-        // 98 MB for a 24 MP one), and let go the moment the ground is drawn.
-        if (settings.media) photo = await decodeOriginal(settings.media.id)
-        if (controller.signal.aborted) throw new DOMException('The save was cancelled.', 'AbortError')
-        dispatch({ type: 'photoLoaded' })
-        const decoded = photo
-        const pressed = await savePrint(out, scratch, settings, decoded, {
+        // 159 MB for a 40 MP one), let go once its last rows are in the print;
+        // the press draws on fresh offscreen canvases, so the export can never
+        // read back the visible one, which carries the selection crosshair
+        // (N8).
+        const result = await pressForSave({
+          settings,
           format,
           maxHeight,
           signal: controller.signal,
+          onPhotoLoaded: () => dispatch({ type: 'photoLoaded' }),
           onProgress: (progress) => dispatch({ type: 'progress', progress }),
-          onGround: () => decoded?.close(),
         })
-        const file = printFile(pressed)
+        if (result.kind === 'tooBig') {
+          dispatch({ type: 'tooBig', failed: result.failed, why: result.why, smaller: result.smaller })
+          return
+        }
+        const file = printFile(result.pressed)
         // Hand it over now if the tap is still fresh, or if there is no share
         // sheet to need it (a desktop download); otherwise wait for a tap.
         const now = !canShareFile(file) || performance.now() - tapped < SHARE_AT_ONCE_MS
         dispatch({ type: 'pressed', file, now })
-        if (now) await deliver(file, pressed.plan)
+        if (now) await deliver(file, result.pressed.plan)
       } catch (err) {
         if (isAbort(err)) {
           dispatch({ type: 'cancelled' })
-          return
-        }
-        if (err instanceof CanvasLimitError) {
-          // Offered, never taken unasked: the largest smaller copy whose
-          // canvases this device proves it can hold.
-          photo?.close()
-          photo = null
-          dispatch({ type: 'tooBig', failed: err.plan, why: err.why, smaller: findSmallerPlan(settings, err.plan.height, canvasesFit) })
           return
         }
         // Never a quieter, smaller file: the reason, with the numbers.
@@ -501,7 +626,7 @@ export function useSave(
         dispatch({ type: 'failed', message: `Could not press ${dims(plan.width, plan.height)}: ${reason}` })
       } finally {
         clearExportInFlight()
-        photo?.close()
+        void awake?.release().catch(() => {})
         if (abortRef.current === controller) abortRef.current = null
         runningRef.current = false
       }

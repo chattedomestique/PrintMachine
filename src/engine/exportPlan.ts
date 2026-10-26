@@ -4,9 +4,11 @@
  * The rule the user set is "no down-rezzing at ALL", of the photo or of the
  * exported image. So the sheet is exported at the height at which the photo
  * lands on it pixel for pixel — its NATIVE height — and never smaller than
- * the reference height, whatever the photo. The one thing that can bring a
- * print below its photo is the export canvas's own ceiling (MAX_AREA), and the
- * plan says so in `limit` rather than doing it quietly.
+ * the reference height, whatever the photo, and whatever its size: there is
+ * no ceiling (the print is pressed in bands and encoded as it is pressed, so
+ * no canvas or array of the sheet's size exists to hold it back). The one
+ * limit left is the JPEG container's own (65,535 px a side), which only a
+ * photo wider than that meets, and the plan says so in `limit`.
  *
  * Pure: no DOM. The renderer is handed `height` and computes the width from
  * the same aspect (`round(height x aspect)`), so this and the canvas can never
@@ -22,7 +24,8 @@
  * Save presses at `height` (export.ts `savePrint`, through `planPrint`).
  */
 
-import { MAX_AREA, NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'
+import { JPEG_MAX_EDGE } from './encode/jpeg.ts'
+import { NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'
 
 /**
  * Why the height is what it is:
@@ -30,11 +33,12 @@ import { MAX_AREA, NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'
  *  - `floor`   the photo has fewer pixels than the reference height, so it is
  *              enlarged (`upscale` > 1) rather than the print made smaller;
  *  - `none`    no photo: NO_PHOTO_HEIGHT;
- *  - `ceiling` the export canvas's area limit binds, and the print is smaller
- *              than its photo — the one case a photo loses pixels, stated;
+ *  - `format`  a JPEG holds at most JPEG_MAX_EDGE (65,535) px a side, and the
+ *              print would be bigger: the largest height that fits (a PNG
+ *              has no such limit) — said, with the way round it;
  *  - `smaller` the caller asked for a smaller copy (`maxHeight`).
  */
-export type PlanLimit = 'native' | 'floor' | 'none' | 'ceiling' | 'smaller'
+export type PlanLimit = 'native' | 'floor' | 'none' | 'format' | 'smaller'
 
 export interface ExportPlan {
   width: number
@@ -45,7 +49,7 @@ export interface ExportPlan {
   nativeHeight: number
   /** Sheet pixels per photo pixel, as realised: 1 native, above 1 the photo is
    *  enlarged ("photo is 1600 px, upscaled 1.5x"), below 1 it is reduced
-   *  (only at the ceiling or for a smaller copy). Null with no photo. */
+   *  (only for a smaller copy or past a JPEG's edge). Null with no photo. */
   upscale: number | null
 }
 
@@ -61,13 +65,19 @@ export interface PlanPhoto {
  * @param aspect the sheet's width over its height, as a number (any positive
  *               value: an Original sheet can be wider than it is tall).
  * @param opts.maxHeight a height the caller will not go above (a smaller copy).
+ * @param opts.format the file it is saved as: a JPEG cannot hold an edge
+ *               over 65,535 px; a PNG (and no format) has no such limit.
  */
-export function planExport(aspect: number, photo: PlanPhoto | null, opts: { maxHeight?: number } = {}): ExportPlan {
+export function planExport(
+  aspect: number,
+  photo: PlanPhoto | null,
+  opts: { maxHeight?: number; format?: 'jpeg' | 'png' } = {},
+): ExportPlan {
   if (!(aspect > 0) || !Number.isFinite(aspect)) throw new RangeError(`Not a sheet aspect: ${aspect}`)
   const a = aspect
 
   let nativeHeight = 0
-  let wanted: number
+  let height: number
   let limit: PlanLimit
   if (photo) {
     const mw = Math.max(1, photo.width)
@@ -83,25 +93,23 @@ export function planExport(aspect: number, photo: PlanPhoto | null, opts: { maxH
     nativeHeight = Math.ceil(Math.min(mh, mw / a) / zoom)
     while (!lands(nativeHeight)) nativeHeight++
     while (nativeHeight > 1 && lands(nativeHeight - 1)) nativeHeight--
-    wanted = Math.max(REFERENCE_HEIGHT, nativeHeight)
+    height = Math.max(REFERENCE_HEIGHT, nativeHeight)
     limit = nativeHeight >= REFERENCE_HEIGHT ? 'native' : 'floor'
   } else {
-    wanted = NO_PHOTO_HEIGHT
+    height = NO_PHOTO_HEIGHT
     limit = 'none'
   }
 
-  // The area ceiling, floored so the sheet is never over it; then, since the
-  // width rounds, walked down until width x height really is within it.
-  let height = Math.min(wanted, Math.floor(Math.sqrt(MAX_AREA / a)))
-  if (height < wanted) limit = 'ceiling'
   if (opts.maxHeight !== undefined && opts.maxHeight < height) {
-    height = Math.floor(opts.maxHeight)
+    height = Math.max(1, Math.floor(opts.maxHeight))
     limit = 'smaller'
   }
-  height = Math.max(1, height)
-  while (height > 1 && Math.round(height * a) * height > MAX_AREA) {
-    height--
-    if (limit !== 'smaller') limit = 'ceiling'
+  // A JPEG's frame header holds an edge of at most 65,535: the largest height
+  // whose width (rounded) and height both fit.
+  if (opts.format === 'jpeg' && Math.max(height, Math.round(height * a)) > JPEG_MAX_EDGE) {
+    height = Math.min(height, JPEG_MAX_EDGE)
+    while (height > 1 && Math.round(height * a) > JPEG_MAX_EDGE) height--
+    limit = 'format'
   }
   const width = Math.max(1, Math.round(height * a))
 

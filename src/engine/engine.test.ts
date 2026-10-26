@@ -1116,9 +1116,10 @@ describe('whichever decode of the photo is drawn, it fills the rectangle its tru
 describe('Save never prints a photo as bare paper', () => {
   it('refuses a document with a photo when no decode of it was handed over', async () => {
     const s = { ...defaultSettings(), media: makeMedia({ id: 'p', width: 100, height: 100 }) }
-    // Refused before any canvas is touched.
-    const untouched = {} as CanvasRenderingContext2D
-    await expect(savePrint(untouched, untouched, s, null)).rejects.toBeInstanceOf(MissingPhotoError)
+    // Refused before any canvas is made.
+    let made = 0
+    await expect(savePrint(s, null, { makeCanvas: () => (made++, {} as CanvasRenderingContext2D) })).rejects.toBeInstanceOf(MissingPhotoError)
+    expect(made).toBe(0)
   })
 })
 

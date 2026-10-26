@@ -16,15 +16,25 @@
  *     fresh tap when the press outlasted the tap that started it.
  *  3. AbortError means the user dismissed the sheet. It is not a failure and
  *     must never surface as an error.
- *  4. JPEG at 0.95 by default, PNG as the explicit lossless choice.
+ *  4. JPEG at quality 95 with every colour sample kept (4:4:4), written by
+ *     this app's own encoder (encode/jpeg.ts); PNG (encode/png.ts) as the
+ *     explicit lossless choice.
  *
  * The size is planned from the photo (exportPlan.ts): the print is saved at
  * the height where the photo lands pixel for pixel, never at the preview's,
- * and never quietly smaller.
+ * never quietly smaller, and with no ceiling: the press runs in bands
+ * (render.ts `pressToSink`) and each band goes straight into the encoder, so
+ * no canvas, array or file buffer the size of the sheet is ever made.
  */
 
+import { JpegEncoder } from './encode/jpeg.ts'
+import { PngEncoder } from './encode/png.ts'
 import { planExport, type ExportPlan } from './exportPlan.ts'
-import { renderPrintAsync, throwIfAborted, type RenderProgress } from './render.ts'
+import { MIN_BAND_ROWS, bandHeight } from './limits.ts'
+import type { DrawRect, LumaGrid } from './media.ts'
+import { groundRect, isNativeRect, outputSize, pressToSink, sourceSize, throwIfAborted, type RenderProgress, type RowSink } from './render.ts'
+import type { GlyphPlan } from './text.ts'
+import { TILE_BUDGET, tileGrid, type TileBudget } from './tiles.ts'
 import { sheetAspect, type MediaLayer, type PrintSettings } from './types.ts'
 
 export type ExportFormat = 'jpeg' | 'png'
@@ -32,16 +42,15 @@ export type ExportFormat = 'jpeg' | 'png'
 /**
  * JPEG quality. 0.95 rather than 0.92: on a screened print it is a quarter to
  * a third more bytes for visibly cleaner dot edges, and still several times
- * smaller than PNG. Below 1.0 browsers write 4:2:0 chroma (Chromium does,
- * measured), which halves the colour resolution of saturated ink on paper —
- * the one loss a quality setting cannot remove, so PNG is offered as the
- * lossless path rather than this number being pushed to 1.0 (three times the
- * bytes, and still not lossless).
+ * smaller than PNG. The encoder keeps every colour sample (4:4:4); a
+ * browser's own encoder below quality 1.0 halves the colour resolution
+ * (4:2:0, measured in Chromium), which smears saturated ink on paper.
  */
 export const JPEG_QUALITY = 0.95
 
 export const ENCODINGS: Record<ExportFormat, { mime: string; ext: string; quality: number | undefined }> = {
-  jpeg: { mime: 'image/jpeg', ext: 'jpg', quality: JPEG_QUALITY },
+  // The encoder's quality, 1..100 (libjpeg's scale): 95.
+  jpeg: { mime: 'image/jpeg', ext: 'jpg', quality: Math.round(JPEG_QUALITY * 100) },
   png: { mime: 'image/png', ext: 'png', quality: undefined },
 }
 
@@ -60,10 +69,10 @@ export class MissingPhotoError extends Error {
 }
 
 /** The size this print saves at: from its sheet and its photo's TRUE size
- *  (never the preview's working copy), at its zoom. */
-export function planPrint(settings: PrintSettings, opts: { maxHeight?: number } = {}): ExportPlan {
+ *  (never the preview's working copy), at its zoom, in its format. */
+export function planPrint(settings: PrintSettings, opts: { maxHeight?: number; format?: ExportFormat } = {}): ExportPlan {
   const m = settings.media
-  return planExport(sheetAspect(settings), m ? { width: m.width, height: m.height, scale: m.scale } : null, opts)
+  return planExport(sheetAspect(settings), m ? { width: m.width, height: m.height, scale: m.scale } : null, { maxHeight: opts.maxHeight, format: opts.format ?? 'jpeg' })
 }
 
 export interface PressedPrint {
@@ -78,93 +87,189 @@ export interface SaveOptions {
    *  automatic: see CanvasLimitError). */
   maxHeight?: number
   /** Cancel: checked at every step of the press, and once more after the
-   *  encode, so a cancelled save never returns a file. */
+   *  file is written, so a cancelled save never returns a file. */
   signal?: AbortSignal
   onProgress?: (progress: RenderProgress) => void
-  /** Called once the photo is in the ground: the caller frees its decode. */
+  /** Called once the photo's last rows are read (the last band): the caller
+   *  frees its decode. */
   onGround?: () => void
+  /** Where the photo lands, when not where the document puts it: a smaller
+   *  copy decoded to its rectangle (media.ts `snapCopyRect`), drawn 1:1. */
+  rect?: DrawRect
+  /** Makes the press's canvases (a tile canvas and, for a photo at its own
+   *  pixels, the canvas its bands are blitted into): detached canvases by
+   *  default. A test hands in its own. */
+  makeCanvas?: () => CanvasRenderingContext2D
 }
 
 /**
- * Press the print at its planned size and encode it.
+ * The test seam (README "Test seams"): read once per press from
+ * `globalThis.__PM_TEST__`, inert when absent. `finishDelayMs` holds the
+ * file's writing that long after the last band (`onFinishStart` called
+ * first), so a gate can tap Cancel while the file is written; `tileBudget`
+ * forces small tiles.
+ */
+interface TestSeam {
+  finishDelayMs?: number
+  onFinishStart?: () => void
+  tileBudget?: TileBudget
+}
+const testSeam = (): TestSeam => (globalThis as { __PM_TEST__?: TestSeam }).__PM_TEST__ ?? {}
+
+/** A press that runs out of memory starts again with bands half as tall, at
+ *  most this many times. */
+export const BAND_HALVINGS = 4
+
+/** The reason a canvas that reads back blank is given. */
+const BLANK = 'a canvas came back blank'
+
+/**
+ * The canvases a press of `plan` makes, at their real sizes: the tile canvas
+ * at the grid's first tile (the largest, clipped to the sheet) and, when the
+ * photo is drawn at its own pixels (`native`), the canvas each band of it is
+ * blitted into (at most TILE_EDGE wide, a band tall).
+ */
+export function pressCanvases(plan: Pick<ExportPlan, 'width' | 'height'>, native: boolean, budget: TileBudget = TILE_BUDGET): { w: number; h: number }[] {
+  const grid = tileGrid(plan.width, plan.height, budget)
+  const sizes = [{ w: grid.tileW, h: Math.min(grid.tileH, plan.height) }]
+  if (native) sizes.push({ w: Math.min(plan.width, Math.floor(budget.edge)), h: bandHeight(plan.width, plan.height) })
+  return sizes
+}
+
+/** A detached 2D canvas, read from often. */
+function detachedCanvas(): CanvasRenderingContext2D {
+  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+  if (!ctx) throw new Error('Could not open a canvas to press the print.')
+  return ctx
+}
+
+/** The save's encoder as the press's sink, its file in `chunks`. */
+function encoderSink(format: ExportFormat, w: number, h: number, bandRows: number, chunks: Uint8Array[]): RowSink {
+  const onChunk = (c: Uint8Array) => chunks.push(c)
+  if (format === 'png') {
+    const png = new PngEncoder(w, h, onChunk, { bandRows })
+    return { put: (rgba, rows) => png.push(rgba, rows), settled: () => png.settled(), finish: () => png.finish(), abort: () => png.abort() }
+  }
+  const jpeg = new JpegEncoder(w, h, ENCODINGS.jpeg.quality!, onChunk)
+  return { put: (rgba, rows) => jpeg.push(rgba, rows), settled: async () => {}, finish: async () => jpeg.finish(), abort: () => {} }
+}
+
+/**
+ * Press the print at its planned size and write the file, band by band.
  *
  * The export never reads back the on-screen canvas — that canvas may carry a
- * selection crosshair. Re-rendering with no overlay makes an editing aid in a
- * saved file structurally impossible rather than something we remember to
- * avoid (N8). Both canvases are let go (width 0) once the file exists, or the
- * press fails: tens of megabytes on a phone.
+ * selection crosshair. Pressing again with no overlay makes an editing aid in
+ * a saved file structurally impossible rather than something we remember to
+ * avoid (N8). The press's canvases are proved first (a sentinel pixel at
+ * each one's last pixel, at the sizes the press will make them) and let go
+ * (width 0) once the file exists, or the press fails.
+ *
+ * Out of memory (a `RangeError` from a typed array, anywhere in the press or
+ * the encoder) starts the press again from the first band with bands half as
+ * tall, a fresh encoder and fresh buffers, keeping what does not depend on
+ * the band (the decoded photo, the photo's luminance grid, the type's
+ * layouts), at most BAND_HALVINGS times: the same file, more slowly. Once the
+ * photo's last rows are read the caller has closed its decode, so a press
+ * that runs out of memory after that is not tried again. What cannot be
+ * pressed at all is a CanvasLimitError, with the plan.
  *
  * @param media the photo decoded from its ORIGINAL bytes (not the preview's
- *   working copy), so the print is drawn from the original's pixels.
- * @param render the renderer; a test hands in a spy.
+ *   working copy), or a smaller copy decoded to `opts.rect`.
  */
-export async function savePrint(
-  exportCtx: CanvasRenderingContext2D,
-  scratchCtx: CanvasRenderingContext2D,
-  settings: PrintSettings,
-  media: CanvasImageSource | null,
-  opts: SaveOptions = {},
-  render: typeof renderPrintAsync = renderPrintAsync,
-): Promise<PressedPrint> {
+export async function savePrint(settings: PrintSettings, media: CanvasImageSource | null, opts: SaveOptions = {}): Promise<PressedPrint> {
   if (settings.media && !media) throw new MissingPhotoError()
   const format = opts.format ?? 'jpeg'
-  const plan = planPrint(settings, { maxHeight: opts.maxHeight })
-  let piece: CanvasRenderingContext2D | null = null
+  const plan = planPrint(settings, { maxHeight: opts.maxHeight, format })
+  const { w, h } = outputSize(sheetAspect(settings), plan.height)
+  // The press makes the width from the same aspect; a sheet of any other
+  // size is not the print the caption promised.
+  if (w !== plan.width) throw new Error(`The print would come out ${w}×${h}, not the planned ${plan.width}×${plan.height}.`)
+  const seam = testSeam()
+  const budget = seam.tileBudget ?? TILE_BUDGET
+  const made: CanvasRenderingContext2D[] = []
+  const canvas = () => {
+    const ctx = (opts.makeCanvas ?? detachedCanvas)()
+    made.push(ctx)
+    return ctx
+  }
+  // The photo is closed by the caller once its last rows are read: from then
+  // on a press cannot be run again. (With no photo there is nothing to lose.)
+  let grounded = false
+  const onGround = () => {
+    if (media) grounded = true
+    opts.onGround?.()
+  }
   try {
-    // Every full-size canvas the press uses, allocated and proved before any
-    // work: over its limit an iOS canvas does not throw, it hands back a
-    // blank one, and the print would come out empty.
-    if (!fitsCanvas(exportCtx, plan.width, plan.height) || !fitsCanvas(scratchCtx, plan.width, plan.height)) {
-      throw new CanvasLimitError(plan, 'a canvas that size came back blank')
+    const size = media ? sourceSize(media) : null
+    const native = !!settings.media && !!size && isNativeRect(opts.rect ?? groundRect(settings.media, w, h), size.width, size.height)
+    // Every canvas the press makes, proved at its real size before any work:
+    // over its limit an iOS canvas does not throw, it hands back a blank one,
+    // and the print would come out empty.
+    const [tileSize, pieceSize] = pressCanvases(plan, native, budget)
+    const tile = canvas()
+    if (!fitsCanvas(tile, tileSize.w, tileSize.h)) throw new CanvasLimitError(plan, BLANK)
+    let piece: CanvasRenderingContext2D | undefined
+    if (pieceSize) {
+      piece = canvas()
+      if (!fitsCanvas(piece, pieceSize.w, pieceSize.h)) throw new CanvasLimitError(plan, BLANK)
     }
-    await render(exportCtx, scratchCtx, settings, plan.height, media, {
-      signal: opts.signal,
-      onProgress: opts.onProgress,
-      onGround: opts.onGround,
-      // A photo at its own pixels is blitted a band at a time into a canvas
-      // of its own (at most 4096 wide and a band tall).
-      makeCanvas: () => {
-        const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-        if (!ctx) throw new Error('Could not open a canvas to press the print.')
-        piece = ctx
-        return ctx
-      },
-    })
-    const { width, height } = exportCtx.canvas
-    // The renderer makes the width from the same aspect; a canvas of any other
-    // size is not the print the caption promised.
-    if (width !== plan.width || height !== plan.height) {
-      throw new Error(`The print came out ${width}×${height}, not the planned ${plan.width}×${plan.height}.`)
+    // Kept across a retry: they do not depend on the band.
+    const plans = new Map<string, GlyphPlan>()
+    const luma: { grid?: LumaGrid } = {}
+    let B = bandHeight(w, h)
+    for (let halvings = 0; ; halvings++) {
+      const chunks: Uint8Array[] = []
+      const sink = encoderSink(format, w, h, B, chunks)
+      try {
+        await pressToSink(settings, plan.height, media, sink, {
+          bandRows: B,
+          tileBudget: budget,
+          rect: opts.rect,
+          signal: opts.signal,
+          onProgress: opts.onProgress,
+          onGround,
+          plans,
+          luma,
+          canvases: { tile, piece: () => piece ?? (piece = canvas()) },
+        })
+        luma.grid = undefined
+        // The file: written after the last band (Cancel stays live while it
+        // is, a second or more on a phone: tapped then, there is no file).
+        opts.onProgress?.({ step: 'write', band: Math.ceil(h / B), bands: Math.ceil(h / B) })
+        // A moment for the page to say so.
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        seam.onFinishStart?.()
+        if (seam.finishDelayMs) await new Promise((resolve) => setTimeout(resolve, seam.finishDelayMs))
+        throwIfAborted(opts.signal)
+        await sink.finish()
+        throwIfAborted(opts.signal)
+        return { blob: new Blob(chunks as BlobPart[], { type: ENCODINGS[format].mime }), plan, format }
+      } catch (err) {
+        sink.abort()
+        chunks.length = 0
+        if (!(err instanceof RangeError) || grounded || halvings >= BAND_HALVINGS || B <= MIN_BAND_ROWS) throw err
+        // Out of memory with the photo still held: again from the first band,
+        // in bands half as tall. What the last attempt made is let go first.
+        B = Math.max(MIN_BAND_ROWS, Math.floor(B / 2))
+      }
     }
-    const blob = await encode(exportCtx.canvas, format)
-    // Cancel stays live while the file is encoded (up to a second on a
-    // desktop, longer on a phone): tapped then, there is no file.
-    throwIfAborted(opts.signal)
-    if (!blob) throw new CanvasLimitError(plan, 'the image could not be encoded')
-    return { blob, plan, format }
   } catch (err) {
     // Out of memory for a typed array or an ImageData is a RangeError: the
     // same "too big for this device", said the same way.
     if (err instanceof RangeError) throw new CanvasLimitError(plan, err.message)
     throw err
   } finally {
-    exportCtx.canvas.width = 0
-    scratchCtx.canvas.width = 0
-    if (piece) (piece as CanvasRenderingContext2D).canvas.width = 0
+    for (const ctx of made) ctx.canvas.width = 0
   }
-}
-
-function encode(canvas: HTMLCanvasElement, format: ExportFormat): Promise<Blob | null> {
-  const { mime, quality } = ENCODINGS[format]
-  return new Promise((resolve) => canvas.toBlob(resolve, mime, quality))
 }
 
 /**
  * This device could not press the print at this size: a canvas came back
- * blank (a sentinel pixel did not read back), the encoder returned nothing, or
- * memory ran out. Never answered by quietly saving something smaller: the
- * save flow offers a smaller copy, in numbers, and the person chooses it
- * (`findSmallerPlan`).
+ * blank (a sentinel pixel did not read back), the photo could not be decoded
+ * whole while a smaller decode of it could, or memory ran out at the smallest
+ * band. Never answered by quietly saving something smaller: the save flow
+ * offers a smaller copy, in numbers, and the person chooses it
+ * (`findSmallerPlanAsync`).
  */
 export class CanvasLimitError extends Error {
   constructor(
@@ -210,20 +315,23 @@ export const SMALLEST_COPY_HEIGHT = 600
 /**
  * The largest smaller copy this device can press: the height stepped down by
  * SMALLER_STEP (rounded to a whole pixel, the sheet's shape kept) from the one
- * that failed, until `fits` holds for a sheet that size — or null once a step
+ * that failed, until `fits` holds for a copy that size — or null once a step
  * would go below SMALLEST_COPY_HEIGHT: this device cannot save this print.
+ * `fits` is asked of each candidate in turn, largest first, and of none after
+ * the first that fits (it may decode the photo at the candidate's size).
  */
-export function findSmallerPlan(
+export async function findSmallerPlanAsync(
   settings: PrintSettings,
   failedHeight: number,
-  fits: (w: number, h: number) => boolean,
-): ExportPlan | null {
+  fits: (plan: ExportPlan) => Promise<boolean>,
+  format: ExportFormat = 'jpeg',
+): Promise<ExportPlan | null> {
   let maxHeight = failedHeight
   for (;;) {
     maxHeight = Math.round(maxHeight * SMALLER_STEP)
     if (maxHeight < SMALLEST_COPY_HEIGHT) return null
-    const plan = planPrint(settings, { maxHeight })
-    if (fits(plan.width, plan.height)) return plan
+    const plan = planPrint(settings, { maxHeight, format })
+    if (await fits(plan)) return plan
   }
 }
 
@@ -305,8 +413,8 @@ export function describePlan(plan: ExportPlan, media: Pick<MediaLayer, 'width' |
       return { size, reason: null }
     case 'floor':
       return { size, reason: `photo is ${photo}: upscaled ${times(plan.upscale ?? 1)}` }
-    case 'ceiling':
-      return { size, reason: `capped at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is ${photo}` }
+    case 'format':
+      return { size, reason: 'JPEG holds at most 65,535 px a side: Save lossless PNG for the photo\'s full size' }
     case 'smaller':
       return { size, reason: 'a smaller copy, as asked' }
   }

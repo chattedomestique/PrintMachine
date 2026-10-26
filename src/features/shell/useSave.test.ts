@@ -8,11 +8,18 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { CanvasLimitError, MissingPhotoError, planPrint } from '../../engine/export.ts'
 import { planExport } from '../../engine/exportPlan.ts'
+import { sheetAspect, type PrintSettings } from '../../engine/types.ts'
+import { defaultSettings, makeMedia } from '../../state/defaults.ts'
+import { PhotoDecodeError } from '../media/decode.ts'
 import {
   IDLE,
   SHARE_AT_ONCE_MS,
   canStart,
+  copyRect,
+  pressForSave,
+  type SaveDeps,
   moreCaption,
   pressInProgress,
   progressText,
@@ -46,7 +53,7 @@ describe('the save flow', () => {
       kinds([
         { type: 'start', format: 'jpeg', plan, photo: true },
         { type: 'photoLoaded' },
-        { type: 'progress', progress: { step: 'press', pass: 1, passes: 2 } },
+        { type: 'progress', progress: { step: 'press', band: 0, bands: 6 } },
         { type: 'pressed', file, now: false },
         { type: 'share' },
         { type: 'delivered' },
@@ -156,8 +163,8 @@ describe('the save flow', () => {
     // The More sheet promises no size either: its first row says why, and
     // the PNG row has no size to show.
     const native = { size: '3024×4032', reason: null }
-    const capped = { size: '4729×3547', reason: 'capped at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is 5712×4284' }
-    for (const c of [native, capped]) {
+    const zoomed = { size: '2400×1800', reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
+    for (const c of [native, zoomed]) {
       expect(moreCaption('failed', c, true)).toStrictEqual({
         size: null,
         word: why,
@@ -169,14 +176,14 @@ describe('the save flow', () => {
 
   it('the More sheet\'s first row: the size a save makes, and why when it is not the photo\'s own pixels', () => {
     const native = { size: '3024×4032', reason: null }
-    const capped = { size: '4729×3547', reason: 'capped at 16.7 MP, the most a browser canvas is guaranteed to hold; photo is 5712×4284' }
+    const zoomed = { size: '2400×1800', reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
     expect(moreCaption('ready', native, true)).toStrictEqual({
       size: '3024×4032',
       word: 'Saves 3024×4032',
       meta: "The photo's own pixels, one for one.",
       alert: false,
     })
-    expect(moreCaption('ready', capped, true)).toStrictEqual({ size: '4729×3547', word: 'Saves 4729×3547', meta: capped.reason, alert: false })
+    expect(moreCaption('ready', zoomed, true)).toStrictEqual({ size: '2400×1800', word: 'Saves 2400×1800', meta: zoomed.reason, alert: false })
     // While the photo decodes the plan is already known (the layer's own
     // dimensions): the size stands.
     expect(moreCaption('loading', native, true).size).toBe('3024×4032')
@@ -197,9 +204,9 @@ describe('the save flow', () => {
     })
     const pressing = run([
       { type: 'start', format: 'jpeg', plan, photo: false },
-      { type: 'progress', progress: { step: 'press', pass: 1, passes: 2 } },
+      { type: 'progress', progress: { step: 'press', band: 1, bands: 6 } },
     ])
-    expect(saveStatus(pressing, 'none')).toEqual({ text: 'Pressing 3024×3780, plate 1 of 2', alert: false, busy: true, action: 'cancel' })
+    expect(saveStatus(pressing, 'none')).toEqual({ text: 'Pressing 3024×3780, 16%', alert: false, busy: true, action: 'cancel' })
     expect(saveStatus(run([{ type: 'start', format: 'jpeg', plan, photo: true }]), 'ready')?.action).toBe('cancel')
     const sharing = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'pressed', file, now: true }])
     expect(saveStatus(sharing, 'none')).toEqual({ text: 'Saving 3024×3780', alert: false, busy: true, action: null })
@@ -227,21 +234,25 @@ describe('the save flow', () => {
     }
   })
 
-  it('says how far the press has got, in pixels and plates', () => {
+  it('says how far the press has got: in pixels, and in percent of its bands', () => {
     const start = run([{ type: 'start', format: 'jpeg', plan, photo: true }])
     expect(progressText(start)).toBe('Pressing 3024×3780: loading the photo')
-    // Before its first step a press claims nothing (a print with no photo lays
-    // none down); then the photo, the plates and the sheet.
+    // Before its first step a press claims nothing; then the photo read for
+    // the second ink, the bands, and the file.
     expect(progressText(run([{ type: 'start', format: 'jpeg', plan, photo: false }]))).toBe('Pressing 3024×3780')
-    expect(progressText(run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'photo', pass: 0, passes: 3 } }], start))).toBe(
-      'Pressing 3024×3780: laying down the photo',
+    expect(progressText(run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'photo', band: 2, bands: 6 } }], start))).toBe(
+      'Pressing 3024×3780: reading the photo',
     )
-    const pressing = run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'press', pass: 2, passes: 3 } }], start)
-    expect(progressText(pressing)).toBe('Pressing 3024×3780, plate 2 of 3')
+    const at = (band: number, bands: number) =>
+      progressText(run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'press', band, bands } }], start))
+    expect(at(0, 6)).toBe('Pressing 3024×3780, 0%')
+    expect(at(3, 7)).toBe('Pressing 3024×3780, 42%')
+    expect(at(19, 20)).toBe('Pressing 3024×3780, 95%')
+    const pressing = run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'press', band: 2, bands: 6 } }], start)
     expect(saveButton(pressing, 'ready')).toEqual({ text: 'Saving', busy: true, disabled: true })
     expect(saveLabel(pressing, 'ready', '3024×3780')).toBe('Saving 3024×3780')
-    expect(progressText(saveReducer(pressing, { type: 'progress', progress: { step: 'print', pass: 3, passes: 3 } }))).toBe(
-      'Pressing 3024×3780: printing the sheet',
+    expect(progressText(saveReducer(pressing, { type: 'progress', progress: { step: 'write', band: 6, bands: 6 } }))).toBe(
+      'Pressing 3024×3780: writing the file',
     )
     expect(progressText(IDLE)).toBeNull()
   })
@@ -252,12 +263,12 @@ describe('a print too big for this device, and a save that did not finish', () =
 
   it('a press that fails for size asks about a smaller copy; it never starts one by itself', () => {
     const pressing = run([{ type: 'start', format: 'png', plan, photo: true }, { type: 'photoLoaded' }])
-    const asked = saveReducer(pressing, { type: 'tooBig', failed: plan, why: 'a canvas that size came back blank', smaller })
-    expect(asked).toEqual({ kind: 'tooBig', format: 'png', failed: plan, why: 'a canvas that size came back blank', smaller })
+    const asked = saveReducer(pressing, { type: 'tooBig', failed: plan, why: 'a canvas came back blank', smaller })
+    expect(asked).toEqual({ kind: 'tooBig', format: 'png', failed: plan, why: 'a canvas came back blank', smaller })
     expect(pressInProgress(asked)).toBe(false)
     expect(saveQuestion(asked, planAt)).toEqual({
       title: 'Too big for this device',
-      text: "This device couldn't press 3024×3780 (a canvas that size came back blank). Save a smaller 2268×2835 copy instead?",
+      text: "This device couldn't press 3024×3780 (a canvas came back blank). Save a smaller 2268×2835 copy instead?",
       choices: [{ label: 'Save smaller', height: 2835 }],
     })
     // Choosing it starts a press at that size, in the format asked for.
@@ -268,7 +279,7 @@ describe('a print too big for this device, and a save that did not finish', () =
     })
     expect(saveReducer(asked, { type: 'dismiss' })).toEqual(IDLE)
     // Only a press can fail for size.
-    expect(saveReducer(IDLE, { type: 'tooBig', failed: plan, why: 'a canvas that size came back blank', smaller })).toBe(IDLE)
+    expect(saveReducer(IDLE, { type: 'tooBig', failed: plan, why: 'a canvas came back blank', smaller })).toBe(IDLE)
   })
 
   it('with no copy this device can press, it says so and offers nothing', () => {
@@ -296,7 +307,7 @@ describe('a print too big for this device, and a save that did not finish', () =
     // Its offer is worked out from the document as it is, so an edit keeps it;
     // a smaller copy worked out for a failed press is dropped.
     expect(saveReducer(notice, { type: 'documentChanged' })).toBe(notice)
-    const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, why: 'a canvas that size came back blank', smaller }])
+    const asked = run([{ type: 'start', format: 'jpeg', plan, photo: false }, { type: 'tooBig', failed: plan, why: 'a canvas came back blank', smaller }])
     expect(saveReducer(asked, { type: 'documentChanged' })).toEqual(IDLE)
     // Never over a save in progress.
     const pressing = run([{ type: 'start', format: 'jpeg', plan, photo: false }])
@@ -306,5 +317,153 @@ describe('a print too big for this device, and a save that did not finish', () =
   it('no question otherwise', () => {
     expect(saveQuestion(IDLE, planAt)).toBeNull()
     expect(saveQuestion({ kind: 'error', message: 'x' }, planAt)).toBeNull()
+  })
+})
+
+describe('the press behind Save: the photo decoded as the print needs it, and what a device cannot press', () => {
+  const doc = (width: number, height: number, aspect: PrintSettings['aspect'] = '4:5'): PrintSettings => ({
+    ...defaultSettings(),
+    aspect,
+    media: makeMedia({ id: 'photo', width, height, native: true }),
+  })
+  const bitmap = (width: number, height: number) => {
+    const b = { width, height, closed: 0, close: () => b.closed++ }
+    return b
+  }
+  /** The page's deps, recorded: every decode asked for, every press made. */
+  const deps = (over: Partial<SaveDeps> = {}) => {
+    const log = {
+      full: [] as string[],
+      resized: [] as string[],
+      pressed: [] as Parameters<SaveDeps['savePrint']>[2][],
+      canvases: [] as string[],
+      bitmaps: [] as ReturnType<typeof bitmap>[],
+    }
+    const d: SaveDeps = {
+      decodeOriginal: async (id) => {
+        log.full.push(id)
+        const b = bitmap(4032, 3024)
+        log.bitmaps.push(b)
+        return b as unknown as ImageBitmap
+      },
+      decodeResized: async (id, w, h) => {
+        log.resized.push(`${id} ${w}x${h}`)
+        const b = bitmap(w, h)
+        log.bitmaps.push(b)
+        return b as unknown as ImageBitmap
+      },
+      savePrint: async (settings, _media, opts) => {
+        log.pressed.push(opts)
+        const m = settings.media
+        const p = planExport(sheetAspect(settings), m ? { width: m.width, height: m.height, scale: m.scale } : null, { maxHeight: opts?.maxHeight, format: opts?.format })
+        opts?.onGround?.()
+        return { blob: new Blob([new Uint8Array(10)]), plan: p, format: opts?.format ?? 'jpeg' }
+      },
+      canvasFits: (w, h) => (log.canvases.push(`${w}x${h}`), true),
+      ...over,
+    }
+    return { d, log }
+  }
+
+  it('a print at its own pixels decodes the original, presses it, and closes it', async () => {
+    const { d, log } = deps()
+    let loaded = 0
+    const r = await pressForSave({ settings: doc(4032, 3024), format: 'jpeg', onPhotoLoaded: () => loaded++ }, d)
+    expect(r.kind).toBe('pressed')
+    expect(log.full).toEqual(['photo'])
+    expect(log.resized).toEqual([])
+    expect(loaded).toBe(1)
+    expect(log.pressed[0]).toMatchObject({ format: 'jpeg', rect: undefined })
+    expect(log.bitmaps.every((b) => b.closed >= 1)).toBe(true)
+  })
+
+  it('a smaller copy decodes the photo straight to its integer rectangle and presses it there, 1:1', async () => {
+    const { d, log } = deps()
+    const s = doc(4032, 3024)
+    const plan = planPrint(s, { maxHeight: 2268 })
+    expect(plan).toMatchObject({ width: 1814, height: 2268, limit: 'smaller' })
+    const r = await pressForSave({ settings: s, format: 'jpeg', maxHeight: 2268 }, d)
+    expect(r.kind).toBe('pressed')
+    expect(log.full).toEqual([])
+    // The cover fit of 4032x3024 on 1814x2268 is 3024 x 2268 (a scale of
+    // 0.75, dx -605): already whole, so it is the rectangle as it is.
+    const rect = copyRect(s, plan)!
+    expect(rect).toEqual({ dx: -605, dy: 0, dw: 3024, dh: 2268 })
+    expect(log.resized).toEqual(['photo 3024x2268'])
+    expect(log.pressed[0]).toMatchObject({ maxHeight: 2268, rect })
+    // A fractional fit is rounded up and placed on whole pixels, still
+    // covering the sheet.
+    const p = planPrint(doc(4000, 3001), { maxHeight: 1999 })
+    const odd = copyRect(doc(4000, 3001), p)!
+    expect([odd.dx, odd.dy, odd.dw, odd.dh].every(Number.isInteger)).toBe(true)
+    expect(odd.dx <= 0 && odd.dy <= 0 && odd.dx + odd.dw >= p.width && odd.dy + odd.dh >= p.height).toBe(true)
+  })
+
+  it('a whole decode that fails while a smaller one works is this device\'s size: the largest copy whose canvases and photo it can hold', async () => {
+    const reason = 'Cannot create an image buffer from the argument to createImageBitmap'
+    const { d, log } = deps({
+      decodeOriginal: async () => {
+        throw new PhotoDecodeError(reason)
+      },
+    })
+    const r = await pressForSave({ settings: doc(7728, 5152, 'original'), format: 'jpeg' }, d)
+    expect(r).toMatchObject({ kind: 'tooBig', why: reason, failed: { width: 7728, height: 5152 }, smaller: { width: 5796, height: 3864, limit: 'smaller' } })
+    // The copy's canvases (its first tile, its photo's band), then its photo
+    // at its size: one decode.
+    expect(log.canvases).toEqual(['4096x1024', '4096x361'])
+    expect(log.resized).toEqual(['photo 5796x3864'])
+    expect(log.pressed).toEqual([])
+  })
+
+  it('a file that cannot be decoded at any size stays a plain failure, never a smaller-copy offer', async () => {
+    const { d, log } = deps({
+      decodeOriginal: async () => {
+        throw new PhotoDecodeError('The source image could not be decoded.')
+      },
+      decodeResized: async () => {
+        throw new PhotoDecodeError('The source image could not be decoded.')
+      },
+    })
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, d)).rejects.toThrow(
+      'The photo could not be decoded to save: The source image could not be decoded.',
+    )
+    expect(log.pressed).toEqual([])
+  })
+
+  it('a canvas that comes back blank: the largest copy that proves itself, its photo decoded only for the one offered', async () => {
+    const s = doc(4032, 3024)
+    const { d, log } = deps({
+      savePrint: async () => {
+        throw new CanvasLimitError(planPrint(s), 'a canvas came back blank')
+      },
+    })
+    // Canvases wider than 1500 px read back blank.
+    d.canvasFits = (w, h) => (log.canvases.push(`${w}x${h}`), w <= 1500)
+    const r = await pressForSave({ settings: s, format: 'png' }, d)
+    // 2268 tall (its tile 1814 wide: blank), then 1701 (1361 wide: fits).
+    expect(r).toMatchObject({ kind: 'tooBig', why: 'a canvas came back blank', smaller: { width: 1361, height: 1701 } })
+    expect(log.canvases).toEqual(['1814x2268', '1361x1701', '1361x1540'])
+    expect(log.resized).toEqual(['photo 2268x1701'])
+    expect(log.bitmaps.every((b) => b.closed >= 1)).toBe(true)
+  })
+
+  it('a missing photo is said as itself, and a Cancel while it decodes stops before the press', async () => {
+    const { d } = deps({
+      decodeOriginal: async () => {
+        throw new MissingPhotoError()
+      },
+    })
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, d)).rejects.toBeInstanceOf(MissingPhotoError)
+    const controller = new AbortController()
+    const { d: d2, log } = deps({
+      decodeOriginal: async () => {
+        controller.abort()
+        return bitmap(4032, 3024) as unknown as ImageBitmap
+      },
+    })
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: controller.signal }, d2)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(log.pressed).toEqual([])
   })
 })

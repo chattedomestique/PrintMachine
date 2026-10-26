@@ -9,10 +9,12 @@
  *
  * Desktop Chromium's resident memory is not a faithful stand-in for an
  * iPhone's: V8 frees short-lived buffers eagerly where JavaScriptCore keeps
- * them. So this runs the REAL export path (`renderPrintAsync`, the function
- * Save calls) in node, where every typed array is counted: each constructor
- * is wrapped, and at every allocation of a full-sheet-sized buffer a full
- * garbage collection runs and the bytes still live are read back
+ * them. So this runs the REAL export path (`pressToSink`, the press Save
+ * runs, into the real JPEG encoder, whose file is counted and dropped) in
+ * node, where every typed array is counted: each constructor is wrapped, and
+ * at every allocation of a quarter of the sheet's pixels or more, and at
+ * every step of the press, a full garbage collection runs and the bytes still
+ * live are read back
  * (`process.memoryUsage().arrayBuffers`). A buffer is live while anything can
  * still reach it — a local not yet out of scope included, which is how a
  * conservative collector like JavaScriptCore's sees it too. V8 runs
@@ -26,15 +28,11 @@
  * the right size and plausible content (type-shaped strokes where glyphs
  * were drawn, a photo where the photo was), so the engine walks the same
  * branches it does in a browser. What lives OUTSIDE typed arrays is stated,
- * not measured: the export's canvases (the sheet-sized output canvas, the
- * tile canvas at its largest tile, the piece canvas a photo at its own
- * pixels is blitted into a band at a time; 4 bytes a pixel each) and the
- * decoded original photo (4 bytes per photo pixel, held until the photo's
- * last rows are read, at the last band). The report adds them up.
- *
- * The live bytes are read at every allocation of a quarter of the sheet's
- * pixels or more and at every step of the press (the band engine's buffers
- * are band-sized, so a peak between two large allocations is not missed).
+ * not measured: the export's canvases (the tile canvas at its largest tile,
+ * the piece canvas a photo at its own pixels is blitted into a band at a
+ * time; 4 bytes a pixel each), the decoded original photo (4 bytes per photo
+ * pixel, held until the photo's last rows are read, at the last band) and the
+ * file (its bytes counted as it is written). The report adds them up.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -179,7 +177,8 @@ function fakeContext() {
 const { createServer } = await import('vite')
 const server = await createServer({ root, configFile: false, logLevel: 'error', server: { middlewareMode: true, watch: null }, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] } })
 const load = (p) => server.ssrLoadModule(resolve(root, p))
-const { renderPrintAsync } = await load('src/engine/render.ts')
+const { pressToSink } = await load('src/engine/render.ts')
+const { JpegEncoder } = await load('src/engine/encode/jpeg.ts')
 const { planPrint } = await load('src/engine/export.ts')
 const { defaultSettings, makeLayer, makeMedia } = await load('src/state/defaults.ts')
 const { contrastPartner } = await load('src/engine/inks.ts')
@@ -199,7 +198,6 @@ for (const c of CASES.filter((k) => k.id === only)) {
   const plan = planPrint(s)
   const n = plan.width * plan.height
   const photoBytes = s.media ? s.media.width * s.media.height * 4 : 0
-  const out = fakeContext()
   const scratch = fakeContext()
   const photo = s.media ? { width: s.media.width, height: s.media.height } : null
 
@@ -221,30 +219,36 @@ for (const c of CASES.filter((k) => k.id === only)) {
   meter.base = process.memoryUsage().arrayBuffers
   Object.assign(meter, { on: true, n, total: 0, peak: 0, threshold: Math.floor(n / 4) })
   let samples = 0
+  // The real encoder, at Save's quality; its file is counted and dropped.
+  let fileBytes = 0
   const t0 = performance.now()
-  await renderPrintAsync(out, scratch, s, plan.height, photo, {
-    makeCanvas: () => measured(fakeContext(), 'piece'),
+  const jpeg = new JpegEncoder(plan.width, plan.height, 95, (chunk) => (fileBytes += chunk.length))
+  const sink = { put: (rgba, rows) => jpeg.push(rgba, rows), settled: async () => {}, finish: async () => jpeg.finish(), abort: () => {} }
+  await pressToSink(s, plan.height, photo, sink, {
+    canvases: { tile: scratch, piece: () => measured(fakeContext(), 'piece') },
     onGround: () => sample(),
     onProgress: () => {
       samples++
       sample()
     },
   })
+  await sink.finish()
+  sample()
   const ms = performance.now() - t0
   meter.on = false
 
   const decode = photoBytes / n
-  const canvases = 4 + (4 * largest.tile) / n + (4 * largest.piece) / n
+  const canvases = (4 * largest.tile) / n + (4 * largest.piece) / n
   const peak = meter.peak / n
   const over = c.gated && peak > GATE
   if (over) failed = true
   console.log(`case ${c.id}: ${c.name}`)
   console.log(`  ${plan.width}x${plan.height} (${(n / 1e6).toFixed(1)} MP), ${s.layers.length} plates, ${ms.toFixed(0)} ms in node, ${samples} steps sampled`)
   console.log(`  typed arrays: peak ${fmt(peak)} B/px (${(meter.peak / 1e6).toFixed(0)} MB)${c.gated ? (over ? `  OVER the ${GATE} B/px gate` : '  ok') : '  (recorded)'}; allocated in all ${fmt(meter.total / n)} B/px`)
-  const total = peak + canvases + decode
+  const total = peak + canvases + decode + fileBytes / n
   console.log(
-    `  with the canvases (${fmt(canvases)} B/px: the output 4, the tile canvas at its largest ${fmt((4 * largest.tile) / n)}, the photo's piece canvas ${fmt((4 * largest.piece) / n)}) ` +
-      `and the decoded photo (${fmt(decode)} B/px, until its last rows are read):`,
+    `  with the canvases (${fmt(canvases)} B/px: the tile canvas at its largest ${fmt((4 * largest.tile) / n)}, the photo's piece canvas ${fmt((4 * largest.piece) / n)}), ` +
+      `the decoded photo (${fmt(decode)} B/px, until its last rows are read) and the file (${fmt(fileBytes / n)} B/px of the fake print):`,
   )
   console.log(`    peak ${fmt(total)} B/px (${((total * n) / 1e6).toFixed(0)} MB)\n`)
 }

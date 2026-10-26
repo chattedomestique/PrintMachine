@@ -9,13 +9,15 @@
  *
  *  1. A 12 MP photo on 4:5, Save: within 100 ms of the tap Save reads Saving
  *     and the status card above the dock offers Cancel, the card counts the
- *     press in pixels and plates, the file is the size the More sheet and
- *     Save's name promised, and the in-flight mark is set while it presses
- *     and gone after.
- *  2. Canvases that read back blank above 5 MP (what an iOS canvas over its
- *     limit does): Save asks, in numbers, for a smaller copy before pressing
+ *     press in pixels and percent and says when it writes the file, the file
+ *     is the size the More sheet and Save's name promised, and the in-flight
+ *     mark is set while it presses and gone after.
+ *  2. Canvases wider than 2000 px that read back blank (what an iOS canvas
+ *     over its limit does; the 12 MP print's tiles are 2419 wide, its smaller
+ *     copy's 1814): Save asks, in numbers, for a smaller copy before pressing
  *     anything (focus on Save smaller), and Save smaller saves a file that
- *     size. Blank above 0.3 MP: it says this device cannot save the print.
+ *     size. Blank over 100 px wide: it says this device cannot save the
+ *     print.
  *  3. The tab closed mid-press: the next launch says the last save did not
  *     finish, with Try again (focused) and a smaller copy; Escape dismisses
  *     it, the launch after says nothing. Killed again, and the photo's
@@ -27,9 +29,10 @@
  *     tool's File tab says so; Save cannot be tapped, and no file appears;
  *     the More sheet promises no size (its first row says why, the PNG row
  *     is unavailable and shows no size).
- *  5. Cancel tapped while the file is encoded (an encoder slowed to 1.5 s,
- *     as a phone's is): no file, no "Saved" toast, Save again and no card,
- *     with a share sheet and without one.
+ *  5. Cancel tapped while the file is written (its writing held 1.5 s by the
+ *     test seam, README "Test seams", as a phone's can take): no file, no
+ *     "Saved" toast, Save again and no card, with a share sheet and without
+ *     one.
  *  6. Ctrl+Z while the print is pressed: the document does not change (the
  *     page is inert, and so is keyboard undo), the file is the print on
  *     screen, and Ctrl+Z works again once the press is over.
@@ -185,17 +188,25 @@ const question = (page) =>
     }
   }, QUESTION)
 const waitForQuestion = (page) => page.waitForFunction((Q) => document.querySelector(Q)?.open, QUESTION, { timeout: 60_000 })
-const pressing = (page) => page.waitForFunction((LINE) => document.querySelector(LINE)?.textContent?.includes('plate'), LINE, { timeout: 60_000 })
+/** The press under way: the card counts its bands, or writes the file. */
+const pressing = (page) => page.waitForFunction((LINE) => /%|writing the file/.test(document.querySelector(LINE)?.textContent ?? ''), LINE, { timeout: 60_000 })
 
-/** Detached canvases (the press's, not the on-screen preview) over `mp`
- *  megapixels read back blank. */
-const blankAbove = (mp) => `
+/** Detached canvases (the press's, not the on-screen preview) wider than
+ *  `px` read back blank. */
+const blankWider = (px) => `
   const real = CanvasRenderingContext2D.prototype.getImageData
   CanvasRenderingContext2D.prototype.getImageData = function (...a) {
     const d = real.apply(this, a)
-    if (!this.canvas.isConnected && this.canvas.width * this.canvas.height > ${mp} * 1e6) d.data.fill(0)
+    if (!this.canvas.isConnected && this.canvas.width > ${px}) d.data.fill(0)
     return d
   }
+`
+
+/** The test seam (README "Test seams"): the file's writing held `ms`, the
+ *  moment it starts recorded. */
+const slowWrite = (ms) => `
+  window.__encodeStarted = null
+  window.__PM_TEST__ = { finishDelayMs: ${ms}, onFinishStart: () => (window.__encodeStarted = performance.now()) }
 `
 
 try {
@@ -224,26 +235,29 @@ try {
     const ms = first ? Math.round(first.t - t0) : Infinity
     check(size === '2419×3024' && name === 'Save 2419×3024 JPEG', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
     check(first?.b === 'Saving' && first?.c === 'Cancel' && ms < 100, `Save read "${first?.b}" and the card offered "${first?.c}" ${ms} ms after the tap (< 100 ms)`)
-    check(lines.some((l) => l.includes(`${size}, plate 1 of`)) && lines.some((l) => l.endsWith('printing the sheet')), `the line counted the press: ${lines.join(' / ')}`)
+    check(
+      lines.some((l) => new RegExp(`^Pressing ${size}, \\d+%$`).test(l)) && lines.some((l) => l.endsWith('writing the file')),
+      `the line counted the press: ${lines.join(' / ')}`,
+    )
     check(file === pixels(size), `the file is ${file}, the caption's ${size}`)
     check(mark === JSON.stringify({ height: 3024, format: 'jpeg' }) && (await page.evaluate((F) => localStorage.getItem(F), FLAG)) === null, `in flight ${mark}, gone after`)
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     await ctx.close()
   }
 
-  console.log('\n2. A device whose canvases come back blank above 5 MP')
+  console.log('\n2. A device whose canvases come back blank wider than 2000 px')
   {
     const ctx = await newContext()
-    const { page, errors } = await open(ctx, blankAbove(5))
+    const { page, errors } = await open(ctx, blankWider(2000))
     await choosePhoto(page, 4032, 3024)
     const files = []
     page.on('download', (d) => files.push(d))
     await page.locator(SAVE).click()
     await waitForQuestion(page)
     const q = await question(page)
-    const pressed = await page.evaluate(() => window.__labels.some((x) => x.l.includes('plate') || x.l.includes('printing')))
+    const pressed = await page.evaluate(() => window.__labels.some((x) => x.l.includes('%') || x.l.endsWith('writing the file')))
     check(
-      q.text === "This device couldn't press 2419×3024 (a canvas that size came back blank). Save a smaller 1814×2268 copy instead?",
+      q.text === "This device couldn't press 2419×3024 (a canvas came back blank). Save a smaller 1814×2268 copy instead?",
       `asked: "${q.text}"`,
     )
     check(q.buttons.join('|') === 'Cancel|Save smaller' && q.focus === 'Save smaller', `choices: ${q.buttons.join(', ')}; focus on "${q.focus}"`)
@@ -257,15 +271,15 @@ try {
     await ctx.close()
 
     const ctx2 = await newContext()
-    const { page: p2 } = await open(ctx2, blankAbove(0.3))
+    const { page: p2 } = await open(ctx2, blankWider(100))
     await choosePhoto(p2, 4032, 3024)
     await p2.locator(SAVE).click()
     await waitForQuestion(p2)
     const none = await question(p2)
     check(
-      none.text === "This device couldn't press 2419×3024 (a canvas that size came back blank), nor a copy smaller than it: it cannot save this print." &&
+      none.text === "This device couldn't press 2419×3024 (a canvas came back blank), nor a copy smaller than it: it cannot save this print." &&
         none.buttons.join('|') === 'OK',
-      `blank above 0.3 MP: "${none.text}" [${none.buttons.join(', ')}]`,
+      `blank wider than 100 px: "${none.text}" [${none.buttons.join(', ')}]`,
     )
     await ctx2.close()
   }
@@ -404,18 +418,11 @@ try {
     await ctx.close()
   }
 
-  console.log('\n5. Cancel tapped while the file is encoded')
+  console.log('\n5. Cancel tapped while the file is written')
   {
-    // The press's encoder (a detached canvas over 1 MP) answers 1.5 s late,
-    // as a phone's does; the time it started is recorded.
-    const slowEncoder = `
-      window.__encodeStarted = null
-      const real = HTMLCanvasElement.prototype.toBlob
-      HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) {
-        if (!this.isConnected && this.width * this.height > 1e6) window.__encodeStarted = performance.now()
-        return real.call(this, (b) => setTimeout(() => cb(b), 1500), ...rest)
-      }
-    `
+    // The file's writing held 1.5 s after the last band, as a phone's can
+    // take; the time it started is recorded.
+    const slowEncoder = slowWrite(1500)
     const shareSheet = `window.__shared = 0; navigator.canShare = () => true; navigator.share = async () => { window.__shared++ }`
     for (const share of [false, true]) {
       const ctx = await newContext()
@@ -439,7 +446,7 @@ try {
       check(
         during.button === 'Saving' && during.cancel === 'Cancel' && end.button === 'Save' && end.card === 0 && end.caption === caption &&
           !/Saved|Downloaded/.test(end.toast) && downloaded === 0 && end.shared === 0,
-        `${share ? 'with a share sheet' : 'no share sheet'}: "${during.cancel}" tapped during the encode (Save "${during.button}") -> ` +
+        `${share ? 'with a share sheet' : 'no share sheet'}: "${during.cancel}" tapped while the file is written (Save "${during.button}") -> ` +
           `"${end.button}", ${end.card} card, "Saves ${end.caption}", toast "${end.toast}", ${downloaded} downloads, ${end.shared} shares`,
       )
       check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
@@ -480,13 +487,8 @@ try {
 
   console.log('\n7. Focus while the print is pressed')
   {
-    // A press long enough to look at: the encoder answers 1.5 s late.
-    const slow = `
-      const real = HTMLCanvasElement.prototype.toBlob
-      HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) {
-        return real.call(this, (b) => setTimeout(() => cb(b), 1500), ...rest)
-      }
-    `
+    // A press long enough to look at: the file's writing held 1.5 s.
+    const slow = slowWrite(1500)
     const ctx = await newContext()
     const { page, errors } = await open(ctx, slow)
     await page.waitForTimeout(600)
@@ -528,15 +530,10 @@ try {
 
   console.log('\n8. The gesture hint across a save: the card hides, its words for a screen reader stay')
   {
-    // A press long enough to look at: the encoder answers 1.5 s late, as in 7.
-    // The hint is looked at as soon as the status line says the print is
-    // being pressed, in whichever phase (photo, plates, the sheet).
-    const slow = `
-      const real = HTMLCanvasElement.prototype.toBlob
-      HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) {
-        return real.call(this, (b) => setTimeout(() => cb(b), 1500), ...rest)
-      }
-    `
+    // A press long enough to look at: the file's writing held 1.5 s, as in
+    // 7. The hint is looked at as soon as the status line says the print is
+    // being pressed, in whichever phase (the photo, the bands, the file).
+    const slow = slowWrite(1500)
     const ctx = await newContext()
     const { page, errors } = await open(ctx, slow)
     await choosePhoto(page, 1600, 1200)

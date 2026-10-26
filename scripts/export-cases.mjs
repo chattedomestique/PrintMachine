@@ -33,9 +33,9 @@
  *     pre-pass and one through the press.
  *
  * Gated in megabytes (`gate.typed`, and `gate.total` with the canvases, the
- * decoded photo and the JPEG's stated bound added): the ceilings the band
- * engine was designed to, or what was measured x 1.25 where that is lower
- * (case 7: 115.2 MB typed, so 144).
+ * decoded photo and the file at measure-alloc's FILE_BOUND added): the
+ * ceilings the band engine was designed to, or what was measured x 1.25
+ * where that is lower (case 7: 115.2 MB typed, so 144).
  *
  * And the same-width pairs (`pair`): a 4000x10000 photo on Original (a
  * 4000x9999 sheet: the shortest on which it lands 1:1) against a 4000x5000

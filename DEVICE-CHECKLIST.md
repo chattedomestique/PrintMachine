@@ -178,10 +178,12 @@ So:
       is tapped
 - [ ] The saved file has **no** selection crosshair in it (the thirds guides are
       gone; the crosshair is the one editing aid left, and it must never print)
-- [ ] File size: megabytes, in proportion to the pixels (a 12 MP photo on 4:5:
-      about 2-7 MB as JPEG; a 40 MP photo on its own sheet: 15 to 30 MB for a
-      real photograph, 11 to 38 MB between a smooth photo and pure noise); PNG
-      several times that
+- [ ] File size: megabytes, in proportion to the pixels and the photo's detail
+      (a 12 MP photo on 4:5: about 2 to 11 MB as JPEG; a 40 MP photo on its
+      own sheet: up to about 40 MB, a byte a pixel, for a detailed
+      photograph, less for a smooth one: measured in Chromium, 4.6 MB over a
+      smooth ramp and 39.7 MB over per-pixel noise on fine detail). Write
+      down what a real camera photo gives; PNG is several times that
 - [ ] Memory, the hard gate a desktop cannot give (`measure-alloc.mjs` counts
       it; desktop memory is not a phone's): with Safari's Web Inspector
       attached (Timelines > Memory), Save a 12 MP portrait on 4:5 with the
@@ -193,7 +195,7 @@ So:
       without a tab reload (counted: 201 MB at peak)
 
 > Expect megabytes, not the ~300 KB the playbook cites for photographs: the
-> print is saved at the photo's own pixels (15 to 30 MB for a 40 MP
+> print is saved at the photo's own pixels (up to about 40 MB for a 40 MP
 > photograph), with every colour sample kept (4:4:4), and a halftone screen
 > over paper grain is close to worst-case for JPEG's DCT. Dropping quality to
 > compensate smears the dots, which is the one thing this app exists to
@@ -272,9 +274,9 @@ holds"). What only a phone can settle:
       under about 450 MB; the worst legal press (grain at screen 36,
       misregistration 30) at 61 MP under about 540 MB. `measure-alloc` holds
       what it counts (the typed arrays, the canvases, the decoded photo and
-      the file's bound) under those: 321, 410 and 491 MB measured. Write down
-      the phone's own peak beside them; what the browser holds besides is
-      what only a phone shows.
+      the file at 1.4 bytes a pixel) under those: 339, 425 and 518 MB
+      measured. Write down the phone's own peak beside them; what the
+      browser holds besides is what only a phone shows.
 - [ ] **Font clamp.** A 61 MP portrait photo on its own sheet (9504 px tall),
       type at 120%: the glyphs in the file are as wide as the preview shows
       them, not 17 to 38% narrower (the device spike read every font up to

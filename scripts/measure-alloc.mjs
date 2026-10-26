@@ -30,9 +30,9 @@
  * The gates (export-cases.mjs): cases 1-4 in bytes of typed arrays per output
  * pixel, at what they measured when the band engine landed x 1.25 (case 5 is
  * recorded, not gated); cases 6-10 in megabytes, of typed arrays and of the
- * whole (the typed arrays, the canvases, the decoded photo and the JPEG's
- * stated bound, 0.95 bytes an output pixel, so the gate does not depend on
- * how well the fake print compresses); and the same-width pairs, a 4000x10000
+ * whole (the typed arrays, the canvases, the decoded photo and the file at
+ * FILE_BOUND bytes an output pixel, so the gate does not depend on how well
+ * the fake print compresses); and the same-width pairs, a 4000x10000
  * sheet against a 4000x5000 one, whose peaks may differ by at most 1.15
  * times (the press holds what grows with the width, not the height).
  *
@@ -57,8 +57,17 @@ const args = process.argv.slice(2)
 const child = args[0] === '--case'
 /** The same-width gate: the taller sheet's peak typed bytes over the shorter's. */
 const SAME_WIDTH = 1.15
-/** The JPEG's stated bound, bytes an output pixel (a noise ground at q95, E7). */
-const FILE_BOUND = 0.95
+/**
+ * The file, in bytes an output pixel: what the app's own encoder (q95,
+ * 4:4:4) writes for a photograph with ±32 levels of noise in every pixel and
+ * every channel, 1.40, the noisiest ground a camera's photo comes near
+ * (sensor noise of sigma 8 in every channel, with no noise reduction, is
+ * 0.89; a 40 MP photo with per-pixel noise over fine detail, saved through
+ * the app, 1.00). Pure noise, which no camera writes, is 2.42: 96 MB at
+ * 40 MP, about 58 MB over this bound. Measured on 2048x2048 grounds pushed
+ * in bands as Save pushes them.
+ */
+const FILE_BOUND = 1.4
 if (!child) {
   // One process per case, with the collector exposed (the accounting needs
   // it); the gate fails if any case does.
@@ -325,7 +334,7 @@ for (const c of CASES.filter((k) => k.id === only)) {
         `    peak ${fmt(total / n)} B/px (${(total / 1e6).toFixed(0)} MB)\n`,
     )
   } else if (c.gate) {
-    // Cases 6-10: in megabytes, the file at its stated bound.
+    // Cases 6-10: in megabytes, the file at FILE_BOUND.
     const file = FILE_BOUND * n
     const total = meter.peak + canvasBytes + photoBytes + file
     const typedOver = meter.peak > c.gate.typed * 1e6

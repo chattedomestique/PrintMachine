@@ -958,18 +958,23 @@ moment before the press, the photo already decoded):
 | 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 -> 8.3 | 120 -> 37 -> 14.0 (235 MB) | 65.6 -> 18.7 -> 15.6 s | +1484 -> +445 -> +232 MB |
 
 And the sizes the band engine made possible, every one a photo at its own
-pixels (the file at its stated bound, 0.95 bytes an output pixel, a noise
-ground at quality 95, so the number does not depend on how well the test
-print compresses; the gate in brackets):
+pixels (the file counted at 1.4 bytes an output pixel, what the app's
+encoder writes for a photograph with ±32 levels of noise in every pixel and
+channel, noisier than a camera's photo comes: sigma 8 of sensor noise in
+every channel is 0.89, and a 40 MP photo with per-pixel noise over fine
+detail saved through the app 1.00; so the number does not depend on how well
+the test print compresses. Pure noise, 2.42 bytes a pixel, is no photograph
+and is not covered: it would put case 6 at about 379 MB. The gate in
+brackets):
 
 | Case | Sheet | Typed arrays, peak | With canvases, the decoded photo and the file | Chromium time: ms/MP (press + encoder) | Chromium RSS |
 |---|---|---|---|---|---|
-| 6. 40 MP on Original, the default document, second ink | 7728x5152 | 102.3 MB (125) | 320.6 MB (350) | 15.1 s: 379 (317 + 62) | +231 MB |
-| 7. A 61 MP photo on 4:5, case 2's document | 5069x6336 | 115.2 MB (144) | 410.1 MB (450) | 17.3 s: 539 (473 + 65) | +211 MB |
-| 7g. The same, under Grain | 5069x6336 | 117.3 MB (145) | 412.2 MB (450) | 17.6 s: 548 (482 + 66) | +215 MB |
-| 8. 61 MP on Original, case 2's document, the worst legal press (Grain at pitch 36, misregistration 30, every plate's type at 0.16 of the height) | 9504x6336 | 172.1 MB (210) | 490.6 MB (540) | 37.0 s: 615 (553 + 62) | +268 MB |
-| 9. A 48 MP 3:1 panorama on Original, the default document, second ink | 12000x4000 | 121.2 MB (150) | 378.4 MB (420) | 18.5 s: 386 (320 + 65) | +245 MB |
-| 10. 3:1 on Original, type at 10%, second ink (the luminance at one cell a pixel) | 6399x2133 | 149.2 MB (185) | 238.9 MB (290) | 5.6 s: 410 (346 + 64) | +261 MB |
+| 6. 40 MP on Original, the default document, second ink | 7728x5152 | 102.3 MB (125) | 338.6 MB (350) | 15.1 s: 379 (317 + 62) | +231 MB |
+| 7. A 61 MP photo on 4:5, case 2's document | 5069x6336 | 115.2 MB (144) | 424.6 MB (450) | 17.3 s: 539 (473 + 65) | +211 MB |
+| 7g. The same, under Grain | 5069x6336 | 117.3 MB (145) | 426.7 MB (450) | 17.6 s: 548 (482 + 66) | +215 MB |
+| 8. 61 MP on Original, case 2's document, the worst legal press (Grain at pitch 36, misregistration 30, every plate's type at 0.16 of the height) | 9504x6336 | 172.1 MB (210) | 517.7 MB (540) | 37.0 s: 615 (553 + 62) | +268 MB |
+| 9. A 48 MP 3:1 panorama on Original, the default document, second ink | 12000x4000 | 121.2 MB (150) | 400.0 MB (420) | 18.5 s: 386 (320 + 65) | +245 MB |
+| 10. 3:1 on Original, type at 10%, second ink (the luminance at one cell a pixel) | 6399x2133 | 149.2 MB (185) | 245.1 MB (290) | 5.6 s: 410 (346 + 64) | +261 MB |
 
 What the press holds grows with the sheet's WIDTH (its tile rings and band
 buffers), not its height: a 4000x10000 photo on Original (a 4000x9999 sheet)
@@ -1502,10 +1507,13 @@ error 35 levels, where a browser's 4:2:0 JPEG at the same quality errs by up
 to 112 at the dot edges); **Save lossless PNG**, in More, keeps every pixel
 exactly.
 
-A saved print is megabytes, in proportion to its pixels (on the harness
-fixture: about 2 MB for 2419×3024 and 3 MB for 3024×3780; 11 to 38 MB for
-40 MP, between a smooth photo and a ground of pure noise; against the ~300 KB
-the playbook cites for a photograph). A halftone screen over paper grain is close
+A saved print is megabytes, in proportion to its pixels and to the photo's
+detail (measured with the app's own encoder: on the harness fixture 2.3 MB
+for 2419×3024 and 3.5 MB for 3024×3780; at 40 MP, 7728×5152, 4.6 MB over a
+smooth grey ramp and 39.7 MB over a photo with per-pixel noise over fine
+detail, about a byte a pixel, which is what a detailed photograph comes to;
+pure noise, which no camera writes, is 2.4 bytes a pixel, 96 MB; against the
+~300 KB the playbook cites for a photograph). A halftone screen over paper grain is close
 to worst case for JPEG — high-frequency detail in every block — and lowering
 the quality to compensate smears the dots, so the size stands as a deliberate
 trade. PNG, the lossless choice, is several times larger again.

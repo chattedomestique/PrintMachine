@@ -512,7 +512,7 @@ export async function pressForSave(
 }
 
 /** Ask the screen to stay on while the print is pressed (a screen that sleeps
- *  suspends the page's timers, and a two-minute press is when it would). Best
+ *  suspends the page's timers, and a long press is when it would). Best
  *  effort: null where there is no Wake Lock (iOS before 16.4) or it is
  *  refused. */
 async function keepAwake(): Promise<{ release(): Promise<void> } | null> {

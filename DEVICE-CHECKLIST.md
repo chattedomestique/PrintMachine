@@ -265,11 +265,11 @@ holds"). What only a phone can settle:
 - [ ] **Peak memory.** Safari Web Inspector (Timelines > Memory) during a 40 MP
       save on Original: the peak stays under about 350 MB; during a 61 MP save
       under about 450 MB; the worst legal press (grain at screen 36,
-      misregistration 30) at 61 MP under about 540 MB. Those are the gates
-      `measure-alloc` holds what it counts to (the typed arrays, the canvases,
-      the decoded photo and the file's bound): 321, 410 and 491 MB measured.
-      Write down the phone's own peak beside them; what the browser holds
-      besides is what only a phone shows.
+      misregistration 30) at 61 MP under about 540 MB. `measure-alloc` holds
+      what it counts (the typed arrays, the canvases, the decoded photo and
+      the file's bound) under those: 321, 410 and 491 MB measured. Write down
+      the phone's own peak beside them; what the browser holds besides is
+      what only a phone shows.
 - [ ] **Tile canvases.** In the console on the deployed app, for [4096, 1024],
       [4096, 512] and [2048, 2048], write a sentinel pixel at the last pixel
       and read it back:

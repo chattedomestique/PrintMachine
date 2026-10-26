@@ -1,13 +1,19 @@
 <!doctype html>
-<html lang="en">
+<!-- The style guide's `default` palette: true neutral grey, chroma 0. The
+     app's job is judging ink and stock colour, and tinted chrome shifts how
+     the inks read, so no palette with a hue (README, "Design system"). -->
+<html lang="en" data-palette="default">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="description" content="Turn type into an authentic Risograph print, on your phone." />
 
-    <!-- Must match manifest theme_color in vite.config.ts (playbook §3.1). -->
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#EDEDEC" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1A1A" />
+    <!-- Must match manifest theme_color in vite.config.ts (playbook §3.1). Both
+         are the style guide's --canvas in the `default` palette, resolved in a
+         browser (light / dark). Change them together with data-palette. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F5F5F5" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0E0E0E" />
 
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
@@ -20,10 +26,22 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 
     <title>Print Machine</title>
-    <script type="module" crossorigin src="/PrintMachine/assets/index-DmT-M5Q_.js"></script>
-    <link rel="stylesheet" crossorigin href="/PrintMachine/assets/index-CE2V5pA2.css">
+    <script type="module" crossorigin src="/PrintMachine/assets/index-BhIYYF1i.js"></script>
+    <link rel="stylesheet" crossorigin href="/PrintMachine/assets/index-NC5M96N5.css">
   <link rel="manifest" href="/PrintMachine/manifest.webmanifest"></head>
   <body>
     <div id="root"></div>
+    <!-- The style guide's layout scripts (src/vendor/styleguide/VERSION.md):
+         core (SG.fit), the segmented control's fit, the toolbar's pages. Plain
+         scripts by design, so not part of the bundle. ROOT-ABSOLUTE paths:
+         Vite rewrites them with the build's base (/PrintMachine/ on Pages, /
+         in development); a hard-coded /PrintMachine/ breaks the other. -->
+    <script src="/PrintMachine/sg/core.min.js" defer></script>
+    <script src="/PrintMachine/sg/js/44-segmented.min.js" defer></script>
+    <!-- 70-scrubber defines SG.afterParse, which 71-toolbar needs and the style
+         guide's dist/elements/manifest.json does not list. Inert without
+         .scrubber elements. -->
+    <script src="/PrintMachine/sg/js/70-scrubber.min.js" defer></script>
+    <script src="/PrintMachine/sg/js/71-toolbar.min.js" defer></script>
   </body>
 </html>

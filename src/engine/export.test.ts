@@ -3,9 +3,8 @@
  * preview's), in bands, straight into the encoder (a JPEG with every colour
  * sample kept, or a lossless PNG); every canvas it makes is proved first; a
  * press that runs out of memory goes again in bands half as tall, to the same
- * file; and nothing is printed on bare paper for want of its photo. The file
- * is handed over by a share sheet that never falls back to a download where
- * that would take the app with it.
+ * file; and nothing is printed on bare paper for want of its photo. (The
+ * file is handed over by the page: features/shell/page.test.ts.)
  *
  * The press runs for real here (node has no 2D context, so the canvases are
  * stand-ins that draw nothing: the type and the photo come out blank, which
@@ -23,7 +22,6 @@ import {
   MissingPhotoError,
   SMALLER_STEP,
   SMALLEST_COPY_HEIGHT,
-  deliverFile,
   describePlan,
   fileSize,
   findSmallerPlanAsync,
@@ -31,7 +29,6 @@ import {
   planPrint,
   pressCanvases,
   printFile,
-  saveMessage,
   savePrint,
 } from './export.ts'
 import { planExport } from './exportPlan.ts'
@@ -556,52 +553,6 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
   })
 })
 
-describe('handing the file over', () => {
-  afterEach(() => vi.unstubAllGlobals())
-  const file = () => new File([new Uint8Array(10)], 'print-machine.jpg', { type: 'image/jpeg' })
-  /** A share sheet that behaves as told, and a page that records downloads. */
-  const browser = (share: () => Promise<void>) => {
-    const downloads: string[] = []
-    vi.stubGlobal('navigator', { canShare: () => true, share })
-    vi.stubGlobal('document', {
-      createElement: () => ({ click: () => downloads.push('a'), remove: () => {} }),
-      body: { appendChild: () => {} },
-    })
-    vi.stubGlobal('URL', { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} })
-    return downloads
-  }
-  const fail = (name: string) => async () => {
-    const e = new Error(name)
-    e.name = name
-    throw e
-  }
-
-  it('shares; a dismissed sheet is a cancel, not an error', async () => {
-    browser(async () => {})
-    await expect(deliverFile(file(), { allowDownload: true })).resolves.toBe('shared')
-    browser(fail('AbortError'))
-    await expect(deliverFile(file(), { allowDownload: true })).resolves.toBe('cancelled')
-  })
-
-  it('in a home-screen app a failed share never falls through to a download: it throws, and the file waits for another tap', async () => {
-    const downloads = browser(fail('DataError'))
-    await expect(deliverFile(file(), { allowDownload: false })).rejects.toThrow('DataError')
-    expect(downloads).toEqual([])
-  })
-
-  it('an expired tap asks for another tap, even where downloads are allowed', async () => {
-    const downloads = browser(fail('NotAllowedError'))
-    await expect(deliverFile(file(), { allowDownload: true })).rejects.toThrow('NotAllowedError')
-    expect(downloads).toEqual([])
-  })
-
-  it('in a browser tab a failed share downloads instead, as before', async () => {
-    const downloads = browser(fail('DataError'))
-    await expect(deliverFile(file(), { allowDownload: true })).resolves.toBe('downloaded')
-    expect(downloads).toEqual(['a'])
-  })
-})
-
 describe('what Save says', () => {
   const plan = (s: PrintSettings) => describePlan(planPrint(s), s.media)
 
@@ -635,15 +586,8 @@ describe('what Save says', () => {
     expect(describePlan(planPrint(s, { format: 'png' }), s.media)).toEqual({ size: '120000×40000', reason: null })
   })
 
-  it('a size in MB or KB, and a confirmation that repeats the dimensions', () => {
+  it('a size in MB or KB', () => {
     expect(fileSize(6_204_000)).toBe('6.2 MB')
     expect(fileSize(840_000)).toBe('840 KB')
-    const p = planPrint(withPhoto(4032, 3024))
-    expect(saveMessage('shared', p)).toBe('Saved 2419×3024')
-    expect(saveMessage('downloaded', p)).toBe('Downloaded 2419×3024')
-    expect(saveMessage('cancelled', p)).toBeNull()
-    // A smaller copy says so: the caption above Save names the full size.
-    const smaller = planPrint(withPhoto(4032, 3024), { maxHeight: 2268 })
-    expect(saveMessage('shared', smaller)).toBe('Saved 1814×2268, a smaller copy')
   })
 })

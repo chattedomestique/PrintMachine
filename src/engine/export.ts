@@ -1,30 +1,21 @@
 /**
- * Saving.
+ * Saving: the press behind Save, and what it says.
  *
  * For a mobile-first tool this is *the* flow — everything upstream is in
- * service of this working every time on the phone. The rules encoded here,
- * from playbook §6.1:
+ * service of this working every time on the phone.
  *
- *  1. Web Share first, <a download> only as the desktop fallback. iOS Safari
- *     largely ignores `download` on blob URLs and instead *navigates* to the
- *     image, destroying app state. Inverting these two is the single most
- *     common failure in this class of app.
- *  2. `navigator.share` needs transient activation, and a print pressed at the
- *     photo's own resolution takes seconds — longer than the activation a tap
- *     grants. So pressing and sharing are two steps (`savePrint`, then
- *     `deliverFile`), and the save flow (features/shell/useSave.ts) asks for a
- *     fresh tap when the press outlasted the tap that started it.
- *  3. AbortError means the user dismissed the sheet. It is not a failure and
- *     must never surface as an error.
- *  4. JPEG at quality 95 with every colour sample kept (4:4:4), written by
- *     this app's own encoder (encode/jpeg.ts); PNG (encode/png.ts) as the
- *     explicit lossless choice.
- *
- * The size is planned from the photo (exportPlan.ts): the print is saved at
- * the height where the photo lands pixel for pixel, never at the preview's,
- * never quietly smaller, and with no ceiling: the press runs in bands
- * (render.ts `pressToSink`) and each band goes straight into the encoder, so
- * no canvas, array or file buffer the size of the sheet is ever made.
+ *  - The size is planned from the photo (exportPlan.ts): the print is saved at
+ *    the height where the photo lands pixel for pixel, never at the preview's,
+ *    never quietly smaller, and with no ceiling: the press runs in bands
+ *    (render.ts `pressToSink`) and each band goes straight into the encoder,
+ *    so no canvas, array or file buffer the size of the sheet is ever made.
+ *  - JPEG at quality 95 with every colour sample kept (4:4:4), written by
+ *    this app's own encoder (encode/jpeg.ts); PNG (encode/png.ts) as the
+ *    explicit lossless choice.
+ *  - Like the rest of the engine it touches no DOM: the press's canvases come
+ *    from the caller (`SaveOptions.makeCanvas`), and the file it returns is
+ *    handed to the share sheet or downloaded by the page
+ *    (features/shell/page.ts).
  */
 
 import { JpegEncoder } from './encode/jpeg.ts'
@@ -97,9 +88,9 @@ export interface SaveOptions {
    *  copy decoded to its rectangle (media.ts `snapCopyRect`), drawn 1:1. */
   rect?: DrawRect
   /** Makes the press's canvases (a tile canvas and, for a photo at its own
-   *  pixels, the canvas its bands are blitted into): detached canvases by
-   *  default. A test hands in its own. */
-  makeCanvas?: () => CanvasRenderingContext2D
+   *  pixels, the canvas its bands are blitted into): the page's detached
+   *  canvases (features/shell/page.ts `detachedCanvas`), or a test's own. */
+  makeCanvas: () => CanvasRenderingContext2D
 }
 
 /**
@@ -136,13 +127,6 @@ export function pressCanvases(plan: Pick<ExportPlan, 'width' | 'height'>, native
   return sizes
 }
 
-/** A detached 2D canvas, read from often. */
-function detachedCanvas(): CanvasRenderingContext2D {
-  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-  if (!ctx) throw new Error('Could not open a canvas to press the print.')
-  return ctx
-}
-
 /** The save's encoder as the press's sink, its file in `chunks`. */
 function encoderSink(format: ExportFormat, w: number, h: number, bandRows: number, chunks: Uint8Array[]): RowSink {
   const onChunk = (c: Uint8Array) => chunks.push(c)
@@ -176,7 +160,7 @@ function encoderSink(format: ExportFormat, w: number, h: number, bandRows: numbe
  * @param media the photo decoded from its ORIGINAL bytes (not the preview's
  *   working copy), or a smaller copy decoded to `opts.rect`.
  */
-export async function savePrint(settings: PrintSettings, media: CanvasImageSource | null, opts: SaveOptions = {}): Promise<PressedPrint> {
+export async function savePrint(settings: PrintSettings, media: CanvasImageSource | null, opts: SaveOptions): Promise<PressedPrint> {
   if (settings.media && !media) throw new MissingPhotoError()
   const format = opts.format ?? 'jpeg'
   const plan = planPrint(settings, { maxHeight: opts.maxHeight, format })
@@ -188,7 +172,7 @@ export async function savePrint(settings: PrintSettings, media: CanvasImageSourc
   const budget = seam.tileBudget ?? TILE_BUDGET
   const made: CanvasRenderingContext2D[] = []
   const canvas = () => {
-    const ctx = (opts.makeCanvas ?? detachedCanvas)()
+    const ctx = opts.makeCanvas()
     made.push(ctx)
     return ctx
   }
@@ -348,51 +332,6 @@ export function printFile(pressed: PressedPrint, name = 'print-machine'): File {
   return new File([pressed.blob], `${name}.${ext}`, { type: mime })
 }
 
-export type Delivery = 'shared' | 'downloaded' | 'cancelled'
-
-/** Whether this browser can hand the file to a share sheet. */
-export function canShareFile(file: File): boolean {
-  return typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] }) === true
-}
-
-/**
- * Hand the file over: the share sheet where there is one, a download where
- * there is not.
- *
- * A share that fails (anything but the person dismissing it) falls back to a
- * download only where `allowDownload` says that is safe. In an iOS home-screen
- * app it is not — `<a download>` navigates to the image and takes the app
- * with it — so the error is thrown and the caller keeps the file and the
- * Share button for another tap.
- */
-export async function deliverFile(file: File, opts: { allowDownload: boolean }): Promise<Delivery> {
-  if (canShareFile(file)) {
-    try {
-      await navigator.share({ files: [file], title: file.name })
-      return 'shared'
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return 'cancelled'
-      // An expired activation is the save flow's to handle: another tap.
-      if (!opts.allowDownload || (err instanceof Error && err.name === 'NotAllowedError')) throw err
-    }
-  }
-  download(file)
-  return 'downloaded'
-}
-
-function download(file: File): void {
-  const url = URL.createObjectURL(file)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = file.name
-  a.rel = 'noopener'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  // Not synchronous — some browsers need the URL alive briefly past .click().
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
 /** Pixel dimensions as a person reads them. */
 export const dims = (w: number, h: number): string => `${w}×${h}`
 
@@ -424,22 +363,5 @@ export function describePlan(plan: ExportPlan, media: Pick<MediaLayer, 'width' |
       return { size, reason: 'JPEG holds at most 65,535 px a side: Save lossless PNG for the photo\'s full size' }
     case 'smaller':
       return { size, reason: 'a smaller copy, as asked' }
-  }
-}
-
-/** The confirmation after a save. Deliberately does not claim the file reached
- *  Photos — the share promise resolving only means the sheet was dismissed
- *  (§6.3). "Saved" is honest shorthand; "saved to your camera roll" is not.
- *  A smaller copy says it is one: the caption above Save still names the full
- *  size, so the confirmation is where the smaller file is named. */
-export function saveMessage(delivery: Delivery, plan: ExportPlan): string | null {
-  const what = `${dims(plan.width, plan.height)}${plan.limit === 'smaller' ? ', a smaller copy' : ''}`
-  switch (delivery) {
-    case 'shared':
-      return `Saved ${what}`
-    case 'downloaded':
-      return `Downloaded ${what}`
-    case 'cancelled':
-      return null
   }
 }

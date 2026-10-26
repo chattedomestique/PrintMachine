@@ -359,6 +359,7 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
         opts?.onGround?.()
         return { blob: new Blob([new Uint8Array(10)]), plan: p, format: opts?.format ?? 'jpeg' }
       },
+      makeCanvas: () => ({}) as CanvasRenderingContext2D,
       canvasFits: (w, h) => (log.canvases.push(`${w}x${h}`), true),
       ...over,
     }
@@ -374,6 +375,8 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     expect(log.resized).toEqual([])
     expect(loaded).toBe(1)
     expect(log.pressed[0]).toMatchObject({ format: 'jpeg', rect: undefined })
+    // On the page's canvases: the engine makes none of its own.
+    expect(log.pressed[0]!.makeCanvas).toBe(d.makeCanvas)
     expect(log.bitmaps.every((b) => b.closed >= 1)).toBe(true)
   })
 

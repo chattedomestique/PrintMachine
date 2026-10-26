@@ -24,6 +24,7 @@ import { tileGrid } from '../../src/engine/tiles.ts'
 import { JpegEncoder } from '../../src/engine/encode/jpeg.ts'
 import { PngEncoder } from '../../src/engine/encode/png.ts'
 import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
+import { detachedCanvas } from '../../src/features/shell/page.ts'
 import { sheetAspect, type PrintSettings } from '../../src/engine/types.ts'
 import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
 import plain from './docs/plain.json'
@@ -516,6 +517,7 @@ async function save(
   const t0 = performance.now()
   const pressed = await savePrint(settings, media, {
     format: opts.format,
+    makeCanvas: detachedCanvas,
     onProgress: (p) => steps.push(`${p.step} ${p.band}/${p.bands}`),
     onGround: () => media?.close(),
   })
@@ -570,6 +572,7 @@ async function press(format: ExportFormat = 'jpeg'): Promise<{ w: number; h: num
   try {
     const pressed = await savePrint(settings, media, {
       format,
+      makeCanvas: detachedCanvas,
       onGround: () => media?.close(),
       onProgress: (p) => {
         if (p.step === 'write') pressMs = performance.now() - t0
@@ -604,7 +607,7 @@ async function fileDigest(blob: Blob): Promise<{ sha256: string; w: number; h: n
 async function fileParity(name: string, height: number): Promise<{ file: string; canvas: string; same: boolean; w: number; h: number }> {
   const settings = load(name)
   const media = settings.media ? await photoBitmap(settings.media.width, settings.media.height) : null
-  const pressed = await savePrint(settings, media, { format: 'png', maxHeight: height })
+  const pressed = await savePrint(settings, media, { format: 'png', maxHeight: height, makeCanvas: detachedCanvas })
   const file = await fileDigest(pressed.blob)
   const canvas = await render(name, pressed.plan.height, { async: true })
   return { file: file.sha256, canvas: canvas.sha256, same: file.sha256 === canvas.sha256 && file.w === canvas.w && file.h === canvas.h, w: file.w, h: file.h }
@@ -651,6 +654,7 @@ async function retry(
     try {
       const pressed = await savePrint(settings, media, {
         maxHeight: height,
+        makeCanvas: detachedCanvas,
         onGround: () => media?.close(),
         onProgress: (p) => {
           band = p.band

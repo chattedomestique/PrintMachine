@@ -1326,7 +1326,12 @@ region born holding its words is not reliably read.
 `engine/` must never import from `state/`, `ui/`, or `features/`, and must never
 touch React or the DOM beyond a canvas context handed to it. That constraint is
 what lets the export path re-render a fresh, overlay-free frame with the exact
-same code the preview uses. `ui/` knows nothing about riso and imports nothing
+same code the preview uses. Save keeps to it too: the press's canvases come
+from a factory the page hands in (`SaveOptions.makeCanvas`), and the share
+sheet and the download are the page's (`features/shell/page.ts`); the engine
+returns a Blob. `src/engine/layering.test.ts` reads the engine's sources and
+fails on an import from those folders or a `document`, `window` or
+`navigator`. `ui/` knows nothing about riso and imports nothing
 from `engine/`.
 
 ## Where this departs from Border Studio

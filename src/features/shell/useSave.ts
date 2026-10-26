@@ -4,8 +4,6 @@ import {
   PHOTO_MISSING,
   SMALLER_STEP,
   SMALLEST_COPY_HEIGHT,
-  canShareFile,
-  deliverFile,
   dims,
   findSmallerPlanAsync,
   fitsCanvas,
@@ -13,7 +11,6 @@ import {
   planPrint,
   pressCanvases,
   printFile,
-  saveMessage,
   savePrint,
   type ExportFormat,
   type PressedPrint,
@@ -25,6 +22,7 @@ import type { PrintSettings } from '../../engine/types.ts'
 import { PhotoDecodeError, decodeOriginal, decodeResized } from '../media/decode.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
 import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../../state/persist.ts'
+import { canShareFile, deliverFile, detachedCanvas, saveMessage } from './page.ts'
 
 /**
  * The save flow, as a state machine with no UI in it: the app bar's Save,
@@ -381,12 +379,14 @@ const painted = () =>
 
 const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError'
 
-/** What a press for Save needs from the page: the decodes and the press
- *  itself (a test hands in its own). */
+/** What a press for Save needs from the page: the decodes, the canvases and
+ *  the press itself (a test hands in its own). */
 export interface SaveDeps {
   decodeOriginal(id: string): Promise<ImageBitmap>
   decodeResized(id: string, width: number, height: number): Promise<ImageBitmap>
   savePrint: typeof savePrint
+  /** Makes each canvas the press draws on (the engine makes none). */
+  makeCanvas(): CanvasRenderingContext2D
   /** Whether a canvas of w x h works here (a sentinel pixel read back), then
    *  let go. */
   canvasFits(w: number, h: number): boolean
@@ -397,10 +397,15 @@ export const PAGE: SaveDeps = {
   decodeOriginal,
   decodeResized,
   savePrint,
+  makeCanvas: detachedCanvas,
+  // The very canvases the press would make, proved and let go.
   canvasFits: (w, h) => {
-    const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+    let ctx: CanvasRenderingContext2D | null = null
     try {
-      return !!ctx && fitsCanvas(ctx, w, h)
+      ctx = detachedCanvas()
+      return fitsCanvas(ctx, w, h)
+    } catch {
+      return false
     } finally {
       if (ctx) ctx.canvas.width = 0
     }
@@ -501,6 +506,7 @@ export async function pressForSave(
         maxHeight,
         signal,
         rect,
+        makeCanvas: deps.makeCanvas,
         onProgress: run.onProgress,
         onGround: () => decoded?.close(),
       })

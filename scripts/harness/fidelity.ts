@@ -16,6 +16,7 @@ import { groundRect } from '../../src/engine/render.ts'
 import type { PrintSettings } from '../../src/engine/types.ts'
 import { decodeOriginal, decodeOriented } from '../../src/features/media/decode.ts'
 import { importMedia } from '../../src/features/media/importMedia.ts'
+import { detachedCanvas } from '../../src/features/shell/page.ts'
 import { defaultSettings } from '../../src/state/defaults.ts'
 import { deleteMedia, getMedia } from '../../src/state/mediaStore.ts'
 
@@ -155,7 +156,7 @@ async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format
   const t0 = performance.now()
   // As Save presses it (useSave.ts): its own canvases, the photo closed once
   // its last rows are in the print.
-  const pressed = await savePrint(s, original, { format, onGround: () => original.close() })
+  const pressed = await savePrint(s, original, { format, makeCanvas: detachedCanvas, onGround: () => original.close() })
   const ms = performance.now() - t0
   return { layer, byteForByte, s, plan, pressed, ms }
 }
@@ -194,7 +195,7 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
   if (alsoJpeg) {
     const again = await decodeOriginal(layer.id)
     const t1 = performance.now()
-    const saved = await savePrint(s, again, { format: 'jpeg', onGround: () => again.close() })
+    const saved = await savePrint(s, again, { format: 'jpeg', makeCanvas: detachedCanvas, onGround: () => again.close() })
     jpeg = { ...frameOf(new Uint8Array(await saved.blob.arrayBuffer())), bytes: saved.blob.size, ms: Math.round(performance.now() - t1) }
   }
   await deleteMedia(layer.id)

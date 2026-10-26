@@ -285,7 +285,9 @@ async function exportPixels(settings: PrintSettings, height: number, opts: Expor
  * differ by more than 128 levels, the plates whose box crosses a seam of the
  * grid, and whether every differing pixel lies inside the box of such a plate
  * (its line boxes turned and placed as drawn, widened by its halo and half its
- * font size).
+ * font size): every pixel, at any level, except over a resampled ground, which
+ * differs by a level along its own seams wherever they run (those one-level
+ * differences are let off the box test there, and only there).
  */
 async function seam(name: string, height: number, tile: [number, number], opts: { photo?: number; glyphsOnly?: boolean } = {}) {
   const settings = load(name)
@@ -370,8 +372,8 @@ async function seam(name: string, height: number, tile: [number, number], opts: 
     differ++
     if (d > 128) over128++
     maxDiff = Math.max(maxDiff, d)
-    if (d <= 1) continue
-    over1++
+    if (d > 1) over1++
+    else if (resampled) continue
     const x = i % w
     const y = (i - x) / w
     if (!plates.some((p) => (p.crosses || resampled) && x >= p.widened.x0 && x < p.widened.x1 && y >= p.widened.y0 && y < p.widened.y1)) outside++

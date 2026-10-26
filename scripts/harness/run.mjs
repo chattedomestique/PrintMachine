@@ -272,8 +272,9 @@ try {
     //    resampled photo, with that photo drawn once as one canvas draws it, so
     //    only the glyphs' tiles differ): at most 1% of the inked pixels may
     //    differ, at most 0.05% by more than 128 levels, and every pixel that
-    //    differs by more than a level lies inside the widened box of a plate
-    //    that crosses a seam.
+    //    differs, by any amount, lies inside the widened box of a plate that
+    //    crosses a seam (its ground is the same bytes on both grids, so no
+    //    difference is let off).
     //  - A resampled photo's share (a print with no type inked): at most a
     //    level anywhere, and on the real grid at most 0.1% of the bytes (with
     //    forced small tiles the seams are many times as dense: printed).

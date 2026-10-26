@@ -904,7 +904,8 @@ memory. Its gates are below the tables.
   pixels, 0.0028% by more than 128 levels; at 3000, 0.048%, 0.0013%; on forced
   512x128 tiles at 1000, 0.534%, 0.0098%; the default document at 3600, type
   at 20% at 3600 and a backing over the photo at 2400: 0 bytes. Every
-  differing pixel lies inside the box of a plate that crosses a seam. A
+  differing pixel, at any level, lies inside the box of a plate that crosses
+  a seam (the seam report and `check-bands` fail on one that does not). A
   resampled photo on the grid differs by at most a level, on 0.06% of the
   bytes at 3000 (none at 2400, where the enlargement is exactly 2x). A photo
   at its own pixels (every native save) needs no grid: each band blits its

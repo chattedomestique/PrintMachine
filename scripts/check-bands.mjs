@@ -15,7 +15,8 @@
  *  2. Tiles against one canvas: photo-second-ink at 1000 on those tiles, the
  *     type's share (the photo drawn once as one canvas draws it): at most 1%
  *     of the inked pixels differ, at most 0.05% by more than 128 levels, and
- *     only inside the box of a plate that crosses a seam.
+ *     every one that differs, by any amount, inside the box of a plate that
+ *     crosses a seam.
  *  3. The font cap: a 9,800 px 'O' (over CANVAS_FONT_MAX, under Chromium's
  *     10,000 px clamp), measured as the engine measures type over the cap
  *     (at fontSize / k, times k), has the advance it has measured directly,
@@ -84,7 +85,7 @@ try {
     check(
       r.inked > 0 && r.pctOfInked <= 1 && r.over128PctOfInked <= 0.05 && r.outside === 0,
       `photo-second-ink@1000 on ${r.tile} (${r.tiles} tiles): ${r.differ} of ${r.inked} inked pixels differ (${r.pctOfInked.toFixed(3)}%, at most 1%), ` +
-        `${r.over128} by more than 128 levels (${r.over128PctOfInked.toFixed(4)}%, at most 0.05%), ${r.outside} outside the boxes of the plates crossing a seam`,
+        `${r.over128} by more than 128 levels (${r.over128PctOfInked.toFixed(4)}%, at most 0.05%), ${r.outside} (at any level) outside the boxes of the plates crossing a seam`,
     )
   }
 

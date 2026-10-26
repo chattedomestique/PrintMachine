@@ -63,7 +63,7 @@ speed). It ends with a plain-text table to copy back, and carries the
 Independent JPEG Group's README (its encoder is theirs in part; see
 "Licences and provenance"), so it can be published on its own. `check:spike` runs it
 in Chromium in CI so it cannot rot; the phone's numbers are what decide the
-steps that wait on them (DEVICE-CHECKLIST, "Limits to settle on a device").
+steps that wait on them (DEVICE-CHECKLIST, "Native resolution at any size").
 
 `verify` is one script rather than four commands so that "it's green" means the
 same thing locally as it does in CI. Running the steps by hand once let a

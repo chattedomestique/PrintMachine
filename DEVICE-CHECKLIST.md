@@ -233,8 +233,13 @@ holds"). What only a phone can settle:
       EXIF-rotated JPEG landing on the requested rect of the upright image at
       orientations 1, 3, 6 and 8; every canvas font up to 12,000 px honoured;
       the sentinel pixel read back at 4096x1024, 4096x512, 2048x2048 and
-      4096x4096; the JPEG encoder at 62, 65 and 62 ms/MP (R 0.49, 0.52 and
-      0.49 against this repository's reference machine); and (second and
+      4096x4096 (the export's canvases: it never makes one wider than 4096
+      or larger than 2^22 pixels, a glyph tile, and a photo's band canvas is
+      at most 4096 x a band, about 2 MP; Save proves each one this way
+      before a press, so a lower limit in Safari or a home-screen app shows
+      as the smaller-copy question, never a blank file); the JPEG encoder
+      at 62, 65 and 62 ms/MP (R 0.49, 0.52 and 0.49 against this
+      repository's reference machine); and (second and
       third runs) a CompressionStream write resolving only once its chunk is
       taken, 20 of 20 round trips exact. The tile grid and the per-band blit
       of a photo at its own pixels are built on the blit row, Save's one held
@@ -270,23 +275,6 @@ holds"). What only a phone can settle:
       the file's bound) under those: 321, 410 and 491 MB measured. Write down
       the phone's own peak beside them; what the browser holds besides is
       what only a phone shows.
-- [ ] **Tile canvases.** In the console on the deployed app, for [4096, 1024],
-      [4096, 512] and [2048, 2048], write a sentinel pixel at the last pixel
-      and read it back:
-
-      ```js
-      for (const [w, h] of [[4096, 1024], [4096, 512], [2048, 2048]]) {
-        const c = document.createElement('canvas'); c.width = w; c.height = h
-        const g = c.getContext('2d'); g.fillStyle = 'rgb(1, 2, 3)'; g.fillRect(w - 1, h - 1, 1, 1)
-        console.log(w, h, [...g.getImageData(w - 1, h - 1, 1, 1).data].join()); c.width = 0
-      }
-      ```
-
-      Each should print `1,2,3,255` (the device spike read these back in the
-      Claude app's WebKit view). The export never makes a canvas wider than
-      4096 or larger than 2^22 pixels (a glyph tile; a photo's band canvas is
-      at most 4096 x a band, about 2 MP), and every one is proved this way
-      before a press.
 - [ ] **Font clamp.** A 61 MP portrait photo on its own sheet (9504 px tall),
       type at 120%: the glyphs in the file are as wide as the preview shows
       them, not 17 to 38% narrower (the device spike read every font up to

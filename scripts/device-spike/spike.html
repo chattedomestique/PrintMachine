@@ -1,0 +1,1340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Print Machine spike</title>
+<link rel="icon" href="data:,">
+<!--
+  The device spike for saving at a photo's own pixels (README "Native
+  resolution at any size", DEVICE-CHECKLIST). One self-contained page: no
+  network request, no dependency, nothing stored beyond this tab's
+  sessionStorage. Open it on the phone, optionally pick a large photo, run the
+  tests, copy the table back.
+
+  scripts/check-spike.mjs loads it in Chromium on every CI run, so it cannot rot.
+
+  The JPEG encoder below (the speed test, and the files the decode and crop
+  tests make) is the one Print Machine's Save will use. Its forward DCT is
+  jfdctflt.c's jpeg_fdct_float and its scale table jcdctmgr.c's
+  aanscalefactor, from the Independent JPEG Group's libjpeg 9f, translated to
+  JavaScript (same statements, float64); the quality scaling is jcparam.c's
+  jpeg_quality_scaling. This software is based in part on the work of the
+  Independent JPEG Group. The IJG's README, with its copyright and no-warranty
+  notice unaltered, travels with this page wherever it goes: it is the
+  <script type="text/plain" id="ijg-readme"> block after <main>, byte for byte
+  src/engine/encode/IJG-README.txt (scripts/check-spike.mjs holds the two
+  equal), and the page shows it under "Licence".
+-->
+<style>
+  :root {
+    --bg: #f5f3ee;
+    --surface: #ffffff;
+    --text: #1c1a17;
+    --muted: #5b564e;
+    --line: #d8d2c6;
+    --accent: #b8175b;
+    --accent-text: #ffffff;
+    --ok: #1a6a37;
+    --bad: #b3261e;
+    --warn: #7a5200;
+    --code-bg: #efece5;
+    --focus: #1f5fbf;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141312;
+      --surface: #1f1d1b;
+      --text: #f1eee8;
+      --muted: #b5aea3;
+      --line: #3a3632;
+      --accent: #ff5c9d;
+      --accent-text: #1a0610;
+      --ok: #6fd08f;
+      --bad: #ff8a80;
+      --warn: #f2c26b;
+      --code-bg: #262320;
+      --focus: #8ab4ff;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141312;
+    --surface: #1f1d1b;
+    --text: #f1eee8;
+    --muted: #b5aea3;
+    --line: #3a3632;
+    --accent: #ff5c9d;
+    --accent-text: #1a0610;
+    --ok: #6fd08f;
+    --bad: #ff8a80;
+    --warn: #f2c26b;
+    --code-bg: #262320;
+    --focus: #8ab4ff;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    overflow-wrap: anywhere;
+  }
+  main {
+    max-width: 40rem;
+    margin: 0 auto;
+    padding: 16px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left));
+  }
+  h1 { font-size: 1.5rem; line-height: 1.2; margin: 8px 0 8px; }
+  h2 { font-size: 1.1rem; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin: 0 0 16px;
+  }
+  button, .file-button, select {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 44px;
+    margin: 0 0 8px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  select { font-weight: 400; appearance: auto; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:focus-visible, select:focus-visible, .file-button:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  .file-button { position: relative; }
+  label.field { display: block; font-weight: 600; margin: 4px 0 6px; }
+  progress { width: 100%; height: 12px; accent-color: var(--accent); }
+  #status { min-height: 1.45em; margin: 8px 0 0; }
+  ol.results { list-style: none; margin: 0; padding: 0; }
+  ol.results li { border-top: 1px solid var(--line); padding: 10px 0; }
+  ol.results li:first-child { border-top: 0; }
+  .result-head { font-weight: 600; }
+  .ok { color: var(--ok); }
+  .bad { color: var(--bad); }
+  .warn { color: var(--warn); }
+  .meaning { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
+  summary {
+    padding: 11px 0;
+    line-height: 22px;
+    cursor: pointer;
+  }
+  pre.licence {
+    margin: 8px 0 0;
+    padding: 12px;
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    color: var(--text);
+    border-radius: 8px;
+  }
+  textarea {
+    display: block;
+    width: 100%;
+    min-height: 18rem;
+    margin: 0 0 8px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--code-bg);
+    color: var(--text);
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre;
+    overflow: auto;
+    resize: vertical;
+  }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1 1 0; min-width: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Print Machine spike</h1>
+  <p>Print Machine saves prints at a photo's own pixels, 40 megapixels and more, pressed in bands and written as they are pressed. A few things about that only a real phone can answer. This page measures them. Nothing leaves your phone: the page makes no network requests.</p>
+  <p class="muted">When it finishes, tap <strong>Copy results</strong> and paste the table into the chat. It takes about a minute. A test may make the tab reload if the phone runs out of memory; that is a result too, and the page will say so when it reloads.</p>
+
+  <section class="card" aria-labelledby="h-photo">
+    <h2 id="h-photo">1. Your photo (optional)</h2>
+    <p class="muted">Pick one of your large photos (ideally a 40 MP one) from the camera roll. The page decodes it the way Save will. Without one, the synthetic test below still runs.</p>
+    <label class="file-button" id="pick-label">
+      <span id="pick-text">Choose a photo</span>
+      <input type="file" id="pick" accept="image/*">
+    </label>
+    <p id="pick-info" class="muted" aria-live="polite"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-run">
+    <h2 id="h-run">2. Run</h2>
+    <label class="field" for="synthetic">Synthetic photo (made on this phone, no file needed)</label>
+    <select id="synthetic">
+      <option value="7728x5152" selected>40 MP: 7728 × 5152</option>
+      <option value="8064x6048">48 MP: 8064 × 6048</option>
+      <option value="9504x6336">61 MP: 9504 × 6336</option>
+      <option value="0x0">Skip the synthetic photo</option>
+    </select>
+    <button type="button" class="primary" id="run">Run all tests</button>
+    <progress id="progress" max="1" value="0" aria-label="Progress of the current test"></progress>
+    <p id="status" role="status" aria-live="polite">Ready.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-results">
+    <h2 id="h-results">3. Results</h2>
+    <ol class="results" id="results"></ol>
+    <label class="field" for="table">Results as text</label>
+    <textarea id="table" readonly wrap="off" spellcheck="false" aria-describedby="copy-note"></textarea>
+    <div class="row">
+      <button type="button" class="primary" id="copy">Copy results</button>
+      <button type="button" id="clear">Clear results</button>
+    </div>
+    <p id="copy-note" class="muted" aria-live="polite"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-about">
+    <h2 id="h-about">What each number means</h2>
+    <p><strong>Decode</strong>: the time the browser takes to turn the whole photo file into pixels in memory, as Save will (4 bytes a pixel: 159 MB for 40 MP). "ok" means it worked; a failure is copied word for word. A page cannot see its own memory: if you can, read the peak in Safari's Web Inspector (Timelines, Memory) on a Mac.</p>
+    <p><strong>Blit</strong>: whether drawing the decoded photo at its own size into a 4096 × 1024 canvas at two different row offsets gives identical bytes on the 247 rows the two share. Saving in bands needs "identical" with smoothing off.</p>
+    <p><strong>Crop</strong>: whether asking the browser to decode only part of an EXIF-rotated photo returns the part asked for. It decides whether a lighter-memory fallback is usable for portrait photos. The app does not use it today.</p>
+    <p><strong>Font</strong>: the largest canvas font size this browser honours. Print Machine needs 9216 px for very large type on very large prints.</p>
+    <p><strong>Canvas</strong>: whether canvases of these sizes really hold pixels. iOS hands back a blank canvas instead of an error when a canvas is too large.</p>
+    <p><strong>Compressor</strong>: whether this browser's built-in compressor has finished reading a piece of data by the time it says it has taken it. The lossless PNG save reuses its buffers on that promise; "exact" means every round trip came back unchanged after the buffer was overwritten.</p>
+    <p><strong>Speed</strong>: how fast this phone runs Print Machine's JPEG encoder, in milliseconds per megapixel, and R, that figure divided by 126 (the developer machine's). A 40 MP save is estimated at about 33 s × R; that is a rough estimate, not a measurement of a save.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-licence">
+    <h2 id="h-licence">Licence</h2>
+    <p class="muted">This page's JPEG encoder is based in part on the work of the Independent JPEG Group: its forward DCT is libjpeg 9f's <code>jpeg_fdct_float</code>, translated. Their README, with its copyright and no-warranty notice unaltered, comes with it:</p>
+    <details>
+      <summary>The Independent JPEG Group's README</summary>
+      <pre id="ijg-readme-text" class="licence"></pre>
+    </details>
+  </section>
+</main>
+
+<!-- The Independent JPEG Group's README, byte for byte (see the notice at the top). -->
+<script type="text/plain" id="ijg-readme">The Independent JPEG Group's JPEG software
+==========================================
+
+README for release 9f of 14-Jan-2024
+====================================
+
+This distribution contains the ninth public release of the Independent JPEG
+Group's free JPEG software.  You are welcome to redistribute this software and
+to use it for any purpose, subject to the conditions under LEGAL ISSUES, below.
+
+This software is the work of Tom Lane, Guido Vollbeding, Philip Gladstone,
+Bill Allombert, Jim Boucher, Lee Crocker, Bob Friesenhahn, Ben Jackson,
+John Korejwa, Julian Minguillon, Luis Ortiz, George Phillips, Davide Rossi,
+Ge' Weijers, and other members of the Independent JPEG Group.
+
+IJG is not affiliated with the ISO/IEC JTC1/SC29/WG1 standards committee
+(previously known as JPEG, together with ITU-T SG16).
+
+
+DOCUMENTATION ROADMAP
+=====================
+
+This file contains the following sections:
+
+OVERVIEW            General description of JPEG and the IJG software.
+LEGAL ISSUES        Copyright, lack of warranty, terms of distribution.
+REFERENCES          Where to learn more about JPEG.
+ARCHIVE LOCATIONS   Where to find newer versions of this software.
+ACKNOWLEDGMENTS     Special thanks.
+FILE FORMAT WARS    Software *not* to get.
+TO DO               Plans for future IJG releases.
+
+Other documentation files in the distribution are:
+
+User documentation:
+  install.txt       How to configure and install the IJG software.
+  usage.txt         Usage instructions for cjpeg, djpeg, jpegtran,
+                    rdjpgcom, and wrjpgcom.
+  *.1               Unix-style man pages for programs (same info as usage.txt).
+  wizard.txt        Advanced usage instructions for JPEG wizards only.
+  cdaltui.txt       Description of alternate user interface for cjpeg/djpeg.
+  change.log        Version-to-version change highlights.
+Programmer and internal documentation:
+  libjpeg.txt       How to use the JPEG library in your own programs.
+  example.c         Sample code for calling the JPEG library.
+  structure.txt     Overview of the JPEG library's internal structure.
+  filelist.txt      Road map of IJG files.
+  coderules.txt     Coding style rules --- please read if you contribute code.
+
+Please read at least the files install.txt and usage.txt.  Some information
+can also be found in the JPEG FAQ (Frequently Asked Questions) article.  See
+ARCHIVE LOCATIONS below to find out where to obtain the FAQ article.
+
+If you want to understand how the JPEG code works, we suggest reading one or
+more of the REFERENCES, then looking at the documentation files (in roughly
+the order listed) before diving into the code.
+
+
+OVERVIEW
+========
+
+This package contains C software to implement JPEG image encoding, decoding,
+and transcoding.  JPEG (pronounced "jay-peg") is a standardized compression
+method for full-color and grayscale images.
+
+This software implements JPEG baseline, extended-sequential, and progressive
+compression processes.  Provision is made for supporting all variants of these
+processes, although some uncommon parameter settings aren't implemented yet.
+We have made no provision for supporting the hierarchical or lossless
+processes defined in the standard.
+
+We provide a set of library routines for reading and writing JPEG image files,
+plus two sample applications "cjpeg" and "djpeg", which use the library to
+perform conversion between JPEG and some other popular image file formats.
+The library is intended to be reused in other applications.
+
+In order to support file conversion and viewing software, we have included
+considerable functionality beyond the bare JPEG coding/decoding capability;
+for example, the color quantization modules are not strictly part of JPEG
+decoding, but they are essential for output to colormapped file formats or
+colormapped displays.  These extra functions can be compiled out of the
+library if not required for a particular application.
+
+We have also included "jpegtran", a utility for lossless transcoding between
+different JPEG processes, and "rdjpgcom" and "wrjpgcom", two simple
+applications for inserting and extracting textual comments in JFIF files.
+
+The emphasis in designing this software has been on achieving portability and
+flexibility, while also making it fast enough to be useful.  In particular,
+the software is not intended to be read as a tutorial on JPEG.  (See the
+REFERENCES section for introductory material.)  Rather, it is intended to
+be reliable, portable, industrial-strength code.  We do not claim to have
+achieved that goal in every aspect of the software, but we strive for it.
+
+We welcome the use of this software as a component of commercial products.
+No royalty is required, but we do ask for an acknowledgement in product
+documentation, as described under LEGAL ISSUES.
+
+
+LEGAL ISSUES
+============
+
+In plain English:
+
+1. We don't promise that this software works.  (But if you find any bugs,
+   please let us know!)
+2. You can use this software for whatever you want.  You don't have to pay us.
+3. You may not pretend that you wrote this software.  If you use it in a
+   program, you must acknowledge somewhere in your documentation that
+   you've used the IJG code.
+
+In legalese:
+
+The authors make NO WARRANTY or representation, either express or implied,
+with respect to this software, its quality, accuracy, merchantability, or
+fitness for a particular purpose.  This software is provided "AS IS", and you,
+its user, assume the entire risk as to its quality and accuracy.
+
+This software is copyright (C) 1991-2024, Thomas G. Lane, Guido Vollbeding.
+All Rights Reserved except as specified below.
+
+Permission is hereby granted to use, copy, modify, and distribute this
+software (or portions thereof) for any purpose, without fee, subject to these
+conditions:
+(1) If any part of the source code for this software is distributed, then this
+README file must be included, with this copyright and no-warranty notice
+unaltered; and any additions, deletions, or changes to the original files
+must be clearly indicated in accompanying documentation.
+(2) If only executable code is distributed, then the accompanying
+documentation must state that "this software is based in part on the work of
+the Independent JPEG Group".
+(3) Permission for use of this software is granted only if the user accepts
+full responsibility for any undesirable consequences; the authors accept
+NO LIABILITY for damages of any kind.
+
+These conditions apply to any software derived from or based on the IJG code,
+not just to the unmodified library.  If you use our work, you ought to
+acknowledge us.
+
+Permission is NOT granted for the use of any IJG author's name or company name
+in advertising or publicity relating to this software or products derived from
+it.  This software may be referred to only as "the Independent JPEG Group's
+software".
+
+We specifically permit and encourage the use of this software as the basis of
+commercial products, provided that all warranty or liability claims are
+assumed by the product vendor.
+
+
+The Unix configuration script "configure" was produced with GNU Autoconf.
+It is copyright by the Free Software Foundation but is freely distributable.
+The same holds for its supporting scripts (config.guess, config.sub,
+ltmain.sh).  Another support script, install-sh, is copyright by X Consortium
+but is also freely distributable.
+
+
+REFERENCES
+==========
+
+We recommend reading one or more of these references before trying to
+understand the innards of the JPEG software.
+
+The best short technical introduction to the JPEG compression algorithm is
+	Wallace, Gregory K.  "The JPEG Still Picture Compression Standard",
+	Communications of the ACM, April 1991 (vol. 34 no. 4), pp. 30-44.
+(Adjacent articles in that issue discuss MPEG motion picture compression,
+applications of JPEG, and related topics.)  If you don't have the CACM issue
+handy, a PDF file containing a revised version of Wallace's article is
+available at https://www.ijg.org/files/Wallace.JPEG.pdf.  The file (actually
+a preprint for an article that appeared in IEEE Trans. Consumer Electronics)
+omits the sample images that appeared in CACM, but it includes corrections
+and some added material.  Note: the Wallace article is copyright ACM and IEEE,
+and it may not be used for commercial purposes.
+
+A somewhat less technical, more leisurely introduction to JPEG can be found in
+"The Data Compression Book" by Mark Nelson and Jean-loup Gailly, published by
+M&T Books (New York), 2nd ed. 1996, ISBN 1-55851-434-1.  This book provides
+good explanations and example C code for a multitude of compression methods
+including JPEG.  It is an excellent source if you are comfortable reading C
+code but don't know much about data compression in general.  The book's JPEG
+sample code is far from industrial-strength, but when you are ready to look
+at a full implementation, you've got one here...
+
+The best currently available description of JPEG is the textbook "JPEG Still
+Image Data Compression Standard" by William B. Pennebaker and Joan L.
+Mitchell, published by Van Nostrand Reinhold, 1993, ISBN 0-442-01272-1.
+Price US$59.95, 638 pp.  The book includes the complete text of the ISO JPEG
+standards (DIS 10918-1 and draft DIS 10918-2).
+Although this is by far the most detailed and comprehensive exposition of
+JPEG publicly available, we point out that it is still missing an explanation
+of the most essential properties and algorithms of the underlying DCT
+technology.
+If you think that you know about DCT-based JPEG after reading this book,
+then you are in delusion.  The real fundamentals and corresponding potential
+of DCT-based JPEG are not publicly known so far, and that is the reason for
+all the mistaken developments taking place in the image coding domain.
+
+The original JPEG standard is divided into two parts, Part 1 being the actual
+specification, while Part 2 covers compliance testing methods.  Part 1 is
+titled "Digital Compression and Coding of Continuous-tone Still Images,
+Part 1: Requirements and guidelines" and has document numbers ISO/IEC IS
+10918-1, ITU-T T.81.  Part 2 is titled "Digital Compression and Coding of
+Continuous-tone Still Images, Part 2: Compliance testing" and has document
+numbers ISO/IEC IS 10918-2, ITU-T T.83.
+IJG JPEG 8 introduced an implementation of the JPEG SmartScale extension
+which is specified in two documents:  A contributed document at ITU and ISO
+with title "ITU-T JPEG-Plus Proposal for Extending ITU-T T.81 for Advanced
+Image Coding", April 2006, Geneva, Switzerland.  The latest version of this
+document is Revision 3.  And a contributed document ISO/IEC JTC1/SC29/WG1 N
+5799 with title "Evolution of JPEG", June/July 2011, Berlin, Germany.
+IJG JPEG 9 introduces a reversible color transform for improved lossless
+compression which is described in a contributed document ISO/IEC JTC1/SC29/
+WG1 N 6080 with title "JPEG 9 Lossless Coding", June/July 2012, Paris, France.
+
+The JPEG standard does not specify all details of an interchangeable file
+format.  For the omitted details we follow the "JFIF" conventions, version 2.
+JFIF version 1 has been adopted as Recommendation ITU-T T.871 (05/2011) :
+Information technology - Digital compression and coding of continuous-tone
+still images: JPEG File Interchange Format (JFIF).  It is available as a
+free download in PDF file format from https://www.itu.int/rec/T-REC-T.871.
+A PDF file of the older JFIF document is available at
+https://www.w3.org/Graphics/JPEG/jfif3.pdf.
+
+The TIFF 6.0 file format specification can be obtained by FTP from
+ftp://ftp.sgi.com/graphics/tiff/TIFF6.ps.gz.  The JPEG incorporation scheme
+found in the TIFF 6.0 spec of 3-June-92 has a number of serious problems.
+IJG does not recommend use of the TIFF 6.0 design (TIFF Compression tag 6).
+Instead, we recommend the JPEG design proposed by TIFF Technical Note #2
+(Compression tag 7).  Copies of this Note can be obtained from
+https://www.ijg.org/files/.  It is expected that the next revision
+of the TIFF spec will replace the 6.0 JPEG design with the Note's design.
+Although IJG's own code does not support TIFF/JPEG, the free libtiff library
+uses our library to implement TIFF/JPEG per the Note.
+
+
+ARCHIVE LOCATIONS
+=================
+
+The "official" archive site for this software is www.ijg.org.
+The most recent released version can always be found there in
+directory "files".  This particular version will be archived
+in Windows-compatible "zip" archive format as
+https://www.ijg.org/files/jpegsr9f.zip, and
+in Unix-compatible "tar.gz" archive format as
+https://www.ijg.org/files/jpegsrc.v9f.tar.gz.
+
+The JPEG FAQ (Frequently Asked Questions) article is a source of some
+general information about JPEG.
+It is available on the World Wide Web at http://www.faqs.org/faqs/jpeg-faq/
+and other news.answers archive sites, including the official news.answers
+archive at rtfm.mit.edu: ftp://rtfm.mit.edu/pub/usenet/news.answers/jpeg-faq/.
+If you don't have Web or FTP access, send e-mail to mail-server@rtfm.mit.edu
+with body
+	send usenet/news.answers/jpeg-faq/part1
+	send usenet/news.answers/jpeg-faq/part2
+
+
+ACKNOWLEDGMENTS
+===============
+
+Thank to Juergen Bruder for providing me with a copy of the common DCT
+algorithm article, only to find out that I had come to the same result
+in a more direct and comprehensible way with a more generative approach.
+
+Thank to Istvan Sebestyen and Joan L. Mitchell for inviting me to the
+ITU JPEG (Study Group 16) meeting in Geneva, Switzerland.
+
+Thank to Thomas Wiegand and Gary Sullivan for inviting me to the
+Joint Video Team (MPEG & ITU) meeting in Geneva, Switzerland.
+
+Thank to Thomas Richter and Daniel Lee for inviting me to the
+ISO/IEC JTC1/SC29/WG1 (previously known as JPEG, together with ITU-T SG16)
+meeting in Berlin, Germany.
+
+Thank to John Korejwa and Massimo Ballerini for inviting me to
+fruitful consultations in Boston, MA and Milan, Italy.
+
+Thank to Hendrik Elstner, Roland Fassauer, Simone Zuck, Guenther
+Maier-Gerber, Walter Stoeber, Fred Schmitz, and Norbert Braunagel
+for corresponding business development.
+
+Thank to Nico Zschach and Dirk Stelling of the technical support team
+at the Digital Images company in Halle for providing me with extra
+equipment for configuration tests.
+
+Thank to Richard F. Lyon (then of Foveon Inc.) for fruitful
+communication about JPEG configuration in Sigma Photo Pro software.
+
+Thank to Andrew Finkenstadt for hosting the ijg.org site.
+
+Thank to Thomas G. Lane for the original design and development
+of this singular software package.
+
+Thank to Lars Goehler, Andreas Heinecke, Sebastian Fuss,
+Yvonne Roebert, Andrej Werner, Ulf-Dietrich Braumann,
+and Nina Ssymank for support and public relations.
+
+
+FILE FORMAT WARS
+================
+
+The ISO/IEC JTC1/SC29/WG1 standards committee (previously known as JPEG,
+together with ITU-T SG16) currently promotes different formats containing
+the name "JPEG" which is misleading because these formats are incompatible
+with original DCT-based JPEG and are based on faulty technologies.
+IJG therefore does not and will not support such momentary mistakes
+(see REFERENCES).
+There exist also distributions under the name "OpenJPEG" promoting such
+kind of formats which is misleading because they don't support original
+JPEG images.
+We have no sympathy for the promotion of inferior formats.  Indeed, one of
+the original reasons for developing this free software was to help force
+convergence on common, interoperable format standards for JPEG files.
+Don't use an incompatible file format!
+(In any case, our decoder will remain capable of reading existing JPEG
+image files indefinitely.)
+
+The ISO committee pretends to be "responsible for the popular JPEG" in their
+public reports which is not true because they don't respond to actual
+requirements for the maintenance of the original JPEG specification.
+Furthermore, the ISO committee pretends to "ensure interoperability" with
+their standards which is not true because their "standards" support only
+application-specific and proprietary use cases and contain mathematically
+incorrect code.
+
+There are currently different distributions in circulation containing the
+name "libjpeg" which is misleading because they don't have the features and
+are incompatible with formats supported by actual IJG libjpeg distributions.
+One of those fakes is released by members of the ISO committee and just uses
+the name of libjpeg for misdirection of people, similar to the abuse of the
+name JPEG as described above, while having nothing in common with actual IJG
+libjpeg distributions and containing mathematically incorrect code.
+The other one claims to be a "derivative" or "fork" of the original libjpeg,
+but violates the license conditions as described under LEGAL ISSUES above
+and violates basic C programming properties.
+We have no sympathy for the release of misleading, incorrect and illegal
+distributions derived from obsolete code bases.
+Don't use an obsolete code base!
+
+According to the UCC (Uniform Commercial Code) law, IJG has the lawful and
+legal right to foreclose on certain standardization bodies and other
+institutions or corporations that knowingly perform substantial and
+systematic deceptive acts and practices, fraud, theft, and damaging of the
+value of the people of this planet without their knowing, willing and
+intentional consent.
+The titles, ownership, and rights of these institutions and all their assets
+are now duly secured and held in trust for the free people of this planet.
+People of the planet, on every country, may have a financial interest in
+the assets of these former principals, agents, and beneficiaries of the
+foreclosed institutions and corporations.
+IJG asserts what is: that each man, woman, and child has unalienable value
+and rights granted and deposited in them by the Creator and not any one of
+the people is subordinate to any artificial principality, corporate fiction
+or the special interest of another without their appropriate knowing,
+willing and intentional consent made by contract or accommodation agreement.
+IJG expresses that which already was.
+The people have already determined and demanded that public administration
+entities, national governments, and their supporting judicial systems must
+be fully transparent, accountable, and liable.
+IJG has secured the value for all concerned free people of the planet.
+
+A partial list of foreclosed institutions and corporations ("Hall of Shame")
+is currently prepared and will be published later.
+
+
+TO DO
+=====
+
+Version 9 is the second release of a new generation JPEG standard
+to overcome the limitations of the original JPEG specification,
+and is the first true source reference JPEG codec.
+More features are being prepared for coming releases...
+
+Please send bug reports, offers of help, etc. to jpeg-info@ijg.org.
+</script>
+
+<script>
+'use strict'
+;(function () {
+  // ─── Small helpers ──────────────────────────────────────────────────────
+  var $ = function (id) { return document.getElementById(id) }
+  var KEY = 'pm-spike-v1:'
+  function save(k, v) {
+    try {
+      if (v === null) sessionStorage.removeItem(KEY + k)
+      else sessionStorage.setItem(KEY + k, JSON.stringify(v))
+    } catch (e) { /* storage off: the page still works, it just forgets on reload */ }
+  }
+  function load(k) {
+    try { var v = sessionStorage.getItem(KEY + k); return v ? JSON.parse(v) : null } catch (e) { return null }
+  }
+  var tick = function () { return new Promise(function (r) { setTimeout(r, 0) }) }
+  var now = function () { return performance.now() }
+  function errText(e) {
+    if (!e) return 'unknown error'
+    var name = e.name || 'Error'
+    var msg = e.message || String(e)
+    return name + ': ' + msg
+  }
+  function mp(w, h) { return (w * h / 1e6).toFixed(1) }
+  function ms(t) { return Math.round(t) + ' ms' }
+
+  // ─── Rows ────────────────────────────────────────────────────────────────
+  // Each finished test adds a row: {id, test, result, cls}. Rows are kept in
+  // sessionStorage so a reload (iOS kills a tab that runs out of memory)
+  // does not lose what was measured before it.
+  var rows = load('rows') || []
+  var hints = load('hints') || {}
+
+  function addRow(id, test, result, cls) {
+    rows.push({ id: id, test: test, result: result, cls: cls || '' })
+    save('rows', rows)
+    render()
+  }
+  function setHint(k, v) { hints[k] = v; save('hints', hints); render() }
+
+  function render() {
+    var list = $('results')
+    list.textContent = ''
+    rows.forEach(function (r) {
+      var li = document.createElement('li')
+      var head = document.createElement('div')
+      head.className = 'result-head'
+      head.textContent = r.id + '  ' + r.test
+      var body = document.createElement('div')
+      body.className = r.cls
+      body.textContent = r.result
+      li.appendChild(head)
+      li.appendChild(body)
+      list.appendChild(li)
+    })
+    $('table').value = tableText()
+  }
+
+  function pad(s, n) { s = String(s); while (s.length < n) s += ' '; return s }
+
+  function tableText() {
+    var lines = []
+    lines.push('Print Machine device spike v1')
+    lines.push('when     ' + new Date().toISOString())
+    lines.push('device   ' + navigator.userAgent)
+    lines.push('screen   ' + screen.width + 'x' + screen.height + ' css px, DPR ' + (window.devicePixelRatio || 1) +
+      ', cores ' + (navigator.hardwareConcurrency || '?') + (navigator.deviceMemory ? ', memory ' + navigator.deviceMemory + ' GB' : ''))
+    lines.push('')
+    lines.push(pad('id', 5) + pad('test', 30) + 'result')
+    rows.forEach(function (r) { lines.push(pad(r.id, 5) + pad(r.test, 30) + r.result) })
+    lines.push('')
+    lines.push('decision hints')
+    lines.push('(a) decode + first draw of a 40 MP+ photo in <= 8 s, tab kept (your photo decides; the synthetic stands in without one):')
+    lines.push('(a) your photo: ' + (hints['a.photo'] || 'not run'))
+    lines.push('(a) synthetic:  ' + (hints['a.synthetic'] || 'not run'))
+    lines.push('(b) 1:1 blit identical across origins, smoothing off: ' + (hints.b || 'not run'))
+    lines.push('(c) estimated 40 MP save = 33 s x R: ' + (hints.c || 'not run'))
+    lines.push('(d) canvas font honoured at 9216 px: ' + (hints.d || 'not run'))
+    lines.push('(e) cropped decode lands on the upright rect: ' + (hints.e || 'not run'))
+    lines.push('(f) a CompressionStream write resolves only once its chunk is taken: ' + (hints.f || 'not run'))
+    return lines.join('\n')
+  }
+
+  // A test that was running when the tab went away leaves its mark here.
+  var inflight = load('inflight')
+  if (inflight) {
+    addRow(inflight.id, inflight.test, 'DID NOT FINISH: the page reloaded while it ran (iOS reloads a tab it killed for memory)', 'bad')
+    if (inflight.decode) setHint('a.' + inflight.decode, 'FAIL: the tab reloaded during the decode')
+    save('inflight', null)
+  }
+  // `decode`: which photo's rule (a) line a reload during this test fails.
+  function begin(id, test, decode) { save('inflight', { id: id, test: test, decode: decode || null }) }
+  function end() { save('inflight', null) }
+
+  function progress(f, text) {
+    $('progress').value = Math.max(0, Math.min(1, f))
+    if (text) $('status').textContent = text
+  }
+
+  // ─── The JPEG encoder ────────────────────────────────────────────────────
+  // Baseline (SOF0), 8-bit, three components at 1x1 sampling (4:4:4),
+  // standard Annex K Huffman tables, rows pushed in any groups. The forward
+  // DCT is the IJG's jpeg_fdct_float (see the notice at the top).
+  var ZIGZAG = [0,1,8,16,9,2,3,10,17,24,32,25,18,11,4,5,12,19,26,33,40,48,41,34,27,20,13,6,7,14,21,28,35,42,49,56,57,50,43,36,29,22,15,23,30,37,44,51,58,59,52,45,38,31,39,46,53,60,61,54,47,55,62,63]
+  var LUMA_Q = [16,11,10,16,24,40,51,61,12,12,14,19,26,58,60,55,14,13,16,24,40,57,69,56,14,17,22,29,51,87,80,62,18,22,37,56,68,109,103,77,24,35,55,64,81,104,113,92,49,64,78,87,103,121,120,101,72,92,95,98,112,100,103,99]
+  var CHROMA_Q = [17,18,24,47,99,99,99,99,18,21,26,66,99,99,99,99,24,26,56,99,99,99,99,99,47,66,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99,99]
+  var DC_L_BITS = [0,1,5,1,1,1,1,1,1,0,0,0,0,0,0,0], DC_L_VALS = [0,1,2,3,4,5,6,7,8,9,10,11]
+  var DC_C_BITS = [0,3,1,1,1,1,1,1,1,1,1,0,0,0,0,0], DC_C_VALS = [0,1,2,3,4,5,6,7,8,9,10,11]
+  var AC_L_BITS = [0,2,1,3,3,2,4,3,5,5,4,4,0,0,1,0x7d]
+  var AC_L_VALS = [0x01,0x02,0x03,0x00,0x04,0x11,0x05,0x12,0x21,0x31,0x41,0x06,0x13,0x51,0x61,0x07,0x22,0x71,0x14,0x32,0x81,0x91,0xa1,0x08,0x23,0x42,0xb1,0xc1,0x15,0x52,0xd1,0xf0,0x24,0x33,0x62,0x72,0x82,0x09,0x0a,0x16,0x17,0x18,0x19,0x1a,0x25,0x26,0x27,0x28,0x29,0x2a,0x34,0x35,0x36,0x37,0x38,0x39,0x3a,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5a,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6a,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7a,0x83,0x84,0x85,0x86,0x87,0x88,0x89,0x8a,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,0xa8,0xa9,0xaa,0xb2,0xb3,0xb4,0xb5,0xb6,0xb7,0xb8,0xb9,0xba,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,0xc8,0xc9,0xca,0xd2,0xd3,0xd4,0xd5,0xd6,0xd7,0xd8,0xd9,0xda,0xe1,0xe2,0xe3,0xe4,0xe5,0xe6,0xe7,0xe8,0xe9,0xea,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9,0xfa]
+  var AC_C_BITS = [0,2,1,2,4,4,3,4,7,5,4,4,0,1,2,0x77]
+  var AC_C_VALS = [0x00,0x01,0x02,0x03,0x11,0x04,0x05,0x21,0x31,0x06,0x12,0x41,0x51,0x07,0x61,0x71,0x13,0x22,0x32,0x81,0x08,0x14,0x42,0x91,0xa1,0xb1,0xc1,0x09,0x23,0x33,0x52,0xf0,0x15,0x62,0x72,0xd1,0x0a,0x16,0x24,0x34,0xe1,0x25,0xf1,0x17,0x18,0x19,0x1a,0x26,0x27,0x28,0x29,0x2a,0x35,0x36,0x37,0x38,0x39,0x3a,0x43,0x44,0x45,0x46,0x47,0x48,0x49,0x4a,0x53,0x54,0x55,0x56,0x57,0x58,0x59,0x5a,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6a,0x73,0x74,0x75,0x76,0x77,0x78,0x79,0x7a,0x82,0x83,0x84,0x85,0x86,0x87,0x88,0x89,0x8a,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9a,0xa2,0xa3,0xa4,0xa5,0xa6,0xa7,0xa8,0xa9,0xaa,0xb2,0xb3,0xb4,0xb5,0xb6,0xb7,0xb8,0xb9,0xba,0xc2,0xc3,0xc4,0xc5,0xc6,0xc7,0xc8,0xc9,0xca,0xd2,0xd3,0xd4,0xd5,0xd6,0xd7,0xd8,0xd9,0xda,0xe2,0xe3,0xe4,0xe5,0xe6,0xe7,0xe8,0xe9,0xea,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9,0xfa]
+  var AAN = [1.0, 1.387039845, 1.306562965, 1.175875602, 1.0, 0.785694958, 0.541196100, 0.275899379]
+
+  function huff(bits, vals) {
+    var code = new Uint16Array(256), size = new Uint8Array(256), c = 0, k = 0
+    for (var len = 1; len <= 16; len++) {
+      for (var i = 0; i < bits[len - 1]; i++) { code[vals[k]] = c; size[vals[k]] = len; c++; k++ }
+      c <<= 1
+    }
+    return { code: code, size: size }
+  }
+  function quantTable(base, quality) {
+    var q = Math.max(1, Math.min(100, Math.round(quality)))
+    var s = q < 50 ? Math.floor(5000 / q) : 200 - 2 * q
+    return base.map(function (v) { return Math.max(1, Math.min(255, Math.floor((v * s + 50) / 100))) })
+  }
+  function fdct1(d, o, s) {
+    var t0 = d[o] + d[o + 7 * s], t7 = d[o] - d[o + 7 * s]
+    var t1 = d[o + s] + d[o + 6 * s], t6 = d[o + s] - d[o + 6 * s]
+    var t2 = d[o + 2 * s] + d[o + 5 * s], t5 = d[o + 2 * s] - d[o + 5 * s]
+    var t3 = d[o + 3 * s] + d[o + 4 * s], t4 = d[o + 3 * s] - d[o + 4 * s]
+    var t10 = t0 + t3, t13 = t0 - t3, t11 = t1 + t2, t12 = t1 - t2
+    d[o] = t10 + t11; d[o + 4 * s] = t10 - t11
+    var z1 = (t12 + t13) * 0.707106781
+    d[o + 2 * s] = t13 + z1; d[o + 6 * s] = t13 - z1
+    t10 = t4 + t5; t11 = t5 + t6; t12 = t6 + t7
+    var z5 = (t10 - t12) * 0.382683433, z2 = 0.541196100 * t10 + z5, z4 = 1.306562965 * t12 + z5, z3 = t11 * 0.707106781
+    var z11 = t7 + z3, z13 = t7 - z3
+    d[o + 5 * s] = z13 + z2; d[o + 3 * s] = z13 - z2; d[o + s] = z11 + z4; d[o + 7 * s] = z11 - z4
+  }
+  function Jpeg(w, h, quality, onChunk) {
+    this.w = w; this.h = h; this.onChunk = onChunk
+    var qY = quantTable(LUMA_Q, quality), qC = quantTable(CHROMA_Q, quality)
+    this.qY = qY; this.qC = qC
+    this.rY = new Float64Array(64); this.rC = new Float64Array(64)
+    for (var v = 0; v < 8; v++) for (var u = 0; u < 8; u++) {
+      var i = v * 8 + u, sc = AAN[u] * AAN[v] * 8
+      this.rY[i] = 1 / (qY[i] * sc); this.rC[i] = 1 / (qC[i] * sc)
+    }
+    this.dcL = huff(DC_L_BITS, DC_L_VALS); this.acL = huff(AC_L_BITS, AC_L_VALS)
+    this.dcC = huff(DC_C_BITS, DC_C_VALS); this.acC = huff(AC_C_BITS, AC_C_VALS)
+    this.buf = new Uint8Array(1 << 18); this.n = 0; this.bits = 0; this.nb = 0
+    this.pred = [0, 0, 0]
+    this.mcuW = Math.ceil(w / 8)
+    this.strip = [new Float32Array(this.mcuW * 64), new Float32Array(this.mcuW * 64), new Float32Array(this.mcuW * 64)]
+    this.stripRow = 0; this.rows = 0
+    this.blk = new Float64Array(64); this.q = new Int32Array(64)
+    this.header()
+  }
+  Jpeg.prototype.byte = function (b) {
+    if (this.n === this.buf.length) this.flush()
+    this.buf[this.n++] = b
+  }
+  Jpeg.prototype.flush = function () {
+    if (this.n) { this.onChunk(this.buf.slice(0, this.n)); this.n = 0 }
+  }
+  Jpeg.prototype.u16 = function (v) { this.byte(v >> 8); this.byte(v & 255) }
+  Jpeg.prototype.header = function () {
+    var self = this
+    this.u16(0xffd8)
+    this.u16(0xffe0); this.u16(16)
+    ;[0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0].forEach(function (b) { self.byte(b) })
+    ;[[0, this.qY], [1, this.qC]].forEach(function (t) {
+      self.u16(0xffdb); self.u16(67); self.byte(t[0])
+      for (var i = 0; i < 64; i++) self.byte(t[1][ZIGZAG[i]])
+    })
+    this.u16(0xffc0); this.u16(17); this.byte(8); this.u16(this.h); this.u16(this.w); this.byte(3)
+    for (var c = 0; c < 3; c++) { this.byte(c + 1); this.byte(0x11); this.byte(c ? 1 : 0) }
+    ;[[0, 0, DC_L_BITS, DC_L_VALS], [1, 0, AC_L_BITS, AC_L_VALS], [0, 1, DC_C_BITS, DC_C_VALS], [1, 1, AC_C_BITS, AC_C_VALS]].forEach(function (t) {
+      self.u16(0xffc4); self.u16(19 + t[3].length); self.byte((t[0] << 4) | t[1])
+      t[2].forEach(function (b) { self.byte(b) })
+      t[3].forEach(function (b) { self.byte(b) })
+    })
+    this.u16(0xffda); this.u16(12); this.byte(3)
+    for (c = 0; c < 3; c++) { this.byte(c + 1); this.byte(c ? 0x11 : 0x00) }
+    this.byte(0); this.byte(63); this.byte(0)
+  }
+  Jpeg.prototype.put = function (code, size) {
+    this.bits = (this.bits << size) | code; this.nb += size
+    while (this.nb >= 8) {
+      var b = (this.bits >> (this.nb - 8)) & 255
+      this.byte(b); if (b === 255) this.byte(0)
+      this.nb -= 8
+    }
+    this.bits &= (1 << this.nb) - 1
+  }
+  Jpeg.prototype.push = function (rgba, count) {
+    var w = this.w, mw = this.mcuW * 8, Y = this.strip[0], Cb = this.strip[1], Cr = this.strip[2]
+    for (var r = 0; r < count; r++) {
+      var o = r * w * 4, d = this.stripRow * mw
+      for (var x = 0; x < w; x++) {
+        var R = rgba[o + x * 4], G = rgba[o + x * 4 + 1], B = rgba[o + x * 4 + 2]
+        Y[d + x] = 0.299 * R + 0.587 * G + 0.114 * B - 128
+        Cb[d + x] = -0.168736 * R - 0.331264 * G + 0.5 * B
+        Cr[d + x] = 0.5 * R - 0.418688 * G - 0.081312 * B
+      }
+      for (x = w; x < mw; x++) { Y[d + x] = Y[d + w - 1]; Cb[d + x] = Cb[d + w - 1]; Cr[d + x] = Cr[d + w - 1] }
+      this.stripRow++; this.rows++
+      if (this.stripRow === 8) this.strip8()
+    }
+  }
+  Jpeg.prototype.strip8 = function () {
+    var mw = this.mcuW * 8
+    for (var c = 0; c < 3; c++) for (var r = this.stripRow; r < 8; r++) this.strip[c].copyWithin(r * mw, (this.stripRow - 1) * mw, this.stripRow * mw)
+    for (var m = 0; m < this.mcuW; m++) for (c = 0; c < 3; c++) this.block(this.strip[c], m * 8, mw, c)
+    this.stripRow = 0
+  }
+  Jpeg.prototype.block = function (src, x0, stride, comp) {
+    var b = this.blk, q = this.q, i
+    for (var y = 0; y < 8; y++) for (var x = 0; x < 8; x++) b[y * 8 + x] = src[y * stride + x0 + x]
+    for (i = 0; i < 8; i++) fdct1(b, i * 8, 1)
+    for (i = 0; i < 8; i++) fdct1(b, i, 8)
+    var rec = comp ? this.rC : this.rY
+    for (i = 0; i < 64; i++) q[i] = Math.round(b[i] * rec[i])
+    var dc = comp ? this.dcC : this.dcL, ac = comp ? this.acC : this.acL
+    var diff = q[0] - this.pred[comp]; this.pred[comp] = q[0]
+    this.value(dc, 0, diff)
+    var run = 0
+    for (i = 1; i < 64; i++) {
+      var v = q[ZIGZAG[i]]
+      if (v === 0) { run++; continue }
+      while (run > 15) { this.put(ac.code[0xf0], ac.size[0xf0]); run -= 16 }
+      this.value(ac, run, v); run = 0
+    }
+    if (run > 0) this.put(ac.code[0], ac.size[0])
+  }
+  Jpeg.prototype.value = function (t, run, v) {
+    var a = v < 0 ? -v : v, s = 0
+    while (a) { s++; a >>= 1 }
+    var sym = (run << 4) | s
+    this.put(t.code[sym], t.size[sym])
+    if (s) this.put(v < 0 ? v + (1 << s) - 1 : v, s)
+  }
+  Jpeg.prototype.finish = function () {
+    if (this.rows !== this.h) throw new Error('JPEG: ' + this.rows + ' rows pushed for a height of ' + this.h)
+    if (this.stripRow) this.strip8()
+    if (this.nb) this.put((1 << (8 - this.nb)) - 1, 8 - this.nb)
+    this.u16(0xffd9); this.flush()
+  }
+
+  /** A JPEG of w x h from pixel(x, y, out, o) writing RGB at out[o..o+2],
+   *  made band by band (no canvas, no full-size buffer). Resolves to
+   *  {blob, encodeMs}; reports progress through onRow(fraction). */
+  async function makeJpeg(w, h, quality, pixel, onRow) {
+    var chunks = []
+    var enc = new Jpeg(w, h, quality, function (c) { chunks.push(c) })
+    var band = Math.max(8, Math.min(h, Math.floor((1 << 20) / w)))
+    var buf = new Uint8ClampedArray(w * band * 4)
+    var encodeMs = 0
+    for (var y0 = 0; y0 < h; y0 += band) {
+      var n = Math.min(band, h - y0)
+      for (var r = 0; r < n; r++) for (var x = 0; x < w; x++) pixel(x, y0 + r, buf, (r * w + x) * 4)
+      var t = now()
+      enc.push(buf, n)
+      encodeMs += now() - t
+      if (onRow) { onRow((y0 + n) / h); await tick() }
+    }
+    var t1 = now()
+    enc.finish()
+    encodeMs += now() - t1
+    return { blob: new Blob(chunks, { type: 'image/jpeg' }), encodeMs: encodeMs }
+  }
+
+  // A photo-like synthetic: soft shapes and a little grain, so it compresses
+  // like a photograph rather than like noise or like a flat colour.
+  function photoPixel(seed) {
+    var s = seed >>> 0
+    return function (x, y, out, o) {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0
+      var n = ((s >>> 24) - 128) * 0.05
+      var base = 128 + 80 * Math.sin(x / 350) * Math.cos(y / 270) + 30 * Math.sin((x + y) / 97)
+      out[o] = base + 18 + n
+      out[o + 1] = base + n
+      out[o + 2] = base - 22 + n
+      out[o + 3] = 255
+    }
+  }
+
+  // The speed test's image: a saturated halftone with noise, the same image
+  // the 126 ms/MP reference was measured on, so R compares like with like.
+  function halftonePixel() {
+    var s = 1
+    return function (x, y, out, o) {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0
+      var u = (x * 0.7071 + y * 0.7071) / 26, v = (x * 0.7071 - y * 0.7071) / 26
+      var dd = Math.hypot(u - Math.round(u), v - Math.round(v))
+      var dot = dd < 0.32 + 0.2 * Math.sin(x / 700)
+      var n = ((s >>> 24) - 128) * 0.03
+      if (dot) { out[o] = 255 + n; out[o + 1] = 72 + n; out[o + 2] = 176 + n }
+      else { out[o] = 244 + n; out[o + 1] = 238 + n; out[o + 2] = 225 + n }
+      out[o + 3] = 255
+    }
+  }
+
+  // ─── Decoding, as Save decodes ───────────────────────────────────────────
+  // decode.ts decodeOriented: the EXIF orientation applied; an engine that
+  // refuses the option with a TypeError gets the plain call.
+  async function decodeOriented(blob) {
+    try {
+      return { bmp: await createImageBitmap(blob, { imageOrientation: 'from-image' }), note: '' }
+    } catch (e) {
+      if (!(e instanceof TypeError)) throw e
+      return { bmp: await createImageBitmap(blob), note: ' (from-image refused: ' + errText(e) + '; plain decode)' }
+    }
+  }
+
+  function canvas2d(w, h, readBack) {
+    var c = document.createElement('canvas')
+    c.width = w; c.height = h
+    var ctx = c.getContext('2d', readBack ? { willReadFrequently: true } : undefined)
+    if (!ctx) throw new Error('no 2D context for ' + w + 'x' + h)
+    return ctx
+  }
+
+  // ─── Test: decode + blit ─────────────────────────────────────────────────
+  // `key` names the photo's own rule (a) line: 'photo' or 'synthetic'.
+  async function testDecode(id, label, blob, key) {
+    progress(0, 'Decoding ' + label + ' (' + (blob.size / 1e6).toFixed(1) + ' MB file)…')
+    await tick()
+    begin(id, 'decode ' + label, key)
+    var t0 = now(), res
+    try {
+      res = await decodeOriented(blob)
+    } catch (e) {
+      end()
+      addRow(id, 'decode ' + label, 'FAILED after ' + ms(now() - t0) + ': ' + errText(e), 'bad')
+      setHint('a.' + key, 'FAIL: ' + errText(e))
+      return
+    }
+    var decodeMs = now() - t0
+    var bmp = res.bmp
+    // The first draw, timed apart: an engine may finish decoding lazily.
+    var probe = canvas2d(1, 1, true)
+    var t1 = now()
+    probe.drawImage(bmp, 0, 0, 1, 1, 0, 0, 1, 1)
+    probe.getImageData(0, 0, 1, 1)
+    var firstDrawMs = now() - t1
+    probe.canvas.width = 0
+    end()
+    // Rule (a) is judged on both: a decode that is quick only because the
+    // engine put the work off to the first draw is not quick.
+    var totalMs = decodeMs + firstDrawMs
+    addRow(id, 'decode ' + label,
+      'ok, ' + bmp.width + 'x' + bmp.height + ' (' + mp(bmp.width, bmp.height) + ' MP), decode ' + ms(decodeMs) +
+      ', first draw ' + ms(firstDrawMs) + res.note, totalMs <= 8000 ? 'ok' : 'warn')
+    setHint('a.' + key, bmp.width * bmp.height >= 39e6
+      ? (totalMs <= 8000 ? 'PASS' : 'FAIL') + ': ' + mp(bmp.width, bmp.height) + ' MP, decode ' + ms(decodeMs) + ' + first draw ' + ms(firstDrawMs) + ' = ' + ms(totalMs)
+      : 'not judged: ' + mp(bmp.width, bmp.height) + ' MP, under 39 MP')
+    try {
+      await testBlit(id + 'b', label, bmp)
+    } finally {
+      bmp.close()
+    }
+  }
+
+  async function testBlit(id, label, bmp) {
+    progress(0.5, 'Blitting ' + label + ' at two tile origins…')
+    await tick()
+    var W = Math.min(4096, bmp.width), H = 1024
+    if (bmp.height < 1024) {
+      addRow(id, 'blit ' + label, 'not run: the photo is under 1024 rows tall', 'warn')
+      return
+    }
+    begin(id, 'blit ' + label, false)
+    try {
+      var ctx = canvas2d(W, H, true)
+      // A tile of columns from the middle of the photo, so a wide photo is
+      // read away from its left edge, as a cropped sheet would be.
+      var x0 = Math.max(0, Math.floor((bmp.width - W) / 2))
+      // The engine's call: drawImage(photo, rect.dx - x0, rect.dy - y0, w, h),
+      // here with the photo's own rectangle at the origin.
+      var read = function (origin, smooth) {
+        ctx.clearRect(0, 0, W, H)
+        ctx.imageSmoothingEnabled = smooth
+        if (smooth) ctx.imageSmoothingQuality = 'high'
+        ctx.drawImage(bmp, -x0, -origin, bmp.width, bmp.height)
+        // Photo rows 777..1023: rows 777.. of the tile at 0, rows 0.. of the tile at 777.
+        return ctx.getImageData(0, origin === 0 ? 777 : 0, W, 247).data
+      }
+      var compare = function (a, b) {
+        var differ = 0, worst = 0
+        for (var i = 0; i < a.length; i++) {
+          var d = a[i] > b[i] ? a[i] - b[i] : b[i] - a[i]
+          if (d) { differ++; if (d > worst) worst = d }
+        }
+        return { differ: differ, worst: worst, of: a.length }
+      }
+      var blank = function (a) { for (var i = 3; i < a.length; i += 4) if (a[i] !== 0) return false; return true }
+      var offA = read(0, false), offB = read(777, false)
+      var off = compare(offA, offB)
+      var onA = read(0, true), onB = read(777, true)
+      var on = compare(onA, onB)
+      var offOn = compare(offA, onA)
+      ctx.canvas.width = 0
+      end()
+      if (blank(offA) || blank(offB)) {
+        addRow(id, 'blit ' + label, 'FAILED: the 4096 x 1024 canvas read back blank', 'bad')
+        setHint('b', 'FAIL: blank canvas')
+        return
+      }
+      var say = function (r) { return r.differ === 0 ? 'identical' : r.differ + ' of ' + r.of + ' bytes differ (max ' + r.worst + ')' }
+      addRow(id, 'blit ' + label,
+        'smoothing off: ' + say(off) + '; smoothing high: ' + say(on) + '; off vs high at one origin: ' + say(offOn),
+        off.differ === 0 ? 'ok' : 'bad')
+      var v = off.differ === 0 ? 'PASS' : 'FAIL'
+      if (!hints.b || v === 'FAIL') setHint('b', v + ' (' + label + ': smoothing off ' + say(off) + ')')
+    } catch (e) {
+      end()
+      addRow(id, 'blit ' + label, 'FAILED: ' + errText(e), 'bad')
+      setHint('b', 'FAIL: ' + errText(e))
+    }
+  }
+
+  // ─── Test: font clamp ────────────────────────────────────────────────────
+  async function testFont() {
+    progress(0, 'Reading the largest canvas font…')
+    await tick()
+    var ctx = canvas2d(1, 1, false)
+    var stack = 'Impact, Haettenschweiler, "Arial Narrow Bold", "Helvetica Neue", sans-serif'
+    var sizes = [4096, 8192, 9216, 9800, 10000, 10001, 12000]
+    var base = 0, largest = 0, parts = []
+    sizes.forEach(function (px) {
+      ctx.font = '700 ' + px + 'px ' + stack
+      var m = /([\d.]+)px/.exec(ctx.font)
+      var got = m ? Number(m[1]) : NaN
+      var per = ctx.measureText('O').width / px
+      if (px === 4096) base = per
+      var honoured = got === px && Math.abs(per - base) <= 0.005 * base
+      if (honoured) largest = px
+      parts.push(px + (honoured ? ' ok' : ' -> ' + (isNaN(got) ? '?' : got) + ' px, O ' + (per / base).toFixed(3) + 'x'))
+    })
+    ctx.canvas.width = 0
+    addRow('4', 'font size honoured', 'largest ' + largest + ' px; ' + parts.join(', '), largest >= 9216 ? 'ok' : 'bad')
+    setHint('d', (largest >= 9216 ? 'PASS' : 'FAIL') + ' (largest honoured ' + largest + ' px)')
+  }
+
+  // ─── Test: canvas sentinels ──────────────────────────────────────────────
+  async function testCanvases() {
+    var sizes = [[4096, 1024], [4096, 512], [2048, 2048], [4096, 4096]]
+    var parts = [], allOk = true
+    for (var i = 0; i < sizes.length; i++) {
+      var w = sizes[i][0], h = sizes[i][1]
+      progress(i / sizes.length, 'Canvas ' + w + ' x ' + h + '…')
+      await tick()
+      begin('5', 'canvas ' + w + 'x' + h, false)
+      try {
+        var ctx = canvas2d(w, h, true)
+        ctx.fillStyle = 'rgb(1,2,3)'
+        ctx.fillRect(w - 1, h - 1, 1, 1)
+        var d = ctx.getImageData(w - 1, h - 1, 1, 1).data
+        var ok = d[0] === 1 && d[1] === 2 && d[2] === 3 && d[3] === 255
+        if (!ok) allOk = false
+        parts.push(w + 'x' + h + ' ' + (ok ? 'ok' : 'BLANK (' + Array.prototype.join.call(d, ',') + ')'))
+        ctx.canvas.width = 0
+      } catch (e) {
+        allOk = false
+        parts.push(w + 'x' + h + ' FAILED ' + errText(e))
+      }
+      end()
+    }
+    addRow('5', 'canvas sentinel pixel', parts.join('; '), allOk ? 'ok' : 'bad')
+  }
+
+  // ─── Test: crop semantics under EXIF orientation ─────────────────────────
+  function withOrientation(jpeg, o) {
+    // An APP1 Exif segment (big-endian TIFF, IFD0 with one entry, 0x0112
+    // Orientation, SHORT), placed after the JFIF APP0 segment.
+    var tiff = [0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0]
+    var body = [0x45, 0x78, 0x69, 0x66, 0, 0].concat(tiff)
+    var len = body.length + 2
+    var seg = [0xff, 0xe1, len >> 8, len & 255].concat(body)
+    var at = 2 + 2 + ((jpeg[4] << 8) | jpeg[5]) // after SOI and APP0
+    var out = new Uint8Array(jpeg.length + seg.length)
+    out.set(jpeg.subarray(0, at), 0)
+    out.set(seg, at)
+    out.set(jpeg.subarray(at), at + seg.length)
+    return new Blob([out], { type: 'image/jpeg' })
+  }
+  function pixelsOf(bmp) {
+    var ctx = canvas2d(bmp.width, bmp.height, true)
+    ctx.drawImage(bmp, 0, 0)
+    var d = ctx.getImageData(0, 0, bmp.width, bmp.height).data
+    ctx.canvas.width = 0
+    return d
+  }
+  function meanDiff(c, cw, ch, u, uw, ox, oy, step) {
+    var sum = 0, n = 0
+    for (var y = 0; y < ch; y += step) for (var x = 0; x < cw; x += step) {
+      var a = (y * cw + x) * 4, b = ((oy + y) * uw + ox + x) * 4
+      sum += Math.abs(c[a] - u[b]) + Math.abs(c[a + 1] - u[b + 1]) + Math.abs(c[a + 2] - u[b + 2])
+      n += 3
+    }
+    return sum / n
+  }
+  async function testCrop() {
+    progress(0, 'Making a small EXIF-rotated JPEG…')
+    await tick()
+    var RW = 400, RH = 300
+    var made = await makeJpeg(RW, RH, 100, function (x, y, out, o) {
+      out[o] = (x * 255) / (RW - 1)
+      out[o + 1] = (y * 255) / (RH - 1)
+      out[o + 2] = ((x >> 4) + (y >> 4)) & 1 ? 200 : 60
+      out[o + 3] = 255
+    })
+    var raw = new Uint8Array(await made.blob.arrayBuffer())
+    var req = { sx: 30, sy: 40, sw: 100, sh: 80 }
+    var parts = [], exact = []
+    var orients = [1, 3, 6, 8]
+    for (var k = 0; k < orients.length; k++) {
+      var o = orients[k]
+      progress(k / orients.length, 'Cropped decode, EXIF orientation ' + o + '…')
+      await tick()
+      try {
+        var blob = withOrientation(raw, o)
+        var full = await createImageBitmap(blob, { imageOrientation: 'from-image' })
+        var uw = full.width, uh = full.height
+        // Orientations 5 to 8 turn the picture a quarter: upright it is RH x RW.
+        var upright = o >= 5 ? uw === RH && uh === RW : uw === RW && uh === RH
+        var u = pixelsOf(full)
+        full.close()
+        var crop = await createImageBitmap(blob, req.sx, req.sy, req.sw, req.sh, { imageOrientation: 'from-image' })
+        var cw = crop.width, ch = crop.height
+        var c = pixelsOf(crop)
+        crop.close()
+        var text = 'o' + o + ': full ' + uw + 'x' + uh + (upright ? '' : ' (NOT upright)') + ', crop ' + cw + 'x' + ch
+        if (cw !== req.sw || ch !== req.sh) {
+          text += ', wrong size'
+        } else {
+          var d = meanDiff(c, cw, ch, u, uw, req.sx, req.sy, 1)
+          if (d <= 3) {
+            text += ', lands on the requested rect'
+            exact.push(o)
+          } else {
+            var best = null
+            for (var oy = 0; oy + ch <= uh; oy += 2) for (var ox = 0; ox + cw <= uw; ox += 2) {
+              var m = meanDiff(c, cw, ch, u, uw, ox, oy, 5)
+              if (!best || m < best.m) best = { m: m, ox: ox, oy: oy }
+            }
+            text += best && best.m <= 4
+              ? ', lands ELSEWHERE: asked (' + req.sx + ',' + req.sy + '), got about (' + best.ox + ',' + best.oy + ')'
+              : ', matches no upright rect (mean error ' + d.toFixed(1) + ')'
+          }
+        }
+        parts.push(text)
+      } catch (e) {
+        parts.push('o' + o + ': FAILED ' + errText(e))
+      }
+    }
+    addRow('3', 'cropped decode, EXIF', parts.join('; '), exact.length === 4 ? 'ok' : 'warn')
+    setHint('e', 'exact for orientations [' + exact.join(', ') + '] of [1, 3, 6, 8]')
+  }
+
+  // ─── Test: encoder speed ─────────────────────────────────────────────────
+  async function testSpeed() {
+    progress(0, 'Encoding a 4 MP halftone with the save encoder…')
+    await tick()
+    begin('6', 'encoder speed', false)
+    // A small encode first, untimed, so the timed one runs compiled code (the
+    // reference was measured on a long run).
+    await makeJpeg(512, 512, 95, halftonePixel())
+    var W = 2048, H = 2048
+    var made = await makeJpeg(W, H, 95, halftonePixel(), function (f) { progress(f, 'Encoding a 4 MP halftone with the save encoder… ' + Math.round(f * 100) + '%') })
+    end()
+    var per = made.encodeMs / (W * H / 1e6)
+    var R = per / 126
+    addRow('6', 'JPEG encoder speed (q95)', Math.round(per) + ' ms/MP (4.2 MP in ' + ms(made.encodeMs) + ', ' + (made.blob.size / 1e6).toFixed(2) + ' MB); R = ' + R.toFixed(2), 'ok')
+    var est = 33 * R
+    var action = est <= 150 ? 'proceed' : est <= 300 ? 'proceed with progress, Cancel and the wake lock' : 'a Worker pool becomes part of the work'
+    setHint('c', Math.round(est) + ' s (R ' + R.toFixed(2) + '): ' + action)
+  }
+
+  // ─── Test: the compressor takes a chunk before its write resolves ───────
+  // The PNG encoder fills a batch again once its write to the
+  // CompressionStream has resolved, which the Compression Streams standard
+  // makes the moment the compressor has read it. Here: write a chunk, queue a
+  // second, overwrite the first once its write resolves, and decompress. The
+  // standard's behaviour gives back both chunks as written.
+  async function testDeflate() {
+    if (typeof CompressionStream !== 'function' || typeof DecompressionStream !== 'function') {
+      addRow('7', 'compressor takes on write', 'not available (iOS before 16.4): PNG saves use the uncompressed fallback', 'warn')
+      setHint('f', 'n/a (no CompressionStream)')
+      return
+    }
+    var sizes = [1000, 20000, 70000, 200000, 1500000], reps = 4, bad = 0, total = 0
+    begin('7', 'compressor takes on write', false)
+    for (var k = 0; k < sizes.length; k++) {
+      var size = sizes[k]
+      progress(k / sizes.length, 'Compressor, ' + size + '-byte chunks…')
+      await tick()
+      for (var rep = 0; rep < reps; rep++) {
+        var cs = new CompressionStream('deflate')
+        var w = cs.writable.getWriter(), r = cs.readable.getReader(), parts = []
+        var pump = (async function () { for (;;) { var x = await r.read(); if (x.done) return; parts.push(x.value) } })()
+        var buf = new Uint8Array(size)
+        for (var i = 0; i < size; i++) buf[i] = (i * 7 + rep) & 255
+        var orig = buf.slice()
+        var p1 = w.write(buf)
+        w.write(orig.slice())
+        await p1
+        buf.fill(0)
+        await w.close(); await pump
+        var back = new Uint8Array(await new Response(new Blob(parts).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer())
+        var same = back.length === 2 * size
+        for (i = 0; same && i < size; i++) if (back[i] !== orig[i] || back[size + i] !== orig[i]) same = false
+        total++
+        if (!same) bad++
+      }
+    }
+    end()
+    addRow('7', 'compressor takes on write', bad === 0 ? 'exact: ' + total + ' of ' + total + ' round trips unchanged (1 KB to 1.5 MB chunks)' : bad + ' of ' + total + ' round trips CHANGED by overwriting a chunk after its write resolved', bad === 0 ? 'ok' : 'bad')
+    setHint('f', bad === 0 ? 'PASS' : 'FAIL (' + bad + ' of ' + total + ')')
+  }
+
+  // ─── Test: a synthetic large photo, made here ────────────────────────────
+  async function testSynthetic(w, h) {
+    var label = 'synthetic ' + w + 'x' + h
+    progress(0, 'Making a ' + mp(w, h) + ' MP JPEG on this phone…')
+    await tick()
+    begin('2', 'make ' + label, false)
+    var made = await makeJpeg(w, h, 92, photoPixel(7), function (f) {
+      progress(f, 'Making a ' + mp(w, h) + ' MP JPEG on this phone… ' + Math.round(f * 100) + '%')
+    })
+    end()
+    addRow('2', 'make ' + label, 'ok, ' + (made.blob.size / 1e6).toFixed(1) + ' MB, encoder ' + Math.round(made.encodeMs / (w * h / 1e6)) + ' ms/MP', 'ok')
+    await testDecode('2a', label, made.blob, 'synthetic')
+  }
+
+  // ─── Running ─────────────────────────────────────────────────────────────
+  var picked = null
+  $('pick').addEventListener('change', function () {
+    var f = this.files && this.files[0]
+    picked = f || null
+    $('pick-info').textContent = f ? f.name + ', ' + (f.size / 1e6).toFixed(1) + ' MB, ' + (f.type || 'unknown type') : ''
+    $('pick-text').textContent = f ? 'Choose another photo' : 'Choose a photo'
+  })
+
+  async function step(name, fn) {
+    try {
+      await fn()
+    } catch (e) {
+      end()
+      addRow('!', name, 'FAILED: ' + errText(e), 'bad')
+    }
+  }
+
+  var running = false
+  async function runAll() {
+    if (running) return
+    running = true
+    document.body.dataset.state = 'running'
+    $('run').disabled = true
+    $('copy-note').textContent = ''
+    // Cheap tests first, the memory-heavy decodes last: a reload loses nothing.
+    await step('font', testFont)
+    await step('canvas', testCanvases)
+    await step('crop', testCrop)
+    await step('speed', testSpeed)
+    await step('compressor', testDeflate)
+    if (picked) {
+      var file = picked
+      await step('photo', function () { return testDecode('1', 'your photo', file, 'photo') })
+    } else {
+      addRow('1', 'decode your photo', 'not run (no photo picked)', 'warn')
+    }
+    var size = $('synthetic').value.split('x').map(Number)
+    if (size[0] > 0) await step('synthetic', function () { return testSynthetic(size[0], size[1]) })
+    progress(1, 'Done. Tap Copy results and paste the table into the chat.')
+    $('run').disabled = false
+    running = false
+    document.body.dataset.state = 'done'
+  }
+  $('run').addEventListener('click', runAll)
+
+  $('copy').addEventListener('click', async function () {
+    var text = tableText()
+    $('table').value = text
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('no clipboard')
+      await navigator.clipboard.writeText(text)
+      $('copy-note').textContent = 'Copied. Paste it into the chat.'
+    } catch (e) {
+      // The fallback: select the whole table so the system's Copy takes it.
+      var ta = $('table')
+      ta.focus()
+      ta.select()
+      ta.setSelectionRange(0, ta.value.length)
+      var copied = false
+      try { copied = document.execCommand('copy') } catch (e2) { copied = false }
+      $('copy-note').textContent = copied
+        ? 'Copied. Paste it into the chat.'
+        : 'The table is selected: use your phone\'s Copy, then paste it into the chat.'
+    }
+  })
+
+  $('clear').addEventListener('click', function () {
+    rows = []; hints = {}
+    save('rows', null); save('hints', null); save('inflight', null)
+    $('copy-note').textContent = ''
+    progress(0, 'Ready.')
+    render()
+  })
+
+  $('ijg-readme-text').textContent = $('ijg-readme').textContent
+  render()
+  document.body.dataset.state = 'ready'
+  // For scripts/check-spike.mjs: run the tests and make a JPEG file to pick.
+  window.spike = {
+    run: runAll,
+    table: tableText,
+    jpegBase64: async function (w, h) {
+      var made = await makeJpeg(w, h, 92, photoPixel(3))
+      var bytes = new Uint8Array(await made.blob.arrayBuffer())
+      var s = ''
+      for (var i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+      return btoa(s)
+    },
+  }
+})()
+</script>
+</body>
+</html>

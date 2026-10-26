@@ -17,8 +17,8 @@
  * exactly what a burned stencil gives you.
  */
 
-import { blurField } from './blur.ts'
-import { fbm2D } from './rng.ts'
+import { blurInPlace } from './blur.ts'
+import { FbmSampler } from './rng.ts'
 
 export interface RoughOptions {
   /** How far the edge is allowed to wander, 0..1. 0 is a clean vector edge. */
@@ -33,20 +33,48 @@ export interface RoughOptions {
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
 
 /**
- * Roughen and bleed a tone field.
+ * The threshold's wander: two octaves of value noise, the coarse one 1.6 times
+ * the tear's feature size, so it grows with the type and the sheet. On the
+ * smallest type at the reference height the fine octave is under a pixel and
+ * stops at one; the floor is left at a pixel on larger sheets too, because
+ * sizing it to the sheet measured as a wash (the scale tests, and the
+ * harness's 20% type at the reference height against twice it: 0.9706
+ * floored at a pixel, 0.9713 floored at the sheet's scale).
+ */
+export function tearNoise(w: number, scale: number, seed: number): FbmSampler {
+  return new FbmSampler(w, scale * 1.6, 2, seed ^ 0x1b873593)
+}
+
+/**
+ * Roughen and bleed a tone field, in place: the tone in, the torn tone out.
+ * Nothing to do (no roughness, no bleed) leaves it as it is.
  *
  * Runs on the *tone*, before screening, so the screen bites on the ragged
  * outline rather than a clean one — ordering matters here as much as anywhere
- * else in the pipeline.
+ * else in the pipeline. The blur's buffers are the caller's (see blur.ts
+ * `blurInPlace`; `needsSpare` says when `spare` is needed), so a press makes
+ * no sheet-sized allocation here.
+ *
+ * `field` may be a WINDOW of the sheet: `h` rows starting at sheet row
+ * `row0`. The wander is read at the sheet's own rows (`y + row0`), so a
+ * window tears exactly as the sheet does at every row the blur's reach does
+ * not cross the window's edge: the blur clamps at the window's first and last
+ * rows, which is the sheet's own clamp only where those are the sheet's top
+ * and bottom. A caller that presses in bands widens each window by three
+ * times the blur's integer radius on any side that is not the sheet's edge
+ * (render.ts `plateHalo`), and uses only the rows inside.
  */
-export function roughenEdges(
-  tone: Float32Array,
+export function roughenInPlace(
+  field: Float32Array,
   w: number,
   h: number,
   opts: RoughOptions,
-): Float32Array {
+  scratch: Float32Array,
+  spare?: Float32Array,
+  row0 = 0,
+): void {
   const { roughness, bleed, seed } = opts
-  if (roughness <= 0 && bleed <= 0) return tone
+  if (roughness <= 0 && bleed <= 0) return
 
   // The blur radius sets how far the edge can travel. Tie it to the requested
   // feature scale so raggedness and its wavelength stay proportional — a wide
@@ -59,13 +87,18 @@ export function roughenEdges(
   // letterforms the print kept whole.
   const radius = Math.max(0, opts.scale)
 
-  const soft = blurField(tone, w, h, radius)
+  // The softened tone, in place: each pixel is read once, below, and then
+  // overwritten with the cut.
+  blurInPlace(field, w, h, radius, scratch, spare)
+  const soft = field
 
   // Two octaves is enough: a coarse wander plus a fine nibble. More just
-  // averages back toward a smooth edge. Unfloored for the same reason as the
+  // averages back toward a smooth edge. Unrounded for the same reason as the
   // radius — a wavelength pinned to a pixel is a different wavelength on every
   // size of sheet.
-  const wander = roughness > 0 ? fbm2D(w, h, opts.scale * 1.6, 2, seed ^ 0x1b873593) : null
+  // Read only on the edge (0 < soft < 1), the few percent of the sheet the
+  // cut wanders on, rather than laid out over all of it.
+  const wander = roughness > 0 ? tearNoise(w, opts.scale, seed) : null
 
   // Cutting at 0.5 reproduces the original outline. Lowering it keeps more of
   // the blurred skirt, which is precisely ink spread.
@@ -73,21 +106,25 @@ export function roughenEdges(
   // A narrow ramp either side of the cut keeps the edge hard but not aliased.
   const e = 0.06
 
-  const out = new Float32Array(w * h)
-  for (let i = 0; i < out.length; i++) {
-    const s = soft[i]
-    // Interior and bare paper are already settled — leave them alone so the
-    // roughening cannot punch holes in the middle of a solid.
-    if (s <= 0) continue
-    if (s >= 1) {
-      out[i] = 1
-      continue
+  const out = field
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      const s = soft[i]
+      // Interior and bare paper are already settled — leave them alone so the
+      // roughening cannot punch holes in the middle of a solid.
+      if (s <= 0) {
+        out[i] = 0
+        continue
+      }
+      if (s >= 1) {
+        out[i] = 1
+        continue
+      }
+
+      const cut = wander ? base + (wander.at(x, y + row0) - 0.5) * roughness * 0.55 : base
+      const t = (s - (cut - e)) / (2 * e)
+      out[i] = clamp01(t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t))
     }
-
-    const cut = wander ? base + (wander[i] - 0.5) * roughness * 0.55 : base
-    const t = (s - (cut - e)) / (2 * e)
-    out[i] = clamp01(t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t))
   }
-
-  return out
 }

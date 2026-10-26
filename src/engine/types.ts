@@ -10,15 +10,8 @@
  * here, never the other way round.
  */
 
-import type { DitherType } from './dither.ts'
-import type { ScreenShape } from './screen.ts'
-
 export type TextAlign = 'left' | 'center' | 'right' | 'justify'
 
-/** Where forced justification puts the slack it needs to fill the measure.
- *  'words' keeps the words themselves tight and opens the spaces between them;
- *  'letters' spreads every gap equally for the solid rectangular block. A line
- *  with no spaces has nowhere to put word slack, so it falls back to letters. */
 /**
  * An imported photo, sitting under every plate as the ground the ink prints on.
  *
@@ -28,32 +21,27 @@ export type TextAlign = 'left' | 'center' | 'right' | 'justify'
  */
 export interface MediaLayer {
   id: string
-  /** Intrinsic pixel size of the decoded image, for the cover fit. */
+  /** The photo's true pixel size, the right way up (EXIF orientation
+   *  applied): the original's, since an import stores the original bytes.
+   *  The cover fit, the pan and the export plan read this, never the size of
+   *  whatever copy the preview decoded. */
   width: number
   height: number
-  /** Multiplier on the cover fit; 1 exactly fills the sheet. */
+  /** True for every photo imported since imports stopped resampling: the
+   *  stored bytes are the original's. Absent on a document saved by an older
+   *  build, whose stored copy was cut to a 2048 px long edge (media.ts
+   *  `isReducedCopy`). */
+  native?: boolean
+  /** Zoom on the cover fit, at least 1: 1 exactly fills the sheet. */
   scale: number
+  /** Centre of the photo in sheet fractions, kept inside the range where the
+   *  photo still covers the sheet (media.ts `panBounds`). */
   x: number
   y: number
-  opacity: number
-  /** Run the photo through the press — separated, worn, screened, misregistered. */
-  printed: boolean
-  /** Ink for the separated plate. Only read when `printed`. */
-  inkId: string
-  contrast: number
-  lift: number
 }
 
-export type JustifyBy = 'words' | 'letters'
-
-/** Which edge a line with no spaces sits against inside a justified block.
- *  Such a line has no word gap to open, and pulling its letters apart to reach
- *  the measure tears the word in half — so it keeps its natural spacing and
- *  parks at one edge instead. */
-export type SoloAlign = 'left' | 'right'
-
 /** Screening method. A duplicator's RIP does one or the other, not both. */
-export type ScreenMethod = 'halftone' | 'dither' | 'woodcut' | 'scribble'
+export type ScreenMethod = 'halftone' | 'grain'
 
 export interface FontChoice {
   readonly id: string
@@ -67,27 +55,11 @@ export const FONTS: readonly FontChoice[] = [
   { id: 'grotesk', name: 'Grotesk', stack: `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` },
   { id: 'serif', name: 'Serif', stack: `ui-serif, 'New York', Georgia, 'Times New Roman', serif` },
   { id: 'mono', name: 'Mono', stack: `ui-monospace, SFMono-Regular, Menlo, 'Courier New', monospace` },
-  { id: 'rounded', name: 'Rounded', stack: `ui-rounded, 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', system-ui, sans-serif` },
   { id: 'poster', name: 'Poster', stack: `Impact, Haettenschweiler, 'Arial Narrow Bold', 'Helvetica Neue', sans-serif` },
 ]
 
 export function fontById(id: string): FontChoice {
   return FONTS.find((f) => f.id === id) ?? FONTS[0]
-}
-
-/**
- * A solid box behind a chosen set of words.
- *
- * Its own ink and opacity, because the whole point is emphasis — a box in the
- * text's colour is just a heavier weight. Rendered as a separate plate under
- * the type, through the identical wear pipeline.
- */
-export interface WordBox {
-  id: string
-  /** Global word indices, whitespace-split across the layer's whole text. */
-  words: number[]
-  inkId: string
-  opacity: number
 }
 
 /** One plate: some type, in one ink. */
@@ -97,16 +69,16 @@ export interface TextLayer {
   /** Ink id from inks.ts. */
   inkId: string
   fontId: string
-  /** CSS font-weight, 100–900. Ignored by fonts with a single weight. */
-  weight: number
-  /** Type size as a fraction of the canvas height. */
+  /** Bold (weight 700) or regular (400). The weight decision that matters on a
+   *  photo: heavier strokes survive the screen, the tear and the bleed. */
+  bold: boolean
+  /** Type size as a fraction of the canvas height. The size that prints: the
+   *  Fit action writes one, nothing scales it afterwards. */
   size: number
   /** Multiple of the type size. */
   lineHeight: number
   /** Letter spacing in em — between every character. */
   tracking: number
-  /** Word spacing in em — extra at each space, on top of tracking. */
-  wordSpacing: number
   /**
    * A second ink for wherever the photo behind the type is dark.
    *
@@ -117,168 +89,122 @@ export interface TextLayer {
    * and knocks the photo back to paper under the second ink, because a
    * transparent light ink over solid black is still solid black.
    *
-   * null is off, and the type prints in one ink everywhere.
-   */
-  /**
-   * Per-word press overrides, keyed by word index.
+   * The plate's own ink is a valid second ink ("Keep this ink"): both halves
+   * print that ink, and the photo is knocked back to paper wherever it is
+   * darker than the ink, so one colour stays readable across the whole photo
+   * — the riso way, with the ink still transparent.
    *
-   * Bleed and offset are properties *of a plate*, not of a pixel — bleed is
-   * where the stencil's threshold sits, offset is where the paper landed. So a
-   * word given either becomes its own plate and goes through the press
-   * separately, which is also exactly how a real second hit would behave.
-   * Deltas on the layer's press, so the global controls still move everything.
+   * null is off, and the type prints in one ink everywhere. Never set
+   * together with `backing`.
    */
-  wordPress: Record<string, { bleed?: number; offset?: number }>
-
-  /**
-   * Print this layer's type and boxes *over* the photo instead of into it.
-   *
-   * Riso ink is transparent, so by default a plate multiplies down from
-   * whatever it lands on — which is the whole reason type genuinely overprints
-   * a photograph. Sometimes what you want is the opposite: the words sitting on
-   * the image at full strength, unaffected by whatever is underneath.
-   */
-  opaque: boolean
-
-  /**
-   * Strike this layer like a typewriter.
-   *
-   * Not a font and not a filter: the glyphs are placed on a fixed pitch and
-   * each one is struck with the offset belonging to *its own type slug*, so
-   * every `e` on the sheet leans the same way while the force behind each
-   * keystroke varies. null is off.
-   */
-  typewriter: {
-    /** 0..1. How far out of true the type bars have worn. */
-    wear: number
-    /** 0..1. How unevenly the keys are hit. */
-    strike: number
-    /** 0..1. Ink squeezed to the edge of the stroke by the slug. */
-    impression: number
-    /** 0..1. The fabric ribbon's weave showing in the fill. */
-    ribbon: number
-  } | null
-
   contrastInkId: string | null
   /** Luminance below which the photo counts as dark, 0..1. */
   contrastThreshold: number
 
+  /** Justify stretches every line to the widest: a line with a space by its
+   *  word gaps, a line without one by its letters. */
   align: TextAlign
-  justifyBy: JustifyBy
-  soloAlign: SoloAlign
   /** Anchor position, 0..1 of canvas width/height. */
   x: number
   y: number
   /** Degrees, clockwise. */
   rotation: number
-  caps: boolean
-  opacity: number
-  /** Scale the block uniformly so its widest line fills the canvas width. */
-  fitWidth: boolean
 
-  /** Background boxes, drawn under the type in plate order. */
-  boxes: WordBox[]
-  /** How far a box extends past its words, in em. */
-  boxPadding: number
-  /** Box corner radius in em. 0 is a hard rectangle. */
-  boxRadius: number
+  /**
+   * A solid block of ink behind each line of the type, or null for none: the
+   * ink id it is printed in. Pressed as its own plate before the type, so it
+   * tears, bleeds and misregisters like everything else, and the type
+   * overprints it into a third colour. The photo is cut back to paper under
+   * it, so the block reads the same over any part of the picture. Padding
+   * 0.12 em, square corners. Never set together with `contrastInkId`.
+   */
+  backing: string | null
 }
 
 /**
- * Everything about how one pass is pulled.
- *
- * Two of these exist per document — one for the type, one for the photo —
- * because a photo and a headline want genuinely different presses. A screen
- * coarse enough to read as print on a poster word turns a photograph into
- * mud, and wear tuned to tear a letterform pleasantly just reads as damage
- * across a face. Sharing one profile means every change to one ruins the
- * other, which is what the first cut of the photo layer did.
+ * Everything about how one pass is pulled. One per document: the photo is the
+ * ground the type prints on, not a pass of its own, so the press is the
+ * type's.
  *
  * The seed is deliberately *not* here: it is one sheet of paper going through
- * one machine, so both passes vary together.
+ * one machine, so every pass on it varies together.
  */
 export interface PressProfile {
+  /** Halftone dots, or Atkinson grain. */
   method: ScreenMethod
-  screenShape: ScreenShape
-  /** Lattice pitch in pixels at the reference render size. */
+  /** Halftone lattice pitch in pixels at the reference render size; the grain
+   *  cell is a third of it. */
   screenPitch: number
-  screenSoftness: number
-  ditherType: DitherType
-  ditherThreshold: number
-  /** Dither cell size in pixels at the reference render size. */
-  ditherScale: number
-
-  /** Spacing of woodcut grooves or scribble strokes, in px at reference size. */
-  carvePitch: number
-  /** Direction of the cut or the hatch, in degrees. */
-  carveAngle: number
-  /** 0..1. How far those marks wander from straight. */
-  carveRoughness: number
-
-  /** Ink density ceiling in [0,1]. */
+  /** Ink density ceiling in [0,1] — the "Ink" control. */
   density: number
-  /** Midtone shaping; <1 lays down more ink. */
-  gamma: number
-  mottle: number
-  dropout: number
-  banding: number
-
-  /** Edge raggedness from the burned stencil, 0..1. */
-  roughness: number
-  /** Feature size of that raggedness, in px at the reference height. */
-  roughScale: number
-  /** Ink spread past the artwork edge, 0..1. */
-  bleed: number
-  /** Pale drum streaks running the length of the sheet, 0..1. */
-  streaks: number
-  /** Ink drag along the feed direction, 0..1. */
-  smear: number
-  /** Regions where ink did not transfer at all, 0..1. */
-  patches: number
   /** Max plate offset in pixels at the reference render size. */
   misregistration: number
-
-  /**
-   * Scale the press's detail to the rendered type size.
-   *
-   * On: small type gets a proportionally finer screen, tear and bleed so it
-   * stays legible. Off: one ruling for the whole sheet, which is physically
-   * what a Riso does and what destroys small words.
-   */
-  detailScaling: boolean
-
+  /** 0..1. The burned stencil's edge: tear and bleed together (ink.ts
+   *  `edgeToRough`). */
+  edge: number
+  /** 0..0.8. The drum's uneven ink film: mottle and speckle dropout together
+   *  (ink.ts `wearToMottle`). */
+  wear: number
 }
 
 export interface PrintSettings {
   /** The photo behind everything, or null for bare paper. */
   media: MediaLayer | null
   /**
-   * How much of the paper's colour and tooth veils the photo. 0 prints
-   * straight onto it; 1 is full stock character. No effect without a photo,
-   * where the paper is the ground by definition.
+   * Whether the paper's colour and tooth veil the photo. On, the photo looks
+   * printed on the same stock as the type; off, the ink lands straight on the
+   * photograph's own colour. No effect without a photo, where the paper is the
+   * ground by definition.
    */
-  paperAmount: number
+  paperVeil: boolean
 
-  /** Output aspect. The render resolution is fixed in render.ts and does not
-   *  depend on the display size (playbook §5.2). */
-  aspect: '1:1' | '4:5' | '3:4' | '2:3'
+  /** The sheet's shape: a fixed ratio, or 'original', the photo's own shape
+   *  (`sheetAspect`). The render resolution does not depend on the display
+   *  size (playbook §5.2). */
+  aspect: FixedAspect | 'original'
 
+  /** The stock. Its tooth and cloudiness are fixed (render.ts). */
   paperId: string
-  paperTexture: number
-  paperBlotch: number
 
   /** How the type is pulled. */
   press: PressProfile
-  /** How the photo is pulled, when it is printed rather than shown as shot. */
-  photoPress: PressProfile
 
   seed: number
   layers: TextLayer[]
 }
 
-export const ASPECTS: Record<PrintSettings['aspect'], number> = {
+/** A sheet shape with a fixed ratio. */
+export type FixedAspect = '1:1' | '4:5' | '3:4' | '2:3'
+
+/** Width over height of each fixed sheet shape. */
+export const ASPECTS: Record<FixedAspect, number> = {
   '1:1': 1,
   '4:5': 4 / 5,
   '3:4': 3 / 4,
   '2:3': 2 / 3,
+}
+
+/** How far from square an Original sheet may go: a photo more extreme than
+ *  3:1 (a panorama) is cover-cropped to 3:1, so no sheet is a sliver. */
+const ORIGINAL_ASPECT_RANGE: readonly [number, number] = [1 / 3, 3]
+
+/** The Original sheet's shape when there is no photo to take it from (a
+ *  document holds 'original' only with a photo; this is the fallback). */
+const ORIGINAL_WITHOUT_PHOTO = ASPECTS['4:5']
+
+/**
+ * The sheet's width over its height, as a number: the one place an aspect key
+ * becomes a ratio. 'original' is the photo's own shape — its true, upright
+ * size — clamped to ORIGINAL_ASPECT_RANGE; with no photo, 4:5.
+ *
+ * Original is what the first photo opens on: with zoom at 100% and no pan the
+ * photo then fills the sheet exactly, so the untouched path neither crops nor
+ * resamples a pixel.
+ */
+export function sheetAspect(s: { aspect: PrintSettings['aspect']; media: { width: number; height: number } | null }): number {
+  if (s.aspect !== 'original') return ASPECTS[s.aspect]
+  if (!s.media || !(s.media.width > 0) || !(s.media.height > 0)) return ORIGINAL_WITHOUT_PHOTO
+  const [lo, hi] = ORIGINAL_ASPECT_RANGE
+  const a = s.media.width / s.media.height
+  return a < lo ? lo : a > hi ? hi : a
 }

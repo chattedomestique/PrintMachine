@@ -10,8 +10,20 @@
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview",
-    "verify": "npm run lint && npm run typecheck && npm test && npm run build",
-    "verify:offline": "npm run build && node scripts/verify-offline.mjs"
+    "verify": "npm run lint && npm run typecheck && npm run check:css && npm test && npm run build",
+    "verify:offline": "PAGES=1 npm run build && node scripts/verify-offline.mjs",
+    "verify:geometry": "npm run build && node scripts/verify-geometry.mjs",
+    "sync:styleguide": "node scripts/sync-styleguide.mjs ../styleguide",
+    "harness": "node scripts/harness/run.mjs",
+    "measure:alloc": "node scripts/measure-alloc.mjs",
+    "measure:export": "node scripts/measure-export.mjs",
+    "measure:fidelity": "node scripts/measure-fidelity.mjs",
+    "check:css": "node scripts/check-css.mjs",
+    "check:save": "node scripts/check-save.mjs",
+    "check:touch": "node scripts/check-touch.mjs",
+    "check:spike": "node scripts/check-spike.mjs",
+    "check:encode": "node scripts/check-encode.mjs",
+    "check:bands": "node scripts/check-bands.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

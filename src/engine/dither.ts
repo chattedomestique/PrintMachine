@@ -1,274 +1,256 @@
 /**
- * Dithering — the alternative to a halftone screen.
+ * Grain — the press's second screen, beside the halftone.
  *
- * Where a screen clusters ink into regular dots, dithering scatters it. Riso
- * output from a photocopier-style RIP often uses error diffusion instead of a
- * classic screen, and Atkinson in particular has the blown-highlight, crunchy
- * look people associate with early Mac graphics and cheap duplicators.
+ * Where a screen clusters ink into regular dots, error diffusion scatters it.
+ * Riso drivers screen with one or the other, so one diffusion earns its place
+ * as the second choice: Atkinson, which diffuses only 6/8 of the error and so
+ * blows out highlights and crushes shadows — the crunchy duplicator look. The
+ * threshold is fixed at the neutral 0.5.
  *
- * Every kernel here is the standard published one. The point of carrying a
- * dozen rather than two is that they are genuinely different textures, not
- * variations on a slider: Jarvis is smooth and slow, Burkes is fast and
- * contrasty, Sierra-Lite is coarse and cheap, clustered-dot is the one that
- * still looks like a *printing* screen rather than a computer effect.
- *
- * Error-diffusion algorithms ported in spirit from p5.riso's `ditherImage()`
- * (Lavigne & Brain).
+ * Ported in spirit from p5.riso's `ditherImage()` (Lavigne & Brain).
  */
 
-export type DitherType =
-  | 'none'
-  | 'threshold'
-  | 'bayer2'
-  | 'bayer4'
-  | 'bayer8'
-  | 'clustered'
-  | 'atkinson'
-  | 'floydsteinberg'
-  | 'jarvis'
-  | 'stucki'
-  | 'burkes'
-  | 'sierra'
-  | 'sierralite'
-
-export const DITHER_TYPES: readonly { id: DitherType; name: string }[] = [
-  { id: 'none', name: 'None' },
-  { id: 'threshold', name: 'Hard' },
-  { id: 'bayer2', name: 'Bayer 2' },
-  { id: 'bayer4', name: 'Bayer 4' },
-  { id: 'bayer8', name: 'Bayer 8' },
-  { id: 'clustered', name: 'Clustered' },
-  { id: 'atkinson', name: 'Atkinson' },
-  { id: 'floydsteinberg', name: 'Floyd' },
-  { id: 'jarvis', name: 'Jarvis' },
-  { id: 'stucki', name: 'Stucki' },
-  { id: 'burkes', name: 'Burkes' },
-  { id: 'sierra', name: 'Sierra' },
-  { id: 'sierralite', name: 'Sierra Lite' },
+/** Atkinson's kernel as [dx, dy, weight]: six neighbours, an eighth each. */
+const ATKINSON: readonly (readonly [number, number, number])[] = [
+  [1, 0, 1 / 8], [2, 0, 1 / 8],
+  [-1, 1, 1 / 8], [0, 1, 1 / 8], [1, 1, 1 / 8],
+  [0, 2, 1 / 8],
 ]
 
-/**
- * Bayer matrix of side `n`, normalised to [0,1).
- *
- * Built by the canonical doubling rule, which is easier to verify than a
- * bit-twiddling closed form:
- *
- *   M(1)  = [0]
- *   M(2n) = [ 4·M(n)+0   4·M(n)+2 ]
- *           [ 4·M(n)+3   4·M(n)+1 ]
- */
-function bayer(n: number): Float32Array {
-  let m = [[0]]
-  while (m.length < n) {
-    const k = m.length
-    const next: number[][] = Array.from({ length: k * 2 }, () => new Array<number>(k * 2))
-    for (let y = 0; y < k; y++) {
-      for (let x = 0; x < k; x++) {
-        const v = 4 * m[y][x]
-        next[y][x] = v
-        next[y][x + k] = v + 2
-        next[y + k][x] = v + 3
-        next[y + k][x + k] = v + 1
-      }
-    }
-    m = next
-  }
-  const flat = new Float32Array(n * n)
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) flat[y * n + x] = m[y][x] / (n * n)
-  return flat
-}
-
-const BAYER = { 2: bayer(2), 4: bayer(4), 8: bayer(8) } as const
-
-/**
- * Classic 6x6 clustered-dot (45°) ordered matrix.
- *
- * The one ordered pattern that still reads as *printed* rather than as a
- * computer effect, because it grows a single blob per cell the way a real
- * screen does instead of scattering isolated pixels.
- */
-const CLUSTERED = (() => {
-  const order = [
-    [34, 29, 17, 21, 30, 35],
-    [28, 14, 9, 16, 20, 31],
-    [13, 8, 4, 5, 15, 19],
-    [12, 3, 0, 1, 10, 18],
-    [27, 7, 2, 6, 23, 24],
-    [33, 26, 11, 22, 25, 32],
-  ]
-  const flat = new Float32Array(36)
-  for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++) flat[y * 6 + x] = order[y][x] / 36
-  return flat
-})()
-
-type Kernel = readonly (readonly [number, number, number])[]
-
-/** Error-diffusion kernels as [dx, dy, weight]. */
-const KERNELS: Record<string, Kernel> = {
-  // Atkinson diffuses only 6/8 of the error, which is why it blows out
-  // highlights and crushes shadows — that clipping is the look.
-  atkinson: [
-    [1, 0, 1 / 8], [2, 0, 1 / 8],
-    [-1, 1, 1 / 8], [0, 1, 1 / 8], [1, 1, 1 / 8],
-    [0, 2, 1 / 8],
-  ],
-  floydsteinberg: [
-    [1, 0, 7 / 16],
-    [-1, 1, 3 / 16], [0, 1, 5 / 16], [1, 1, 1 / 16],
-  ],
-  jarvis: [
-    [1, 0, 7 / 48], [2, 0, 5 / 48],
-    [-2, 1, 3 / 48], [-1, 1, 5 / 48], [0, 1, 7 / 48], [1, 1, 5 / 48], [2, 1, 3 / 48],
-    [-2, 2, 1 / 48], [-1, 2, 3 / 48], [0, 2, 5 / 48], [1, 2, 3 / 48], [2, 2, 1 / 48],
-  ],
-  stucki: [
-    [1, 0, 8 / 42], [2, 0, 4 / 42],
-    [-2, 1, 2 / 42], [-1, 1, 4 / 42], [0, 1, 8 / 42], [1, 1, 4 / 42], [2, 1, 2 / 42],
-    [-2, 2, 1 / 42], [-1, 2, 2 / 42], [0, 2, 4 / 42], [1, 2, 2 / 42], [2, 2, 1 / 42],
-  ],
-  burkes: [
-    [1, 0, 8 / 32], [2, 0, 4 / 32],
-    [-2, 1, 2 / 32], [-1, 1, 4 / 32], [0, 1, 8 / 32], [1, 1, 4 / 32], [2, 1, 2 / 32],
-  ],
-  sierra: [
-    [1, 0, 5 / 32], [2, 0, 3 / 32],
-    [-2, 1, 2 / 32], [-1, 1, 4 / 32], [0, 1, 5 / 32], [1, 1, 4 / 32], [2, 1, 2 / 32],
-    [-1, 2, 2 / 32], [0, 2, 3 / 32], [1, 2, 2 / 32],
-  ],
-  sierralite: [
-    [1, 0, 2 / 4],
-    [-1, 1, 1 / 4], [0, 1, 1 / 4],
-  ],
-}
-
-const ORDERED: Record<string, { m: Float32Array; n: number }> = {
-  bayer2: { m: BAYER[2], n: 2 },
-  bayer4: { m: BAYER[4], n: 4 },
-  bayer8: { m: BAYER[8], n: 8 },
-  clustered: { m: CLUSTERED, n: 6 },
-}
+/** The cut point: 0.5 is neutral. */
+const THRESHOLD = 0.5
 
 export interface DitherOptions {
-  /** Cut point in [0,1]; 0.5 is neutral, lower prints more ink. */
-  threshold?: number
   /**
-   * Size of one dither cell in output pixels.
+   * Size of one grain cell in output pixels, fraction and all.
    *
    * At 1 the pattern is one pixel per cell, which at export resolution is far
-   * too fine to see and reads as flat tone. Coarsening it is the whole
-   * character of the technique — the chunky duplicator look is a dither whose
-   * cells are several pixels across. Implemented by dithering a reduced grid
-   * and expanding the result, so every algorithm coarsens the same way rather
-   * than each needing its own notion of size.
+   * too fine to see and reads as flat tone; the chunky duplicator look is a
+   * grain several pixels across. Implemented by dithering a reduced grid and
+   * expanding the result.
+   *
+   * Not rounded. The cell rides the render height (a third of the screen size
+   * times height / reference), and a cell rounded to whole pixels is a
+   * different grain on every sheet: 1.68 px rounds to 2 (+19%). A fractional
+   * cell maps pixel x to grid column floor(x / cell), so some cells are a
+   * pixel wider than others and the grain's average size is exact. A whole
+   * number gives exactly the grid it always did.
    */
   scale?: number
 }
 
 /**
- * Dither a tone field into a coverage field.
+ * Grain a tone field into a coverage field: one `GrainStream` drained over the
+ * whole sheet, so a sheet grained at once and one grained in bands run the
+ * same code and print the same bytes.
  *
- * @returns a new w*h field of 0s and 1s (except `none`, which passes the tone
- *          through unchanged).
+ * @param out where to write: a new float field of 0s and 1s by default, or a
+ *            byte field of 0s and 255s.
+ * @returns the w*h field.
  */
-export function ditherField(
+export function ditherField<T extends Float32Array | Uint8ClampedArray = Float32Array>(
   tone: Float32Array,
   w: number,
   h: number,
-  type: DitherType,
   opts: DitherOptions = {},
-): Float32Array {
-  if (type === 'none') return tone.slice()
-
-  const threshold = opts.threshold ?? 0.5
-  const scale = Math.max(1, Math.round(opts.scale ?? 1))
-
-  if (scale === 1) return ditherAt(tone, w, h, type, threshold)
-
-  // Reduce, dither, expand. Averaging on the way down matters: sampling one
-  // pixel per cell would dither the noise rather than the tone, and the result
-  // is speckle that does not track the artwork underneath it.
-  const sw = Math.max(1, Math.ceil(w / scale))
-  const sh = Math.max(1, Math.ceil(h / scale))
-  const small = new Float32Array(sw * sh)
-  for (let y = 0; y < sh; y++) {
-    for (let x = 0; x < sw; x++) {
-      let sum = 0
-      let n = 0
-      for (let dy = 0; dy < scale; dy++) {
-        const sy = y * scale + dy
-        if (sy >= h) break
-        for (let dx = 0; dx < scale; dx++) {
-          const sx = x * scale + dx
-          if (sx >= w) break
-          sum += tone[sy * w + sx]
-          n++
-        }
-      }
-      small[y * sw + x] = n > 0 ? sum / n : 0
-    }
-  }
-
-  const dithered = ditherAt(small, sw, sh, type, threshold)
-  const out = new Float32Array(w * h)
-  for (let y = 0; y < h; y++) {
-    const sy = Math.min(sh - 1, (y / scale) | 0)
-    for (let x = 0; x < w; x++) {
-      out[y * w + x] = dithered[sy * sw + Math.min(sw - 1, (x / scale) | 0)]
-    }
-  }
+  out: T = new Float32Array(w * h) as T,
+): T {
+  new GrainStream(w, h, opts.scale ?? 1).run(tone, 0, 0, h, out)
   return out
 }
 
-function ditherAt(
-  tone: Float32Array,
-  w: number,
-  h: number,
-  type: DitherType,
-  threshold: number,
-): Float32Array {
-  const out = new Float32Array(w * h)
+/**
+ * Where each grid cell starts along an axis of `n` pixels: cell k holds the
+ * pixels with floor(x / cell) === k. One past the last cell is `n`, so cell k
+ * runs from starts[k] up to (not including) starts[k + 1]. Every cell holds at
+ * least one pixel, since cell >= 1.
+ */
+export function cellStarts(n: number, cell: number): Int32Array {
+  const count = Math.floor((n - 1) / cell) + 1
+  const starts = new Int32Array(count + 1)
+  let k = 0
+  for (let x = 0; x < n; x++) {
+    const c = Math.floor(x / cell)
+    if (c >= k) starts[k++] = x
+  }
+  starts[count] = n
+  return starts
+}
 
-  if (type === 'threshold') {
-    for (let i = 0; i < out.length; i++) out[i] = tone[i] >= threshold ? 1 : 0
-    return out
+/** The cell row (index into `rows`, cellStarts' output) holding pixel row y. */
+export function cellRowOf(rows: Int32Array, y: number): number {
+  let lo = 0
+  let hi = rows.length - 2
+  while (lo < hi) {
+    const m = (lo + hi + 1) >> 1
+    if (rows[m] <= y) lo = m
+    else hi = m - 1
+  }
+  return lo
+}
+
+/** How many cell rows ahead of the one being grained must hold their tone:
+ *  Atkinson's kernel reaches two rows down. */
+const LOOK_AHEAD = 2
+
+/**
+ * The tone rows [a, b) a grain stream reads to deliver the sheet's rows
+ * [y0, y1), given that the band before ended at y0 (bands run top to bottom,
+ * each starting where the last ended): the cell rows from the first one not
+ * yet loaded through two past the band's last cell row, as pixel rows. Empty
+ * (a === b) when everything the band needs was loaded for an earlier band.
+ * A function of the grid and the band only, so a press can size its windows
+ * before it grains anything.
+ */
+export function grainRows(rows: Int32Array, y0: number, y1: number): { a: number; b: number } {
+  const last = rows.length - 2
+  const loaded = y0 <= 0 ? -1 : Math.min(last, cellRowOf(rows, y0 - 1) + LOOK_AHEAD)
+  const upTo = Math.min(last, cellRowOf(rows, y1 - 1) + LOOK_AHEAD)
+  if (upTo <= loaded) return { a: y0, b: y0 }
+  return { a: rows[loaded + 1], b: rows[upTo + 1] }
+}
+
+/**
+ * Atkinson grain, one band of rows at a time, with exactly the bytes graining
+ * the whole sheet at once gives.
+ *
+ * Error diffusion is the one stage of the press whose output at a pixel
+ * depends on everything above it, so a band cannot be grained on its own. It
+ * does not need the rows above, though, only what they left behind: the error
+ * they pushed into the next two cell rows. So the stream keeps those three
+ * cell rows (a ring of float32 rows, the one being grained and the two the
+ * kernel reaches) and the bits of the last cell row it grained, and a band
+ * picks up where the last one stopped.
+ *
+ * Each cell row's tone is loaded (its cells' means: the reduction graining
+ * always did) the moment it first comes within the kernel's reach, never
+ * earlier and never twice, which is why a band reads the tone two cell rows
+ * past its own end (`grainRows`). Loading before any error lands on a row,
+ * and adding the error in the same order, is what makes every float32
+ * addition the same as graining the whole field does.
+ *
+ * Bands must run top to bottom, each starting where the last ended.
+ */
+export class GrainStream {
+  readonly cell: number
+  /** Where each cell column and cell row starts (cellStarts). */
+  readonly cols: Int32Array
+  readonly rows: Int32Array
+  private readonly sw: number
+  private readonly sh: number
+  /** Cell rows j, j + 1 and j + 2 at ring[k % 3]. */
+  private readonly ring: [Float32Array, Float32Array, Float32Array]
+  /** The bits (0 or 1) of the last cell row grained, `next - 1`. */
+  private readonly last: Uint8Array
+  /** The first cell row not yet grained. */
+  private next = 0
+  /** The last cell row whose tone is loaded. */
+  private loaded = -1
+  /** Where the last band ended: the next must start there. */
+  private at = 0
+
+  constructor(
+    private readonly w: number,
+    h: number,
+    cell: number,
+  ) {
+    this.cell = Math.max(1, cell)
+    this.cols = cellStarts(w, this.cell)
+    this.rows = cellStarts(h, this.cell)
+    this.sw = this.cols.length - 1
+    this.sh = this.rows.length - 1
+    this.ring = [new Float32Array(this.sw), new Float32Array(this.sw), new Float32Array(this.sw)]
+    this.last = new Uint8Array(this.sw)
   }
 
-  const ordered = ORDERED[type]
-  if (ordered) {
-    const { m, n } = ordered
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x
-        // Centre the matrix on the threshold so it stays symmetric.
-        const bias = m[(y % n) * n + (x % n)] - 0.5
-        out[i] = tone[i] >= threshold + bias ? 1 : 0
-      }
+  /** The tone rows this stream reads for the band [y0, y1) (`grainRows`). */
+  need(y0: number, y1: number): { a: number; b: number } {
+    return grainRows(this.rows, y0, y1)
+  }
+
+  /**
+   * Grain the sheet's rows [y0, y1) into `out` (row y at out[(y - y0) * w]),
+   * 0 or `unit` (255 for bytes, 1 for floats; by default from the array).
+   * `tone` holds the sheet's rows from `toneRow0` on and must cover
+   * `need(y0, y1)`; no other row of it is read.
+   */
+  run(
+    tone: Float32Array,
+    toneRow0: number,
+    y0: number,
+    y1: number,
+    out: Float32Array | Uint8ClampedArray,
+    unit: number = out instanceof Uint8ClampedArray ? 255 : 1,
+  ): void {
+    if (y0 !== this.at || y1 <= y0) throw new Error(`GrainStream: band [${y0}, ${y1}) does not follow row ${this.at}`)
+    this.at = y1
+    const { rows, sh, ring, last } = this
+    const j0 = cellRowOf(rows, y0)
+    const j1 = cellRowOf(rows, y1 - 1)
+    // A cell row the band before began: its bits are already made.
+    if (j0 < this.next) this.paint(j0, y0, y1, out, unit)
+    for (let j = this.next; j <= j1; j++) {
+      const reach = Math.min(sh - 1, j + LOOK_AHEAD)
+      for (let k = this.loaded + 1; k <= reach; k++) this.load(k, tone, toneRow0)
+      this.loaded = Math.max(this.loaded, reach)
+      const cur = ring[j % 3]
+      const r1 = ring[(j + 1) % 3]
+      const r2 = ring[(j + 2) % 3]
+      this.diffuse(j, cur, r1, r2, last)
+      this.next = j + 1
+      this.paint(j, y0, y1, out, unit)
     }
-    return out
   }
 
-  // Error diffusion. Work on a scratch copy so the input field is not mutated —
-  // the caller may still need it (and shared engine inputs must stay pure).
-  const buf = Float32Array.from(tone)
-  const kernel = KERNELS[type] ?? KERNELS.floydsteinberg
+  /** Cell row k's tone: each cell the mean of its pixels, summed row by row. */
+  private load(k: number, tone: Float32Array, toneRow0: number): void {
+    const { w, cols, rows, sw } = this
+    const r = this.ring[k % 3]
+    for (let x = 0; x < sw; x++) {
+      let sum = 0
+      let n = 0
+      for (let sy = rows[k]; sy < rows[k + 1]; sy++) {
+        const row = (sy - toneRow0) * w
+        for (let sx = cols[x]; sx < cols[x + 1]; sx++) {
+          sum += tone[row + sx]
+          n++
+        }
+      }
+      r[x] = n > 0 ? sum / n : 0
+    }
+  }
 
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x
-      const old = buf[i]
-      const next = old >= threshold ? 1 : 0
-      out[i] = next
+  /** Grain cell row j in raster order: its bits into `bits`, its error into
+   *  the row's remaining cells and the two rows below (Atkinson). */
+  private diffuse(j: number, cur: Float32Array, r1: Float32Array, r2: Float32Array, bits: Uint8Array): void {
+    const { sw, sh } = this
+    for (let x = 0; x < sw; x++) {
+      const old = cur[x]
+      const next = old >= THRESHOLD ? 1 : 0
+      bits[x] = next
       const err = old - next
       if (err === 0) continue
-
-      for (const [kx, ky, weight] of kernel) {
+      for (const [kx, ky, weight] of ATKINSON) {
         const nx = x + kx
-        const ny = y + ky
-        if (nx < 0 || nx >= w || ny >= h) continue
-        buf[ny * w + nx] += err * weight
+        if (nx < 0 || nx >= sw || j + ky >= sh) continue
+        const row = ky === 0 ? cur : ky === 1 ? r1 : r2
+        row[nx] += err * weight
       }
     }
   }
 
-  return out
+  /** Cell row j's bits, expanded to its pixels, for the rows of [y0, y1) it
+   *  covers. */
+  private paint(j: number, y0: number, y1: number, out: Float32Array | Uint8ClampedArray, unit: number): void {
+    const { w, cols, rows, sw, last } = this
+    const top = Math.max(rows[j], y0)
+    const bottom = Math.min(rows[j + 1], y1)
+    for (let y = top; y < bottom; y++) {
+      const o = (y - y0) * w
+      for (let x = 0; x < sw; x++) {
+        const v = last[x] * unit
+        for (let sx = cols[x]; sx < cols[x + 1]; sx++) out[o + sx] = v
+      }
+    }
+  }
 }

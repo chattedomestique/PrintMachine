@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { historyReducer, initHistory, type SettingsAction } from './settingsReducer.ts'
 import { loadSettings, saveSettings } from './persist.ts'
+import { sweepMedia } from './mediaStore.ts'
 import { SettingsContext, type SettingsStore } from './settingsStore.ts'
 
 /** Idle gap that ends a coalescing burst. Long enough to span a slider drag's
@@ -11,9 +12,10 @@ const BURST_MS = 450
 const PERSIST_MS = 400
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [history, rawDispatch] = useReducer(historyReducer, undefined, () =>
-    initHistory(loadSettings()),
-  )
+  // The document as it was loaded, kept: the launch sweep reads it, and only
+  // it, so no edit made while the sweep runs can change what it may delete.
+  const [launched] = useState(loadSettings)
+  const [history, rawDispatch] = useReducer(historyReducer, launched, initHistory)
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
 
   const burstTimer = useRef<number | undefined>(undefined)
@@ -57,20 +59,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => window.clearTimeout(burstTimer.current), [])
 
-  // Keyboard undo/redo.
+  // Once per launch, free the stored photos nothing can reach: Remove and
+  // Replace leave the bytes for Undo, and history does not outlive the page.
+  // Best effort — a store that cannot be listed is left as it is.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
-      const target = e.target as HTMLElement | null
-      // Don't hijack undo inside a text field.
-      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return
-      e.preventDefault()
-      if (e.shiftKey) redo()
-      else undo()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo])
+    void sweepMedia(new Set(launched.media ? [launched.media.id] : [])).catch(() => undefined)
+  }, [launched])
 
   const layers = present.layers
 

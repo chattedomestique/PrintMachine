@@ -12,7 +12,9 @@
  * sub-path is precisely where `navigateFallback` and the precache URLs go
  * wrong, and it survives every localhost test that skips it.
  *
- * Run: npm run verify:offline   (after a PAGES=1 build)
+ * Run: npm run verify:offline   (builds with PAGES=1 first: this serves the
+ * build only under the Pages sub-path, so a build for `/` would 404 every
+ * asset and time out)
  */
 
 import { createServer } from 'node:http'
@@ -37,6 +39,9 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json',
   '.json': 'application/json',
   '.ico': 'image/x-icon',
+  // The style guide's Archivo. Chromium loads a font served as
+  // application/octet-stream anyway; a test server should still be honest.
+  '.woff2': 'font/woff2',
 }
 
 /** Serve dist/ under the Pages sub-path, and nothing outside it. */
@@ -81,6 +86,7 @@ const watchdog = setTimeout(() => {
 const executablePath =
   process.env.CHROMIUM_PATH ??
   [
+    '/opt/pw-browsers/chromium',
     '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
@@ -127,12 +133,16 @@ try {
   if (hashed.length < 2) fail(`precache is missing the hashed JS/CSS (found ${hashed.length})`)
   else console.log(`✓ precached ${entries.length} entries including the hashed bundle`)
 
-  // 3. The app has to say it is ready, or the readiness signal is a lie.
+  // 3. The app has to say it is ready, or the readiness signal is a lie. The
+  // contract is a DOM attribute, not a look: `data-offline-state` on whatever
+  // node carries the signal, which need not be visible (`attached`, not the
+  // default `visible`: the More sheet's row is in the DOM but not shown).
   try {
-    await page.waitForSelector('.offline-dot[data-state="ready"]', { timeout: 10_000 })
+    await page.waitForSelector('[data-offline-state="ready"]', { state: 'attached', timeout: 10_000 })
     console.log('✓ app reports itself offline-ready')
   } catch {
-    fail(`offline indicator never reached "ready" (stuck at ${await page.getAttribute('.offline-dot', 'data-state')})`)
+    const stuck = await page.evaluate(() => document.querySelector('[data-offline-state]')?.getAttribute('data-offline-state') ?? 'no node')
+    fail(`offline signal never reached "ready" (stuck at ${stuck})`)
   }
 
   // 4. Airplane mode.

@@ -1,7 +1,33 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
+// The style guide first: core declares the layer order (sg.reset … sg.utilities)
+// that everything after it slots into. Then only the elements the app uses
+// (src/vendor/styleguide/VERSION.md; never edited here, see
+// scripts/sync-styleguide.mjs).
+import './vendor/styleguide/core.min.css'
+import './vendor/styleguide/icons.css'
+import './vendor/styleguide/elements/button.min.css'
+import './vendor/styleguide/elements/card.min.css'
+import './vendor/styleguide/elements/appbar.min.css'
+import './vendor/styleguide/elements/toolbar.min.css'
+import './vendor/styleguide/elements/tabs.min.css'
+import './vendor/styleguide/elements/segmented.min.css'
+import './vendor/styleguide/elements/slider.min.css'
+import './vendor/styleguide/elements/swatch.min.css'
+import './vendor/styleguide/elements/switch.min.css'
+import './vendor/styleguide/elements/dialog.min.css'
+import './vendor/styleguide/elements/input.min.css'
+import './vendor/styleguide/elements/select.min.css'
+import './vendor/styleguide/elements/spinner.min.css'
+import './vendor/styleguide/elements/menu.min.css'
+// The app's own CSS is unlayered, so it wins over every sg.* layer without
+// !important. In this order: app facts, the editor's planes and type scale,
+// the dock's panels, the shell.
 import './styles/index.css'
+import './styles/editor.css'
+import './styles/dock.css'
+import './styles/shell.css'
 import App from './App.tsx'
 import { setOfflineReady, setUnsupported } from './state/swStatus.ts'
 
@@ -15,7 +41,7 @@ import { setOfflineReady, setUnsupported } from './state/swStatus.ts'
 if ('serviceWorker' in navigator) {
   registerSW({
     immediate: true,
-    onOfflineReady: setOfflineReady,
+    onOfflineReady: () => setOfflineReady(true),
     // An already-active worker means a previous visit finished precaching, so
     // this launch is offline-capable even though onOfflineReady won't re-fire.
     onRegisteredSW: (_url, registration) => {
@@ -26,6 +52,37 @@ if ('serviceWorker' in navigator) {
 } else {
   setUnsupported()
 }
+
+// The app bar stays one row with whole words (the style guide's rule 19).
+// CSS cannot ask "does the title fit?", so the style guide's SG.fit measures
+// it and writes the richest layout that fits to data-fit (shell.css draws
+// each):
+//   full     the title on one line, Save with its word
+//   compact  Save as an icon (its name stays in aria-label)
+//   tight    and the title may wrap at its space ("Print / Machine")
+// It re-checks on resize, on the reader's text size and when fonts load.
+//
+// Vite hoists this module into <head>, ahead of the style guide's deferred
+// scripts in <body>, so SG may not exist yet. Every deferred script has run by
+// DOMContentLoaded, so register then if it is not already there.
+//
+// A menu row with a meta (the More sheet's PNG row and its size, a plate and
+// its ink) puts the meta under its words when both will not fit on one line:
+// the style guide's own registration (its 63-menu.js, which is not loaded
+// because it owns menu state React owns). Without it, at large text the
+// size ran off the sheet's edge.
+const registerFits = () => {
+  window.SG?.fit?.register('.app__bar', { steps: ['full', 'compact', 'tight'], parts: '.appbar__title', strict: true })
+  window.SG?.fit?.register('.menu__item:has(> .menu__meta)', { steps: ['inline', 'stack'], parts: '.menu__meta' })
+}
+if (window.SG?.fit) registerFits()
+else document.addEventListener('DOMContentLoaded', registerFits, { once: true })
+// SG.fit re-checks when `document.fonts.ready` settles, and that can settle
+// before Archivo is even asked for (the bar mounts after the scripts ran), so
+// a launch from cache measured the title in the fallback face and kept the
+// bar icon-only at 390 px (seen in the built app, about one load in ten).
+// Re-check whenever a face finishes loading.
+document.fonts?.addEventListener?.('loadingdone', () => window.SG?.fit?.update?.())
 
 const root = document.getElementById('root')
 if (!root) throw new Error('#root is missing from index.html')

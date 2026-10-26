@@ -1,0 +1,108 @@
+/**
+ * The engine's hard limits, in one place.
+ *
+ * Here rather than beside the controls that enforce them because the engine
+ * needs them too (`fitSize` clamps to the size range) and `engine/` may not
+ * import from `features/`. The normaliser reads them from here as well, so a
+ * stored value, a fitted value and a gesture can never disagree about what a
+ * valid size is. The export's numbers live here for the same reason: the
+ * planner (exportPlan.ts), the band engine and the save must agree on them.
+ * There is no ceiling on a print's size: it is pressed in bands and encoded
+ * as it is pressed, so nothing of the sheet's size is ever made.
+ */
+
+/**
+ * Every pitch and offset in the settings is expressed against this height, so
+ * the preview and the export produce the same *look* at different resolutions.
+ * It is also the export's floor: a print is never saved smaller than this,
+ * however few pixels its photo has.
+ */
+export const REFERENCE_HEIGHT = 1800
+
+/**
+ * The band engine's knobs. Every one is a MEMORY or SPEED knob: no value of
+ * any of them changes a byte of a print, but for the one named exception
+ * (TILE_PIXELS, below).
+ *
+ *  - TILE_EDGE, 4096: the widest canvas the export ever makes, the edge every
+ *    browser has always honoured. A sheet wider than it is drawn in columns.
+ *  - TILE_PIXELS, 2^22 (4,194,304): the pixels of one tile of the glyph grid
+ *    (and of a resampled photo's). A sheet of up to 4.19 MP and at most 4096
+ *    wide is ONE tile, drawn exactly as the whole sheet always was. Above it,
+ *    a glyph whose box crosses a seam between two tiles is rasterised by two
+ *    clipped canvases, and its antialiased edge may differ from one canvas's
+ *    by a few levels (README "Pressed in bands").
+ *  - BAND_PIXELS, 2^21: the output pixels pressed at a time, before the rows
+ *    each plate reads beyond them; the band is `floor(BAND_PIXELS / w)` rows
+ *    (`bandHeight`).
+ *  - MIN_BAND_ROWS, 32: no band is shorter, however wide the sheet.
+ */
+export const TILE_EDGE = 4096
+export const TILE_PIXELS = 1 << 22
+export const BAND_PIXELS = 1 << 21
+export const MIN_BAND_ROWS = 32
+
+/** The rows of the sheet pressed and printed at a time: BAND_PIXELS over
+ *  the width, at least MIN_BAND_ROWS, at most the sheet. A sheet of up to
+ *  2 MP (every preview) is one band. */
+export function bandHeight(w: number, h: number): number {
+  return Math.max(1, Math.min(h, Math.max(Math.floor(BAND_PIXELS / Math.max(1, w)), MIN_BAND_ROWS)))
+}
+
+/**
+ * The largest font size the engine ever sets on a canvas, in pixels.
+ * Chromium clamps `ctx.font` at 10,000 px (and measures and draws at the
+ * clamped size: a glyph 17 to 38% too small); an iPhone (iOS 18.7 WebKit)
+ * honoured 12,000 in the device spike. Above this, type is measured and drawn
+ * at fontSize / k under `ctx.scale(k, k)`, so the canvas never sees a font
+ * over it while layout, advances and glyphs all live at the full size. At or
+ * under it nothing changes: the largest font a build before the band engine
+ * could set was 8512.8 px (120% on a 1:3 sheet 7094 px tall).
+ */
+export const CANVAS_FONT_MAX = 9216
+
+/**
+ * The export height of a print with no photo: 2 x REFERENCE_HEIGHT (a 4:5
+ * sheet is 2880 x 3600, 10.4 MP). Type is vector and every effect scales, so
+ * a larger sheet is strictly crisper; an integer ratio keeps the grain cells,
+ * one-pixel kernels and misregistration exact; and it stays below a 12 MP
+ * photo's export, so it adds no new memory regime.
+ */
+export const NO_PHOTO_HEIGHT = 3600
+
+/**
+ * Type size, as a fraction of the sheet's height: the em, so `fontSize = size
+ * x height`. Shown as `size x 1000` percent (sizeScale.ts), so 0.10 of the
+ * sheet reads "100%".
+ *
+ *  - SIZE_MIN, 0.01 ("10%"): the one floor for the slider, a nudge, a pinch,
+ *    the keys, Fit and a typed value. At the reference height it is an 18 px
+ *    em, below which type stops reading. Every size an older build could
+ *    store (its floor was 0.015) is above it, so nothing saved moves.
+ *  - SIZE_SLIDER_MAX, 0.10 ("100%"): the end of the slider's travel, which is
+ *    where captions and headlines over a photo live. 90 steps of SIZE_STEP.
+ *  - SIZE_STEP, 0.001 ("1%"): the slider's step and a nudge's.
+ *  - SIZE_MAX, 1.2 ("1200%"): the ceiling for everything that is not the
+ *    slider — a pinch, the keys, Fit, a typed value, a stored size. Larger
+ *    type stays reachable (Fit on a short word lands well past 100%); the
+ *    slider's thumb pins at its end and the readout shows the true value.
+ */
+export const SIZE_MIN = 0.01
+export const SIZE_SLIDER_MAX = 0.1
+export const SIZE_STEP = 0.001
+export const SIZE_MAX = 1.2
+
+/**
+ * The plate budget: at most this many text plates, and this many pressed
+ * passes in all — a backing is a pass of its own, while a second ink is
+ * pressed once and then split, so it counts once. Every pass is a full press
+ * at export resolution, so the cap is what keeps the worst export knowable on
+ * a phone.
+ */
+export const MAX_TEXT_PLATES = 3
+export const MAX_PRESSED_PASSES = 4
+
+/** How many times the press runs for this document. */
+export function passCount(settings: { layers: readonly { backing: string | null }[] }): number {
+  return settings.layers.length + settings.layers.filter((l) => l.backing).length
+}

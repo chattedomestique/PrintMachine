@@ -1,0 +1,38 @@
+[
+  {},
+  null,
+  "x",
+  [],
+  42,
+  true,
+  {
+    "aspect": 5,
+    "layers": "x",
+    "press": 7,
+    "photoPress": [],
+    "media": "y",
+    "paperId": 3,
+    "paperAmount": "lots",
+    "paperTexture": null,
+    "seed": "z",
+    "unknownKey": true
+  },
+  {
+    "layers": [],
+    "press": null,
+    "media": {
+      "id": "",
+      "width": 10,
+      "height": 10
+    }
+  },
+  {
+    "layers": null,
+    "media": {
+      "id": "m",
+      "width": -1,
+      "height": "tall"
+    },
+    "aspect": "16:9"
+  }
+]

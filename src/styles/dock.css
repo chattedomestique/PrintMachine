@@ -1,0 +1,360 @@
+/* ── The dock's panels, on the style guide ───────────────────────────────────
+   Ported from Border Studio's Controls.css (PR #1, 597ce7a). The controls are
+   the style guide's elements — .btn, .tabs, .segmented, .slider, .switch,
+   .swatch-set, .select, .input, .card / .dialog — so this file holds no
+   button, toggle or slider styling of its own (how they look in the tray,
+   without frames, is editor.css). It lays those elements out for a short
+   panel under the sheet, and draws the few things the style guide has no
+   element for: the one-line parameter strip, the plate button and the ink
+   button.
+
+   Roles only: no colour literals. An ink's own colour is data, and comes in as
+   --swatch, like a swatch's. */
+
+.controls {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── A panel: the head row, then the content area ──
+   The heights are editor.css's (--ed-*): the same in every panel, so the
+   sheet above never changes size when you switch tools or tabs. */
+.controls__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ed-band-pad);
+}
+/* The tabs' band: its hairline runs the full width of the dock (the panel's
+   gutters are given back as padding). */
+.controls__head {
+  display: flex;
+  align-items: center;
+  /* 8px, not 12: on a 320px phone every pixel goes to the tabs beside the
+     plate button. */
+  gap: var(--space-2);
+  min-block-size: var(--ed-head-h);
+  margin-inline: calc(-1 * var(--gutter));
+  padding-inline: var(--gutter);
+  border-block-end: var(--bw-thin) solid var(--ed-hair);
+  min-inline-size: 0;
+}
+.controls__head > .tabs { flex: 1 1 auto; min-inline-size: 0; }
+/* The settings band: its rows in the middle, so a panel with less in it has
+   the same room above its rows as below them. min-, not block-size: at large
+   text the rows grow, and growing is better than clipping. At 100% every
+   panel's rows fit inside this height (scripts/verify-geometry.mjs). */
+.controls__panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--ed-gap);
+  min-block-size: var(--ed-content-h);
+}
+/* Over photo's rows follow its own choice (Off: none; a second ink: its
+   strip; a backing: its ink), so centred like the rest, its Off / Second ink
+   / Backing control moved under the finger that chose (48px, the way Border
+   Studio's Box tab moves when Pill is chosen). Here the choice starts the
+   panel, so it stays where it was tapped. */
+.controls__panel[data-sub="over"] { justify-content: flex-start; }
+/* The hairline between two settings: inset to the gutters, as in a list. */
+.controls__rule {
+  flex: none;
+  block-size: 0;
+  border-block-start: var(--bw-thin) solid var(--ed-hair);
+}
+
+/* Nothing to edit yet: one line (and its one action) in the middle of the
+   content area. */
+.controls__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin: auto;
+  text-align: center;
+}
+.controls__empty > p {
+  margin: 0;
+  font: var(--ed-t-hint);
+  color: var(--ink-soft);
+}
+
+/* ── Rows: an options row is one 44px line ── */
+.controls__row {
+  display: flex;
+  /* One line at every phone width at 100% text (the dock is built so); at
+     large text a row that cannot hold its controls wraps rather than running
+     off the side. */
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  min-block-size: var(--ed-row-h);
+  min-inline-size: 0;
+}
+.controls__row--start { justify-content: flex-start; }
+
+.controls__label {
+  font: var(--ed-t-name);
+  color: var(--ink);
+}
+.controls__hint {
+  font: var(--ed-t-hint);
+  color: var(--ink-mute);
+  margin: 0;
+}
+/* A note that matters (a photo saved small by an older version, a photo that
+   could not be read): ink, not muted, and it may take two lines. */
+.controls__note {
+  font: var(--ed-t-hint);
+  color: var(--ink-soft);
+  margin: 0;
+}
+.controls__note[role="alert"] {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  color: var(--bad-ink);
+}
+.controls__note[role="alert"] > .ic { --ic-size: 1.15em; flex: none; }
+
+/* ── The value beside a setting's name ──
+   The style guide's slider readout (plain text, tabular), made a button so
+   you can tap it to type an exact number. No frame: it reads as the value.
+   The largest words in the tray, because the number you are changing is what
+   the eye should find first. Its target is 44px on the line's 36 (below). */
+.controls__value {
+  position: relative;
+  flex: 0 0 auto;
+  min-inline-size: var(--chrome-hit);
+  min-block-size: var(--ed-strip-head-h);
+  padding: 0;
+  font: var(--ed-t-value);
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--ink);
+  text-align: end;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .controls__value:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+}
+/* The 44px targets on the strip's 36px name line (style guide rule 6). They
+   cannot grow 4px each way as a lone button would: the line's foot belongs to
+   the slider row under it, whose input stands a border's width proud of its
+   row (the style guide's focus frame), and the nudges' hit areas reach as
+   far. So they grow UP, into the gap over the strip where nothing is
+   tappable (the hairline and its two gaps, 17px; or open space where the
+   strip stands alone), and stop that border's width short of the line's
+   foot: 44px of target each, overlapping nothing (verify-geometry measures
+   the hit area each one still owns). The leading ink button is set to the
+   line's height plus its own frame, centred, so its padding box is the line
+   too and the same rule places its target. */
+:is(.controls__value, .paramstrip__pick)::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+}
+:is(.controls__value, .paramstrip__pick, .paramstrip__head > .controls__inkbtn)::after {
+  inset-block: min(0px, calc(100% - var(--chrome-hit) - var(--bw))) var(--bw);
+}
+
+/* ── Sliders ── */
+.controls__slider { inline-size: 100%; }
+/* A drag with any vertical component moves the value instead of scrolling the
+   dock (which only scrolls at large text). */
+.controls__slider .slider__input { touch-action: none; }
+
+/* ── The parameter strip: one setting on screen, the rest one tap away ──
+   A 36px line (the name, the value) over the 44px slider row. */
+.paramstrip {
+  display: flex;
+  flex-direction: column;
+}
+.paramstrip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-block-size: var(--ed-strip-head-h);
+}
+/* The name opens the picker. It is the slider's label, so it reads as one —
+   words, with the up/down chevrons that say "there are more" — rather than a
+   second framed control beside the value. Pressed, it tints at once. */
+.paramstrip__pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--chrome-2);
+  min-block-size: var(--ed-strip-head-h);
+  margin-inline-start: calc(-1 * var(--chrome-2));
+  padding-inline: var(--chrome-2) var(--chrome-3);
+  font: var(--ed-t-name);
+  color: var(--ink);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  touch-action: none; /* a swipe up on the name opens the picker */
+}
+.paramstrip__pick .ic { --ic-size: 1em; color: var(--ink-mute); }
+@media (hover: hover) {
+  .paramstrip__pick:hover { background: var(--ed-tint); }
+}
+.paramstrip__pick:active { background: var(--ed-tint-2); }
+.paramstrip__name { font: var(--ed-t-name); color: var(--ink); }
+/* Said in the value's place when the setting cannot move right now. */
+.paramstrip__why { text-align: end; }
+/* A control leading the strip (the second ink before its Switch point): the
+   name follows it, the value keeps the far end. */
+.paramstrip__head > .controls__inkbtn {
+  min-block-size: 0;
+  block-size: calc(var(--ed-strip-head-h) + 2 * var(--bw));
+  margin-block: calc(-1 * var(--bw));
+}
+.paramstrip__head > .controls__inkbtn + * { margin-inline-end: auto; }
+
+/* ── The plate button at the start of the head row ── */
+.controls__layerbtn { flex: 0 0 auto; max-inline-size: 42%; --_px: var(--chrome-2); }
+.controls__layerbtn > .btn__label {
+  display: inline-flex;
+  align-items: center;
+  min-inline-size: 0;
+}
+.controls__layername {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.controls__layerbtn > .ic { --ic-size: 1em; color: var(--ink-mute); }
+/* A plate's ink, as a dot beside its name: the ink is data (--swatch); the
+   name says which ink it is, so the dot is never the only cue. */
+.controls__markdot {
+  display: inline-block;
+  inline-size: 0.75em;
+  block-size: 0.75em;
+  border-radius: var(--radius-pill);
+  background: var(--swatch);
+  border: var(--bw-thin) solid var(--ink-faint);
+  flex: 0 0 auto;
+  margin-inline-end: var(--chrome-2);
+}
+
+/* A tab whose setting is in effect (Over photo, with a second ink or a
+   backing): a small dot after its name (the words ", on" are there for a
+   screen reader). A dot, because the underline already means "the tab on
+   screen". */
+.tabs__on {
+  display: inline-block;
+  inline-size: 0.4em;
+  block-size: 0.4em;
+  margin-inline-start: var(--chrome-2);
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+/* ── Type: the B toggle, the text field ── */
+.controls__letter { font-family: var(--font-sans); font-weight: 800; flex: none; }
+
+/* The text field takes the whole content area. */
+.controls__textarea {
+  flex: 1 1 0;
+  inline-size: 100%;
+  min-block-size: 0;
+  resize: none;
+}
+
+/* ── Inks ── */
+/* A button that names an ink and opens the ink dialog: the ink as a chip, its
+   name beside it. The chip has its own edge so an ink as pale as the tray
+   (Mist, White) still has one (1.4.11). */
+.controls__inkbtn { flex: 0 1 auto; min-inline-size: 0; --_px: var(--chrome-3); }
+.controls__inkbtn > .btn__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--chrome-2);
+  min-inline-size: 0;
+}
+.controls__inkbtn .ic { --ic-size: 1em; color: var(--ink-mute); }
+.controls__inkname {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.controls__inkchip {
+  display: block;
+  flex: none;
+  /* chrome: a picture inside a control stops at its 100% size */
+  inline-size: var(--chrome-ic-sm);
+  block-size: var(--chrome-ic-sm);
+  border-radius: var(--radius-pill);
+  background: var(--swatch);
+  /* the colour's own edge: --line is no line in the tray (editor.css) */
+  border: var(--bw-thin) solid var(--ink-faint);
+}
+
+/* A native select in a row: never under 16px (iOS zooms below that). The
+   style guide draws its frame on the wrapper and sets the <select> a
+   border's width inside it each way, so a tap on the frame's edge opened
+   nothing: 40px of target in a 44px control. The select fills the frame
+   (its own border is transparent, so nothing drawn moves). */
+.controls__select { flex: 0 0 auto; min-inline-size: 9rem; }
+.controls__select-field {
+  min-block-size: var(--_h);
+  margin-block: calc(-1 * var(--_bw));
+}
+
+/* Stocks on one scrolling line in the dock: a second row of chips would cost
+   the sheet ~90px. The chip cut at the edge says "more"; the padding keeps
+   the rings and the chosen chip's second ring unclipped. */
+.controls__section .swatch-set__list {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding-inline: var(--chrome-2);
+  margin-inline: calc(-1 * var(--chrome-2));
+}
+.controls__section .swatch-set__list::-webkit-scrollbar { display: none; }
+.controls__section .swatch-set__opt { flex: 0 0 auto; min-inline-size: 4.5rem; }
+/* In the dock the swatch cell is one 44px chip and its name, close under it:
+   the style guide's roomier cell would make the Paper panel taller than every
+   other, and the sheet would jump for it. */
+.controls__section .swatch-set__opt { padding-block: var(--chrome-2) var(--chrome-1); row-gap: var(--chrome-1); }
+
+/* ── Dialogs (cards on native <dialog>) ── */
+.valuemodal__body,
+.inkdialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.valuemodal__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.valuemodal__input {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  text-align: center;
+  font: var(--type-title);
+  font-variant-numeric: tabular-nums;
+}
+.valuemodal__range { color: var(--ink-soft); text-align: center; margin: 0; }
+
+/* The ink dialog: the whole ink table as one swatch set, in the table's order
+   (the fluorescents lead: the reason to print Riso at all). It scrolls inside
+   the card; the card's bar and its Done stay put. */
+.inkdialog .card__body {
+  max-block-size: min(60dvh, 36rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

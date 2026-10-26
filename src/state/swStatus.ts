@@ -16,17 +16,28 @@
 export type SWState = 'pending' | 'ready' | 'unsupported'
 
 let state: SWState = 'pending'
+/** Precaching finished during THIS launch (not found done from an earlier
+ *  one): the one time it is worth saying out loud. */
+let fresh = false
 const listeners = new Set<() => void>()
 
 function emit(): void {
   for (const l of listeners) l()
 }
 
-/** Called by the SW registration when everything is precached. */
-export function setOfflineReady(): void {
+/** Called by the SW registration when everything is precached: `justNow`
+ *  when it finished during this launch, not when an earlier one did. */
+export function setOfflineReady(justNow = false): void {
   if (state === 'ready') return
   state = 'ready'
+  fresh = justNow
   emit()
+}
+
+/** Whether the app became offline-ready during this launch (said once, in
+ *  the status region; every later launch finds it ready and says nothing). */
+export function offlineJustReady(): boolean {
+  return fresh
 }
 
 /** Called when there is no service worker to wait for. */

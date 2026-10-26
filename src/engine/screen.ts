@@ -15,10 +15,7 @@
  * coordinate* instead of the *image* gets the same result with one allocation.
  */
 
-export type ScreenShape = 'circle' | 'square' | 'line' | 'ellipse' | 'cross' | 'diamond'
-
 export interface ScreenOptions {
-  shape: ScreenShape
   /** Lattice pitch in output pixels. Larger = coarser, more visible dots. */
   pitch: number
   /** Screen angle in degrees. */
@@ -29,6 +26,10 @@ export interface ScreenOptions {
    *  lattice travels with the plate, so shifting a plate shifts its dots. */
   originX: number
   originY: number
+  /** The sheet row the tone's first row is, when it holds a band of the
+   *  sheet: the lattice is placed by sheet rows, so a band is screened
+   *  exactly as the same rows of the whole sheet are. 0 by default. */
+  row0?: number
 }
 
 /** Smooth 1→0 ramp as `d` crosses `edge`, over `width` pixels. */
@@ -40,64 +41,35 @@ function falloff(d: number, edge: number, width: number): number {
   return t * t * (3 - 2 * t)
 }
 
-/**
- * Distance metric per shape, and the radius that a given tone should grow to.
- * Radius scales with sqrt(tone) for area-proportional shapes so that perceived
- * darkness tracks tone linearly; line/cross scale linearly because they grow in
- * one dimension only.
- */
-function dotRadius(shape: ScreenShape, tone: number, pitch: number): number {
-  switch (shape) {
-    case 'circle':
-    case 'ellipse':
-      // 0.72·pitch at tone 1 overshoots the 0.707 needed to close the corners,
-      // so shadows black out just before full tone. That saturation *is* dot
-      // gain, and leaving it in is what keeps this from looking like inkjet.
-      return Math.sqrt(tone) * pitch * 0.72
-    case 'square':
-    case 'diamond':
-      return Math.sqrt(tone) * pitch * 0.5
-    case 'line':
-    case 'cross':
-      return tone * pitch * 0.5
-  }
-}
-
-function dotDistance(shape: ScreenShape, dx: number, dy: number): number {
-  const ax = Math.abs(dx)
-  const ay = Math.abs(dy)
-  switch (shape) {
-    case 'circle':
-      return Math.sqrt(dx * dx + dy * dy)
-    case 'ellipse':
-      // Elongated dot — the classic "chain" screen at midtones.
-      return Math.sqrt((dx / 0.72) * (dx / 0.72) + dy * dy)
-    case 'square':
-      return Math.max(ax, ay)
-    case 'diamond':
-      return ax + ay
-    case 'line':
-      return ay
-    case 'cross':
-      return Math.min(ax, ay)
-  }
-}
+/** A coverage field: 0..1 as floats, or 0..255 in bytes (what the press keeps:
+ *  a quarter of the memory, and within half a level of the float). */
+export type CoverageField = Float32Array | Uint8ClampedArray
 
 /**
- * Screen a tone field into a coverage field.
+ * Screen a tone field into a coverage field with round dots.
+ *
+ * The dot's radius grows with sqrt(tone), so its area — and so perceived
+ * darkness — tracks tone linearly. 0.72·pitch at tone 1 overshoots the 0.707
+ * needed to close the corners, so shadows black out just before full tone.
+ * That saturation *is* dot gain, and leaving it in is what keeps this from
+ * looking like inkjet.
  *
  * @param tone  w*h values in [0,1] — 0 is bare paper, 1 is solid ink.
- * @returns     a new w*h coverage field in [0,1].
+ * @param out   where to write: a new float field in [0,1] by default, or a
+ *              byte field, written 0..255 (rounded).
+ * @returns     the w*h coverage field.
  */
-export function screenField(
+export function screenField<T extends CoverageField = Float32Array>(
   tone: Float32Array,
   w: number,
   h: number,
   opts: ScreenOptions,
-): Float32Array {
-  const { shape, angle, softness, originX, originY } = opts
+  out: T = new Float32Array(w * h) as T,
+): T {
+  const { angle, softness, originX, originY } = opts
+  const row0 = opts.row0 ?? 0
   const pitch = Math.max(1.2, opts.pitch)
-  const out = new Float32Array(w * h)
+  const unit = out instanceof Uint8ClampedArray ? 255 : 1
 
   const a = (angle * Math.PI) / 180
   const cos = Math.cos(a)
@@ -105,13 +77,13 @@ export function screenField(
   const inv = 1 / pitch
 
   for (let y = 0; y < h; y++) {
-    const py = y - originY
+    const py = y + row0 - originY
     for (let x = 0; x < w; x++) {
       const i = y * w + x
       const t = tone[i]
       if (t <= 0) continue
       if (t >= 1) {
-        out[i] = 1
+        out[i] = unit
         continue
       }
 
@@ -124,19 +96,11 @@ export function screenField(
       const dx = (rx * inv - Math.round(rx * inv)) * pitch
       const dy = (ry * inv - Math.round(ry * inv)) * pitch
 
-      const d = dotDistance(shape, dx, dy)
-      const r = dotRadius(shape, t, pitch)
+      const d = Math.sqrt(dx * dx + dy * dy)
+      const r = Math.sqrt(t) * pitch * 0.72
 
-      let cov = falloff(d, r, softness)
-
-      if (shape === 'cross') {
-        // A cross is the union of a horizontal and a vertical bar, so the
-        // single min() distance above needs the second arm added back.
-        const d2 = Math.max(Math.abs(dx), Math.abs(dy))
-        cov = Math.max(cov, falloff(d2, r, softness) * (d2 <= pitch * 0.5 ? 1 : 0))
-      }
-
-      out[i] = cov > 1 ? 1 : cov
+      const cov = falloff(d, r, softness)
+      out[i] = (cov > 1 ? 1 : cov) * unit
     }
   }
 

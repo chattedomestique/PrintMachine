@@ -15,20 +15,14 @@
  */
 
 export interface CompositeLayer {
-  /**
-   * Cover what is underneath rather than multiplying into it.
-   *
-   * Transparent ink is the honest default and is why overprinting works at
-   * all. An opaque plate is a deliberate departure — the words sit on the
-   * image at full strength regardless of what the image is doing there.
-   */
-  opaque?: boolean
-  /** w*h coverage in [0,1]. */
-  coverage: Float32Array
+  /** w*h coverage: 0..1 as floats, or 0..255 in bytes (what the press keeps).
+   *  Ink is always transparent: a plate multiplies into what it lands on,
+   *  never covers it — keeping a colour readable over dark ground is done the
+   *  riso way, by knocking the ground back to paper (knockout.ts), not by
+   *  painting over it. */
+  coverage: Float32Array | Uint8ClampedArray
   /** The ink's printed colour at full coverage on white. */
   rgb: readonly [number, number, number]
-  /** Layer master opacity in [0,1] — scales coverage uniformly. */
-  opacity: number
 }
 
 export interface PaperInput {
@@ -44,6 +38,31 @@ export interface PaperInput {
   base?: Uint8ClampedArray
   /** 0..1. Ignored without `base`, where the paper is the ground by definition. */
   paperAmount?: number
+  /** The sheet row `shade` starts at: a band's shade is just that band's rows
+   *  (an export samples the paper a band at a time). 0, the whole sheet, by
+   *  default. */
+  shadeRow0?: number
+  /**
+   * Where the ground is cut back to paper, 0..255 per pixel (knockout.ts),
+   * applied to `base`'s alpha as it is read: alpha x (1 - k / 255), rounded
+   * as a byte store rounds it. The same as cutting a copy of the ground first,
+   * without the copy (4 bytes a pixel).
+   */
+  knockout?: Uint8ClampedArray
+}
+
+/**
+ * A number stored into a Uint8ClampedArray, as the store rounds it (ECMAScript
+ * ToUint8Clamp: clamped to 0..255, the nearest integer, a half to the even
+ * one), without a store.
+ */
+export function clampByte(v: number): number {
+  if (!(v > 0)) return 0
+  if (v >= 255) return 255
+  const f = Math.floor(v)
+  if (f + 0.5 < v) return f + 1
+  if (v < f + 0.5) return f
+  return f % 2 === 1 ? f + 1 : f
 }
 
 /**
@@ -54,7 +73,17 @@ export interface PaperInput {
  * because the second ink sits on a darker base — which is exactly the behaviour
  * a real press has.
  *
- * @param out RGBA byte buffer of length w*h*4, written in full (alpha = 255).
+ * @param out RGBA byte buffer of length w*h*4, written in full (alpha = 255)
+ *   — or, given a band of rows, written in that band.
+ * @param y0, y1 the band of rows to print, [y0, y1); the whole sheet by
+ *   default. Every pixel is printed on its own, so printing the sheet in bands
+ *   gives exactly the bytes printing it at once does.
+ * @param outRow0 the sheet row `out` starts at: 0 when `out` is the whole
+ *   sheet, `y0` when it holds only the band.
+ * @param rowBase the sheet row the ground (`paper.base`), the knockout and
+ *   every layer's coverage start at: 0 when they hold the whole sheet, the
+ *   band's first row when they hold only the band (a print pressed in bands
+ *   never holds a sheet of any of them).
  */
 export function compositeLayers(
   out: Uint8ClampedArray,
@@ -62,8 +91,12 @@ export function compositeLayers(
   h: number,
   paper: PaperInput,
   layers: readonly CompositeLayer[],
+  y0 = 0,
+  y1 = h,
+  outRow0 = 0,
+  rowBase = 0,
 ): void {
-  const n = w * h
+  const n = y1 * w
   const pr = paper.rgb[0] / 255
   const pg = paper.rgb[1] / 255
   const pb = paper.rgb[2] / 255
@@ -74,72 +107,62 @@ export function compositeLayers(
   const absR = new Float32Array(count)
   const absG = new Float32Array(count)
   const absB = new Float32Array(count)
-  const alpha = new Float32Array(count)
-  const inkR = new Float32Array(count)
-  const inkG = new Float32Array(count)
-  const inkB = new Float32Array(count)
-  const opaque: boolean[] = []
+  const bytes = layers.map((layer) => layer.coverage instanceof Uint8ClampedArray)
   for (let l = 0; l < count; l++) {
-    const { rgb, opacity } = layers[l]
+    const { rgb } = layers[l]
     absR[l] = 1 - rgb[0] / 255
     absG[l] = 1 - rgb[1] / 255
     absB[l] = 1 - rgb[2] / 255
-    inkR[l] = rgb[0] / 255
-    inkG[l] = rgb[1] / 255
-    inkB[l] = rgb[2] / 255
-    alpha[l] = opacity < 0 ? 0 : opacity > 1 ? 1 : opacity
-    opaque[l] = layers[l].opaque === true
   }
 
   const base = paper.base
+  const knockout = paper.knockout
+  const outStart = outRow0 * w
+  const baseStart = rowBase * w
+  const shade = paper.shade
+  const shadeStart = (paper.shadeRow0 ?? 0) * w
   // Without a photo the paper *is* the ground, so the veil is fully on and the
   // arithmetic below collapses back to exactly `rgb × shade`.
   const amount = base ? Math.max(0, Math.min(1, paper.paperAmount ?? 1)) : 1
 
-  for (let i = 0; i < n; i++) {
+  for (let i = y0 * w; i < n; i++) {
     let r: number
     let g: number
     let b: number
 
+    // The pixel in the arrays that hold rows from `rowBase` on.
+    const j = i - baseStart
     if (base) {
-      const o = i * 4
+      const o = j * 4
       // Alpha, not just colour. A photo moved or scaled off the trim leaves
       // bare sheet, and getImageData hands those pixels back as transparent
       // *black* — reading the colour alone prints a black border round a photo
       // that has simply been panned. Uncovered sheet is paper, so the ground is
       // the photo composited over white and the veil is forced fully on there,
       // which is exactly the paper this function draws without a photo at all.
-      const a = base[o + 3] / 255
+      const a = (knockout ? clampByte(base[o + 3] * (1 - knockout[j] / 255)) : base[o + 3]) / 255
       const veil = amount * a + (1 - a)
-      const s = 1 - veil * (1 - paper.shade[i])
+      const s = 1 - veil * (1 - shade[i - shadeStart])
       r = ((base[o] / 255) * a + (1 - a)) * (1 - veil * (1 - pr)) * s
       g = ((base[o + 1] / 255) * a + (1 - a)) * (1 - veil * (1 - pg)) * s
       b = ((base[o + 2] / 255) * a + (1 - a)) * (1 - veil * (1 - pb)) * s
     } else {
-      const s = paper.shade[i]
+      const s = shade[i - shadeStart]
       r = pr * s
       g = pg * s
       b = pb * s
     }
 
     for (let l = 0; l < count; l++) {
-      const c = layers[l].coverage[i] * alpha[l]
+      let c = layers[l].coverage[j]
       if (c <= 0) continue
-      if (opaque[l]) {
-        // Lerp to the ink rather than multiplying through it: at full coverage
-        // nothing of what was underneath survives.
-        const k = 1 - c
-        r = r * k + inkR[l] * c
-        g = g * k + inkG[l] * c
-        b = b * k + inkB[l] * c
-        continue
-      }
+      if (bytes[l]) c /= 255
       r *= 1 - c * absR[l]
       g *= 1 - c * absG[l]
       b *= 1 - c * absB[l]
     }
 
-    const o = i * 4
+    const o = (i - outStart) * 4
     out[o] = r * 255
     out[o + 1] = g * 255
     out[o + 2] = b * 255

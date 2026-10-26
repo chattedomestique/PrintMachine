@@ -8,30 +8,51 @@
  * twice, and the ink never reaches full density no matter how many passes.
  */
 
+import { cellNoiseAt, type CellNoise, type FbmSampler } from './rng.ts'
+
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
 
 /**
- * Apply the ink's density ceiling and midtone shaping to a tone field.
+ * The two wear controls, and what each one drives.
+ *
+ * Edge is the burned stencil's outline: how far it tears, and how far the ink
+ * spreads past it. Bleed is the same threshold pass as the tear, so the two
+ * move together at the ratio the press always shipped with (0.55 : 0.35) —
+ * "fat but clean" against "thin but ragged" is not a decision the job needs.
+ *
+ * Wear is the drum's ink film: blotchy mottle, and the speckle dropout that is
+ * the same failure at a finer grain, together at the shipped 0.22 : 0.012.
+ *
+ * Written as amount / reference x partner so that at the reference amount the
+ * result is the shipped value exactly — the default print does not move.
+ */
+const EDGE_REFERENCE = 0.55
+const BLEED_AT_REFERENCE = 0.35
+const WEAR_REFERENCE = 0.22
+const DROPOUT_AT_REFERENCE = 0.012
+
+/** Edge (0..1) to the stencil's tear and bleed. */
+export function edgeToRough(edge: number): { roughness: number; bleed: number } {
+  return { roughness: edge, bleed: (edge / EDGE_REFERENCE) * BLEED_AT_REFERENCE }
+}
+
+/** Wear (0..0.8) to the ink film's mottle and dropout. */
+export function wearToMottle(wear: number): { mottle: number; dropout: number } {
+  return { mottle: wear, dropout: (wear / WEAR_REFERENCE) * DROPOUT_AT_REFERENCE }
+}
+
+/**
+ * Apply the ink's density ceiling to a tone field.
  *
  * Riso ink at "100%" is not black — it is roughly 85–92% of the pigment's own
  * colour, because the drum only carries so much ink. Capping this is the
  * cheapest single thing that stops output looking like an inkjet print.
  *
  * @param density max coverage in [0,1] — 0.88 is a realistic single pass.
- * @param gamma   <1 lifts midtones (more ink), >1 drops them.
+ * @param out where to write; `tone` itself works (each pixel is read once).
  */
-export function applyDensity(
-  tone: Float32Array,
-  density: number,
-  gamma: number,
-): Float32Array {
-  const out = new Float32Array(tone.length)
-  const g = Math.max(0.05, gamma)
-  const useGamma = Math.abs(g - 1) > 1e-6
-  for (let i = 0; i < tone.length; i++) {
-    const t = clamp01(tone[i])
-    out[i] = (useGamma ? Math.pow(t, g) : t) * density
-  }
+export function applyDensity(tone: Float32Array, density: number, out: Float32Array = new Float32Array(tone.length)): Float32Array {
+  for (let i = 0; i < tone.length; i++) out[i] = clamp01(tone[i]) * density
   return out
 }
 
@@ -40,17 +61,21 @@ export function applyDensity(
  *
  * `amount` swings coverage by ±amount around 1, so 0.25 means the ink film
  * varies between 75% and 125% of nominal across the sheet. `dropout` is the
- * probability of a pixel losing most of its ink — dust on the drum, a fibre in
+ * probability of a speck losing most of its ink — dust on the drum, a fibre in
  * the paper. Both are weighted toward areas that already carry ink, because
  * bare paper has nothing to go wrong with.
  *
- * @param mottle  w*h low-frequency noise in [0,1] (see rng.fbm2D).
- * @param speckle w*h white noise in [0,1] (see rng.whiteNoise2D).
+ * @param mottle  w*h low-frequency noise in [0,1] (see rng.fbm2D): the field,
+ *   or a sampler of it (an export holds no field; the values are the same).
+ * @param speckle white noise on cells sized to the sheet (rng.CellNoise): a
+ *   speck is a pixel at the reference height and grows with the sheet, so dust
+ *   is the same size on the print at every resolution. Read where the pixel
+ *   has ink, and only there.
  */
 export function applyMottle(
   coverage: Float32Array,
-  mottle: Float32Array,
-  speckle: Float32Array,
+  mottle: Float32Array | FbmSampler,
+  speckle: CellNoise,
   amount: number,
   dropout: number,
   w: number,
@@ -67,22 +92,40 @@ export function applyMottle(
    * step larger than one, which walks through the same noise faster and so
    * yields proportionally finer blotch. Wrapped, because striding runs off the
    * end of a field that was only ever w by h.
+   *
+   * The speckle is not strided: it is white, so a stride would only pick other
+   * values of the same noise, and its speck is already the finest the sheet
+   * holds.
    */
   detail = 1,
+  /** Where to write; `coverage` itself works (each pixel is read once). */
+  out: Float32Array = new Float32Array(coverage.length),
+  /** When `coverage` is a window of the sheet: the sheet row its first row
+   *  is, and the sheet's full height. The mottle and the speckle are read at
+   *  the sheet's own rows, and the stride wraps at the sheet's height, never
+   *  the window's, so a window wears exactly as those rows of the sheet do.
+   *  (A cached mottle field is the whole sheet's, read at those rows too.) */
+  row0 = 0,
+  fullH = h,
 ): Float32Array {
-  const out = new Float32Array(coverage.length)
   const step = detail >= 1 ? 1 : Math.max(1, Math.round(1 / detail))
+  const field = mottle instanceof Float32Array ? mottle : null
+  const sampler = field ? null : (mottle as FbmSampler)
 
   for (let y = 0; y < h; y++) {
-    const sy = step === 1 ? y : (y * step) % h
+    const Y = y + row0
+    const sy = step === 1 ? Y : (Y * step) % fullH
     for (let x = 0; x < w; x++) {
       const i = y * w + x
       const c = coverage[i]
-      if (c <= 0) continue
-      const j = step === 1 ? i : sy * w + ((x * step) % w)
-      const m = 1 + amount * (mottle[j] * 2 - 1)
+      if (c <= 0) {
+        out[i] = 0
+        continue
+      }
+      const sx = step === 1 ? x : (x * step) % w
+      const m = 1 + amount * ((field ? field[sy * w + sx] : sampler!.at(sx, sy)) * 2 - 1)
       let v = c * m
-      if (dropout > 0 && speckle[j] < dropout) v *= 0.15
+      if (dropout > 0 && cellNoiseAt(speckle, x, Y) < dropout) v *= 0.15
       out[i] = clamp01(v)
     }
   }
@@ -90,7 +133,9 @@ export function applyMottle(
 }
 
 /**
- * Resample a field by a sub-pixel offset, bilinearly.
+ * Resample a field by a sub-pixel offset, bilinearly: the sheet rows [y0, y1)
+ * of `src` moved by (dx, dy), into `out` (row y at out[(y - y0) * w]), each
+ * value the float32 it stores.
  *
  * This is half of misregistration: the *image* on the plate moves. The other
  * half is moving the screen lattice by the same offset (see ScreenOptions'
@@ -103,41 +148,58 @@ export function applyMottle(
  * shift uncovers, which shows up as a hard band along the edge of any artwork
  * that runs to the trim. A plate that slides down should reveal unprinted
  * paper at the top, because that is what it does.
+ *
+ * From a WINDOW of the source: `src` holds the sheet's rows from `srcRow0`;
+ * rows outside the sheet (above 0, from `fullH` on) and columns outside
+ * [0, w) read as 0. The rows read are [floor(y0 - dy), floor(y1 - 1 - dy) + 2),
+ * clamped to the sheet (`shiftSource`): the caller hands in at least those.
+ * No shift copies the rows. (Checked against a plain shift of the whole field:
+ * the tests' `shiftField`, engine/__tests__/reference.ts.)
  */
-export function shiftField(
+export function shiftRows(
   src: Float32Array,
   w: number,
-  h: number,
+  srcRow0: number,
+  fullH: number,
   dx: number,
   dy: number,
+  y0: number,
+  y1: number,
+  out: Float32Array,
 ): Float32Array {
-  if (dx === 0 && dy === 0) return src.slice()
-
-  const out = new Float32Array(w * h)
-  const at = (x: number, y: number): number =>
-    x < 0 || x >= w || y < 0 || y >= h ? 0 : src[y * w + x]
-
-  for (let y = 0; y < h; y++) {
+  if (dx === 0 && dy === 0) {
+    out.set(src.subarray((y0 - srcRow0) * w, (y1 - srcRow0) * w))
+    return out
+  }
+  const at = (x: number, y: number): number => (x < 0 || x >= w || y < 0 || y >= fullH ? 0 : src[(y - srcRow0) * w + x])
+  for (let y = y0; y < y1; y++) {
     const sy = y - dy
-    const y0 = Math.floor(sy)
-    const fy = sy - y0
-
+    const ya = Math.floor(sy)
+    const fy = sy - ya
+    const o = (y - y0) * w
     for (let x = 0; x < w; x++) {
       const sx = x - dx
-      const x0 = Math.floor(sx)
-      const fx = sx - x0
-
-      const a = at(x0, y0)
-      const b = at(x0 + 1, y0)
-      const c = at(x0, y0 + 1)
-      const d = at(x0 + 1, y0 + 1)
-
+      const xa = Math.floor(sx)
+      const fx = sx - xa
+      const a = at(xa, ya)
+      const b = at(xa + 1, ya)
+      const c = at(xa, ya + 1)
+      const d = at(xa + 1, ya + 1)
       const top = a + (b - a) * fx
       const bot = c + (d - c) * fx
-      out[y * w + x] = top + (bot - top) * fy
+      out[o + x] = top + (bot - top) * fy
     }
   }
   return out
+}
+
+/** The sheet rows `shiftRows` reads to make rows [y0, y1), clamped to the
+ *  sheet: [y0, y1) itself when nothing moves. */
+export function shiftSource(dx: number, dy: number, y0: number, y1: number, fullH: number): { a: number; b: number } {
+  if (y1 <= y0) return { a: y0, b: y0 }
+  if (dx === 0 && dy === 0) return { a: y0, b: y1 }
+  const a = Math.min(fullH, Math.max(0, Math.floor(y0 - dy)))
+  return { a, b: Math.min(fullH, Math.max(a, Math.floor(y1 - 1 - dy) + 2)) }
 }
 
 /**

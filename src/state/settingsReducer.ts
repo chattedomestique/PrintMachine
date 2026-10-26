@@ -1,15 +1,14 @@
-import type {
-  MediaLayer,
-  PressProfile,
-  PrintSettings,
-  TextLayer,
-  WordBox,
+import {
+  sheetAspect,
+  type MediaLayer,
+  type PressProfile,
+  type PrintSettings,
+  type TextLayer,
 } from '../engine/types.ts'
-
-/** Which of the two presses a control is editing. */
-export type PressTarget = 'press' | 'photoPress'
 import { makeLayer } from './defaults.ts'
 import { contrastPartner } from '../engine/inks.ts'
+import { clampPan } from '../engine/media.ts'
+import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
 
 /**
  * The document reducer plus an undo/redo history around it.
@@ -24,27 +23,24 @@ import { contrastPartner } from '../engine/inks.ts'
  * render — reading a ref during render is a real staleness bug.
  */
 
+/**
+ * `coalesce`: part of a burst (a drag, typing) that is one undo step. `join`:
+ * part of the undo step the last coalescing run opened, even if that run's
+ * burst is over: a double tap's reset joins the move its first tap made, and
+ * the second tap can be handled long after the first (behind a render). Only
+ * that step: when the run left none (it ended where it began, or changed
+ * nothing), or anything else has happened since, a join is a step of its own.
+ * A join never opens or extends a burst.
+ */
 export type SettingsAction =
-  | { type: 'patch'; patch: Partial<PrintSettings>; coalesce?: boolean }
-  | { type: 'patchLayer'; id: string; patch: Partial<TextLayer>; coalesce?: boolean }
-  | { type: 'addLayer' }
+  | { type: 'patch'; patch: Partial<PrintSettings>; coalesce?: boolean; join?: boolean }
+  | { type: 'patchLayer'; id: string; patch: Partial<TextLayer>; coalesce?: boolean; join?: boolean }
+  /** `id`: the new plate's, so the UI that adds it can select it. */
+  | { type: 'addLayer'; id?: string }
   | { type: 'removeLayer'; id: string }
-  | { type: 'moveLayer'; id: string; direction: -1 | 1 }
-  | { type: 'addBox'; layerId: string }
-  | { type: 'removeBox'; layerId: string; boxId: string }
-  | { type: 'patchBox'; layerId: string; boxId: string; patch: Partial<WordBox>; coalesce?: boolean }
-  | { type: 'toggleBoxWord'; layerId: string; boxId: string; word: number }
-  | { type: 'setBoxWords'; layerId: string; boxId: string; words: number[] }
-  | { type: 'patchPress'; target: PressTarget; patch: Partial<PressProfile>; coalesce?: boolean }
-  | {
-      type: 'setWordPress'
-      layerId: string
-      words: number[]
-      patch: { bleed?: number; offset?: number }
-      coalesce?: boolean
-    }
+  | { type: 'patchPress'; patch: Partial<PressProfile>; coalesce?: boolean; join?: boolean }
   | { type: 'setMedia'; media: MediaLayer | null }
-  | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean }
+  | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean; join?: boolean }
   | { type: 'reset'; settings: PrintSettings }
 
 export type HistoryAction =
@@ -59,6 +55,11 @@ export interface HistoryState {
   future: PrintSettings[]
   /** True while a run of coalescing actions is still open. */
   bursting: boolean
+  /** True while the last step in `past` is the one a coalescing run opened
+   *  and nothing else has happened since: no other step, no Undo or Redo, the
+   *  run not dropped, no new run that opened nothing. It outlives the burst
+   *  (`endBurst` leaves it): it is what a `join` may merge into. */
+  joinable: boolean
 }
 
 const LIMIT = 60
@@ -67,37 +68,114 @@ const LIMIT = 60
  *  never lands on the same ink as the one before it. */
 const NEXT_INK = ['fluorescentpink', 'blue', 'yellow', 'black', 'green', 'fluorescentorange']
 
-let boxSeq = 0
-const nextBoxId = (): string => `box-${Date.now().toString(36)}-${boxSeq++}`
-
-/** Replace one layer, leaving the rest of the document untouched. */
-function mapLayer(
-  state: PrintSettings,
-  id: string,
-  fn: (l: TextLayer) => TextLayer,
-): PrintSettings {
-  return { ...state, layers: state.layers.map((l) => (l.id === id ? fn(l) : l)) }
+/**
+ * Keep the sheet a sheet and the photo covering it. Re-applied by every action
+ * that can move the photo, zoom it, replace or remove it, or change the
+ * sheet's shape:
+ *
+ *  - An Original sheet takes its shape from the photo, so without one it is
+ *    the default 4:5 (removing the photo of an Original sheet lands there).
+ *  - The pan is clamped against the NEW numeric aspect, so the stored
+ *    placement is always one that prints with no bare strip — the renderer
+ *    clamps too, but a stored value it has to correct would make the next pan
+ *    start from a position the picture is not actually at.
+ */
+function withCover(state: PrintSettings): PrintSettings {
+  const sheet: PrintSettings = state.aspect === 'original' && !state.media ? { ...state, aspect: '4:5' } : state
+  return sheet.media ? { ...sheet, media: clampPan(sheet.media, sheetAspect(sheet), 1) } : sheet
 }
 
-/** The document transition, exported so the invariants it enforces — chiefly
- *  that a word belongs to at most one box — can be tested without React. */
+/** True when the plate budget has no room for another pressed pass. */
+export function atPassLimit(state: PrintSettings): boolean {
+  return passCount(state) >= MAX_PRESSED_PASSES
+}
+
+/** True when no further plate may be added: too many plates, or no pass left. */
+export function atPlateLimit(state: PrintSettings): boolean {
+  return state.layers.length >= MAX_TEXT_PLATES || atPassLimit(state)
+}
+
+/** What a plate does over the photo: nothing, a second ink, or a backing. */
+export type OverPhoto = 'off' | 'second' | 'backing'
+
+export const overPhotoOf = (l: TextLayer): OverPhoto =>
+  l.backing ? 'backing' : l.contrastInkId ? 'second' : 'off'
+
+/**
+ * Whether the plate's Switch point does anything: only when the pass splits
+ * between two DIFFERENT inks. With the plate's own ink as its second ink
+ * ("Keep this ink") both halves print that ink, so the switch point changes
+ * no pixel (engine test), and a control that does nothing is not offered.
+ */
+export const hasSwitchPoint = (l: TextLayer): boolean =>
+  !l.backing && l.contrastInkId !== null && l.contrastInkId !== l.inkId
+
+/**
+ * The layer patch for choosing what a plate does over the photo. The second
+ * ink starts at the automatic partner, exactly as the first photo seeds it; a
+ * backing starts in an ink the type will visibly overprint, never its own.
+ */
+export function overPhotoPatch(l: TextLayer, over: OverPhoto): Partial<TextLayer> {
+  if (over === 'off') return { contrastInkId: null, backing: null }
+  if (over === 'second') return { contrastInkId: contrastPartner(l.inkId), backing: null }
+  const backing = ['yellow', 'fluorescentpink', 'blue', 'black'].find((id) => id !== l.inkId) ?? 'yellow'
+  return { backing, contrastInkId: null }
+}
+
+/**
+ * One layer edit, with the rules that keep a plate coherent:
+ *
+ *  - A plate has a second ink OR a backing, never both (the second ink reads
+ *    the photo, but over a backing the ground is the block). Setting one
+ *    clears the other.
+ *  - "Keep this ink" (a second ink equal to the plate's ink) follows the ink:
+ *    changing a pink plate that keeps its own ink to blue must keep blue, not
+ *    turn into a blue/pink split nobody chose.
+ *  - A new backing is refused when the press budget is spent. Changing an
+ *    existing backing's ink costs nothing and is always allowed.
+ */
+function patchLayer(state: PrintSettings, l: TextLayer, patch: Partial<TextLayer>): TextLayer | null {
+  const next = { ...l, ...patch }
+  if (patch.backing && !l.backing && atPassLimit(state)) return null
+  if ('inkId' in patch && patch.inkId !== undefined && l.contrastInkId === l.inkId && !('contrastInkId' in patch)) {
+    next.contrastInkId = patch.inkId
+  }
+  if (patch.backing) next.contrastInkId = null
+  else if (patch.contrastInkId) next.backing = null
+  return next
+}
+
+/** The document transition, exported so the invariants it enforces — the
+ *  cover rule, the plate budget, a backing or a second ink but never both —
+ *  can be tested without React. */
 export function applySettings(state: PrintSettings, action: SettingsAction): PrintSettings {
   switch (action.type) {
-    case 'patch':
-      return { ...state, ...action.patch }
+    case 'patch': {
+      const next = { ...state, ...action.patch }
+      return 'aspect' in action.patch || 'media' in action.patch ? withCover(next) : next
+    }
 
-    case 'patchLayer':
-      return {
-        ...state,
-        layers: state.layers.map((l) => (l.id === action.id ? { ...l, ...action.patch } : l)),
-      }
+    case 'patchLayer': {
+      const i = state.layers.findIndex((l) => l.id === action.id)
+      if (i < 0) return state
+      const next = patchLayer(state, state.layers[i], action.patch)
+      if (!next) return state
+      const layers = [...state.layers]
+      layers[i] = next
+      return { ...state, layers }
+    }
 
     case 'addLayer': {
+      // Over budget, Add does nothing (the panel says why). A document saved
+      // over the budget keeps every plate: dropping one would destroy work.
+      if (atPlateLimit(state)) return state
       const used = new Set(state.layers.map((l) => l.inkId))
       const inkId = NEXT_INK.find((i) => !used.has(i)) ?? NEXT_INK[state.layers.length % NEXT_INK.length]
       return {
         ...state,
-        layers: [...state.layers, makeLayer({ text: 'NEW', inkId, size: 0.12, y: 0.3, fitWidth: false })],
+        // At makeLayer()'s size, inside the Size slider: a new plate that
+        // opened past its end would pin the thumb and jump on the first drag.
+        layers: [...state.layers, makeLayer({ text: 'NEW', inkId, y: 0.3, ...(action.id ? { id: action.id } : {}) })],
       }
     }
 
@@ -106,94 +184,14 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       if (state.layers.length <= 1) return state
       return { ...state, layers: state.layers.filter((l) => l.id !== action.id) }
 
-    case 'moveLayer': {
-      const i = state.layers.findIndex((l) => l.id === action.id)
-      const j = i + action.direction
-      if (i < 0 || j < 0 || j >= state.layers.length) return state
-      const layers = [...state.layers]
-      ;[layers[i], layers[j]] = [layers[j], layers[i]]
-      return { ...state, layers }
-    }
-
-    case 'addBox': {
-      // Each box gets the first ink not already spoken for on this layer, so a
-      // new box is visible against the type instead of invisibly matching it.
-      return mapLayer(state, action.layerId, (l) => {
-        const used = new Set([l.inkId, ...l.boxes.map((b) => b.inkId)])
-        const inkId = NEXT_INK.find((i) => !used.has(i)) ?? NEXT_INK[l.boxes.length % NEXT_INK.length]
-        const box: WordBox = { id: nextBoxId(), words: [], inkId, opacity: 1 }
-        return { ...l, boxes: [...l.boxes, box] }
-      })
-    }
-
-    case 'removeBox':
-      return mapLayer(state, action.layerId, (l) => ({
-        ...l,
-        boxes: l.boxes.filter((b) => b.id !== action.boxId),
-      }))
-
-    case 'patchBox':
-      return mapLayer(state, action.layerId, (l) => ({
-        ...l,
-        boxes: l.boxes.map((b) => (b.id === action.boxId ? { ...b, ...action.patch } : b)),
-      }))
-
-    case 'toggleBoxWord':
-      return mapLayer(state, action.layerId, (l) => ({
-        ...l,
-        boxes: l.boxes.map((b) => {
-          if (b.id !== action.boxId) {
-            // A word belongs to at most one box — otherwise two inks stack in
-            // the same rectangle and the result is neither colour.
-            return b.words.includes(action.word)
-              ? { ...b, words: b.words.filter((n) => n !== action.word) }
-              : b
-          }
-          const has = b.words.includes(action.word)
-          return {
-            ...b,
-            words: has
-              ? b.words.filter((n) => n !== action.word)
-              : [...b.words, action.word].sort((x, y) => x - y),
-          }
-        }),
-      }))
-
-    case 'setBoxWords':
-      return mapLayer(state, action.layerId, (l) => {
-        const claimed = new Set(action.words)
-        return {
-          ...l,
-          boxes: l.boxes.map((b) =>
-            b.id === action.boxId
-              ? { ...b, words: [...action.words].sort((x, y) => x - y) }
-              // Same one-box-per-word rule the single toggle enforces: taking a
-              // word for this box has to release it from any other, or two inks
-              // stack in the same rectangle and the result is neither colour.
-              : { ...b, words: b.words.filter((n) => !claimed.has(n)) },
-          ),
-        }
-      })
-
     case 'patchPress':
-      return { ...state, [action.target]: { ...state[action.target], ...action.patch } }
-
-    case 'setWordPress':
-      return mapLayer(state, action.layerId, (l) => {
-        const next = { ...l.wordPress }
-        for (const w of action.words) {
-          const merged = { ...next[String(w)], ...action.patch }
-          // Zero on both is the default, so store nothing rather than an entry
-          // meaning "normal" — otherwise the map grows forever and every one of
-          // those words needlessly becomes its own plate.
-          if (!merged.bleed && !merged.offset) delete next[String(w)]
-          else next[String(w)] = merged
-        }
-        return { ...l, wordPress: next }
-      })
+      return { ...state, press: { ...state.press, ...action.patch } }
 
     case 'setMedia': {
-      if (!action.media || state.media) return { ...state, media: action.media }
+      // Replacing a photo keeps the sheet the person chose (an Original sheet
+      // takes the new photo's shape); removing one from an Original sheet
+      // leaves 4:5 (withCover).
+      if (!action.media || state.media) return withCover({ ...state, media: action.media })
       // The first photo is the moment a single ink stops being enough. Type
       // that was perfectly readable on paper goes invisible over half of any
       // photograph, and the control that fixes it does not even exist in the
@@ -201,27 +199,49 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       // default means the app's first answer to "put a picture behind this" is
       // an unreadable one. Seeded, not forced: the toggle shows on, it undoes,
       // and turning it off leaves a single ink.
-      return {
+      // A plate with a backing already reads over the photo (the block is
+      // printed on paper there), and it may not take a second ink as well.
+      //
+      // And the sheet becomes the photo's own shape (Original): at 100% and
+      // centred the photo then fills it exactly, so the untouched path neither
+      // crops nor resamples a pixel. Choosing 4:5 or 1:1 is a crop the person
+      // makes, not one the app makes for them. Undo brings the old sheet back.
+      return withCover({
         ...state,
+        aspect: 'original',
         media: action.media,
         layers: state.layers.map((l) =>
-          l.contrastInkId ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },
+          l.contrastInkId || l.backing ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },
         ),
-      }
+      })
     }
 
     case 'patchMedia':
       // A patch with no photo present is a no-op rather than a crash: the
       // gesture layer can fire one as a drag ends just after a clear.
-      return state.media ? { ...state, media: { ...state.media, ...action.patch } } : state
+      return state.media ? withCover({ ...state, media: { ...state.media, ...action.patch } }) : state
 
     case 'reset':
       return action.settings
   }
 }
 
+/** Equality of plain data, which the document is (it is stored as JSON):
+ *  objects, arrays, strings, numbers, booleans and null. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const ka = Object.keys(a)
+  const kb = Object.keys(b)
+  if (ka.length !== kb.length) return false
+  return ka.every(
+    (k) => Object.hasOwn(b, k) && sameData((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+  )
+}
+
 export function initHistory(settings: PrintSettings): HistoryState {
-  return { past: [], present: settings, future: [], bursting: false }
+  return { past: [], present: settings, future: [], bursting: false, joinable: false }
 }
 
 export function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
@@ -234,6 +254,7 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
         present: previous,
         future: [state.present, ...state.future],
         bursting: false,
+        joinable: false,
       }
     }
 
@@ -245,6 +266,7 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
         present: next,
         future: rest,
         bursting: false,
+        joinable: false,
       }
     }
 
@@ -253,22 +275,51 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
 
     default: {
       const next = applySettings(state.present, action)
-      if (next === state.present) return state
+      const wantsJoin = 'join' in action && action.join === true
+      // A join is a reset, never part of a drag: it does not open a burst.
+      const coalesce = 'coalesce' in action && action.coalesce === true && !wantsJoin
 
-      const coalesce = 'coalesce' in action && action.coalesce === true
-
-      // Mid-burst: replace the present without growing the history, so the
-      // whole drag reads as a single step.
-      if (coalesce && state.bursting) {
-        return { ...state, present: next, future: [] }
+      // A change that changes nothing is not an undo step. A drag on a photo
+      // that cannot move (100% on its own sheet: every patch clamps back to
+      // where it is) or a second reset of a value already at its default
+      // used to push one, and Undo then seemed to do nothing. Such a change
+      // that starts a run (the burst is over) opened no step, so a double
+      // tap's reset after it has no step of its own run to join.
+      if (next === state.present || sameData(next, state.present)) {
+        return coalesce && !state.bursting && state.joinable ? { ...state, joinable: false } : state
       }
 
+      // Joining: only the step the last coalescing run opened, while nothing
+      // else has happened since (`joinable`). Not just the last step: a run
+      // that was dropped (below) leaves an unrelated step last, and after an
+      // Undo the last step is no longer the change it joins.
+      const join = wantsJoin && state.joinable && state.past.length > 0 && state.future.length === 0
+
+      // Mid-burst: replace the present without growing the history, so the
+      // whole drag reads as a single step. A join does the same after the
+      // burst is over.
+      if ((coalesce && state.bursting) || join) {
+        // A run that ends where it began (a drag back to its start; a double
+        // tap on a setting already at its default, whose first tap moved the
+        // thumb) is no step at all: drop the step it opened, and end the
+        // burst, so a move after it opens a step of its own. The step now
+        // last is someone else's: nothing may join it.
+        const start = state.past[state.past.length - 1]
+        if (start !== undefined && sameData(next, start)) {
+          return { past: state.past.slice(0, -1), present: start, future: [], bursting: false, joinable: false }
+        }
+        return { ...state, present: next, future: [], joinable: true }
+      }
+
+      // A step of its own. Only a coalescing run's step may be joined later;
+      // a join that found nothing to join is a plain step.
       const past = [...state.past, state.present]
       return {
         past: past.length > LIMIT ? past.slice(past.length - LIMIT) : past,
         present: next,
         future: [],
         bursting: coalesce,
+        joinable: coalesce,
       }
     }
   }

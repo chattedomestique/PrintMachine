@@ -32,31 +32,42 @@ function boxH(src: Float32Array, dst: Float32Array, w: number, h: number, r: num
   }
 }
 
-/** One vertical box pass. Same seeding rule, striding by w. */
-function boxV(src: Float32Array, dst: Float32Array, w: number, h: number, r: number): void {
+/**
+ * One vertical box pass. Same seeding rule, striding by w.
+ *
+ * Walked row by row with a running sum per column, not column by column: the
+ * field is stored by rows, and a column walk touches one value per row — a
+ * cache miss each on a sheet thousands of pixels wide (it was most of the
+ * press's time on a 16 MP export). Each column's sum takes exactly the same
+ * additions in the same order (held in float64, as the single sum was), so
+ * the result is the same to the bit.
+ */
+function boxV(src: Float32Array, dst: Float32Array, w: number, h: number, r: number, sums: Float64Array): void {
   const norm = 1 / (2 * r + 1)
-  for (let x = 0; x < w; x++) {
-    let sum = src[x] * (r + 1)
-    for (let i = 1; i <= r; i++) sum += src[Math.min(i, h - 1) * w + x]
-
-    for (let y = 0; y < h; y++) {
-      dst[y * w + x] = sum * norm
-      const add = src[Math.min(y + r + 1, h - 1) * w + x]
-      const drop = src[Math.max(y - r, 0) * w + x]
-      sum += add - drop
+  for (let x = 0; x < w; x++) sums[x] = src[x] * (r + 1)
+  for (let i = 1; i <= r; i++) {
+    const row = Math.min(i, h - 1) * w
+    for (let x = 0; x < w; x++) sums[x] += src[row + x]
+  }
+  for (let y = 0; y < h; y++) {
+    const out = y * w
+    const add = Math.min(y + r + 1, h - 1) * w
+    const drop = Math.max(y - r, 0) * w
+    for (let x = 0; x < w; x++) {
+      dst[out + x] = sums[x] * norm
+      sums[x] += src[add + x] - src[drop + x]
     }
   }
 }
 
-/** Three box passes at an integer radius. */
-function boxes(src: Float32Array, w: number, h: number, r: number): Float32Array {
-  const a = src.slice()
-  const b = new Float32Array(src.length)
+/** Three box passes at an integer radius, on `a` in place, with `b` as the
+ *  other half of the ping-pong. */
+function boxesInPlace(a: Float32Array, b: Float32Array, w: number, h: number, r: number): void {
+  const sums = new Float64Array(w)
   for (let pass = 0; pass < 3; pass++) {
     boxH(a, b, w, h, r)
-    boxV(b, a, w, h, r)
+    boxV(b, a, w, h, r, sums)
   }
-  return a
 }
 
 /**
@@ -65,9 +76,33 @@ function boxes(src: Float32Array, w: number, h: number, r: number): Float32Array
  */
 const FRACTIONAL_BELOW = 4
 
+/** Whether `blurInPlace` at this radius needs its `spare` buffer: only to mix
+ *  two blurs, for a fraction of a pixel below FRACTIONAL_BELOW. */
+export function needsSpare(radius: number): boolean {
+  if (radius <= 0.01) return false
+  const lo = Math.floor(radius)
+  return !(radius - lo < 0.01 || lo >= FRACTIONAL_BELOW)
+}
+
 /**
- * Blur a field by `radius` pixels. Returns a new array; the input is untouched.
- * A radius of effectively zero is a no-op copy.
+ * How many rows (or columns) one pass of `blurInPlace` at this radius reaches
+ * either side: the larger of the integer radii it runs (a fraction under
+ * FRACTIONAL_BELOW mixes floor and floor + 1), 0 when it does nothing. Three
+ * passes reach three times this: a window of rows blurs exactly as the sheet
+ * does wherever its edge is at least that far away (or is the sheet's own).
+ */
+export function blurReach(radius: number): number {
+  if (radius <= 0.01) return 0
+  const lo = Math.floor(radius)
+  return radius - lo < 0.01 || lo >= FRACTIONAL_BELOW ? Math.max(1, lo) : lo + 1
+}
+
+/**
+ * Blur a field by `radius` pixels, in place, with caller-owned buffers (an
+ * export reuses one workspace for every plate): `scratch` is the box blur's
+ * other half; `spare` holds the source for the second of two mixed blurs, and
+ * is needed only when `needsSpare`. A radius of effectively zero leaves the
+ * field as it is.
  *
  * Fractional radii are honoured by mixing the two neighbouring integer blurs.
  * Rounding instead is what made the preview and the saved file different
@@ -84,16 +119,27 @@ const FRACTIONAL_BELOW = 4
  * the clamped reads it needs in the inner loop cost more than the second blur
  * they were meant to save. Both were measured.
  */
-export function blurField(src: Float32Array, w: number, h: number, radius: number): Float32Array {
-  if (radius <= 0.01) return src.slice()
+export function blurInPlace(
+  field: Float32Array,
+  w: number,
+  h: number,
+  radius: number,
+  scratch: Float32Array,
+  spare?: Float32Array,
+): void {
+  if (radius <= 0.01) return
 
   const lo = Math.floor(radius)
   const frac = radius - lo
-  if (frac < 0.01 || lo >= FRACTIONAL_BELOW) return boxes(src, w, h, Math.max(1, lo))
+  if (frac < 0.01 || lo >= FRACTIONAL_BELOW) {
+    boxesInPlace(field, scratch, w, h, Math.max(1, lo))
+    return
+  }
+  if (!spare) throw new Error('blurInPlace: a fractional radius needs a spare buffer')
 
   // Radius zero is the field itself, so the low end of the mix is free below 1.
-  const base = lo >= 1 ? boxes(src, w, h, lo) : src.slice()
-  const up = boxes(src, w, h, lo + 1)
-  for (let i = 0; i < base.length; i++) base[i] += (up[i] - base[i]) * frac
-  return base
+  spare.set(field)
+  if (lo >= 1) boxesInPlace(field, scratch, w, h, lo)
+  boxesInPlace(spare, scratch, w, h, lo + 1)
+  for (let i = 0; i < field.length; i++) field[i] += (spare[i] - field[i]) * frac
 }

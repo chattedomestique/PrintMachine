@@ -121,22 +121,6 @@ export function inkById(id: string): Ink {
 export const cssRgb = (rgb: readonly [number, number, number]): string =>
   `rgb(${rgb[0]} ${rgb[1]} ${rgb[2]})`
 
-/**
- * Preview the colour of `top` overprinted on `bottom` at full coverage, using
- * the same subtractive model as the compositor. Used by the UI to show what a
- * two-ink pairing will actually produce.
- */
-export function overprint(
-  bottom: readonly [number, number, number],
-  top: readonly [number, number, number],
-): [number, number, number] {
-  return [
-    Math.round((bottom[0] * top[0]) / 255),
-    Math.round((bottom[1] * top[1]) / 255),
-    Math.round((bottom[2] * top[2]) / 255),
-  ]
-}
-
 /** Common paper stocks. Riso is almost never printed on pure white. */
 export interface Paper {
   readonly id: string

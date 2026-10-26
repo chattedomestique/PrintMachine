@@ -679,7 +679,7 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
 - **Sharing.** The share sheet needs the tap that opens it to be recent, and a
   press outlasts it. A press that finished within a second of the tap would
   share at once, but at a photo's own resolution none does (a print with no
-  photo, 2880×3600, takes over 4 s on a desktop): Save becomes **Share** and
+  photo, 2880×3600, takes about 3 s on a desktop): Save becomes **Share** and
   the card says "3024×3780 is ready (6.2 MB)", a fresh tap that shares the file
   already made (the card's × lets it go). A share that fails keeps the file and
   the button: in a home-screen app it never falls through to a download, which
@@ -1417,7 +1417,8 @@ same value modal, action sheets, toast and app bar. What differs, and why:
   icon, and "Saving" where there is room for a word (a ring alone in the
   compact bar).** Border Studio keeps its download icon beside the word and
   counts a video's percent on Save. Here the progress is in the status card,
-  in pixels and plates, with Cancel; with the icon kept, "Saving" overflowed
+  as the print's size and the percent of its bands pressed ("Pressing
+  7728×5152, 43%"), with Cancel; with the icon kept, "Saving" overflowed
   the bar at 390 px and pushed Undo into the title. Both apps draw a busy Save
   without its fill (it is busy and unavailable).
 - **The dock's head row has an 8 px gap, not 12,** and the plate button 8 px

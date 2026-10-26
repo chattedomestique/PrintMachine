@@ -147,7 +147,7 @@ So:
       in Photos' info panel)
 - [ ] Expect that second tap on every save: no press at a photo's own
       resolution finishes within the second that would share at once (even a
-      print with no photo is 2880×3600; it takes over 4 s on a desktop). A
+      print with no photo is 2880×3600; it takes about 3 s on a desktop). A
       save that ends on "Share" is not a bug; one whose share sheet does not
       open from that tap is
 - [ ] Home-screen app: dismiss or break the share sheet → "Share" is still

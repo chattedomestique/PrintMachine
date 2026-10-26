@@ -227,7 +227,7 @@ export class JpegEncoder {
 
   constructor(width: number, height: number, quality: number, onChunk: (chunk: Uint8Array) => void, chunkSize = 1 << 18) {
     if (!(width >= 1 && height >= 1 && width <= JPEG_MAX_EDGE && height <= JPEG_MAX_EDGE) || !Number.isInteger(width) || !Number.isInteger(height)) {
-      throw new RangeError(`JPEG: ${width}x${height} is not a size a JPEG can hold (1 to ${JPEG_MAX_EDGE} a side)`)
+      throw new Error(`JPEG: ${width}x${height} is not a size a JPEG can hold (1 to ${JPEG_MAX_EDGE} a side)`)
     }
     this.w = width
     this.h = height

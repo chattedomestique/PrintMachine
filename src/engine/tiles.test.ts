@@ -112,7 +112,30 @@ describe('the ring of tile rows', () => {
     const across = rowsFromTiles(grid, cache, 1, span, 15, 32)
     expect(across.buffer).toBe(span.buffer)
     expect([...across]).toEqual([...field.subarray(150, 320)])
-    expect(() => rowsFromTiles(grid, cache, 1, new Uint8Array(10), 15, 32)).toThrow(RangeError)
+    expect(() => rowsFromTiles(grid, cache, 1, new Uint8Array(10), 15, 32)).toThrow(/rows \[15, 32\) do not fit the span of 1/)
+  })
+
+  it('a broken invariant is a plain Error, never the RangeError Save reads as memory running out', () => {
+    const cache = new TileRowCache(2, () => new Uint8Array(10 * 10), () => {})
+    const thrown = (f: () => unknown) => {
+      try {
+        f()
+      } catch (e) {
+        return e
+      }
+      return null
+    }
+    for (const [what, f] of [
+      ['a span a row short', () => rowsFromTiles(grid, cache, 1, new Uint8Array(10 * 16), 15, 32)],
+      ['rows past the sheet', () => rowsFromTiles(grid, cache, 1, new Uint8Array(10 * 20), 95, 101)],
+      ['rows backwards', () => rowsFromTiles(grid, cache, 1, new Uint8Array(10 * 20), 20, 10)],
+      ['no sheet', () => tileGrid(0, 10)],
+      ['a ring of nothing', () => new TileRowCache(0, () => null, () => {})],
+    ] as const) {
+      const e = thrown(f)
+      expect(e, what).toBeInstanceOf(Error)
+      expect(e, what).not.toBeInstanceOf(RangeError)
+    }
   })
 })
 

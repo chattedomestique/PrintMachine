@@ -238,7 +238,9 @@ describe('the JPEG encoder: streaming', () => {
       [1, JPEG_MAX_EDGE + 1],
       [1.5, 2],
     ]) {
-      expect(() => new JpegEncoder(w, h, 95, () => {})).toThrow(RangeError)
+      // A plain Error, never a RangeError: Save reads that as memory.
+      expect(() => new JpegEncoder(w, h, 95, () => {})).toThrow(/is not a size a JPEG can hold/)
+      expect(() => new JpegEncoder(w, h, 95, () => {})).not.toThrow(RangeError)
     }
   })
 

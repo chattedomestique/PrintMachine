@@ -417,6 +417,39 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
       restore()
     }
   })
+
+  it('a tone source that breaks an invariant (a plain Error) is pressed once and said as itself, never offered as a smaller copy', async () => {
+    // The glyph tiles' read-back throws what the tile plumbing's checks throw
+    // (rowsFromTiles, the ring, the native ground's band): a plain Error.
+    // The same fault as a RangeError, for contrast, is memory: pressed again
+    // in halved bands, then too big for this device.
+    const press = async (fault: () => Error) => {
+      let reads = 0
+      const made = canvases()
+      const makeCanvas = () => {
+        const ctx = made.makeCanvas()
+        const read = ctx.getImageData.bind(ctx)
+        ;(ctx as unknown as { getImageData: typeof read }).getImageData = (x, y, w, h) => {
+          // The sentinel (1x1) reads back as drawn; a tile's rows throw.
+          if (w * h > 1) {
+            reads++
+            throw fault()
+          }
+          return read(x, y, w, h)
+        }
+        return ctx
+      }
+      const err = await savePrint(defaultSettings(), null, { maxHeight: 1800, makeCanvas }).catch((e: unknown) => e)
+      return { err, reads }
+    }
+    const bug = await press(() => new Error('rowsFromTiles: rows [1389, 1459) do not fit the span of 69'))
+    expect(bug.err).not.toBeInstanceOf(CanvasLimitError)
+    expect((bug.err as Error).message).toBe('rowsFromTiles: rows [1389, 1459) do not fit the span of 69')
+    expect(bug.reads).toBe(1)
+    const memory = await press(() => new RangeError('Array buffer allocation failed'))
+    expect(memory.err).toBeInstanceOf(CanvasLimitError)
+    expect(memory.reads).toBe(1 + BAND_HALVINGS)
+  })
 })
 
 describe('the smaller copy offered: three quarters at a time, the sheet kept, the first one that fits', () => {

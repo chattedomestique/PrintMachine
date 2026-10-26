@@ -152,7 +152,7 @@ export class PngEncoder {
     opts: { compression?: 'deflate' | 'stored'; bandRows?: number } = {},
   ) {
     if (!(Number.isInteger(width) && Number.isInteger(height) && width >= 1 && height >= 1 && width <= PNG_MAX_EDGE && height <= PNG_MAX_EDGE)) {
-      throw new RangeError(`PNG: ${width}x${height} is not a size a PNG can hold`)
+      throw new Error(`PNG: ${width}x${height} is not a size a PNG can hold`)
     }
     this.w = width
     this.h = height

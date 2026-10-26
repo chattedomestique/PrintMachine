@@ -16,6 +16,10 @@
  * sheet itself: drawn as it always was.
  *
  * Pure: no canvas here. The loaders that draw a tile row are handed in.
+ *
+ * A broken invariant here is a bug, thrown as a plain Error: never a
+ * RangeError, which Save reads as memory running out (export.ts `savePrint`)
+ * and would answer with a smaller copy.
  */
 
 import { TILE_EDGE, TILE_PIXELS } from './limits.ts'
@@ -58,7 +62,7 @@ export interface Tile {
  * [cx tileW, min(w, (cx + 1) tileW)) and rows [ty tileH, min(h, (ty + 1) tileH)).
  */
 export function tileGrid(w: number, h: number, budget: TileBudget = TILE_BUDGET): TileGrid {
-  if (!(w >= 1 && h >= 1)) throw new RangeError(`tileGrid: not a sheet: ${w}x${h}`)
+  if (!(w >= 1 && h >= 1)) throw new Error(`tileGrid: not a sheet: ${w}x${h}`)
   const tileW = Math.max(1, Math.min(w, Math.floor(budget.edge)))
   const tileH = Math.max(1, Math.floor(budget.pixels / tileW))
   return { w, h, tileW, tileH, cols: Math.ceil(w / tileW), rows: Math.ceil(h / tileH) }
@@ -121,7 +125,7 @@ export class TileRowCache<T> {
     make: () => T,
     private readonly load: (ty: number, slot: T) => void,
   ) {
-    if (!(capacity >= 1)) throw new RangeError(`TileRowCache: capacity ${capacity}`)
+    if (!(capacity >= 1)) throw new Error(`TileRowCache: capacity ${capacity}`)
     this.slots = Array.from({ length: capacity }, () => ({ ty: -1, used: 0, slot: make() }))
   }
 
@@ -170,7 +174,7 @@ export function rowsFromTiles<T extends Uint8Array | Uint8ClampedArray>(
   a: number,
   b: number,
 ): T {
-  if (a < 0 || b > grid.h || b < a) throw new RangeError(`rowsFromTiles: rows [${a}, ${b}) of ${grid.h}`)
+  if (a < 0 || b > grid.h || b < a) throw new Error(`rowsFromTiles: rows [${a}, ${b}) of ${grid.h}`)
   const stride = grid.w * channels
   if (b === a) return span.subarray(0, 0) as T
   const [first, last] = tileRowsOf(grid, a, b)
@@ -178,7 +182,7 @@ export function rowsFromTiles<T extends Uint8Array | Uint8ClampedArray>(
     const y0 = first * grid.tileH
     return cache.row(first).subarray((a - y0) * stride, (b - y0) * stride) as T
   }
-  if (span.length < (b - a) * stride) throw new RangeError(`rowsFromTiles: rows [${a}, ${b}) do not fit the span of ${span.length / stride}`)
+  if (span.length < (b - a) * stride) throw new Error(`rowsFromTiles: rows [${a}, ${b}) do not fit the span of ${span.length / stride}`)
   for (let ty = first; ty <= last; ty++) {
     const y0 = ty * grid.tileH
     const from = Math.max(a, y0)

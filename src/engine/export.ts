@@ -239,7 +239,8 @@ export async function savePrint(settings: PrintSettings, media: CanvasImageSourc
     }
   } catch (err) {
     // Out of memory for a typed array or an ImageData is a RangeError: the
-    // same "too big for this device", said the same way.
+    // same "too big for this device", said the same way. (The engine's own
+    // invariants throw a plain Error, so a bug never reads as a size.)
     if (err instanceof RangeError) throw new CanvasLimitError(plan, err.message)
     throw err
   } finally {

@@ -702,7 +702,10 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   last pixel and read back (`fitsCanvas`, `engine/export.ts`). Memory that runs
   out for a typed array (a `RangeError`) anywhere in the press presses it again
   from the first band in bands half as tall (the same file, more slowly), up to
-  four times, while the photo is still held. What still cannot be pressed — a
+  four times, while the photo is still held. Only a `RangeError` is read that
+  way: the engine's own checks (the tile ring, the encoders' sizes) throw a
+  plain `Error`, so a bug is said as itself, pressed once, never offered as a
+  smaller copy. What still cannot be pressed — a
   canvas that comes back blank, memory out at the smallest band, or an original
   that cannot be decoded whole while a smaller decode of it can (the import
   already read it, so that is this device's memory) — is one error,

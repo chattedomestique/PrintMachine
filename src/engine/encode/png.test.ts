@@ -328,7 +328,9 @@ describe('the PNG encoder', { timeout: 60_000 }, () => {
       [1, 0],
       [2.5, 1],
     ]) {
-      expect(() => new PngEncoder(w, h, () => {})).toThrow(RangeError)
+      // A plain Error, never a RangeError: Save reads that as memory.
+      expect(() => new PngEncoder(w, h, () => {})).toThrow(/is not a size a PNG can hold/)
+      expect(() => new PngEncoder(w, h, () => {})).not.toThrow(RangeError)
     }
   })
 })

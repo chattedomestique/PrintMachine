@@ -1390,7 +1390,7 @@ class NativeGroundRows implements GroundRows {
 
   rows(y0: number, y1: number): Uint8ClampedArray {
     const { piece, media, r, w } = this
-    if (y1 - y0 > this.pieceH) throw new RangeError(`NativeGroundRows: ${y1 - y0} rows asked of a band of ${this.pieceH}`)
+    if (y1 - y0 > this.pieceH) throw new Error(`NativeGroundRows: ${y1 - y0} rows asked of a band of ${this.pieceH}`)
     for (let x0 = 0; x0 < w; x0 += this.pieceW) {
       const pw = Math.min(this.pieceW, w - x0)
       piece.clearRect(0, 0, this.pieceW, this.pieceH)

@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { BAND_PIXELS, CANVAS_FONT_MAX, MIN_BAND_ROWS, TILE_EDGE, TILE_PIXELS, bandHeight } from './limits.ts'
 import { TiledGroundRows, TiledTones, isNativeRect, printSheet, sampledNoise, type ToneSource, type TonePass } from './render.ts'
 import { drawBacking, drawGlyphs, fontCapFactor, lineRects, planGlyphs } from './text.ts'
-import { TILE_BUDGET, TileRowCache, ringRows, rowsFromTiles, tileAt, tileGrid, tilesFor } from './tiles.ts'
+import { TILE_BUDGET, TileRowCache, ringRows, rowsFromTiles, tileAt, tileGrid } from './tiles.ts'
 import { coverRect, snapRect } from './media.ts'
 import type { PrintSettings, TextLayer } from './types.ts'
 import { makeGround } from './__tests__/fields.ts'
@@ -44,11 +44,10 @@ describe('the grid', () => {
     expect(shape(3651, 10954)).toEqual([3651, 1148, 1, 10])
   })
 
-  it('tiles are clipped to the sheet at the last column and row; tilesFor finds every tile a rectangle meets', () => {
+  it('tiles are clipped to the sheet at the last column and row', () => {
     const g = tileGrid(7728, 5152)
+    expect(tileAt(g, 0, 0)).toEqual({ cx: 0, ty: 0, x0: 0, y0: 0, w: 4096, h: 1024 })
     expect(tileAt(g, 1, 5)).toEqual({ cx: 1, ty: 5, x0: 4096, y0: 5120, w: 3632, h: 32 })
-    expect(tilesFor(g, { x0: 4000, y0: 1000, x1: 4100, y1: 1030 }).map((t) => `${t.cx},${t.ty}`)).toEqual(['0,0', '1,0', '0,1', '1,1'])
-    expect(tilesFor(g, { x0: -50, y0: -50, x1: 0, y1: 10 })).toEqual([])
     // Forced small tiles (the test seam): 512 x 128.
     const f = tileGrid(800, 1000, { edge: 512, pixels: 65536 })
     expect([f.tileW, f.tileH, f.cols, f.rows]).toEqual([512, 128, 2, 8])
@@ -87,10 +86,16 @@ describe('the ring of tile rows', () => {
     expect(cache.row(1).ty).toBe(1)
     expect(cache.row(0).ty).toBe(0) // held
     expect(cache.row(2).ty).toBe(2) // evicts 1, the least recently used
-    expect(cache.held().sort()).toEqual([0, 2])
-    expect(cache.row(1).ty).toBe(1) // evicts 0
-    expect(drawn).toEqual([0, 1, 2, 1])
-    expect(cache.loads).toBe(4)
+    expect(drawn).toEqual([0, 1, 2])
+    // 2 and 0 are held: nothing drawn, and 2 is now the least recently used.
+    expect(cache.row(2).ty).toBe(2)
+    expect(cache.row(0).ty).toBe(0)
+    expect(drawn).toEqual([0, 1, 2])
+    expect(cache.row(1).ty).toBe(1) // evicts 2
+    expect(cache.row(0).ty).toBe(0) // held
+    expect(cache.row(2).ty).toBe(2) // drawn again, evicting 1
+    expect(drawn).toEqual([0, 1, 2, 1, 2])
+    expect(cache.loads).toBe(5)
   })
 
   it('after a sequential pass over the sheet (the photo\'s luminance), the first band\'s row is drawn again', () => {
@@ -217,7 +222,8 @@ describe('glyphs on the tile grid', () => {
     const grid = tileGrid(800, 1000, { edge: 512, pixels: 65536 })
     const { ctx, calls } = recorder()
     const plan = planGlyphs(ctx, l, grid.h)
-    const perTile = tilesFor(grid, { x0: 0, y0: 0, x1: grid.w, y1: grid.h }).map((t) => {
+    const tiles = Array.from({ length: grid.rows * grid.cols }, (_, k) => tileAt(grid, k % grid.cols, Math.floor(k / grid.cols)))
+    const perTile = tiles.map((t) => {
       calls.length = 0
       drawGlyphs(ctx, plan, l, grid.w, grid.h, t)
       return calls.slice()
@@ -226,7 +232,7 @@ describe('glyphs on the tile grid', () => {
     const strip = (c: string[]) => c.filter((_, i) => i !== 0 && i !== 2)
     expect(perTile.length).toBe(16)
     for (const [k, c] of perTile.entries()) {
-      const t = tileAt(grid, k % grid.cols, Math.floor(k / grid.cols))
+      const t = tiles[k]
       expect(c[0]).toBe(`clearRect 0,0,${t.w},${t.h}`)
       expect(c[2]).toBe(`translate ${-t.x0},${-t.y0}`)
       expect(strip(c)).toEqual(strip(perTile[0]))
@@ -337,7 +343,8 @@ describe('the tile plumbing, exactly: tile sources that slice known fields print
       const out = new Uint8ClampedArray(w * h * 4)
       printSheet(out, s, t.rows, t.tones, sampledNoise(s, w, h), w, h, { bandRows: B })
       expect(sha(out), `${name} ${w}x${h}, tiles ${budget.edge}x${budget.pixels / budget.edge}, bands of ${B}`).toBe(sha(want))
-      // The ring wrapped: tile rows were drawn and drawn again.
+      // The tile sources were read (the bytes above are theirs, not the
+      // whole fields').
       expect(t.loads()).toBeGreaterThan(0)
     }
   }

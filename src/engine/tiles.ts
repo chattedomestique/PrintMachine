@@ -80,21 +80,6 @@ export function tileRowsOf(grid: TileGrid, a: number, b: number): [number, numbe
   return [Math.floor(a / grid.tileH), Math.floor((b - 1) / grid.tileH)]
 }
 
-/** Every tile that meets the rectangle [x0, x1) x [y0, y1) of the sheet,
- *  row by row. */
-export function tilesFor(grid: TileGrid, rect: { x0: number; y0: number; x1: number; y1: number }): Tile[] {
-  const x0 = Math.max(0, rect.x0)
-  const y0 = Math.max(0, rect.y0)
-  const x1 = Math.min(grid.w, rect.x1)
-  const y1 = Math.min(grid.h, rect.y1)
-  const tiles: Tile[] = []
-  if (x1 <= x0 || y1 <= y0) return tiles
-  for (let ty = Math.floor(y0 / grid.tileH); ty * grid.tileH < y1; ty++) {
-    for (let cx = Math.floor(x0 / grid.tileW); cx * grid.tileW < x1; cx++) tiles.push(tileAt(grid, cx, ty))
-  }
-  return tiles
-}
-
 /** How many tile rows a ring must hold so that a window of `rows` rows of
  *  the sheet is always in it at once: the tile rows such a window can span,
  *  never more than the grid has. */
@@ -152,11 +137,6 @@ export class TileRowCache<T> {
     pick.ty = ty
     pick.used = ++this.clock
     return pick.slot
-  }
-
-  /** Which tile rows are held, for the tests. */
-  held(): number[] {
-    return this.slots.filter((s) => s.ty >= 0).map((s) => s.ty)
   }
 }
 

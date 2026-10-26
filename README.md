@@ -714,7 +714,9 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   itself here, its canvases first and then its photo decoded at its size,
   stepping down by three quarters of the height at a time (the sheet's shape
   kept) and never under 600 px; when none does, it says this device cannot
-  save the print. A file that cannot be decoded at any size is a plain failure
+  save the print. Proving a copy can take as long as a decode, and the card
+  still offers Cancel meanwhile: a Cancel tapped then ends the save, with no
+  question after it. A file that cannot be decoded at any size is a plain failure
   ("The photo could not be decoded to save: ..."), never an offer. Nothing is
   pressed until the person picks Save smaller; the copy's photo is decoded
   straight to the copy's size, once, and drawn at its own pixels; and the

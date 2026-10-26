@@ -447,6 +447,30 @@ describe('the smaller copy offered: three quarters at a time, the sheet kept, th
     for (let i = 1; i < heights.length; i++) expect(heights[i]).toBeLessThan(heights[i - 1])
     expect(await findSmallerPlanAsync(s, 1000, async () => true)).toMatchObject({ height: 750 })
   })
+
+  it('a Cancel during a probe rejects with an AbortError, and no candidate is asked after it', async () => {
+    const s = withPhoto(4032, 3024)
+    const controller = new AbortController()
+    const tried: number[] = []
+    const run = findSmallerPlanAsync(
+      s,
+      3024,
+      async (p) => {
+        tried.push(p.height)
+        // Tapped while the second candidate is probed; it would have fitted.
+        if (tried.length === 2) controller.abort()
+        return tried.length === 2
+      },
+      { signal: controller.signal },
+    )
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    expect(tried).toEqual([2268, 1701])
+    // Cancelled before it starts: nothing is probed.
+    await expect(findSmallerPlanAsync(s, 3024, async (p) => (tried.push(p.height), true), { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(tried).toEqual([2268, 1701])
+  })
 })
 
 describe('the async render: the same stages, with yields, progress and Cancel', () => {

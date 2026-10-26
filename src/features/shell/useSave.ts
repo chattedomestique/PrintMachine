@@ -20,7 +20,7 @@ import {
 } from '../../engine/export.ts'
 import type { ExportPlan } from '../../engine/exportPlan.ts'
 import { snapCopyRect, type DrawRect } from '../../engine/media.ts'
-import { groundRect, type RenderProgress } from '../../engine/render.ts'
+import { groundRect, throwIfAborted, type RenderProgress } from '../../engine/render.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { PhotoDecodeError, decodeOriginal, decodeResized } from '../media/decode.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
@@ -448,8 +448,9 @@ export type SaveResult = { kind: 'pressed'; pressed: PressedPrint } | { kind: 't
  *    to the copy's integer rectangle (`copyRect`) and presses it 1:1.
  *  - A CanvasLimitError from the press offers the largest copy that fits.
  *
- * Rejects with the press's AbortError on Cancel, and with an Error that says
- * why on any other failure. The photo is closed by the time it settles.
+ * Rejects with the press's AbortError on Cancel (also one tapped while the
+ * smaller copies are probed), and with an Error that says why on any other
+ * failure. The photo is closed by the time it settles.
  */
 export async function pressForSave(
   run: {
@@ -464,7 +465,13 @@ export async function pressForSave(
 ): Promise<SaveResult> {
   const { settings, format, maxHeight, signal } = run
   const plan = planPrint(settings, { maxHeight, format })
-  const smaller = (height: number) => findSmallerPlanAsync(settings, height, (p) => copyFits(settings, p, deps), format)
+  // A Cancel tapped while the copies are probed (each may decode the photo)
+  // is an AbortError, never the question afterwards.
+  const smaller = async (height: number) => {
+    const copy = await findSmallerPlanAsync(settings, height, (p) => copyFits(settings, p, deps), { format, signal })
+    throwIfAborted(signal)
+    return copy
+  }
   let photo: ImageBitmap | null = null
   try {
     let rect: DrawRect | undefined
@@ -485,7 +492,7 @@ export async function pressForSave(
         }
       }
     }
-    if (signal?.aborted) throw new DOMException('The save was cancelled.', 'AbortError')
+    throwIfAborted(signal)
     run.onPhotoLoaded?.()
     const decoded = photo
     try {

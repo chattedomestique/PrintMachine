@@ -466,4 +466,44 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     })
     expect(log.pressed).toEqual([])
   })
+
+  it('a Cancel tapped while the smaller copies are probed is a cancel, never the question afterwards', async () => {
+    // Each probe may decode the photo at the copy's size: the person taps
+    // Cancel during the first one. After a press that failed for size, and
+    // after a whole decode that failed.
+    const s = doc(4032, 3024)
+    for (const failure of ['press', 'decode'] as const) {
+      const controller = new AbortController()
+      let tapped = false
+      const { d, log } = deps({
+        savePrint: async () => {
+          throw new CanvasLimitError(planPrint(s), 'a canvas came back blank')
+        },
+      })
+      if (failure === 'decode') {
+        d.decodeOriginal = async () => {
+          throw new PhotoDecodeError('Cannot create an image buffer')
+        }
+      }
+      const probe = d.decodeResized
+      d.decodeResized = async (id, w, h) => {
+        const b = await probe(id, w, h)
+        if (tapped) controller.abort()
+        return b
+      }
+      // Without the Cancel the first candidate proves itself and is offered.
+      expect(await pressForSave({ settings: s, format: 'jpeg', signal: controller.signal }, d), failure).toMatchObject({
+        kind: 'tooBig',
+        smaller: { width: 1814, height: 2268 },
+      })
+      log.resized.length = 0
+      tapped = true
+      await expect(pressForSave({ settings: s, format: 'jpeg', signal: controller.signal }, d), failure).rejects.toMatchObject({
+        name: 'AbortError',
+      })
+      // One probe, the one the Cancel landed in: none after it.
+      expect(log.resized, failure).toEqual(['photo 3024x2268'])
+      expect(log.bitmaps.every((b) => b.closed >= 1), failure).toBe(true)
+    }
+  })
 })

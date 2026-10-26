@@ -319,19 +319,26 @@ export const SMALLEST_COPY_HEIGHT = 600
  * would go below SMALLEST_COPY_HEIGHT: this device cannot save this print.
  * `fits` is asked of each candidate in turn, largest first, and of none after
  * the first that fits (it may decode the photo at the candidate's size).
+ *
+ * Cancel (`signal`) is read before each candidate and after each answer: a
+ * probe can take as long as a decode, and a Cancel tapped during it rejects
+ * with an AbortError rather than putting a question to someone who left.
  */
 export async function findSmallerPlanAsync(
   settings: PrintSettings,
   failedHeight: number,
   fits: (plan: ExportPlan) => Promise<boolean>,
-  format: ExportFormat = 'jpeg',
+  opts: { format?: ExportFormat; signal?: AbortSignal } = {},
 ): Promise<ExportPlan | null> {
   let maxHeight = failedHeight
   for (;;) {
+    throwIfAborted(opts.signal)
     maxHeight = Math.round(maxHeight * SMALLER_STEP)
     if (maxHeight < SMALLEST_COPY_HEIGHT) return null
-    const plan = planPrint(settings, { maxHeight, format })
-    if (await fits(plan)) return plan
+    const plan = planPrint(settings, { maxHeight, format: opts.format ?? 'jpeg' })
+    const fit = await fits(plan)
+    throwIfAborted(opts.signal)
+    if (fit) return plan
   }
 }
 

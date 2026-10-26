@@ -101,6 +101,13 @@ jobs:
       - run: node scripts/check-encode.mjs
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
+      # The band engine on real glyphs and a real photo, through the export's
+      # entry point: the same bytes at every band height on forced small
+      # tiles, the type's tile seams inside their bounds, and type over the
+      # canvas's font cap keeping its advances.
+      - run: node scripts/check-bands.mjs
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
       # Time and resident memory of an export in desktop Chrome. Informational:
       # V8 frees what JavaScriptCore keeps, so measure-alloc is the gate.
       - run: node scripts/measure-export.mjs

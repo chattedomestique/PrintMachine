@@ -44,8 +44,10 @@ import { FbmSampler, fbm2D, type CellNoise } from './rng.ts'
 import { defaultAngle, screenField, type ScreenOptions } from './screen.ts'
 import { cutKnockoutRows } from './knockout.ts'
 import { LumaAccumulator, SWITCH_BAND, bandMask, coverRect, sampleLumaRows, snapRect, splitInks, type DrawRect, type InkSplit, type LumaGrid } from './media.ts'
-import { plateFontSize, rasterizeBacking, rasterizeText } from './text.ts'
-import { REFERENCE_HEIGHT, passCount } from './limits.ts'
+import { drawBacking, drawGlyphs, planGlyphs, plateFontSize, rasterizeBacking, rasterizeText, type GlyphPlan, type SheetPart } from './text.ts'
+import { readAlpha, readRgba } from './readback.ts'
+import { TILE_BUDGET, TileRowCache, ringRows, rowsFromTiles, tileAt, tileGrid, type TileBudget, type TileGrid } from './tiles.ts'
+import { REFERENCE_HEIGHT, bandHeight, passCount } from './limits.ts'
 import { sheetAspect, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
 
 /**
@@ -280,8 +282,6 @@ function cachedBackingTone(
   cache.tone.set(slot, entry)
   return entry
 }
-
-const toneOf = (r: { tone: ToneField; fontSize: number }) => ({ field: r.tone, fontSize: r.fontSize })
 
 /** Get a valid cache for these settings, rebuilding only when the inputs move. */
 export function ensureCache(
@@ -805,6 +805,17 @@ export interface ToneSource {
    *  `backing(layer)` report as `fontSize`, without drawing anything. A
    *  source without it is asked for the tone itself. */
   size?(layer: TextLayer): number
+  /** Told once, before the first band, every pass the print presses and the
+   *  largest window of rows any of them reads (`maxWindow`): a source that
+   *  draws its tones as the bands need them (an export's, on the tile grid)
+   *  makes what it holds here, once. */
+  reserve?(rows: number, passes: readonly TonePass[]): void
+}
+
+/** One pass a tone is asked for: a layer's type or its backing. */
+export interface TonePass {
+  layer: TextLayer
+  kind: 'backing' | 'type'
 }
 
 const rowsOfTone = (t: PlateTone, w: number): ToneRows => ('rows' in t ? t.rows : wholeTone(t.field, w))
@@ -881,14 +892,21 @@ function drain<T>(steps: Generator<RenderProgress, T>): T {
 }
 
 export interface PrintOptions {
-  /** Rows pressed and printed at a time. The whole sheet (one band) by
-   *  default. A speed and memory knob only: every band height prints the
+  /** Rows pressed and printed at a time: `bandHeight(w, h)` by default
+   *  (BAND_PIXELS over the width; a sheet of up to 2 MP, every preview, is
+   *  one band). A speed and memory knob only: every band height prints the
    *  same bytes. */
   bandRows?: number
-  /** Called once every plate is pressed for the last time, before the last
-   *  rows are printed: what pressed the plates (an export's glyph canvas)
-   *  may be let go. */
+  /** Called once every plate is pressed for the last time and the last
+   *  band's photo rows are read, before the last rows are printed: what
+   *  pressed the plates (an export's tile canvas) may be let go. */
   onPressed?: () => void
+  /** Called once the photo's last rows are read: nothing reads the photo
+   *  after it, so an export may close its decode. */
+  onGround?: () => void
+  /** Every band's planes as they are composited, rows [y0, y1) of the sheet
+   *  from row y0 on (the harness's seam report reads what was inked). */
+  onBand?: (layers: readonly CompositeLayer[], y0: number, y1: number) => void
 }
 
 /**
@@ -975,7 +993,8 @@ interface Plate {
  * and mask is keyed to the sheet's rows, error diffusion carries its state
  * from band to band, and the photo's luminance is gathered from every band
  * before the first is pressed. So every band height prints the same bytes,
- * and one band (the default) is the sheet pressed whole.
+ * and one band is the sheet pressed whole (a sheet of up to 2 MP, every
+ * preview, is one band by default: `bandHeight`).
  *
  * Everything a band needs is made once, before the first band, at the
  * largest size any band needs, and reused (`maxWindow`): no band allocates.
@@ -990,7 +1009,7 @@ export function* printSheetSteps(
   h: number,
   opts: PrintOptions = {},
 ): Generator<RenderProgress, CompositeLayer[]> {
-  const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? h)))
+  const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? bandHeight(w, h))))
   const bands = Math.ceil(h / B)
   const passes = passCount(s)
   const scale = h / REFERENCE_HEIGHT
@@ -1040,7 +1059,11 @@ export function* printSheetSteps(
 
   // One set of working buffers for every band and every plate (see
   // Workspace), at the largest window any of them needs.
-  let ws = makeWorkspace(maxWindow(plates, B, h), w)
+  const windowRows = maxWindow(plates, B, h)
+  let ws = makeWorkspace(windowRows, w)
+  // A source that draws its tones as the bands read them makes what it
+  // holds now, with everything else (an export's rings of glyph tiles).
+  tones.reserve?.(windowRows, plates)
 
   // Where the photo is cut back to paper, accumulated across plates: under
   // the second ink wherever that ink cannot print on what is there, and under
@@ -1219,23 +1242,28 @@ export function* printSheetSteps(
     screened = undefined
     for (const p of plates) yield* pressBand(p, y0, y1, band)
 
-    if (y1 === h) {
-      // Pressed for the last time: the working buffers, the ground's
-      // luminance, the masks and the streams are let go (a suspended
-      // generator would otherwise hold them through the print), and the
-      // caller may let go of whatever it pressed with.
-      ws = RELEASED
-      lumaGrid = undefined
-      masks = undefined
-      for (const p of plates) p.grain = undefined
-      opts.onPressed?.()
-    }
-
     // The photo is the ground, so knocking out means taking its alpha down and
     // letting the paper underneath come back through. That alpha path is also
     // what a transparent PNG's own transparency takes: both read as paper. Done
     // as each pixel is printed (compositeLayers), not on a copy of the ground.
+    // Read before the last band lets go of what it pressed with: a photo
+    // drawn on the tile grid is drawn with the same canvas.
     const base = groundRows?.rows(y0, y1)
+
+    if (y1 === h) {
+      // Pressed for the last time and the photo read for the last time: the
+      // working buffers, the ground's luminance, the masks and the streams
+      // are let go (a suspended generator would otherwise hold them through
+      // the print), and the caller may let go of the photo and of whatever it
+      // pressed with.
+      ws = RELEASED
+      lumaGrid = undefined
+      masks = undefined
+      for (const p of plates) p.grain = undefined
+      if (groundRows) opts.onGround?.()
+      opts.onPressed?.()
+    }
+    opts.onBand?.(layers, y0, y1)
     const ground_ = base ? { base, knockout: knock, paperAmount: s.paperVeil ? 1 : 0 } : {}
     if (sampled) shade ??= new Float32Array(shadeRows * w)
     // Printed in rows of the output's band (or about a million pixels), so an
@@ -1284,6 +1312,281 @@ export function groundRect(media: MediaLayer, w: number, h: number): DrawRect {
 }
 
 /**
+ * Whether a photo lands on the sheet at its own pixels: drawn at exactly its
+ * size (`r` is `mw` x `mh`) at a whole-pixel offset. Every native export is
+ * (`snapRect`), and so is a smaller copy decoded to its rectangle. Such a
+ * ground is a copy of the photo's pixels at any origin, so it is drawn a band
+ * at a time; any other is resampled and drawn on the tile grid.
+ */
+export function isNativeRect(r: DrawRect, mw: number, mh: number): boolean {
+  return r.dw === mw && r.dh === mh && Number.isInteger(r.dx) && Number.isInteger(r.dy)
+}
+
+/** The pixel size of something drawImage draws, when it says (an ImageBitmap,
+ *  a canvas, an image); 0 when it does not. */
+function sourceSize(media: CanvasImageSource): { width: number; height: number } {
+  const m = media as { width?: unknown; height?: unknown }
+  return { width: typeof m.width === 'number' ? m.width : 0, height: typeof m.height === 'number' ? m.height : 0 }
+}
+
+/** Size a canvas, only if it is not that size already (sizing clears it and
+ *  resets its state, and allocates its pixels again). */
+function sizeCanvas(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  if (ctx.canvas.width !== w) ctx.canvas.width = w
+  if (ctx.canvas.height !== h) ctx.canvas.height = h
+}
+
+/**
+ * A photo at its own pixels, a band of rows at a time: each band blits its
+ * own rows, in column pieces at most `edge` wide, into a piece canvas with
+ * smoothing OFF (a nearest copy, so a 1:1 blit is the photo's pixels at any
+ * origin, on every engine measured: Chromium, and an iPhone's WebKit in the
+ * device spike), read back into the one band buffer made here. Nothing of
+ * the sheet's size is held, and no tile ring: every band draws only its rows.
+ */
+class NativeGroundRows implements GroundRows {
+  private readonly band: Uint8ClampedArray
+  private readonly pieceW: number
+  private readonly pieceH: number
+
+  constructor(
+    private readonly media: CanvasImageSource,
+    private readonly r: DrawRect,
+    private readonly w: number,
+    private readonly piece: CanvasRenderingContext2D,
+    rows: number,
+    edge: number,
+  ) {
+    this.pieceW = Math.max(1, Math.min(w, Math.floor(edge)))
+    this.pieceH = Math.max(1, rows)
+    this.band = new Uint8ClampedArray(this.pieceH * w * 4)
+    sizeCanvas(piece, this.pieceW, this.pieceH)
+  }
+
+  rows(y0: number, y1: number): Uint8ClampedArray {
+    const { piece, media, r, w } = this
+    if (y1 - y0 > this.pieceH) throw new RangeError(`NativeGroundRows: ${y1 - y0} rows asked of a band of ${this.pieceH}`)
+    for (let x0 = 0; x0 < w; x0 += this.pieceW) {
+      const pw = Math.min(this.pieceW, w - x0)
+      piece.clearRect(0, 0, this.pieceW, this.pieceH)
+      piece.imageSmoothingEnabled = false
+      piece.drawImage(media, r.dx - x0, r.dy - y0, r.dw, r.dh)
+      readRgba(piece, pw, y1 - y0, this.band, w, x0)
+    }
+    return this.band.subarray(0, (y1 - y0) * w * 4)
+  }
+}
+
+/** Draw a photo, resampled into `part` of a w x h sheet at the rectangle
+ *  `r`, on a cleared canvas exactly the part's size: the call the whole
+ *  sheet's ground was always drawn with, moved to the part's origin. */
+function drawGroundPart(ctx: CanvasRenderingContext2D, media: CanvasImageSource, r: DrawRect, part: SheetPart): void {
+  ctx.clearRect(0, 0, part.w, part.h)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(media, r.dx - part.x0, r.dy - part.y0, r.dw, r.dh)
+}
+
+/** Fills `slot` with tile row `ty` of the sheet: every tile of the row,
+ *  drawn and read back into its columns (the sheet's width a row, from the
+ *  tile row's first row). */
+export type TileRowLoader<T> = (ty: number, slot: T) => void
+
+/**
+ * A photo that is NOT at its own pixels (a small photo enlarged to the
+ * reference height, or any height the harness asks for): resampled, which is
+ * not the same bytes under translation, so it is drawn on the tile grid
+ * (absolute tiles, each drawn with smoothing 'high' as the whole sheet was:
+ * `groundTiles`) into one ring shared by the luminance pass and the press. A
+ * sheet of one tile is drawn as it always was.
+ */
+export class TiledGroundRows implements GroundRows {
+  private readonly cache: TileRowCache<Uint8ClampedArray<ArrayBuffer>>
+  private readonly span: Uint8ClampedArray<ArrayBuffer>
+
+  /** @param rows the most rows a band asks for at once. */
+  constructor(
+    private readonly grid: TileGrid,
+    rows: number,
+    load: TileRowLoader<Uint8ClampedArray<ArrayBuffer>>,
+  ) {
+    const { w, h, tileH } = grid
+    this.cache = new TileRowCache(ringRows(grid, rows), () => new Uint8ClampedArray(w * Math.min(tileH, h) * 4), load)
+    this.span = new Uint8ClampedArray(grid.rows > 1 ? Math.min(rows, h) * w * 4 : 0)
+  }
+
+  rows(y0: number, y1: number): Uint8ClampedArray {
+    return rowsFromTiles(this.grid, this.cache, 4, this.span, y0, y1)
+  }
+}
+
+/** The photo's tiles, resampled at `r`, drawn into the tile canvas one at a
+ *  time and read back into a tile row of RGBA. */
+function groundTiles(ctx: CanvasRenderingContext2D, media: CanvasImageSource, r: DrawRect, grid: TileGrid): TileRowLoader<Uint8ClampedArray> {
+  return (ty, slot) => {
+    for (let cx = 0; cx < grid.cols; cx++) {
+      const t = tileAt(grid, cx, ty)
+      sizeCanvas(ctx, t.w, t.h)
+      drawGroundPart(ctx, media, r, t)
+      readRgba(ctx, t.w, t.h, slot, grid.w, t.x0)
+    }
+  }
+}
+
+/**
+ * An export's glyph tones, on the tile grid: each pass's tone read from a
+ * ring of its tile rows, filled by `load` as the bands reach them
+ * (`glyphTiles`: every tile of the row drawn into the one tile canvas and its
+ * alpha read back). `reserve` makes the rings, once, before the first band.
+ */
+export class TiledTones implements ToneSource {
+  private rings = new Map<string, TileRowCache<Uint8Array<ArrayBuffer>>>()
+  private span: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+
+  constructor(
+    private readonly grid: TileGrid,
+    private readonly load: (pass: TonePass, ty: number, slot: Uint8Array) => void,
+  ) {}
+
+  size(layer: TextLayer): number {
+    return plateFontSize(layer, this.grid.h)
+  }
+
+  reserve(rows: number, passes: readonly TonePass[]): void {
+    const { w, h, tileH } = this.grid
+    // What an earlier press made goes before anything new is made.
+    this.release()
+    this.span = new Uint8Array(this.grid.rows > 1 ? Math.min(rows, h) * w : 0)
+    for (const pass of passes) {
+      const { layer, kind } = pass
+      this.rings.set(
+        `${kind}:${layer.id}`,
+        new TileRowCache(ringRows(this.grid, rows), () => new Uint8Array(w * Math.min(tileH, h)), (ty, slot) => this.load({ layer, kind }, ty, slot)),
+      )
+    }
+  }
+
+  private tone(layer: TextLayer, kind: TonePass['kind']): PlateTone {
+    const ring = this.rings.get(`${kind}:${layer.id}`)
+    if (!ring) throw new Error(`TiledTones: no ring for the ${kind} of "${layer.id}" (reserve first)`)
+    return { rows: { rows: (a, b) => rowsFromTiles(this.grid, ring, 1, this.span, a, b) }, fontSize: this.size(layer) }
+  }
+
+  type(layer: TextLayer): PlateTone {
+    return this.tone(layer, 'type')
+  }
+
+  backing(layer: TextLayer): PlateTone {
+    return this.tone(layer, 'backing')
+  }
+
+  /** Let the rings go (the press is done with them). */
+  release(): void {
+    this.rings = new Map()
+    this.span = new Uint8Array(0)
+  }
+}
+
+/** Every pass's glyph tiles (or backing tiles), drawn into the tile canvas
+ *  one at a time and read back into a tile row of alpha. One layout per
+ *  layer (`planGlyphs`), made once and kept in `plans`: every tile draws the
+ *  same calls, only the tile's origin differs. */
+function glyphTiles(ctx: CanvasRenderingContext2D, grid: TileGrid, plans: Map<string, GlyphPlan>): (pass: TonePass, ty: number, slot: Uint8Array) => void {
+  return ({ layer, kind }, ty, slot) => {
+    let plan = plans.get(layer.id)
+    if (!plan) {
+      plan = planGlyphs(ctx, layer, grid.h)
+      plans.set(layer.id, plan)
+    }
+    for (let cx = 0; cx < grid.cols; cx++) {
+      const t = tileAt(grid, cx, ty)
+      sizeCanvas(ctx, t.w, t.h)
+      if (kind === 'type') drawGlyphs(ctx, plan, layer, grid.w, grid.h, t)
+      else drawBacking(ctx, plan, layer, grid.w, grid.h, t)
+      readAlpha(ctx, t.w, t.h, slot, grid.w, t.x0)
+    }
+  }
+}
+
+/** What an export draws on. */
+export interface ExportCanvases {
+  /** The tile canvas: every glyph tile, and a resampled photo's tiles, are
+   *  drawn into it in turn, sized to each tile (clipped to the sheet: a
+   *  sheet of one tile is drawn on a canvas of its own size). */
+  tile: CanvasRenderingContext2D
+  /** A canvas for a photo at its own pixels, blitted a band at a time: made
+   *  when such a photo is pressed. */
+  piece?: () => CanvasRenderingContext2D
+}
+
+export interface ExportPressOptions {
+  /** Rows pressed at a time; `bandHeight(w, h)` by default. */
+  bandRows?: number
+  /** The tile grid's budget; TILE_BUDGET by default (a test forces small
+   *  tiles with it). */
+  tileBudget?: TileBudget
+  /** As renderPrint's `onGround`: fired once the photo's last rows are read. */
+  onGround?: () => void
+  /** See PrintOptions.onBand. */
+  onBand?: PrintOptions['onBand']
+  /** The plates' layouts, by layer id: made on first use and kept here, so
+   *  a press run again (a retry) does not lay the type out again. */
+  plans?: Map<string, GlyphPlan>
+}
+
+/**
+ * An export's press, in stages: the band engine fed from the tile grid. No
+ * canvas, array or tone of the sheet's size is made here: the glyphs come off
+ * the tile grid a tile row at a time, the photo a band at a time (at its own
+ * pixels) or off the tile grid (resampled), the noise is sampled where it is
+ * printed, and the printed rows go to `out` a band at a time.
+ */
+function* exportSteps(
+  out: SheetOutput,
+  s: PrintSettings,
+  height: number,
+  media: CanvasImageSource | null,
+  canvases: ExportCanvases,
+  opts: ExportPressOptions,
+): Generator<RenderProgress, void> {
+  const { w, h } = outputSize(sheetAspect(s), height)
+  const grid = tileGrid(w, h, opts.tileBudget)
+  const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? bandHeight(w, h))))
+  const noise = sampledNoise(s, w, h)
+  const tones = new TiledTones(grid, glyphTiles(canvases.tile, grid, opts.plans ?? new Map()))
+
+  let ground: GroundRows | undefined
+  let piece: CanvasRenderingContext2D | null = null
+  if (media && s.media) {
+    yield { step: 'photo', pass: 0, passes: passCount(s) }
+    const r = groundRect(s.media, w, h)
+    const size = sourceSize(media)
+    if (isNativeRect(r, size.width, size.height)) {
+      if (!canvases.piece) throw new Error('A photo at its own pixels is pressed a band at a time, on a canvas the export hands over.')
+      piece = canvases.piece()
+      ground = new NativeGroundRows(media, r, w, piece, B, (opts.tileBudget ?? TILE_BUDGET).edge)
+    } else {
+      ground = new TiledGroundRows(grid, B, groundTiles(canvases.tile, media, r, grid))
+    }
+  } else {
+    opts.onGround?.()
+  }
+
+  yield* printSheetSteps(out, s, ground, tones, noise, w, h, {
+    bandRows: B,
+    onGround: opts.onGround,
+    onBand: opts.onBand,
+    // The tiles are done once the plates are and the photo is read: the
+    // rings and the tile canvas go before the last rows are printed.
+    onPressed: () => {
+      tones.release()
+      canvases.tile.canvas.width = 0
+      if (piece) piece.canvas.width = 0
+    },
+  })
+}
+
+/**
  * Render a full print.
  *
  * Synchronous: this is the preview's entry point, run inside one animation
@@ -1307,34 +1610,37 @@ export function renderPrint(
    *  gives, never one its own size gives. */
   media: CanvasImageSource | null = null,
   /** Called once the photo has been copied into the ground, when nothing
-   *  further reads `media`: an export closes its full-size decode here rather
-   *  than holding it through the whole press. */
+   *  further reads `media`. */
   onGround?: () => void,
 ): void {
-  drain(renderSteps(ctx, scratch, s, cacheRef, overlay, height, media, onGround))
+  drain(previewSteps(ctx, scratch, s, cacheRef, overlay, height, media, onGround))
 }
 
-export interface AsyncRenderOptions {
+export interface AsyncRenderOptions extends ExportPressOptions {
   /** Checked at every step; once aborted, the render stops there and rejects
    *  with an AbortError. */
   signal?: AbortSignal
   /** Where the render has got to, at every step. */
   onProgress?: (progress: RenderProgress) => void
-  /** As renderPrint's `onGround`. */
-  onGround?: () => void
-  /** Rows pressed and printed at a time (`PrintOptions.bandRows`); the whole
-   *  sheet by default. Every band height prints the same bytes. */
-  bandRows?: number
+  /** Makes the canvas a photo at its own pixels is blitted into, a band at
+   *  a time (`ExportCanvases.piece`). */
+  makeCanvas?: () => CanvasRenderingContext2D
 }
 
 /**
- * Render a full print for an export: the SAME stages as `renderPrint`, with a
- * yield to the event loop between them, so a render of many seconds leaves
- * the page able to paint its progress and take a Cancel. It adds nothing but
- * the yields, the abort checks and the progress reports, so at one height it
- * prints exactly the pixels the preview does (harness `--parity`). Never an
- * overlay, and no cache: a one-shot render reads its noise where it prints
- * it (bit for bit the preview's arrays) and keeps nothing for a next frame.
+ * Render a full print for an export: the export's press (`exportSteps`: the
+ * band engine on the tile grid), painted into `ctx` a band at a time, with a
+ * yield to the event loop between its steps, so a render of many seconds
+ * leaves the page able to paint its progress and take a Cancel. Never an
+ * overlay, and no cache: a one-shot render reads its noise where it prints it
+ * (bit for bit the preview's arrays) and keeps nothing for a next frame.
+ *
+ * On a sheet of one tile (up to 4.19 MP, at most 4096 wide: every height the
+ * preview and the harness record) it prints exactly the pixels the preview
+ * does (harness `--parity`). Above that the export rasterises type on the
+ * tile grid, which the preview never does (README "Pressed in bands").
+ *
+ * @param scratch the tile canvas (`ExportCanvases.tile`).
  */
 export async function renderPrintAsync(
   ctx: CanvasRenderingContext2D,
@@ -1344,7 +1650,15 @@ export async function renderPrintAsync(
   media: CanvasImageSource | null,
   opts: AsyncRenderOptions = {},
 ): Promise<void> {
-  const steps = renderSteps(ctx, scratch, s, null, null, height, media, opts.onGround, opts.bandRows)
+  const { w, h } = outputSize(sheetAspect(s), height)
+  sizeCanvas(ctx, w, h)
+  // The sheet is printed a band of rows at a time into one band-sized buffer,
+  // and each band put on the canvas: the canvas already holds the print, so
+  // it is not held a second time in a full-size array.
+  const rows = Math.max(1, Math.min(h, Math.floor(PRINT_BAND_PIXELS / w)))
+  const image = ctx.createImageData(w, rows)
+  const out: SheetOutput = { band: image.data, rows, put: (y0, y1) => ctx.putImageData(image, 0, y0, 0, 0, w, y1 - y0) }
+  const steps = exportSteps(out, s, height, media, { tile: scratch, piece: opts.makeCanvas }, opts)
   try {
     for (;;) {
       throwIfAborted(opts.signal)
@@ -1369,37 +1683,26 @@ export function throwIfAborted(signal: AbortSignal | undefined): void {
 }
 
 /**
- * Both entry points' one implementation, in stages.
- *
- * @param cacheRef the preview's cache, or null for an export: a one-shot render
- *   keeps nothing for a next frame, so it samples the noise where it prints it
- *   and drops each plate's glyphs once the plate is pressed.
+ * The preview's render, in stages: the whole sheet in one canvas, its glyph
+ * rasters and noise cached across frames (`RenderCache`). A preview is under
+ * 2 MP, so it is one band and one tile: the band engine presses it whole.
  */
-function* renderSteps(
+function* previewSteps(
   ctx: CanvasRenderingContext2D,
   scratch: CanvasRenderingContext2D,
   s: PrintSettings,
-  cacheRef: { current: RenderCache | null } | null,
+  cacheRef: { current: RenderCache | null },
   overlay: OverlaySpec | null,
   height: number,
   media: CanvasImageSource | null,
   onGround: (() => void) | undefined,
-  bandRows?: number,
 ): Generator<RenderProgress, void> {
   const { w, h } = outputSize(sheetAspect(s), height)
+  sizeCanvas(ctx, w, h)
+  sizeCanvas(scratch, w, h)
 
-  if (ctx.canvas.width !== w || ctx.canvas.height !== h) {
-    ctx.canvas.width = w
-    ctx.canvas.height = h
-  }
-  if (scratch.canvas.width !== w || scratch.canvas.height !== h) {
-    scratch.canvas.width = w
-    scratch.canvas.height = h
-  }
-
-  const cache = cacheRef ? ensureCache(cacheRef.current, s, w, h) : null
-  if (cacheRef) cacheRef.current = cache
-  const noise: SheetNoise = cache ?? sampledNoise(s, w, h)
+  const cache = ensureCache(cacheRef.current, s, w, h)
+  cacheRef.current = cache
 
   // The photo is laid down first — before any type is rasterised — because the
   // type needs to know what is underneath it before it can decide what colour
@@ -1408,48 +1711,26 @@ function* renderSteps(
   let ground: Uint8ClampedArray | undefined
   if (media && s.media) {
     yield { step: 'photo', pass: 0, passes: passCount(s) }
-    const r = groundRect(s.media, w, h)
-    scratch.clearRect(0, 0, w, h)
-    scratch.imageSmoothingQuality = 'high'
-    scratch.drawImage(media, r.dx, r.dy, r.dw, r.dh)
-    ground = scratch.getImageData(0, 0, w, h).data
+    drawGroundPart(scratch, media, groundRect(s.media, w, h), { x0: 0, y0: 0, w, h })
+    ground = new Uint8ClampedArray(w * h * 4)
+    readRgba(scratch, w, h, ground, w)
   }
   onGround?.()
 
-  // The sheet is printed a band of rows at a time into one band-sized buffer,
-  // and each band put on the canvas: the canvas already holds the print, so
-  // it is not held a second time in a full-size array.
   const rows = Math.max(1, Math.min(h, Math.floor(PRINT_BAND_PIXELS / w)))
   const image = ctx.createImageData(w, rows)
   yield* printSheetSteps(
     { band: image.data, rows, put: (y0, y1) => ctx.putImageData(image, 0, y0, 0, 0, w, y1 - y0) },
     s,
     ground,
-    cache
-      ? {
-          type: (layer) => cachedTone(scratch, layer, cache, w, h),
-          backing: (layer) => cachedBackingTone(scratch, layer, cache, w, h),
-          size: (layer) => plateFontSize(layer, h),
-        }
-      : {
-          type: (layer) => toneOf(rasterizeText(scratch, layer, w, h)),
-          backing: (layer) => toneOf(rasterizeBacking(scratch, layer, w, h)),
-          size: (layer) => plateFontSize(layer, h),
-        },
-    noise,
+    {
+      type: (layer) => cachedTone(scratch, layer, cache, w, h),
+      backing: (layer) => cachedBackingTone(scratch, layer, cache, w, h),
+      size: (layer) => plateFontSize(layer, h),
+    },
+    cache,
     w,
     h,
-    {
-      bandRows,
-      // An export's glyph canvas is done once the plates are: let it go before
-      // the print and the encode (4 bytes a pixel). The preview keeps its own
-      // for the next frame.
-      onPressed: cache
-        ? undefined
-        : () => {
-            scratch.canvas.width = 0
-          },
-    },
   )
 
   if (overlay) drawOverlay(ctx, s, overlay, w, h)

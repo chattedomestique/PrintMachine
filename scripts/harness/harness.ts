@@ -18,11 +18,13 @@
  * so there are no binary fixtures and the same pixels come back every run.
  */
 
-import { renderPrint, renderPrintAsync, type RenderCache } from '../../src/engine/render.ts'
+import { groundRect, isNativeRect, outputSize, plateGeometry, plateHalo, renderPrint, renderPrintAsync, type AsyncRenderOptions, type RenderCache } from '../../src/engine/render.ts'
+import { cssFont, layerFont, lineRects, planGlyphs } from '../../src/engine/text.ts'
+import { tileGrid } from '../../src/engine/tiles.ts'
 import { JpegEncoder } from '../../src/engine/encode/jpeg.ts'
 import { PngEncoder } from '../../src/engine/encode/png.ts'
 import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
-import type { PrintSettings } from '../../src/engine/types.ts'
+import { sheetAspect, type PrintSettings } from '../../src/engine/types.ts'
 import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
 import plain from './docs/plain.json'
 import photoAsShot from './docs/photo-asshot.json'
@@ -197,16 +199,36 @@ export interface RenderResult {
   png?: string
 }
 
+/** Options of a render through the export's entry point only: the preview
+ *  always presses its sheet whole, in one tile. */
+interface ExportOnly {
+  /** Rows pressed at a time. */
+  bandRows?: number
+  /** The tile grid's budget, [edge, pixels]: `[512, 65536]` forces 512x128
+   *  tiles, so a 1000 px sheet is many tiles. */
+  tile?: [number, number]
+}
+
+function exportOptions(opts: ExportOnly & { async?: boolean }): AsyncRenderOptions {
+  if ((opts.bandRows !== undefined || opts.tile !== undefined) && !opts.async) {
+    throw new Error('bandRows and tile are export options: render through the export entry ({ async: true })')
+  }
+  return {
+    bandRows: opts.bandRows,
+    tileBudget: opts.tile ? { edge: opts.tile[0], pixels: opts.tile[1] } : undefined,
+    makeCanvas: () => context(true),
+  }
+}
+
 async function render(
   name: string,
   height: number,
   /** `async`: through the export's entry point, renderPrintAsync, instead of
-   *  the preview's (the parity gate renders both). `bandRows`: the export
-   *  pressed that many rows at a time; only through the export's entry,
-   *  since the preview always presses its sheet whole. */
-  opts: { photo?: number; png?: boolean; async?: boolean; bandRows?: number } = {},
+   *  the preview's (the parity gate renders both). `bandRows`, `tile`: see
+   *  ExportOnly. */
+  opts: { photo?: number; png?: boolean; async?: boolean } & ExportOnly = {},
 ): Promise<RenderResult> {
-  if (opts.bandRows !== undefined && !opts.async) throw new Error('bandRows is an export option: render through the export entry ({ async: true })')
+  const exportOpts = exportOptions(opts)
   const settings = load(name)
   const media = settings.media
     ? await photoBitmap(settings.media.width, settings.media.height, opts.photo)
@@ -216,7 +238,7 @@ async function render(
   const cacheRef: { current: RenderCache | null } = { current: null }
 
   const t0 = performance.now()
-  if (opts.async) await renderPrintAsync(out, scratch, settings, height, media, { bandRows: opts.bandRows })
+  if (opts.async) await renderPrintAsync(out, scratch, settings, height, media, exportOpts)
   else renderPrint(out, scratch, settings, cacheRef, null, height, media)
   const ms = performance.now() - t0
 
@@ -229,6 +251,185 @@ async function render(
   out.canvas.width = 0
   scratch.canvas.width = 0
   return { sha256, ms, w, h, png }
+}
+
+/** A render through the export entry, its pixels and where any plate inked
+ *  (coverage over 0 in any plane), for the seam report. */
+async function exportPixels(settings: PrintSettings, height: number, opts: ExportOnly & { photo?: number }, ground?: ImageBitmap) {
+  const media = ground ?? (settings.media ? await photoBitmap(settings.media.width, settings.media.height, opts.photo) : null)
+  const out = context(false)
+  const scratch = context(true)
+  let inked: Uint8Array | null = null
+  await renderPrintAsync(out, scratch, settings, height, media, {
+    ...exportOptions({ ...opts, async: true }),
+    onBand: (layers, y0, y1) => {
+      const w = out.canvas.width
+      inked ??= new Uint8Array(w * out.canvas.height)
+      const n = (y1 - y0) * w
+      for (const l of layers) for (let i = 0; i < n; i++) if (l.coverage[i] > 0) inked[y0 * w + i] = 1
+    },
+  })
+  const { width: w, height: h } = out.canvas
+  const data = out.getImageData(0, 0, w, h).data
+  out.canvas.width = 0
+  scratch.canvas.width = 0
+  return { data, w, h, inked: inked ?? new Uint8Array(w * h) }
+}
+
+/**
+ * Tiles against one canvas (P-4): the document through the export entry on
+ * the tile grid `tile` and on a single tile as large as the sheet, compared
+ * pixel by pixel. Reports the differing output pixels against the inked ones
+ * (where any plate's coverage is over 0 in the single-tile render), how many
+ * differ by more than 128 levels, the plates whose box crosses a seam of the
+ * grid, and whether every differing pixel lies inside the box of such a plate
+ * (its line boxes turned and placed as drawn, widened by its halo and half its
+ * font size).
+ */
+async function seam(name: string, height: number, tile: [number, number], opts: { photo?: number; glyphsOnly?: boolean } = {}) {
+  const settings = load(name)
+  // `glyphsOnly`: the type's share alone. The photo is drawn once, as one
+  // canvas would draw it, and both renders take that same ground at its own
+  // pixels (a copy, the same bytes on any grid), so only the glyphs' tiles
+  // differ.
+  let ground: ImageBitmap | undefined
+  let pressed = settings
+  if (opts.glyphsOnly && settings.media) {
+    const { w, h } = outputSize(sheetAspect(settings), height)
+    const c = context(true)
+    c.canvas.width = w
+    c.canvas.height = h
+    const photo = await photoBitmap(settings.media.width, settings.media.height, opts.photo)
+    c.imageSmoothingQuality = 'high'
+    const r = groundRect(settings.media, w, h)
+    c.drawImage(photo, r.dx, r.dy, r.dw, r.dh)
+    ground = await createImageBitmap(c.canvas)
+    c.canvas.width = 0
+    pressed = { ...settings, media: { ...settings.media, width: w, height: h, scale: 1, x: 0.5, y: 0.5 } }
+  }
+  const a = await exportPixels(pressed, height, { tile, photo: opts.photo }, ground)
+  const b = await exportPixels(pressed, height, { tile: [1 << 20, 2 ** 40], photo: opts.photo }, ground)
+  ground?.close()
+  const { w, h } = a
+  const grid = tileGrid(w, h, { edge: tile[0], pixels: tile[1] })
+  // Every plate's box on the sheet, as drawn, and whether it crosses a seam.
+  const measureCtx = context(true)
+  const plates: { id: string; kind: string; box: { x0: number; y0: number; x1: number; y1: number }; crosses: boolean; widened: { x0: number; y0: number; x1: number; y1: number } }[] = []
+  let index = 0
+  for (const layer of settings.layers) {
+    const plan = planGlyphs(measureCtx, layer, h)
+    const rects = lineRects(plan.layout, layer.align, plan.blockLeft, plan.firstBaseline)
+    const turn = (layer.rotation * Math.PI) / 180
+    const [c, sn] = [Math.cos(turn), Math.sin(turn)]
+    let x0 = Infinity
+    let y0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    for (const r of rects) {
+      for (const [px, py] of [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]) {
+        const X = layer.x * w + px * c - py * sn
+        const Y = layer.y * h + px * sn + py * c
+        x0 = Math.min(x0, X)
+        y0 = Math.min(y0, Y)
+        x1 = Math.max(x1, X)
+        y1 = Math.max(y1, Y)
+      }
+    }
+    for (const kind of layer.backing ? ['backing', 'type'] : ['type']) {
+      const g = plateGeometry(settings.press, { fontSize: plan.fontSize, index }, settings.seed, h)
+      const pad = plateHalo(g).total + plan.fontSize / 2
+      const crosses = rects.length > 0 && (Math.floor(y0 / grid.tileH) !== Math.floor((y1 - 1) / grid.tileH) || Math.floor(x0 / grid.tileW) !== Math.floor((x1 - 1) / grid.tileW))
+      plates.push({ id: layer.id, kind, box: { x0, y0, x1, y1 }, crosses, widened: { x0: x0 - pad, y0: y0 - pad, x1: x1 + pad, y1: y1 + pad } })
+      index++
+    }
+  }
+  measureCtx.canvas.width = 0
+  // A photo that is not at its own pixels is drawn on the tile grid too, and
+  // a resampled ground differs from one canvas's by a level here and there
+  // along a seam; through the second ink's switch and the knockout that
+  // reaches the type over it, wherever the type is. So with such a ground
+  // the type's differences are looked for in every plate's box.
+  const resampled = !!pressed.media && !groundNative(pressed, w, h)
+  let inked = 0
+  let differ = 0
+  let differBytes = 0
+  let over1 = 0
+  let over128 = 0
+  let maxDiff = 0
+  let outside = 0
+  for (let i = 0; i < w * h; i++) {
+    if (b.inked[i]) inked++
+    let d = 0
+    for (let k = 0; k < 3; k++) {
+      const e = Math.abs(a.data[i * 4 + k] - b.data[i * 4 + k])
+      if (e) differBytes++
+      d = Math.max(d, e)
+    }
+    if (d === 0) continue
+    differ++
+    if (d > 128) over128++
+    maxDiff = Math.max(maxDiff, d)
+    if (d <= 1) continue
+    over1++
+    const x = i % w
+    const y = (i - x) / w
+    if (!plates.some((p) => (p.crosses || resampled) && x >= p.widened.x0 && x < p.widened.x1 && y >= p.widened.y0 && y < p.widened.y1)) outside++
+  }
+  return {
+    name,
+    height,
+    glyphsOnly: !!opts.glyphsOnly,
+    w,
+    h,
+    tile: `${grid.tileW}x${grid.tileH}`,
+    tiles: grid.cols * grid.rows,
+    resampled,
+    inked,
+    differ,
+    differBytes,
+    bytes: w * h * 3,
+    over1,
+    over128,
+    maxDiff,
+    outside,
+    pctOfInked: inked ? (100 * differ) / inked : 0,
+    over128PctOfInked: inked ? (100 * over128) / inked : 0,
+    pctOfBytes: (100 * differBytes) / (w * h * 3),
+    crossing: plates.filter((p) => p.crosses).map((p) => `${p.kind} ${p.id}`),
+  }
+}
+
+/**
+ * The canvas font cap in this browser: a 9,800 px 'O' (over CANVAS_FONT_MAX,
+ * under Chromium's own 10,000 px clamp) measured directly and as the engine
+ * measures it over the cap (at fontSize / k, times k), in each face; and
+ * what this browser does with a font over its clamp (12,000 px read back).
+ */
+function fontCap() {
+  const ctx = context(true)
+  const faces = defaultSettings().layers.map((l) => l.fontId)
+  const rows = []
+  for (const fontId of [...new Set([...faces, 'poster', 'grotesk', 'serif', 'mono'] as const)]) {
+    for (const bold of [false, true]) {
+      const layer = { ...defaultSettings().layers[0], fontId, bold, text: 'O', size: 1, tracking: 0 }
+      const px = 9800
+      ctx.font = cssFont(layerFont(layer, px))
+      const direct = ctx.measureText('O').width
+      const plan = planGlyphs(ctx, layer, px)
+      const capped = plan.layout.lines[0].glyphs[0].width
+      rows.push({ face: `${fontId}${bold ? ' bold' : ''}`, direct, capped, k: plan.k, rel: Math.abs(capped - direct) / direct })
+    }
+  }
+  ctx.font = cssFont({ stack: 'serif', weight: 700, px: 12000 })
+  const clamp = ctx.font
+  ctx.canvas.width = 0
+  return { rows, clamp }
+}
+
+/** Whether the document's photo lands on a w x h sheet at its own pixels. */
+function groundNative(s: PrintSettings, w: number, h: number): boolean {
+  if (!s.media) return false
+  return isNativeRect(groundRect(s.media, w, h), s.media.width, s.media.height)
 }
 
 /** Rec. 709 luma of an RGBA buffer, 0..255. */
@@ -506,6 +707,8 @@ declare global {
     H: {
       docs: string[]
       render: typeof render
+      seam: typeof seam
+      fontCap: typeof fontCap
       scaleCorrelation: typeof scaleCorrelation
       save: typeof save
       prepare: typeof prepare
@@ -517,4 +720,4 @@ declare global {
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, seam, fontCap, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, normalized: !!normalizeSettings }

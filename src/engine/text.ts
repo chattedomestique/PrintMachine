@@ -18,7 +18,8 @@
  * type with tracking applied, where kerning barely registers.
  */
 
-import { SIZE_MAX, SIZE_MIN } from './limits.ts'
+import { CANVAS_FONT_MAX, SIZE_MAX, SIZE_MIN } from './limits.ts'
+import { readAlpha } from './readback.ts'
 import { fontById, type TextAlign, type TextLayer } from './types.ts'
 
 export interface PlacedGlyph {
@@ -326,31 +327,125 @@ export function justifyOffsets(
 
 /* ── Rasterisation ────────────────────────────────────────────────────── */
 
-interface Prepared {
+/**
+ * A plate laid out and placed, ready to be drawn into any tile of its sheet:
+ * one layout per plate, so every tile draws the same glyphs at the same
+ * places.
+ */
+export interface GlyphPlan {
   layout: TextLayout
   /** Left edge of the block, in canvas space, before per-line alignment. */
   blockLeft: number
   /** Baseline of the first line, in canvas space (textBaseline is 'middle'). */
   firstBaseline: number
+  /** The type's size, in pixels (the layout's). */
+  fontSize: number
+  /** The font cap's factor: the canvas is set at fontSize / k and drawn under
+   *  `scale(k, k)`. 1 at or under CANVAS_FONT_MAX, where nothing changes. */
+  k: number
 }
 
-/** Set the font, lay the block out, and place it. Shared by both rasterisers
- *  so the glyphs and the backing are positioned by identical arithmetic. */
-function prepare(ctx: CanvasRenderingContext2D, layer: TextLayer, h: number): Prepared {
+/** How far a type size is over the canvas's font cap: 1 at or under it. */
+export const fontCapFactor = (fontSize: number): number => Math.max(1, fontSize / CANVAS_FONT_MAX)
+
+/**
+ * Set the font, lay the block out, and place it. Shared by both rasterisers
+ * so the glyphs and the backing are positioned by identical arithmetic.
+ *
+ * Type over CANVAS_FONT_MAX is measured at fontSize / k and its advances
+ * scaled back by k, so the layout is the full size's while the canvas never
+ * sees a font over the cap (Chromium clamps at 10,000 px and would measure
+ * and draw the clamped size). At k = 1 every call is the plain one: `/ 1`
+ * and `* 1` are exact.
+ */
+export function planGlyphs(ctx: CanvasRenderingContext2D, layer: TextLayer, h: number): GlyphPlan {
+  const k = fontCapFactor(plateFontSize(layer, h))
   const setFont = (size: number) => {
-    ctx.font = cssFont(layerFont(layer, size))
+    ctx.font = cssFont(layerFont(layer, size / k))
   }
 
   setFont(plateFontSize(layer, h))
   const measure: MeasureFn = (text, fontSize) => {
     setFont(fontSize)
-    return ctx.measureText(text).width
+    return ctx.measureText(text).width * k
   }
 
   const layout = layoutText(layer, h, measure)
   setFont(layout.fontSize)
 
-  return { layout, ...blockOrigin(layout) }
+  return { layout, ...blockOrigin(layout), fontSize: layout.fontSize, k }
+}
+
+/** The part of the sheet a canvas holds: the whole sheet, or one tile of it
+ *  (the canvas is exactly the tile's size). */
+export interface SheetPart {
+  x0: number
+  y0: number
+  w: number
+  h: number
+}
+
+/** Clear the canvas and set it up to draw a plate into `part` of a w x h
+ *  sheet: the part's origin first, then the layer's placement, then the font
+ *  cap's scale. Run `draw` inside, then restore. */
+function inPart(
+  ctx: CanvasRenderingContext2D,
+  plan: GlyphPlan,
+  layer: TextLayer,
+  w: number,
+  h: number,
+  part: SheetPart,
+  draw: () => void,
+): void {
+  ctx.clearRect(0, 0, part.w, part.h)
+  ctx.save()
+  // Every tile draws the same calls; only where the sheet sits differs.
+  ctx.translate(-part.x0, -part.y0)
+  transform(ctx, layer, w, h)
+  if (plan.k !== 1) ctx.scale(plan.k, plan.k)
+  // Set here as well as when planned: a canvas resized since (a tile of
+  // another size) has lost its font.
+  ctx.font = cssFont(layerFont(layer, plan.fontSize / plan.k))
+  ctx.fillStyle = '#fff'
+  draw()
+  ctx.restore()
+}
+
+/**
+ * Draw a plate's glyphs into `part` of its sheet: opaque white on a cleared
+ * canvas, so the alpha channel is the tone. The canvas is exactly the part's
+ * size.
+ */
+export function drawGlyphs(ctx: CanvasRenderingContext2D, plan: GlyphPlan, layer: TextLayer, w: number, h: number, part: SheetPart): void {
+  const { layout, blockLeft, firstBaseline, k } = plan
+  inPart(ctx, plan, layer, w, h, part, () => {
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    // Tracking is already baked into the glyph offsets; leaving the native
+    // property set would apply it a second time.
+    try {
+      ctx.letterSpacing = '0px'
+    } catch {
+      // Older engines lack the property entirely, which is fine — nothing to undo.
+    }
+    layout.lines.forEach((line, i) => {
+      const ox = blockLeft + alignOffset(line.width, layout.widest, layer.align)
+      const oy = firstBaseline + i * layout.lineHeight
+      for (const g of line.glyphs) {
+        if (isSpace(g.ch)) continue
+        ctx.fillText(g.ch, (ox + g.x) / k, oy / k)
+      }
+    })
+  })
+}
+
+/** Draw a plate's backing (a block behind each line) into `part` of its
+ *  sheet, as `drawGlyphs` draws its glyphs. */
+export function drawBacking(ctx: CanvasRenderingContext2D, plan: GlyphPlan, layer: TextLayer, w: number, h: number, part: SheetPart): void {
+  const { layout, blockLeft, firstBaseline, k } = plan
+  inPart(ctx, plan, layer, w, h, part, () => {
+    for (const r of lineRects(layout, layer.align, blockLeft, firstBaseline)) ctx.fillRect(r.x / k, r.y / k, r.w / k, r.h / k)
+  })
 }
 
 /** Where a laid-out block sits about the layer's origin: centred on it, its
@@ -368,7 +463,8 @@ function transform(ctx: CanvasRenderingContext2D, layer: TextLayer, w: number, h
 }
 
 /**
- * Draw one text layer's glyphs and return its tone field.
+ * Draw one text layer's glyphs over the whole sheet and return its tone
+ * field: the sheet as one part (`drawGlyphs`), read back.
  *
  * Glyphs are drawn opaque white onto a cleared context, and the alpha channel
  * *is* the tone — antialiasing included, which gives the screen something to
@@ -382,35 +478,11 @@ export function rasterizeText(
   w: number,
   h: number,
 ): { tone: Uint8Array; fontSize: number } {
-  ctx.clearRect(0, 0, w, h)
-  const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, h)
-
-  ctx.save()
-  transform(ctx, layer, w, h)
-  ctx.fillStyle = '#fff'
-  ctx.textBaseline = 'middle'
-  ctx.textAlign = 'left'
-  // Tracking is already baked into the glyph offsets; leaving the native
-  // property set would apply it a second time.
-  try {
-    ctx.letterSpacing = '0px'
-  } catch {
-    // Older engines lack the property entirely, which is fine — nothing to undo.
-  }
-
-  layout.lines.forEach((line, i) => {
-    const ox = blockLeft + alignOffset(line.width, layout.widest, layer.align)
-    const oy = firstBaseline + i * layout.lineHeight
-    for (const g of line.glyphs) {
-      if (isSpace(g.ch)) continue
-      ctx.fillText(g.ch, ox + g.x, oy)
-    }
-  })
-
-  ctx.restore()
+  const plan = planGlyphs(ctx, layer, h)
+  drawGlyphs(ctx, plan, layer, w, h, { x0: 0, y0: 0, w, h })
   // The rendered size is reported back so the press can scale its detail to
   // the type that actually landed on the sheet.
-  return { tone: alphaToTone(ctx, w, h), fontSize: layout.fontSize }
+  return { tone: alphaToTone(ctx, w, h), fontSize: plan.fontSize }
 }
 
 /** The backing's padding round each line, in em, and its corners: square. */
@@ -527,33 +599,19 @@ export function rasterizeBacking(
   w: number,
   h: number,
 ): { tone: Uint8Array; fontSize: number } {
-  ctx.clearRect(0, 0, w, h)
-  const { layout, blockLeft, firstBaseline } = prepare(ctx, layer, h)
-
-  ctx.save()
-  transform(ctx, layer, w, h)
-  ctx.fillStyle = '#fff'
-  for (const r of lineRects(layout, layer.align, blockLeft, firstBaseline)) ctx.fillRect(r.x, r.y, r.w, r.h)
-  ctx.restore()
-  return { tone: alphaToTone(ctx, w, h), fontSize: layout.fontSize }
+  const plan = planGlyphs(ctx, layer, h)
+  drawBacking(ctx, plan, layer, w, h, { x0: 0, y0: 0, w, h })
+  return { tone: alphaToTone(ctx, w, h), fontSize: plan.fontSize }
 }
 
 /**
  * Read the context's alpha channel as a tone field: the alpha bytes
  * themselves, 0..255 — exactly what was drawn, in a quarter of the memory a
- * float field takes. Read in bands, so the canvas's RGBA is never copied out
- * whole (4 bytes a pixel, for one byte of it).
+ * float field takes. Read in pieces (readback.ts), so the canvas's RGBA is
+ * never copied out whole (4 bytes a pixel, for one byte of it).
  */
 function alphaToTone(ctx: CanvasRenderingContext2D, w: number, h: number): Uint8Array {
   const tone = new Uint8Array(w * h)
-  const band = Math.max(1, Math.floor(TONE_BAND_PIXELS / w))
-  for (let y = 0; y < h; y += band) {
-    const rows = Math.min(band, h - y)
-    const { data } = ctx.getImageData(0, y, w, rows)
-    for (let i = y * w, p = 3, end = (y + rows) * w; i < end; i++, p += 4) tone[i] = data[p]
-  }
+  readAlpha(ctx, w, h, tone, w)
   return tone
 }
-
-/** Pixels of RGBA read from the glyph canvas at a time. */
-const TONE_BAND_PIXELS = 1 << 18

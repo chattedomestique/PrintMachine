@@ -26,9 +26,15 @@
  * the right size and plausible content (type-shaped strokes where glyphs
  * were drawn, a photo where the photo was), so the engine walks the same
  * branches it does in a browser. What lives OUTSIDE typed arrays is stated,
- * not measured: the export's two canvases (4 bytes per pixel each) and the
- * decoded original photo (4 bytes per photo pixel, held only until the photo
- * is in the ground). The report adds them up per phase.
+ * not measured: the export's canvases (the sheet-sized output canvas, the
+ * tile canvas at its largest tile, the piece canvas a photo at its own
+ * pixels is blitted into a band at a time; 4 bytes a pixel each) and the
+ * decoded original photo (4 bytes per photo pixel, held until the photo's
+ * last rows are read, at the last band). The report adds them up.
+ *
+ * The live bytes are read at every allocation of a quarter of the sheet's
+ * pixels or more and at every step of the press (the band engine's buffers
+ * are band-sized, so a peak between two large allocations is not missed).
  */
 
 import { spawnSync } from 'node:child_process'
@@ -56,13 +62,12 @@ const GATE = 35
 
 /* ── Accounting ──────────────────────────────────────────────────────── */
 
-const meter = { on: false, base: 0, n: 1, total: 0, peak: 0, phase: 'ground', peaks: { ground: 0, press: 0, print: 0 }, threshold: 1 }
+const meter = { on: false, base: 0, n: 1, total: 0, peak: 0, threshold: 1 }
 const live = () => process.memoryUsage().arrayBuffers - meter.base
 function sample() {
   globalThis.gc()
   const bytes = live()
   if (bytes > meter.peak) meter.peak = bytes
-  if (bytes > meter.peaks[meter.phase]) meter.peaks[meter.phase] = bytes
 }
 /** Wrap every typed-array constructor, once the modules are loaded (the
  *  bundler checks `instanceof Uint8Array` on its own buffers while loading). */
@@ -117,6 +122,9 @@ function fakeContext() {
     save: () => stack.push(m.slice()),
     restore: () => (m = stack.pop() ?? [1, 0, 0, 1, 0, 0]),
     translate: (x, y) => (m = [m[0], m[1], m[2], m[3], m[4] + m[0] * x + m[2] * y, m[5] + m[1] * x + m[3] * y]),
+    // The font cap draws type over CANVAS_FONT_MAX under scale(k, k).
+    scale: (sx, sy) => (m = [m[0] * sx, m[1] * sx, m[2] * sy, m[3] * sy, m[4], m[5]]),
+    imageSmoothingEnabled: true,
     rotate: (a) => {
       const c = Math.cos(a)
       const s = Math.sin(a)
@@ -195,43 +203,49 @@ for (const c of CASES.filter((k) => k.id === only)) {
   const scratch = fakeContext()
   const photo = s.media ? { width: s.media.width, height: s.media.height } : null
 
+  // The canvases the press makes, at their largest: the tile canvas is
+  // sized to each tile in turn, the piece canvas once.
+  const largest = { tile: 0, piece: 0 }
+  const measured = (ctx, key) => {
+    let w = 0
+    let h = 0
+    Object.defineProperties(ctx.canvas, {
+      width: { get: () => w, set: (v) => ((w = v), (largest[key] = Math.max(largest[key], w * h))) },
+      height: { get: () => h, set: (v) => ((h = v), (largest[key] = Math.max(largest[key], w * h))) },
+    })
+    return ctx
+  }
+  measured(scratch, 'tile')
+
   globalThis.gc()
   meter.base = process.memoryUsage().arrayBuffers
-  Object.assign(meter, { on: true, n, total: 0, peak: 0, phase: 'ground', peaks: { ground: 0, press: 0, print: 0 }, threshold: Math.floor(n / 4) })
+  Object.assign(meter, { on: true, n, total: 0, peak: 0, threshold: Math.floor(n / 4) })
+  let samples = 0
   const t0 = performance.now()
   await renderPrintAsync(out, scratch, s, plan.height, photo, {
-    onGround: () => {
+    makeCanvas: () => measured(fakeContext(), 'piece'),
+    onGround: () => sample(),
+    onProgress: () => {
+      samples++
       sample()
-      meter.phase = 'press'
-    },
-    onProgress: (p) => {
-      // What the print holds, read as it starts.
-      if (p.step === 'print' && meter.phase !== 'print') {
-        meter.phase = 'print'
-        sample()
-      }
     },
   })
   const ms = performance.now() - t0
   meter.on = false
 
-  // The export's two canvases, 4 B/px each, until the plates are pressed;
-  // then the glyph canvas is let go (its width set to 0) and only the output
-  // canvas is left for the print and the encode.
-  const released = scratch.canvas.width === 0
   const decode = photoBytes / n
-  const groundPhase = meter.peaks.ground / n + 8 + decode
-  const pressPhase = meter.peaks.press / n + 8
-  const printPhase = meter.peaks.print / n + (released ? 4 : 8)
+  const canvases = 4 + (4 * largest.tile) / n + (4 * largest.piece) / n
   const peak = meter.peak / n
   const over = c.gated && peak > GATE
   if (over) failed = true
   console.log(`case ${c.id}: ${c.name}`)
-  console.log(`  ${plan.width}x${plan.height} (${(n / 1e6).toFixed(1)} MP), ${s.layers.length} plates, ${ms.toFixed(0)} ms in node`)
+  console.log(`  ${plan.width}x${plan.height} (${(n / 1e6).toFixed(1)} MP), ${s.layers.length} plates, ${ms.toFixed(0)} ms in node, ${samples} steps sampled`)
   console.log(`  typed arrays: peak ${fmt(peak)} B/px (${(meter.peak / 1e6).toFixed(0)} MB)${c.gated ? (over ? `  OVER the ${GATE} B/px gate` : '  ok') : '  (recorded)'}; allocated in all ${fmt(meter.total / n)} B/px`)
-  const total = Math.max(groundPhase, pressPhase, printPhase)
-  console.log(`  typed arrays by phase: laying the photo down ${fmt(meter.peaks.ground / n)}, pressing ${fmt(meter.peaks.press / n)}, printing ${fmt(meter.peaks.print / n)} B/px`)
-  console.log(`  with the canvases (8 B/px; 4 once ${released ? 'the glyph canvas is let go, before the print' : 'pressed — NOT let go'}) and the decoded photo (${fmt(decode)} B/px, until it is in the ground):`)
-  console.log(`    laying the photo down ${fmt(groundPhase)}, pressing ${fmt(pressPhase)}, printing ${fmt(printPhase)} B/px: peak ${fmt(total)} B/px (${((total * n) / 1e6).toFixed(0)} MB)\n`)
+  const total = peak + canvases + decode
+  console.log(
+    `  with the canvases (${fmt(canvases)} B/px: the output 4, the tile canvas at its largest ${fmt((4 * largest.tile) / n)}, the photo's piece canvas ${fmt((4 * largest.piece) / n)}) ` +
+      `and the decoded photo (${fmt(decode)} B/px, until its last rows are read):`,
+  )
+  console.log(`    peak ${fmt(total)} B/px (${((total * n) / 1e6).toFixed(0)} MB)\n`)
 }
 process.exit(failed ? 1 : 0)

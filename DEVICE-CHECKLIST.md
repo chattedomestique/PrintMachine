@@ -182,11 +182,11 @@ So:
       it; desktop memory is not a phone's): with Safari's Web Inspector
       attached (Timelines > Memory), Save a 12 MP portrait on 4:5 with the
       second ink on — the page's peak stays under about 450 MB (the count is
-      359 MB: typed arrays, both canvases and the decoded photo), and the tab
-      is not reloaded
+      194 MB: typed arrays, the canvases and the decoded photo, pressed in
+      bands), and the tab is not reloaded
 - [ ] The heaviest print the budget allows: a 4096x4096 photo on 1:1, three
       plates, two with a second ink and one with a backing — Save completes
-      without a tab reload (counted: 558 MB at peak)
+      without a tab reload (counted: 255 MB at peak)
 
 > Expect megabytes, not the ~300 KB the playbook cites for photographs: the
 > print is saved at the photo's own pixels, and a halftone screen over paper
@@ -214,21 +214,28 @@ Saving at full resolution (none of these can be automated):
 
 ## Limits to settle on a device
 
-- [ ] **The device spike.** Open `scripts/device-spike/spike.html` on the
-      phone (it is one self-contained file and makes no network request;
-      it can be published as a private page on its own: it carries the
-      Independent JPEG Group's README, which their licence asks for wherever
-      the encoder's source goes), pick a large photo from the
-      camera roll if there is one (ideally 40 MP), tap **Run all tests**, then
-      **Copy results**, and send the table back. It decodes the photo and a
-      40 MP synthetic one as Save will, checks that a 1:1 blit is a copy at two
-      tile origins, reads where a cropped decode of an EXIF-rotated JPEG lands,
-      the largest canvas font the engine honours, four canvas sizes, and the
-      JPEG encoder's speed against the developer machine's (R). If the tab
-      reloads during a test, run it again: the page says which test did not
-      finish, and that is a result. The building of prints over 16.7 MP waits
-      on this table: the tile ground on the blit, the decode wiring on the
-      decode.
+- [x] **The device spike**, run twice on 2026-10-25 on an iPhone (iOS 18.7,
+      in the Claude app's in-app browser: WKWebView, Safari's WebKit; 430x932
+      CSS px, DPR 3, 4 cores), with no photo picked, so the 40 MP decode is of
+      the page's own synthetic 7728x5152 JPEG. Measured: that file decoded in
+      277 and 306 ms, first drawn in 55 and 50 ms, the tab kept; a 1:1 blit of
+      it identical across two tile origins with smoothing off and with it
+      'high'; a cropped decode of an EXIF-rotated JPEG landing on the
+      requested rect of the upright image at orientations 1, 3, 6 and 8;
+      every canvas font up to 12,000 px honoured; the sentinel pixel read back
+      at 4096x1024, 4096x512, 2048x2048 and 4096x4096; the JPEG encoder at 62
+      and 65 ms/MP (R 0.49 and 0.52 against this repository's reference
+      machine); and (second run) a CompressionStream write resolving only once
+      its chunk is taken, 20 of 20 round trips exact. The tile grid and the
+      per-band blit of a photo at its own pixels are built on the blit row.
+      The page is `scripts/device-spike/spike.html` (self-contained, no
+      network request; it carries the Independent JPEG Group's README, which
+      their licence asks for wherever the encoder's source goes, so it can be
+      published as a private page on its own).
+- [ ] **The spike with a real 40 MP camera file.** Run the spike again with a
+      40 MP (or larger) photo from the camera roll picked: line (a) "your
+      photo" must PASS (decode and first draw in 8 s or less, the tab kept).
+      Only the synthetic file has been decoded on the phone so far.
 - [ ] **The canvas ceiling is an area.** The app has no edge cap, only the
       16.7 MP area (`MAX_AREA`; the 4096 edge is Borders' number, and
       WebKit's documented limit is an area). On an iPhone, with Safari's Web

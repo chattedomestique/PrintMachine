@@ -109,6 +109,7 @@ export async function savePrint(
   if (settings.media && !media) throw new MissingPhotoError()
   const format = opts.format ?? 'jpeg'
   const plan = planPrint(settings, { maxHeight: opts.maxHeight })
+  let piece: CanvasRenderingContext2D | null = null
   try {
     // Every full-size canvas the press uses, allocated and proved before any
     // work: over its limit an iOS canvas does not throw, it hands back a
@@ -120,6 +121,14 @@ export async function savePrint(
       signal: opts.signal,
       onProgress: opts.onProgress,
       onGround: opts.onGround,
+      // A photo at its own pixels is blitted a band at a time into a canvas
+      // of its own (at most 4096 wide and a band tall).
+      makeCanvas: () => {
+        const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+        if (!ctx) throw new Error('Could not open a canvas to press the print.')
+        piece = ctx
+        return ctx
+      },
     })
     const { width, height } = exportCtx.canvas
     // The renderer makes the width from the same aspect; a canvas of any other
@@ -141,6 +150,7 @@ export async function savePrint(
   } finally {
     exportCtx.canvas.width = 0
     scratchCtx.canvas.width = 0
+    if (piece) (piece as CanvasRenderingContext2D).canvas.width = 0
   }
 }
 

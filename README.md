@@ -660,9 +660,13 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   preview frame never hold their buffers together), and the rest of the page
   is inert (the status card and its Cancel aside), keyboard undo included, so
   the document cannot change under the press and the file is the print on
-  screen. The two entry points print the same bytes
-  at the same height: `npm run harness -- --out p.json --no-hashes --parity
-  1000` renders every harness document through both and fails if any differs.
+  screen. The two entry points print the same bytes at the same height on
+  every sheet of one tile (up to 4.19 MP and at most 4096 px wide, which is
+  every height the preview and the harness record): `npm run harness -- --out
+  p.json --no-hashes --parity 1000` renders every harness document through
+  both and fails if any differs. Above one tile the export rasterises type on
+  the tile grid, which the preview never does, and a glyph that crosses a
+  seam can differ at its antialiased edge (see "The glyphs and a resampled photo on a tile grid").
 - **Sharing.** The share sheet needs the tap that opens it to be recent, and a
   press outlasts it. A press that finished within a second of the tap would
   share at once, but at a photo's own resolution none does (a print with no
@@ -750,12 +754,13 @@ hides, its words are not read out again).
 ### What an export holds
 
 An export at a photo's own resolution is 11-17 MP, so every sheet-sized buffer
-is 45-67 MB of a phone's memory, and an iPhone evicts a tab that holds too
-much. `scripts/measure-alloc.mjs` counts it exactly: it runs the export path in
-node with every typed-array constructor wrapped and, at each sheet-sized
-allocation, collects the garbage and reads back what is still live — the same
-on every run, unlike a browser's resident memory. Its gate is 35 bytes per
-output pixel.
+would be 45-67 MB of a phone's memory, and an iPhone evicts a tab that holds
+too much. `scripts/measure-alloc.mjs` counts it exactly: it runs the export
+path in node with every typed-array constructor wrapped and, at every
+allocation of a quarter of the sheet's pixels or more and at every step of the
+press, collects the garbage and reads back what is still live — the same on
+every run, unlike a browser's resident memory. Its gate is 35 bytes per output
+pixel.
 
 - **No cache, no noise fields.** The preview keeps the paper's shade and the
   ink film's mottle as arrays, reused every frame. An export reads them where
@@ -787,35 +792,77 @@ output pixel.
   rows at a time into one band-sized buffer, and each band is put on the
   canvas, instead of a full-size copy being put at the end; the knockout
   takes the photo's alpha down as each pixel is printed, instead of on a copy
-  of the photo; a glyph raster's alpha is read a band at a time.
-- **Let go as soon as done.** Once the plates are pressed the workspace, the
-  ground's luminance and the switch mask are dropped, and an export's glyph
-  canvas is emptied (its width set to 0), before the print and the encode.
-- **Pressed in bands, the same bytes.** The print can be pressed a band of
-  rows at a time (`printSheet`'s `bandRows`): each band presses every plate,
-  reading only the rows its stages reach (the tear's three blur passes, the
-  shift, the grain's two cell rows of look-ahead: `windowsFor`), cuts its
-  knockout and splits its second ink, and is printed. Every noise, screen and
-  mask is keyed to the sheet's own rows, the grain carries its error from
-  band to band (`GrainStream`), and the photo's luminance is gathered from
-  every band before the first is pressed, so every band height prints the
-  same bytes (`banded.test.ts` against the digests recorded before, and the
-  harness's `--bands` through the export's entry); everything a band needs is
-  made once, before the first, and no band allocates anything of 512 KiB or
-  more (`banded.test.ts`): what a band does make is a few arrays a row long
-  (the blur's column sums, per plate; the luminance's column lookup, per split
-  plate) and a few floats. One set of numbers in a band can differ from the
-  sheet's in its last bit: the tear's vertical blur keeps a float64 running
-  sum per column, and a window's sums start on another row, so where they
-  round (a blur of about 10 px or more: sheets over 6,000 px tall, dense with
-  type) a blurred float can come out a bit apart, some of them inside the
-  range the tear's threshold reads. The tear has turned every one measured
-  into the same torn tone (`window.test.ts`, up to a blur of 20 px, a sheet
-  12,000 px tall), so the bytes are the same; re-seeding the sums on fixed
-  rows of the sheet, at the price of a wider window, is the lever if one ever
-  does not. Save still presses the sheet as one band: pressing in bands
-  lowers the memory only once the glyphs and the photo are drawn a band at a
-  time too, which is the step after.
+  of the photo; every read-back of a canvas (glyphs, the photo) is done in
+  pieces of at most a megabyte, straight into a buffer made once
+  (`engine/readback.ts`).
+- **Let go as soon as done.** Once the plates are pressed for the last time
+  and the photo's last rows are read, the workspace, the ground's luminance,
+  the switch mask and the tile rings are dropped, and an export's tile canvas
+  is emptied (its width set to 0), before the last rows are printed and the
+  encode.
+- **Pressed in bands, the same bytes.** The print is pressed a band of rows
+  at a time (`printSheet`'s `bandRows`; by default `bandHeight`: 2^21 output
+  pixels over the sheet's width, at least 32 rows, so a preview, at most a
+  megapixel, is one band, and a 12 MP export four to six): each band presses
+  every plate, reading only the rows its stages reach (the tear's three blur
+  passes, the shift, the grain's two cell rows of look-ahead: `windowsFor`),
+  cuts its knockout and splits its second ink, and is printed. Every noise,
+  screen and mask is keyed to the sheet's own rows, the grain carries its
+  error from band to band (`GrainStream`), and the photo's luminance is
+  gathered from every band before the first is pressed, so every band height
+  prints the same bytes (`banded.test.ts` against the digests recorded
+  before, and the harness's `--bands` through the export's entry, on the real
+  tile grid and on forced 512x128 tiles; `scripts/check-bands.mjs` in CI);
+  everything a band needs is made once, before the first, and no band
+  allocates anything of 512 KiB or more (`banded.test.ts`): what a band does
+  make is a few arrays a row long (the blur's column sums, per plate; the
+  luminance's column lookup, per split plate) and a few floats. One set of
+  numbers in a band can differ from the sheet's in its last bit: the tear's
+  vertical blur keeps a float64 running sum per column, and a window's sums
+  start on another row, so where they round (a blur of about 10 px or more:
+  sheets over 6,000 px tall, dense with type) a blurred float can come out a
+  bit apart, some of them inside the range the tear's threshold reads. The
+  tear has turned every one measured into the same torn tone
+  (`window.test.ts`, up to a blur of 20 px, a sheet 12,000 px tall), so the
+  bytes are the same; re-seeding the sums on fixed rows of the sheet, at the
+  price of a wider window, is the lever if one ever does not.
+- **The glyphs and a resampled photo on a tile grid.** Two things in a print
+  come off a canvas, and neither is the same bytes when the canvas moves: a
+  glyph rasterised into a band of rows differs at its antialiased edge from
+  the same glyph on one canvas (the rasteriser flattens a curve differently
+  under another clip), and a photo drawn at a fraction of its size differs by
+  a level here and there. So an export draws them on a FIXED grid of tiles
+  (`engine/tiles.ts`: at most 4096 px wide and 2^22 pixels, so a 40 MP sheet
+  is 2 x 6 tiles of 4096x1024), each tile a canvas of its own whose pixels
+  depend on its place and nothing else, and every band takes its rows from a
+  small ring of tile rows (`TileRowCache`, two rows per plate at the user's
+  sizes), drawn once each. A sheet of one tile (up to 4.19 MP and 4096 wide:
+  the preview, the reference sheet and every height the harness records) is
+  drawn exactly as the whole sheet always was. On a bigger sheet, a glyph
+  whose box crosses a seam between two tiles is rasterised by two clipped
+  canvases, and its antialiased edge can differ from one canvas's, by a few
+  levels and at a few isolated pixels by up to about 180, over the glyph's
+  whole extent. It is a property of poster type, not of captions; measured
+  (`run.mjs --seam`, the type's share, the photo drawn once): the 40 MP 4:5
+  sheet (photo-second-ink at 5152, 4122x5152, 12 tiles) 0.232% of the inked
+  pixels, 0.0028% by more than 128 levels; at 3000, 0.048%, 0.0013%; on forced
+  512x128 tiles at 1000, 0.534%, 0.0098%; the default document at 3600, type
+  at 20% at 3600 and a backing over the photo at 2400: 0 bytes. Every
+  differing pixel lies inside the box of a plate that crosses a seam. A
+  resampled photo on the grid differs by at most a level, on 0.06% of the
+  bytes at 3000 (none at 2400, where the enlargement is exactly 2x). A photo
+  at its own pixels (every native save) needs no grid: each band blits its
+  own rows, smoothing off, which is a copy at any origin (the same bytes as
+  one canvas, measured in Chromium and on an iPhone's WebKit by the device
+  spike).
+- **Type over 9216 px.** Chromium will not set a canvas font over 10,000 px
+  (it clamps the size and draws the glyphs up to 38% too small), which 120%
+  type passes on a sheet over 8,333 px tall. So type over `CANVAS_FONT_MAX`
+  (9216 px) is measured and drawn at its size over k under `scale(k, k)`: the
+  layout, advances, line height and backing at the full size, the canvas never
+  over the cap (`check-bands` measures a 9,800 px 'O' both ways in every face:
+  the same advance). At or under it nothing changes; no print a build before
+  the band engine could make had type over 8,513 px.
 - **The ground's luminance on a small grid.** The second ink decides each
   glyph's ink from the photo's luminance blurred across about a word — a
   radius of 500 px on a 12 MP export, the press's slowest pass and a
@@ -834,21 +881,26 @@ output pixel.
   keeps painting and Cancel is taken within a stage.
 
 Measured (`node scripts/measure-alloc.mjs`, `node scripts/measure-export.mjs`;
-before the diet -> after):
+before the diet -> after it -> pressed in bands on the tile grid; the last
+column's canvases are the sheet-sized output canvas, the largest tile and,
+for a photo at its own pixels, the band it is blitted into):
 
 | Case | Sheet | Typed arrays, peak | With canvases and the decoded photo | Chromium time | Chromium RSS |
 |---|---|---|---|---|---|
-| 1. 12 MP portrait, 4:5, second ink | 3024x3780 | 68.4 -> 23.4 B/px | 76 -> 31 B/px (359 MB) | 12.5 -> 5.8 s | +707 -> +311 MB |
-| 2. 3 plates, 4 passes, 4096x4096 | 16.8 MP | 92.7 -> 25.3 | 101 -> 33 (558 MB) | 39.2 -> 11.9 s | +1094 -> +491 MB |
-| 3. No photo | 2880x3600 | 44.5 -> 15.4 | 53 -> 23 (243 MB) | 7.8 -> 3.8 s | +388 -> +278 MB |
-| 4. Grain, 4096x4096 | 16.8 MP | 68.1 -> 23.3 | 76 -> 31 (524 MB) | 21.7 -> 8.0 s | +1104 -> +394 MB |
-| 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 | 120 -> 37 (625 MB) | 65.6 -> 18.7 s | +1484 -> +445 MB |
+| 1. 12 MP portrait, 4:5, second ink | 3024x3780 | 68.4 -> 23.4 -> 6.5 B/px | 76 -> 31 -> 17.0 B/px (194 MB) | 12.5 -> 5.8 -> 4.1 s | +707 -> +311 -> +213 MB |
+| 2. 3 plates, 4 passes, 4096x4096 | 16.8 MP | 92.7 -> 25.3 -> 5.7 | 101 -> 33 -> 15.2 (255 MB) | 39.2 -> 11.9 -> 8.4 s | +1094 -> +491 -> +258 MB |
+| 3. No photo | 2880x3600 | 44.5 -> 15.4 -> 5.6 | 53 -> 23 -> 11.2 (116 MB) | 7.8 -> 3.8 -> 2.5 s | +388 -> +278 -> +174 MB |
+| 4. Grain, 4096x4096 | 16.8 MP | 68.1 -> 23.3 -> 4.5 | 76 -> 31 -> 14.0 (235 MB) | 21.7 -> 8.0 -> 5.9 s | +1104 -> +394 -> +283 MB |
+| 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 -> 7.7 | 120 -> 37 -> 17.2 (289 MB) | 65.6 -> 18.7 -> 12.7 s | +1484 -> +445 -> +288 MB |
 
 The gate is the typed-array column (35 B/px, cases 1-4); desktop Chromium's
 memory is informational (V8 frees short-lived buffers far more eagerly than an
 iPhone's JavaScriptCore), and the phone's own is a DEVICE-CHECKLIST item. The
-legacy five-plate print (kept whole: see "The plate budget") costs 16% more
-than the worst print the budget allows, well inside the margin.
+legacy five-plate print (kept whole: see "The plate budget") costs a third
+more typed memory than the worst print the budget allows, well inside the
+margin. Pressed in bands, what is left is mostly what does not depend on the
+press: the decoded photo (4 B a photo pixel) and the output canvas (4 B a
+sheet pixel), the one sheet-sized canvas left.
 
 ### The same print at every size
 

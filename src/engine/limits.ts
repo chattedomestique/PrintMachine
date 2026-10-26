@@ -29,6 +29,48 @@ export const REFERENCE_HEIGHT = 1800
 export const MAX_AREA = 16_777_216
 
 /**
+ * The band engine's knobs. Every one is a MEMORY or SPEED knob: no value of
+ * any of them changes a byte of a print, but for the one named exception
+ * (TILE_PIXELS, below).
+ *
+ *  - TILE_EDGE, 4096: the widest canvas the export ever makes, the edge every
+ *    browser has always honoured. A sheet wider than it is drawn in columns.
+ *  - TILE_PIXELS, 2^22 (4,194,304): the pixels of one tile of the glyph grid
+ *    (and of a resampled photo's). A sheet of up to 4.19 MP and at most 4096
+ *    wide is ONE tile, drawn exactly as the whole sheet always was. Above it,
+ *    a glyph whose box crosses a seam between two tiles is rasterised by two
+ *    clipped canvases, and its antialiased edge may differ from one canvas's
+ *    by a few levels (README "Pressed in bands").
+ *  - BAND_PIXELS, 2^21: the output pixels pressed at a time, before the rows
+ *    each plate reads beyond them; the band is `floor(BAND_PIXELS / w)` rows
+ *    (`bandHeight`).
+ *  - MIN_BAND_ROWS, 32: no band is shorter, however wide the sheet.
+ */
+export const TILE_EDGE = 4096
+export const TILE_PIXELS = 1 << 22
+export const BAND_PIXELS = 1 << 21
+export const MIN_BAND_ROWS = 32
+
+/** The rows of the sheet pressed and printed at a time: BAND_PIXELS over
+ *  the width, at least MIN_BAND_ROWS, at most the sheet. A sheet of up to
+ *  2 MP (every preview) is one band. */
+export function bandHeight(w: number, h: number): number {
+  return Math.max(1, Math.min(h, Math.max(Math.floor(BAND_PIXELS / Math.max(1, w)), MIN_BAND_ROWS)))
+}
+
+/**
+ * The largest font size the engine ever sets on a canvas, in pixels.
+ * Chromium clamps `ctx.font` at 10,000 px (and measures and draws at the
+ * clamped size: a glyph 17 to 38% too small); an iPhone (iOS 18.7 WebKit)
+ * honoured 12,000 in the device spike. Above this, type is measured and drawn
+ * at fontSize / k under `ctx.scale(k, k)`, so the canvas never sees a font
+ * over it while layout, advances and glyphs all live at the full size. At or
+ * under it nothing changes: the largest font a build before the band engine
+ * could set was 8512.8 px (120% on a 1:3 sheet 7094 px tall).
+ */
+export const CANVAS_FONT_MAX = 9216
+
+/**
  * The export height of a print with no photo: 2 x REFERENCE_HEIGHT (a 4:5
  * sheet is 2880 x 3600, 10.4 MP). Type is vector and every effect scales, so
  * a larger sheet is strictly crisper; an integer ratio keeps the grain cells,

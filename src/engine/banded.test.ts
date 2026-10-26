@@ -270,7 +270,7 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
     })
   }
 
-  it('one band (what Save presses): one switch-mask buffer under grain too, however many switch points', () => {
+  it('one band (every sheet of up to 2 MP): one switch-mask buffer under grain too, however many switch points', () => {
     // Three plates switching at 0.5, 0.4 and 0.3. Under grain in bands each
     // point carries its stream and a buffer of the band's rows; pressed as
     // one band, the mask is remade in one buffer when the point changes, as

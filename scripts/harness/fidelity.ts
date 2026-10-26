@@ -165,7 +165,7 @@ async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format
  * compared with the part of the original the sheet shows, drawn at its own
  * pixels.
  */
-async function zone(w: number, h: number, aspect: PrintSettings['aspect'], format: ExportFormat = 'png', zoom = 1) {
+async function zone(w: number, h: number, aspect: PrintSettings['aspect'], format: ExportFormat = 'png', zoom = 1, alsoJpeg = false) {
   const file = await encode(zonePlate(w, h), 'image/jpeg', 0.92)
   const { layer, byteForByte, s, plan, pressed, ms } = await importAndSave(file, aspect, format, zoom)
   const out = await pixelsOf(pressed.blob)
@@ -188,6 +188,15 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
   // pixels, exactly.
   let maxDiff = 0
   if (same) for (let i = 0; i < refData.length; i++) maxDiff = Math.max(maxDiff, Math.abs(out.data[i] - refData[i]))
+  // The same print saved as Save saves it by default, a JPEG: its size and
+  // its sampling, read from its own frame header.
+  let jpeg: (ReturnType<typeof frameOf> & { bytes: number; ms: number }) | null = null
+  if (alsoJpeg) {
+    const again = await decodeOriginal(layer.id)
+    const t1 = performance.now()
+    const saved = await savePrint(s, again, { format: 'jpeg', onGround: () => again.close() })
+    jpeg = { ...frameOf(new Uint8Array(await saved.blob.arrayBuffer())), bytes: saved.blob.size, ms: Math.round(performance.now() - t1) }
+  }
   await deleteMedia(layer.id)
   return {
     photo: `${w}x${h}`,
@@ -204,7 +213,31 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
     corr: same ? correlation(a, b) : NaN,
     maxDiff: same ? maxDiff : NaN,
     ms: Math.round(ms),
+    jpeg,
   }
+}
+
+/** A JPEG's frame header (SOFn): which one, the image's size, and each
+ *  component's sampling factors, horizontal and vertical ("11 11 11" is
+ *  4:4:4, every colour sample kept). */
+function frameOf(b: Uint8Array): { marker: string; file: string; sampling: string } {
+  let i = 2
+  while (i + 9 < b.length) {
+    if (b[i] !== 0xff) {
+      i++
+      continue
+    }
+    const m = b[i + 1]
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+      const h = (b[i + 5] << 8) | b[i + 6]
+      const w = (b[i + 7] << 8) | b[i + 8]
+      const factors: string[] = []
+      for (let c = 0; c < b[i + 9]; c++) factors.push(b[i + 11 + 3 * c].toString(16).padStart(2, '0'))
+      return { marker: `SOF${m - 0xc0}`, file: `${w}x${h}`, sampling: factors.join(' ') }
+    }
+    i += 2 + ((b[i + 2] << 8) | b[i + 3])
+  }
+  return { marker: 'none', file: '?', sampling: '?' }
 }
 
 /**

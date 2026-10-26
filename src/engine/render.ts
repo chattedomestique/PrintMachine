@@ -918,10 +918,10 @@ export interface PrintOptions {
 /**
  * The ground's luminance grid (media.ts LumaGrid), gathered from every band
  * of the photo in turn, yielding at each. A full-size blur (cell 1) takes the
- * workspace when it is the sheet's size (one band), as it always has; a
- * smaller one leaves it its own.
+ * workspace when it is given and the sheet's size (one band), as it always
+ * has; otherwise it makes its own.
  */
-function* groundLuminance(ground: GroundRows, w: number, h: number, B: number, radius: number, ws: Workspace): Generator<RenderProgress, LumaGrid> {
+function* groundLuminance(ground: GroundRows, w: number, h: number, B: number, radius: number, ws?: Workspace): Generator<RenderProgress, LumaGrid> {
   const acc = new LumaAccumulator(w, h, radius)
   const bands = Math.ceil(h / B)
   for (let y0 = 0; y0 < h; y0 += B) {
@@ -929,7 +929,7 @@ function* groundLuminance(ground: GroundRows, w: number, h: number, B: number, r
     const y1 = Math.min(h, y0 + B)
     acc.addRows(ground.rows(y0, y1), y0, y1)
   }
-  const whole = ws.scratch.length >= w * h
+  const whole = !!ws && ws.scratch.length >= w * h
   return acc.finish(whole ? ws.scratch : undefined, whole ? ws.work : undefined)
 }
 
@@ -1064,6 +1064,37 @@ export function* printSheetSteps(
   }
   for (const p of plates) if (p.split) p.onDark = new Uint8ClampedArray(B * w)
 
+  // The ground's blurred luminance, held as a small grid (media.ts LumaGrid),
+  // gathered from every band of the photo before the first is pressed, and
+  // read back a band at a time into the workspace for each plate that
+  // switches. Blurred across roughly a word of the FIRST plate that switches.
+  // Anything finer and the mask reads the photograph's own grain — the
+  // glitter on water is the same value as white ink and about the size of a
+  // letter, so a tighter blur decides light-or-dark differently inside a
+  // single word. A word is the unit legibility is actually judged in, so it
+  // is the unit that commits.
+  //
+  // Pressed in bands, it is gathered before the press's buffers exist: at
+  // one cell a pixel (small type) it is the luminance of every pixel, two
+  // sheet-sized float fields while it is blurred, and one after, so it never
+  // coincides with the windows and rings. Pressed whole (every preview), the
+  // blur borrows the workspace's own buffers, the sheet's size there, as it
+  // always has (groundLuminance), so it comes after them.
+  //
+  // (Made in functions of their own, here and below: a generator's suspended
+  // frame keeps every local it ever set, so a block-scoped accumulator or
+  // buffer here would be held through every band and the print.)
+  const firstSplit = plates.find((p) => p.split)
+  const luminance = function* (ws?: Workspace): Generator<RenderProgress, LumaGrid | undefined> {
+    if (!firstSplit || !groundRows) return undefined
+    const grid = opts.luma?.grid ?? (yield* groundLuminance(groundRows, w, h, B, Math.max(2, firstSplit.fontSize * 1.5), ws))
+    // Kept for a press run again (a retry at another band height): the grid
+    // does not depend on the band.
+    if (opts.luma) opts.luma.grid = grid
+    return grid
+  }
+  let lumaGrid = bands > 1 ? yield* luminance() : undefined
+
   // One set of working buffers for every band and every plate (see
   // Workspace), at the largest window any of them needs.
   const windowRows = maxWindow(plates, B, h)
@@ -1079,24 +1110,8 @@ export function* printSheetSteps(
   // Held in bytes (0..255): only the anti-aliased skirt of a hole is between.
   const knock = plates.some((p) => p.cuts) ? new Uint8ClampedArray(B * w) : undefined
 
-  // The ground's blurred luminance, held as a small grid (media.ts LumaGrid),
-  // gathered from every band of the photo before the first is pressed, and
-  // read back a band at a time into the workspace for each plate that
-  // switches. Blurred across roughly a word of the FIRST plate that switches.
-  // Anything finer and the mask reads the photograph's own grain — the
-  // glitter on water is the same value as white ink and about the size of a
-  // letter, so a tighter blur decides light-or-dark differently inside a
-  // single word. A word is the unit legibility is actually judged in, so it
-  // is the unit that commits.
-  //
-  // (Made in functions of their own, here and below: a generator's suspended
-  // frame keeps every local it ever set, so a block-scoped accumulator or
-  // buffer here would be held through every band and the print.)
-  const firstSplit = plates.find((p) => p.split)
-  let lumaGrid = firstSplit && groundRows ? (opts.luma?.grid ?? (yield* groundLuminance(groundRows, w, h, B, Math.max(2, firstSplit.fontSize * 1.5), ws))) : undefined
-  // Kept for a press run again (a retry at another band height): the grid
-  // does not depend on the band.
-  if (opts.luma && lumaGrid) opts.luma.grid = lumaGrid
+  // Pressed whole, the luminance now (see above).
+  if (bands === 1) lumaGrid = yield* luminance(ws)
 
   // The screen index every switch mask is made at: the first one's (its
   // index + 1: the pass after it, as it always was). A mask is then a

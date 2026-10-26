@@ -320,6 +320,21 @@ describe('a band allocates nothing', { timeout: 120_000 }, () => {
     expect(fover.map((x) => x.bytes)).toEqual([f.w * f.h * 4, f.w * f.h * 4, f.w * f.h * 4])
   })
 
+  it('...made before the press makes its own buffers, so the two never coincide', () => {
+    // Type at 0.03 of a 300 px sheet (cell 1), in bands of 7: the
+    // luminance's two sheet-sized floats are made, and the second let go,
+    // before the workspace's three windows exist. Pressed whole, the blur
+    // borrows the workspace instead, so there the workspace comes first.
+    const r = run('halftone', 0.03, 7)
+    const sheet = r.w * r.h * 4
+    const window = r.E * r.w * 4
+    const luma = r.log.findIndex((x) => x.bytes === sheet)
+    const windows = r.log.findIndex((x) => x.bytes === window)
+    expect(luma).toBeGreaterThanOrEqual(0)
+    expect(r.log.filter((x) => x.bytes === window).length).toBe(3)
+    expect(windows).toBeGreaterThan(r.log.findLastIndex((x) => x.bytes === sheet))
+  })
+
   it('...and released to one: after the gathering, one sheet-sized float is still held through the bands, none once printed', async () => {
     // Type at 0.03 of a 300 px sheet (cell 1), in bands of 7: the field and
     // the blur's other half are made; the other half is let go when the

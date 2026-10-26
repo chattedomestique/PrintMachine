@@ -545,21 +545,40 @@ async function prepare(settings: PrintSettings): Promise<void> {
 
 /** Press the prepared document through the real savePrint; the photo is
  *  closed once its last rows are in the print, as Save does. `pressMs` is
- *  the time to the last band, `ms` to the file. */
-async function press(format: ExportFormat = 'jpeg'): Promise<{ w: number; h: number; bytes: number; ms: number; pressMs: number }> {
+ *  the time to the last band, `ms` to the file, and `encodeMs` the JPEG
+ *  encoder's own share of it (every row it took, and its finish), timed
+ *  around its two methods. */
+async function press(format: ExportFormat = 'jpeg'): Promise<{ w: number; h: number; bytes: number; ms: number; pressMs: number; encodeMs: number }> {
   if (!prepared) throw new Error('nothing prepared')
   const { settings, media } = prepared
   prepared = null
+  let encodeMs = 0
+  const proto = JpegEncoder.prototype as unknown as Record<'push' | 'finish', (this: unknown, ...a: unknown[]) => void>
+  const real = { push: proto.push, finish: proto.finish }
+  for (const name of ['push', 'finish'] as const) {
+    proto[name] = function (this: unknown, ...a: unknown[]) {
+      const t = performance.now()
+      try {
+        real[name].apply(this, a)
+      } finally {
+        encodeMs += performance.now() - t
+      }
+    }
+  }
   const t0 = performance.now()
   let pressMs = 0
-  const pressed = await savePrint(settings, media, {
-    format,
-    onGround: () => media?.close(),
-    onProgress: (p) => {
-      if (p.step === 'write') pressMs = performance.now() - t0
-    },
-  })
-  return { w: pressed.plan.width, h: pressed.plan.height, bytes: pressed.blob.size, ms: performance.now() - t0, pressMs }
+  try {
+    const pressed = await savePrint(settings, media, {
+      format,
+      onGround: () => media?.close(),
+      onProgress: (p) => {
+        if (p.step === 'write') pressMs = performance.now() - t0
+      },
+    })
+    return { w: pressed.plan.width, h: pressed.plan.height, bytes: pressed.blob.size, ms: performance.now() - t0, pressMs, encodeMs }
+  } finally {
+    Object.assign(proto, real)
+  }
 }
 
 /** The RGBA a file decodes to, and its sha256. */

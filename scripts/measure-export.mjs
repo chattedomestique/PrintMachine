@@ -4,13 +4,15 @@
  * more eagerly than an iPhone's JavaScriptCore, which is why the hard gate is
  * measure-alloc.mjs's deterministic count and, on a phone, DEVICE-CHECKLIST.
  *
- *   node scripts/measure-export.mjs           (cases 1-5 of export-cases.mjs)
- *   node scripts/measure-export.mjs 1 3
+ *   node scripts/measure-export.mjs           (cases 1-10 of export-cases.mjs;
+ *                                               case 8 with FULL=1)
+ *   node scripts/measure-export.mjs 1 3 7g
  *
  * Each case runs the real Save path (savePrint, JPEG) in a fresh browser, the
  * document and its photo prepared first; resident memory is summed over the
  * browser's process tree every 50 ms, and the peak over the press is reported
- * as a delta over the moment before it.
+ * as a delta over the moment before it. The time is split into the press
+ * (everything but the encoder) and the JPEG encoder's own share.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -51,9 +53,10 @@ function treeRss(pid) {
   return total / 1024
 }
 
-const only = process.argv.slice(2).map(Number).filter(Boolean)
+const only = process.argv.slice(2)
+const chosen = only.length ? CASES.filter((k) => only.includes(k.id)) : CASES.filter((k) => !k.pair && (!k.full || process.env.FULL === '1'))
 try {
-  for (const c of CASES.filter((k) => only.length === 0 || only.includes(k.id))) {
+  for (const c of chosen) {
     const browserServer = await chromium.launchServer({ executablePath, args: ['--js-flags=--max-old-space-size=8000'] })
     const pid = browserServer.process().pid
     const browser = await chromium.connect(browserServer.wsEndpoint())
@@ -73,7 +76,8 @@ try {
       if (errors.length) throw new Error(errors.join(' | '))
       const mp = (r.w * r.h) / 1e6
       console.log(
-        `case ${c.id}: ${c.name}\n  ${r.w}x${r.h} (${mp.toFixed(1)} MP): ${(r.ms / 1000).toFixed(1)} s (${(r.ms / mp).toFixed(0)} ms/MP), ` +
+        `case ${c.id}: ${c.name}\n  ${r.w}x${r.h} (${mp.toFixed(1)} MP): ${(r.ms / 1000).toFixed(1)} s (${(r.ms / mp).toFixed(0)} ms/MP: ` +
+          `press ${((r.ms - r.encodeMs) / mp).toFixed(0)}, encoder ${(r.encodeMs / mp).toFixed(0)}), ` +
           `peak RSS +${(peak - before).toFixed(0)} MB (${((peak - before) / mp).toFixed(0)} B/px), file ${(r.bytes / 1e6).toFixed(2)} MB`,
       )
     } finally {

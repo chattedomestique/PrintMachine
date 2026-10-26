@@ -18,7 +18,11 @@
  *    5712x4284 one on 4:5 (native, 3427x4284) and on its own sheet (native,
  *    5712x4284: no ceiling); a
  *    2268x4032 one zoomed to 113% on its own sheet (native, 2008x3569, a tall
- *    sheet whose width binds). Two controls prove the gate can fail: the same
+ *    sheet whose width binds); a 40 MP 7728x5152 one on its own sheet, on 4:5
+ *    and (with FULL=1) on 1:1 (7728x5152, 4122x5152, 5152x5152) and a 61 MP
+ *    9504x6336 one on 4:5 (5069x6336), each saved again as Save's JPEG, which
+ *    must be a baseline frame (SOF0) of the plan's size with every component
+ *    sampled 1x1 (4:4:4). Two controls prove the gate can fail: the same
  *    photo drawn half a pixel off its grid, and from a 2048 px copy (the old
  *    import), must both fall below it.
  *  - a JPEG whose EXIF says rotate 90 saves upright; a PNG's transparent hole
@@ -28,7 +32,9 @@
  *    and 40%) at h and 2h, corr(box2(render(2h)), render(h)) >= SCALE[doc]
  *    from the 1800 px reference height up (scripts/harness/harness.ts).
  *
- * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
+ * The Chromium binary: CHROMIUM_PATH, or the first of the usual places. The
+ * page holds a 61 MP photo, its output and the reference at once (about
+ * 1.2 GB of typed arrays at the 61 MP row), so Chromium's heap is raised.
  */
 
 import { existsSync } from 'node:fs'
@@ -76,7 +82,7 @@ try {
   const p = await page('fidelity.html', 'F')
 
   console.log('Native prints: the photo pixel for pixel (Laplacian ratio >= 0.98, correlation >= 0.999)')
-  for (const [w, h, aspect, plan, zoom = 1] of [
+  const rows = [
     [4032, 3024, 'original', '4032x3024'],
     [4032, 3024, '4:5', '2419x3024'],
     [6000, 4500, '4:5', '3600x4500'],
@@ -85,8 +91,17 @@ try {
     // A tall photo cropped by zooming on its own sheet: the width binds, and
     // the native height lands over 1:1 by more than 1.5 px over the height.
     [2268, 4032, 'original', '2008x3569', 1.13],
-  ]) {
-    const r = await p.evaluate(([w, h, a, z]) => window.F.zone(w, h, a, 'png', z), [w, h, aspect, zoom])
+    // 40 and 61 MP, each saved twice: as a PNG, compared pixel for pixel,
+    // and as Save's JPEG, its size and sampling read from its header. The
+    // 1:1 crop runs with FULL=1 (the CI budget).
+    [7728, 5152, 'original', '7728x5152', 1, true],
+    [7728, 5152, '4:5', '4122x5152', 1, true],
+    ...(process.env.FULL === '1' ? [[7728, 5152, '1:1', '5152x5152', 1, true]] : []),
+    [9504, 6336, '4:5', '5069x6336', 1, true],
+  ]
+  for (const [w, h, aspect, plan, zoom = 1, jpeg = false] of rows) {
+    const t = Date.now()
+    const r = await p.evaluate(([w, h, a, z, j]) => window.F.zone(w, h, a, 'png', z, j), [w, h, aspect, zoom, jpeg])
     const name = `${r.photo} on ${aspect}${zoom !== 1 ? ` at ${Math.round(zoom * 100)}%` : ''}`
     const size = `${r.plan.width}x${r.plan.height}`
     console.log(
@@ -98,6 +113,14 @@ try {
     gate(r.dimsMatch, `${name}: the file is ${r.file}, not the plan's ${size}`)
     gate(r.aligned, `${name}: the photo is not drawn at its own pixels`)
     gate(r.caption.reason === null, `${name}: the caption gives a reason (${r.caption.reason}) for a native print`)
+    if (jpeg) {
+      const j = r.jpeg
+      console.log(
+        `  ${''.padEnd(30)}    and as a JPEG: ${j.marker} ${j.file}, sampling ${j.sampling} ` +
+          `${gate(j.marker === 'SOF0' && j.file === size && j.sampling === '11 11 11', `${name}: the JPEG is ${j.marker} ${j.file} sampling ${j.sampling}, not SOF0 ${size} 11 11 11`)} ` +
+          `(${(j.bytes / 1e6).toFixed(1)} MB in ${(j.ms / 1000).toFixed(1)} s; the row ${((Date.now() - t) / 1000).toFixed(0)} s in all)`,
+      )
+    }
   }
 
   {

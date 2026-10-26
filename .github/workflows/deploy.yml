@@ -59,14 +59,19 @@ jobs:
           CHROMIUM_PATH: /usr/bin/google-chrome
 
       # "No down-rezzing at all" is a claim, so it is measured. The memory
-      # gate: the real export path in node with every typed array counted;
-      # it fails over 35 bytes per output pixel (an iPhone evicts a tab that
-      # holds too much, and desktop memory cannot show it).
+      # gate: the real export path in node with every typed array counted
+      # (an iPhone evicts a tab that holds too much, and desktop memory
+      # cannot show it): the older cases per output pixel, the 40 to 61 MP
+      # ones in megabytes, and a sheet twice as tall at the same width may
+      # hold at most 1.15 times as much. The 61 MP worst press (case 8) runs
+      # with FULL=1.
       - run: node scripts/measure-alloc.mjs
       # Save keeps every pixel of the photo: the real import and the real
-      # savePrint on zone plates, compared with the original; it fails under
-      # a gate. Then the save flow in the built app, tapped: the size Save
-      # and the More sheet promised, the smaller-copy question, a killed save.
+      # savePrint on zone plates up to 61 MP, compared with the original,
+      # and the 40 and 61 MP ones saved again as a JPEG whose header must say
+      # 4:4:4; it fails under a gate. Then the save flow in the built app,
+      # tapped: the size Save and the More sheet promised, the smaller-copy
+      # question, a killed save, a 40 MP photo saved at its own pixels.
       - run: node scripts/measure-fidelity.mjs
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
@@ -110,8 +115,9 @@ jobs:
       - run: node scripts/check-bands.mjs
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
-      # Time and resident memory of an export in desktop Chrome. Informational:
-      # V8 frees what JavaScriptCore keeps, so measure-alloc is the gate.
+      # Time and resident memory of an export in desktop Chrome, 12 to 48 MP.
+      # Informational: V8 frees what JavaScriptCore keeps, so measure-alloc
+      # is the gate.
       - run: node scripts/measure-export.mjs
         continue-on-error: true
         env:

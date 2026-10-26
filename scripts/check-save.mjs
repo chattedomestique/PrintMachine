@@ -43,6 +43,12 @@
  *     runs and is back after, and its live region (every change of which a
  *     screen reader reads out) says the hint once, not again after each
  *     save; it changes once more when the tool changes.
+ *  9. A 40 MP photo (7728x5152) on Original: More and Save's name promise
+ *     7728x5152; within 100 ms of the tap Save reads Saving and the card
+ *     offers Cancel; the percent moves; Cancel then leaves no file and no
+ *     in-flight mark; Save again writes a file that is 7728x5152, a baseline
+ *     JPEG (SOF0) with every component sampled 1x1 (4:4:4), read from its
+ *     own header; the in-flight mark is set while it presses and gone after.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -126,8 +132,8 @@ async function closeTools(page) {
 }
 
 /** A w x h JPEG made in the page, chosen through the real file input, the
- *  sheet set to 4:5. */
-async function choosePhoto(page, w, h) {
+ *  sheet set to `aspect` (4:5 unless said). */
+async function choosePhoto(page, w, h, aspect = '4:5') {
   const bytes = await page.evaluate(
     async ([w, h]) => {
       const c = document.createElement('canvas')
@@ -149,7 +155,7 @@ async function choosePhoto(page, w, h) {
   await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.media, null, { timeout: 30_000 })
   await openTool(page, 'photo', 'sheet')
-  await page.locator('.controls__section[data-tool="photo"] select').selectOption('4:5')
+  await page.locator('.controls__section[data-tool="photo"] select').selectOption(aspect)
   await closeTools(page)
   await page.waitForFunction(
     (SAVE) => document.querySelector(SAVE)?.textContent === 'Save' && !document.querySelector(SAVE)?.hasAttribute('aria-disabled'),
@@ -173,6 +179,25 @@ function imageSize(buf) {
     i += 2 + buf.readUInt16BE(i + 2)
   }
   return null
+}
+/** A JPEG's frame header (SOFn): which one, the image's size, and each
+ *  component's sampling factors, horizontal and vertical ("11 11 11" is
+ *  4:4:4, every colour sample kept). */
+function frameOf(buf) {
+  let i = 2
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xff) {
+      i++
+      continue
+    }
+    const m = buf[i + 1]
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+      const sampling = Array.from({ length: buf[i + 9] }, (_, c) => buf[i + 11 + 3 * c].toString(16).padStart(2, '0')).join(' ')
+      return { marker: `SOF${m - 0xc0}`, size: `${buf.readUInt16BE(i + 7)}x${buf.readUInt16BE(i + 5)}`, sampling, bytes: buf.length }
+    }
+    i += 2 + buf.readUInt16BE(i + 2)
+  }
+  return { marker: 'none', size: null, sampling: null, bytes: buf.length }
 }
 const saved = async (download) => imageSize(readFileSync(await download.path()))
 const pixels = (s) => s.replace('×', 'x')
@@ -576,6 +601,63 @@ try {
       `and once when the tool changes: ${afterTool.map((t) => JSON.stringify(t)).join(' -> ')}`,
     )
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+    await ctx.close()
+  }
+
+  console.log('\n9. A 40 MP photo on Original')
+  {
+    const ctx = await newContext()
+    const { page, errors } = await open(ctx)
+    const t = Date.now()
+    await choosePhoto(page, 7728, 5152, 'original')
+    const size = (await captionOf(page)) ?? '?'
+    const name = await page.locator(SAVE).getAttribute('aria-label')
+    check(size === '7728×5152' && name === 'Save 7728×5152 JPEG', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
+    const files = []
+    page.on('download', (d) => files.push(d))
+    // A Save, cancelled once its percent has moved.
+    await page.evaluate(() => (window.__labels.length = 0))
+    const t0 = await page.evaluate((SAVE) => {
+      const t = performance.now()
+      document.querySelector(SAVE).click()
+      return t
+    }, SAVE)
+    const mark = await page.evaluate((FLAG) => new Promise((res) => {
+      const f = () => (localStorage.getItem(FLAG) ? res(localStorage.getItem(FLAG)) : setTimeout(f, 5))
+      f()
+    }), FLAG)
+    await page.waitForFunction(
+      (size) => new Set(window.__labels.map((x) => x.l).filter((l) => new RegExp(`^Pressing ${size}, \\d+%$`).test(l))).size >= 2,
+      size,
+      { timeout: 120_000 },
+    )
+    const moved = await page.evaluate(() => [...new Set(window.__labels.map((x) => x.l).filter((l) => /%$/.test(l)))])
+    await page.locator(CANCEL).click()
+    await page.waitForFunction((SAVE) => document.querySelector(SAVE)?.textContent === 'Save', SAVE, { timeout: 30_000 })
+    await page.waitForTimeout(1500)
+    const labels = await page.evaluate(() => window.__labels.slice())
+    const first = labels.find((x) => x.b !== 'Save')
+    const ms = first ? Math.round(first.t - t0) : Infinity
+    check(first?.b === 'Saving' && first?.c === 'Cancel' && ms < 100, `Save read "${first?.b}" and the card offered "${first?.c}" ${ms} ms after the tap (< 100 ms)`)
+    check(moved.length >= 2, `the percent moved: ${moved.join(' / ')}`)
+    const markAfterCancel = await page.evaluate((F) => localStorage.getItem(F), FLAG)
+    check(files.length === 0 && markAfterCancel === null, `Cancel at ${moved[moved.length - 1]}: no file, the in-flight mark ${markAfterCancel === null ? 'gone' : 'still set'}`)
+    // Save again, to the file.
+    const t1 = Date.now()
+    const [download] = await Promise.all([page.waitForEvent('download', { timeout: 240_000 }), page.locator(SAVE).click()])
+    const frame = frameOf(readFileSync(await download.path()))
+    const secs = ((Date.now() - t1) / 1000).toFixed(1)
+    await page.waitForTimeout(300)
+    check(
+      frame.marker === 'SOF0' && frame.size === '7728x5152' && frame.sampling === '11 11 11',
+      `Save again: the file is ${frame.marker} ${frame.size}, sampling ${frame.sampling} (4:4:4 is 11 11 11), ${(frame.bytes / 1e6).toFixed(1)} MB, ${secs} s from the tap`,
+    )
+    check(
+      mark === JSON.stringify({ height: 5152, format: 'jpeg' }) && (await page.evaluate((F) => localStorage.getItem(F), FLAG)) === null,
+      `in flight ${mark}, gone after`,
+    )
+    check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+    console.log(`  (${((Date.now() - t) / 1000).toFixed(0)} s in all)`)
     await ctx.close()
   }
 } finally {

@@ -39,8 +39,8 @@ npm run sync:styleguide # re-vendor the style guide from ../styleguide
 ```
 
 ```sh
-npm run measure:fidelity  # Save keeps every pixel of the photo (fails under a gate)
-npm run measure:alloc     # what an export holds, per output pixel (fails over 35 B/px)
+npm run measure:fidelity  # Save keeps every pixel of the photo, up to 61 MP (fails under a gate)
+npm run measure:alloc     # what an export holds, up to 61 MP (fails over a gate; FULL=1 adds the 61 MP worst press)
 npm run measure:export    # export time and desktop memory (informational)
 npm run build && npm run check:save   # the save flow in the built app, tapped
 npm run build && npm run check:touch  # tap-to-select on the sheet, touched
@@ -745,6 +745,10 @@ pixel at the corners, where any resampling shows.
 | 5712x4284 (an iPhone's 24 MP) | 4:5 | 3427x4284 | 1.0000 | 1.0000 | 0 |
 | 5712x4284 | Original | 5712x4284 | 1.0000 | 1.0000 | 0 |
 | 2268x4032 (a tall 16:9), zoomed to 113% | Original | 2008x3569 | 1.0000 | 1.0000 | 0 |
+| 7728x5152 (40 MP) | Original | 7728x5152 | 1.0000 | 1.0000 | 0 |
+| 7728x5152 | 4:5 | 4122x5152 | 1.0000 | 1.0000 | 0 |
+| 7728x5152 (`FULL=1`) | 1:1 | 5152x5152 | 1.0000 | 1.0000 | 0 |
+| 9504x6336 (61 MP) | 4:5 | 5069x6336 | 1.0000 | 1.0000 | 0 |
 | *control: drawn half a pixel off* | 4:5 | 2419x3024 | 0.79 | 0.927 | |
 | *control: from a 2048 px copy (the old import)* | 4:5 | 2419x3024 | 0.13 | 0.875 | |
 
@@ -752,7 +756,11 @@ The gates are a Laplacian energy (the finest detail, which any resampling takes
 down) of at least 0.98 of the original's and a correlation of at least 0.999,
 with the file the size the plan says, the stored photo the picked file byte
 for byte, and Save's caption giving no reason; the two controls are the ways
-this app used to draw a photo, and the script fails if either passes. A JPEG
+this app used to draw a photo, and the script fails if either passes. Each
+40 and 61 MP photo is saved a second time as Save saves it by default, a
+JPEG, whose own header must say a baseline frame (SOF0) of the plan's size
+with every component sampled 1x1 (4:4:4): 24.7 MB at 7728x5152 for this
+zone plate, written in 12.2 s. A JPEG
 whose EXIF says to rotate it saves upright, a PNG's
 transparent hole prints as paper (never black), a document whose stored photo
 is gone is refused rather than printed on bare paper, and the default print
@@ -770,8 +778,11 @@ launch, its choices waiting, and saying so, until the photo is back), a stored
 photo deleted (the card and Save say so, and no file), a Cancel tapped while
 the file is written (no file, with a share sheet or without), Ctrl+Z pressed
 during a press (the document stays as it was, and the file is that print),
-where focus is while it presses, and the gesture hint across two saves (its
-card hides, its words are not read out again).
+where focus is while it presses, the gesture hint across two saves (its
+card hides, its words are not read out again), and a 40 MP photo on Original
+(More and Save promise 7728×5152; the percent moves; Cancel leaves no file;
+Save again writes a 7728x5152 baseline JPEG sampled 4:4:4, read from its
+header).
 
 #### Test seams
 
@@ -793,11 +804,12 @@ sheet-sized buffer would be 45 to 240 MB of a phone's memory, and an iPhone
 evicts a tab that holds too much. So an export holds nothing the sheet's size
 but the decoded photo itself. `scripts/measure-alloc.mjs` counts it exactly:
 it runs the export path (`pressToSink` into the real JPEG encoder) in node
-with every typed-array constructor wrapped and, at every
-allocation of a quarter of the sheet's pixels or more and at every step of the
-press, collects the garbage and reads back what is still live — the same on
-every run, unlike a browser's resident memory. Its gate is 35 bytes per output
-pixel.
+with every typed-array constructor wrapped and, at every allocation over a
+threshold (a quarter of the sheet's pixels for the five older cases, 512 KiB
+from case 6 on, where a quarter of 40 MP would miss every band and tile
+array) and at every step of the press, collects the garbage and reads back
+what is still live — the same on every run, unlike a browser's resident
+memory. Its gates are below the tables.
 
 - **No cache, no noise fields.** The preview keeps the paper's shade and the
   ink film's mottle as arrays, reused every frame. An export reads them where
@@ -911,7 +923,12 @@ pixel.
   harness photo: the switch and the knockout move on under 0.12% of the
   pixels and nothing else moves. Under Grain the switch is error diffusion,
   which re-dithers its whole mixing band at any change in its input: the same
-  ink density (to 0.1%), a different arrangement of the grains there.
+  ink density (to 0.1%), a different arrangement of the grains there. Under a
+  blur of 32 px (type under about 21 px: 10% on a sheet under 2,133 px tall)
+  the cell is a pixel and the grid is the luminance itself, a sheet-sized
+  float, with a second one while it is blurred. Pressed in bands it is
+  gathered before the press makes its own buffers, so the two never coincide
+  (`banded.test.ts`; case 10 below).
 - **Faster, and it never stops the page for long.** The vertical blur now
   walks the sheet by rows with a running sum per column (a column walk was a
   cache miss per pixel, most of the press's time on a wide sheet; the sums are
@@ -921,29 +938,68 @@ pixel.
 
 Measured (`node scripts/measure-alloc.mjs`, `node scripts/measure-export.mjs`;
 before the diet -> after it, one canvas encoded by the browser -> pressed in
-bands into this app's encoder; the last column's canvases are the largest tile
-and, for a photo at its own pixels, the band it is blitted into, and its file
-is the JPEG's bytes as written):
+bands into this app's encoder; the canvases are the largest tile and, for a
+photo at its own pixels, the band it is blitted into; the decoded photo is
+counted until its last rows are read; Chromium's resident memory is over the
+moment before the press, the photo already decoded):
 
 | Case | Sheet | Typed arrays, peak | With canvases, the decoded photo and the file | Chromium time | Chromium RSS |
 |---|---|---|---|---|---|
-| 1. 12 MP portrait, 4:5, second ink | 3024x3780 | 68.4 -> 23.4 -> 7.3 B/px | 76 -> 31 -> 14.0 B/px (160 MB) | 12.5 -> 5.8 -> 5.6 s | +707 -> +311 -> +190 MB |
-| 2. 3 plates, 4 passes, 4096x4096 | 16.8 MP | 92.7 -> 25.3 -> 6.3 | 101 -> 33 -> 12.0 (201 MB) | 39.2 -> 11.9 -> 9.7 s | +1094 -> +491 -> +199 MB |
-| 3. No photo | 2880x3600 | 44.5 -> 15.4 -> 6.4 | 53 -> 23 -> 8.2 (85 MB) | 7.8 -> 3.8 -> 3.5 s | +388 -> +278 -> +170 MB |
-| 4. Grain, 4096x4096 | 16.8 MP | 68.1 -> 23.3 -> 5.1 | 76 -> 31 -> 10.8 (181 MB) | 21.7 -> 8.0 -> 6.8 s | +1104 -> +394 -> +184 MB |
-| 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 -> 8.3 | 120 -> 37 -> 14.0 (235 MB) | 65.6 -> 18.7 -> 14.9 s | +1484 -> +445 -> +232 MB |
+| 1. 12 MP portrait, 4:5, second ink | 3024x3780 | 68.4 -> 23.4 -> 7.3 B/px | 76 -> 31 -> 14.0 B/px (160 MB) | 12.5 -> 5.8 -> 4.8 s | +707 -> +311 -> +183 MB |
+| 2. 3 plates, 4 passes, 4096x4096 | 16.8 MP | 92.7 -> 25.3 -> 6.3 | 101 -> 33 -> 12.0 (201 MB) | 39.2 -> 11.9 -> 10.0 s | +1094 -> +491 -> +199 MB |
+| 3. No photo | 2880x3600 | 44.5 -> 15.4 -> 6.4 | 53 -> 23 -> 8.2 (85 MB) | 7.8 -> 3.8 -> 3.2 s | +388 -> +278 -> +169 MB |
+| 4. Grain, 4096x4096 | 16.8 MP | 68.1 -> 23.3 -> 5.1 | 76 -> 31 -> 10.8 (181 MB) | 21.7 -> 8.0 -> 7.0 s | +1104 -> +394 -> +185 MB |
+| 5. A legacy print, 5 plates, 2 backings | 16.8 MP | 112.0 -> 29.3 -> 8.3 | 120 -> 37 -> 14.0 (235 MB) | 65.6 -> 18.7 -> 15.6 s | +1484 -> +445 -> +232 MB |
 
-The gate is the typed-array column (35 B/px, cases 1-4); desktop Chromium's
-memory is informational (V8 frees short-lived buffers far more eagerly than an
-iPhone's JavaScriptCore), and the phone's own is a DEVICE-CHECKLIST item. The
-legacy five-plate print (kept whole: see "The plate budget") costs a third
-more typed memory than the worst print the budget allows, well inside the
-margin. Pressed in bands, the largest part of what is left is the decoded
-photo (4 B a photo pixel), which does not depend on the press. The time is
-about the same as the browser's own canvas and encoder took: the band engine
-is faster (the halo it re-presses is a fifth of a band at these sizes), and
-this app's JPEG encoder, in JavaScript and keeping every colour sample, is
-slower than the browser's native one (about 100 ms a megapixel here).
+And the sizes the band engine made possible, every one a photo at its own
+pixels (the file at its stated bound, 0.95 bytes an output pixel, a noise
+ground at quality 95, so the number does not depend on how well the test
+print compresses; the gate in brackets):
+
+| Case | Sheet | Typed arrays, peak | With canvases, the decoded photo and the file | Chromium time: ms/MP (press + encoder) | Chromium RSS |
+|---|---|---|---|---|---|
+| 6. 40 MP on Original, the default document, second ink | 7728x5152 | 102.3 MB (125) | 320.6 MB (350) | 15.1 s: 379 (317 + 62) | +231 MB |
+| 7. A 61 MP photo on 4:5, case 2's document | 5069x6336 | 115.2 MB (144) | 410.1 MB (450) | 17.3 s: 539 (473 + 65) | +211 MB |
+| 7g. The same, under Grain | 5069x6336 | 117.3 MB (145) | 412.2 MB (450) | 17.6 s: 548 (482 + 66) | +215 MB |
+| 8. 61 MP on Original, case 2's document, the worst legal press (Grain at pitch 36, misregistration 30, every plate's type at 0.16 of the height) | 9504x6336 | 172.1 MB (210) | 490.6 MB (540) | 37.0 s: 615 (553 + 62) | +268 MB |
+| 9. A 48 MP 3:1 panorama on Original, the default document, second ink | 12000x4000 | 121.2 MB (150) | 378.4 MB (420) | 18.5 s: 386 (320 + 65) | +245 MB |
+| 10. 3:1 on Original, type at 10%, second ink (the luminance at one cell a pixel) | 6399x2133 | 149.2 MB (185) | 238.9 MB (290) | 5.6 s: 410 (346 + 64) | +261 MB |
+
+What the press holds grows with the sheet's WIDTH (its tile rings and band
+buffers), not its height: a 4000x10000 photo on Original (a 4000x9999 sheet)
+holds 109.2 MB of typed arrays at its peak against 107.4 MB for a 4000x5000
+one under case 2's document (1.017 times), and 120.8 against 113.2 MB under
+its worst press (1.068 times).
+
+The gates (the script exits 1 over any): cases 1-4 at what they measured
+once Save pressed into the encoder, x 1.25 (9.1, 7.8, 8.0 and 6.3 bytes of
+typed arrays an output pixel; case 5 is recorded, not gated); cases 6-10 in
+megabytes, the typed arrays and the whole, at the ceilings the band engine
+was designed to or at what they measured x 1.25 where that is lower (case 7:
+144); the same-width pairs at 1.15 times. Case 8 (81 s in node) runs with
+`FULL=1`; CI runs the rest, four processes at a time (2 min 16 s here).
+Desktop Chromium's memory is informational (V8 frees short-lived buffers far
+more eagerly than an iPhone's JavaScriptCore), and the phone's own is a
+DEVICE-CHECKLIST item. The legacy five-plate print (kept whole: see "The
+plate budget") costs a third more typed memory than the worst print the
+budget allows. At 40 MP and over, the largest single thing held is the
+decoded photo (4 B a photo pixel: 159 MB at 40 MP, 241 MB at 61 MP), which
+does not depend on the press.
+
+**Time.** On this machine (4 vCPU, desktop Chromium, the harness's
+synthetic photo): a 40 MP save on Original takes 15.1 s, 379 ms a megapixel
+(the press 317, the JPEG encoder 62); the 61 MP photo on 4:5 under the
+worst legal document 17.3 s (539: 473 and 65); the 61 MP worst press on
+Original 37.0 s. The encoder's share depends on the picture: 62 to 71 ms a
+megapixel on these prints, 112 on the device spike's noisy halftone. In the
+built app (`check-save`), a 40 MP photo on Original is saved 15.0 s after
+the tap. On a phone only the encoder has been measured: the device spike ran
+it at 62, 65 and 62 ms a megapixel on its halftone test image on an iPhone
+(iOS 18.7, the Claude app's in-app WebKit view), R 0.49, 0.52 and 0.49 of
+the reference machine's 126; its estimate of a 40 MP save, 33 s x R, is 16
+to 17 s, the 33 s being this machine's estimate from before the save was
+measured here at 15.1 s. How long a save takes on a phone is a
+DEVICE-CHECKLIST item.
 
 ### The same print at every size
 

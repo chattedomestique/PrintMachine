@@ -21,7 +21,7 @@
 import { JpegEncoder } from './encode/jpeg.ts'
 import { PngEncoder } from './encode/png.ts'
 import { planExport, type ExportPlan, type PlanSheet } from './exportPlan.ts'
-import { effectiveMode, layoutSheet, sheetAspect, type FrameInputs, type SheetSpec } from './frame.ts'
+import { effectiveMode, layoutSheet, sheetAspect, type FrameInputs, type SheetLayout, type SheetSpec } from './frame.ts'
 import { LARGE_PRINT_MP, MIN_BAND_ROWS, bandHeight } from './limits.ts'
 import type { DrawRect, LumaGrid } from './media.ts'
 import { isNativeRect, pressToSink, sourceSize, throwIfAborted, type RenderProgress, type RowSink } from './render.ts'
@@ -118,6 +118,23 @@ interface TestSeam {
 }
 const testSeam = (): TestSeam => (globalThis as { __PM_TEST__?: TestSeam }).__PM_TEST__ ?? {}
 
+/**
+ * The planner's promise, checked where the press begins: a native plan draws
+ * the photo at its own pixels. Laid out at the plan's size, the photo's
+ * rectangle must be the photo's TRUE size at a whole-pixel offset: in Crop
+ * and on Original after the snap (media.ts `snapRect`), in Fit the contained
+ * rectangle itself. Otherwise the planner and the layout disagree, and the
+ * file would be resampled under a caption that says it is not: a plain Error
+ * (a bug said as itself, never a size offered a smaller copy).
+ */
+export function checkNative(plan: ExportPlan, layout: SheetLayout, media: Pick<MediaLayer, 'width' | 'height'> | null): void {
+  if (plan.limit !== 'native' || !media) return
+  const r = layout.photo
+  if (r && isNativeRect(r, media.width, media.height)) return
+  const drawn = r ? `${r.dw}x${r.dh} at (${r.dx}, ${r.dy})` : 'nowhere'
+  throw new Error(`A ${dims(plan.width, plan.height)} print planned at the photo's own pixels would draw its ${dims(media.width, media.height)} photo ${drawn}.`)
+}
+
 /** A press that runs out of memory starts again with bands half as tall, at
  *  most this many times. */
 export const BAND_HALVINGS = 4
@@ -179,10 +196,9 @@ export async function savePrint(settings: PrintSettings, media: CanvasImageSourc
   const plan = planPrint(settings, { maxHeight: opts.maxHeight, format })
   const { width: w, height: h } = plan
   // The press lays the sheet out at the plan's size (frame.ts `layoutSheet`);
-  // a layout whose frame is not the plan's is not the print the caption
-  // promised.
+  // a native plan must find the photo there at its own pixels.
   const layout = layoutSheet(settings, w, h)
-  if (layout.border !== plan.border) throw new Error(`The print's frame would be ${layout.border} px, not the planned ${plan.border} px.`)
+  checkNative(plan, layout, settings.media)
   const seam = testSeam()
   const budget = seam.tileBudget ?? TILE_BUDGET
   const made: CanvasRenderingContext2D[] = []

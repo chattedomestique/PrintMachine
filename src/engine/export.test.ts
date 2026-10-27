@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BAND_HALVINGS,
   CanvasLimitError,
+  checkNative,
   describePlan,
   ENCODINGS,
   fileSize,
@@ -35,7 +36,7 @@ import {
 import { planExport } from './exportPlan.ts'
 import { DRAFT_HEIGHT, PREVIEW_HEIGHT, renderPrint, renderPrintAsync, type RenderProgress } from './render.ts'
 import { LARGE_PRINT_MP, REFERENCE_HEIGHT, bandHeight } from './limits.ts'
-import { sheetAspect } from './frame.ts'
+import { layoutSheet, sheetAspect } from './frame.ts'
 import { quantTable, LUMA_QUANT } from './encode/jpeg.ts'
 import type { PrintSettings } from './types.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
@@ -143,9 +144,25 @@ async function sof0(blob: Blob): Promise<{ w: number; h: number; sampling: numbe
   throw new Error('no SOF0')
 }
 
+/** Set by one test: the layout the press builds draws the photo half a pixel
+ *  off, as a planner and a layout that disagree would. Off, the layout is
+ *  frame.ts's own, untouched. */
+const misplace = vi.hoisted(() => ({ on: false }))
+vi.mock('./frame.ts', async (importOriginal) => {
+  const frame = await importOriginal<typeof import('./frame.ts')>()
+  return {
+    ...frame,
+    layoutSheet: (...args: Parameters<typeof frame.layoutSheet>) => {
+      const layout = frame.layoutSheet(...args)
+      return misplace.on && layout.photo ? { ...layout, photo: { ...layout.photo, dx: layout.photo.dx + 0.5 } } : layout
+    },
+  }
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
   delete (globalThis as { __PM_TEST__?: unknown }).__PM_TEST__
+  misplace.on = false
 })
 
 describe('the export height: the planner, never the preview', () => {
@@ -191,6 +208,51 @@ describe('the export height: the planner, never the preview', () => {
       const f = await sof0(pressed.blob)
       expect([f.w, f.h]).toEqual([plan.width, plan.height])
     }
+  })
+})
+
+describe('a native plan is pressed at the photo\'s own pixels, or not at all', () => {
+  const thrown = (f: () => unknown) => {
+    try {
+      f()
+    } catch (e) {
+      return e
+    }
+    return null
+  }
+
+  it('the layout the press builds must draw the photo at its own size, at a whole-pixel offset: Crop, Original and Fit', () => {
+    const fit = withPhoto(4032, 3024, { aspect: '1:1' })
+    for (const s of [withPhoto(4032, 3024), withPhoto(7728, 5152, { aspect: 'original' }), { ...fit, frame: { ...fit.frame, width: 1 / 14, mode: 'fit' as const } }]) {
+      const plan = planPrint(s)
+      expect(plan.limit).toBe('native')
+      const layout = layoutSheet(s, plan.width, plan.height)
+      expect(thrown(() => checkNative(plan, layout, s.media))).toBeNull()
+      const r = layout.photo!
+      // Half a pixel off, a pixel too wide, a pixel short: each would be a
+      // resample under a caption that says the photo's own pixels.
+      for (const photo of [{ ...r, dx: r.dx + 0.5 }, { ...r, dw: r.dw + 1 }, { ...r, dh: r.dh - 1 }]) {
+        const err = thrown(() => checkNative(plan, { ...layout, photo }, s.media))
+        expect(err).toBeInstanceOf(Error)
+        expect(err).not.toBeInstanceOf(RangeError)
+      }
+    }
+    // A plan that is not native promises nothing to check: an enlarged photo.
+    const small = withPhoto(1600, 1200)
+    const floor = planPrint(small)
+    expect(floor.limit).toBe('floor')
+    expect(thrown(() => checkNative(floor, layoutSheet(small, floor.width, floor.height), small.media))).toBeNull()
+  })
+
+  it('Save runs it before it makes a canvas: a layout that disagrees with the plan is a plain Error, never offered a smaller copy', async () => {
+    const s = withPhoto(4032, 3024)
+    misplace.on = true
+    const c = canvases()
+    const err = await savePrint(s, decoded(4032, 3024), {}, { makeCanvas: c.makeCanvas }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(CanvasLimitError)
+    expect((err as Error).message).toMatch(/^A 2419×3024 print planned at the photo's own pixels would draw its 4032×3024 photo 4032x3024 at \(/)
+    expect(c.made).toHaveLength(0)
   })
 })
 

@@ -122,6 +122,21 @@ export const BLUR_MAX = 240
 export const BLUR_DEFAULT = 60
 
 /**
+ * What the frame's photo-keyed fills are made from (features/media
+ * `frameSource`):
+ *
+ *  - FRAME_SOURCE_LONG, 1024: the photo is decoded once at this long side
+ *    (never above its own) for its colours. One fixed size, not the
+ *    preview's working copy, whose size moves with the zoom: the colours are
+ *    the same whatever zoom the photo was chosen at, in the preview, the save
+ *    and every reopen.
+ *  - PALETTE_SAMPLE, 84: the long side of the sample the palette is read
+ *    from (Border Studio's), area-averaged from that decode.
+ */
+export const FRAME_SOURCE_LONG = 1024
+export const PALETTE_SAMPLE = 84
+
+/**
  * Above this many megapixels, what Save says about a print (export.ts
  * `describePlan`) adds that it is very large and a phone may not finish it.
  * Said, never acted on: the print is still pressed at its size, and nothing

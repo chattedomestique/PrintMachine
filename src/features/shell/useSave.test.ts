@@ -340,6 +340,7 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
       bitmaps: [] as ReturnType<typeof bitmap>[],
     }
     const d: SaveDeps = {
+      frameInputs: async (settings) => (settings.media?.palette ? { palette: settings.media.palette } : {}),
       decodeOriginal: async (id) => {
         log.full.push(id)
         const b = bitmap(4032, 3024)
@@ -377,6 +378,25 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     // On the page's canvases: the engine makes none of its own.
     expect(log.pressed[0]!.makeCanvas).toBe(d.makeCanvas)
     expect(log.bitmaps.every((b) => b.closed >= 1)).toBe(true)
+  })
+
+  it("the frame's inputs are made before the original is decoded, and the press is handed them", async () => {
+    const order: string[] = []
+    const palette = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
+    const inputs: unknown[] = []
+    const base = deps().d
+    const { d } = deps({
+      frameInputs: async () => (order.push('inputs'), { palette }),
+      decodeOriginal: async (id) => (order.push('original'), base.decodeOriginal(id)),
+      savePrint: async (settings, media, got, opts) => (inputs.push(got), base.savePrint(settings, media, got, opts)),
+    })
+    expect((await pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, d)).kind).toBe('pressed')
+    expect(order).toEqual(['inputs', 'original'])
+    expect(inputs).toEqual([{ palette }])
+    // Inputs that cannot be made: nothing is decoded or pressed.
+    const failing = deps({ frameInputs: async () => Promise.reject(new Error("The photo's colours could not be read: no")) })
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, failing.d)).rejects.toThrow(/colours could not be read/)
+    expect([failing.log.full, failing.log.pressed]).toEqual([[], []])
   })
 
   it('a smaller copy decodes the photo straight to its integer rectangle and presses it there, 1:1', async () => {

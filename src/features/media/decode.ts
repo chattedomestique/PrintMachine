@@ -18,6 +18,9 @@
  *    copy's rectangle (`decodeResized`), so it is resampled once, by the
  *    decoder, and drawn 1:1.
  *
+ * The frame's colours are read from one more, of a fixed size
+ * (frameSource.ts), made after the preview's copy and before Save's original.
+ *
  * Every decode applies the photo's EXIF orientation, so the size the document
  * stores and every bitmap drawn from it agree on which way up it is.
  */

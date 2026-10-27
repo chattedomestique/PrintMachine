@@ -3,6 +3,8 @@
  * both, "Keep this ink" following the ink, and the plate budget.
  */
 
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
@@ -19,6 +21,7 @@ import {
   overPhotoOf,
   overPhotoPatch,
   type HistoryState,
+  type SettingsAction,
 } from './settingsReducer.ts'
 
 const doc = (layers: TextLayer[]): PrintSettings => ({ ...defaultSettings(), layers })
@@ -444,5 +447,58 @@ describe("the photo's palette", () => {
     h = historyReducer(h, { type: 'setMedia', media: null })
     const removed = h
     expect(historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })).toBe(removed)
+  })
+})
+
+describe('only setPalette writes the palette', () => {
+  const palette = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
+  const other = { photo: '#d2463c', deep: '#281615', muted: '#bf9592', comp: '#00a4be' }
+  const photo = makeMedia({ id: 'm', width: 4000, height: 3000 })
+  const base = (): PrintSettings => ({ ...defaultSettings(), media: { ...photo, palette } })
+  // Loosely typed, as a careless caller might send it: each action that can
+  // carry a photo tries to carry another palette in with it.
+  const loose = (a: unknown) => a as SettingsAction
+
+  /** Every action the reducer knows (the Record makes a new one fail to
+   *  compile until it is listed here). */
+  const ACTIONS: Record<SettingsAction['type'], SettingsAction[]> = {
+    patch: [loose({ type: 'patch', patch: { media: { ...photo, palette: other } } }), { type: 'patch', patch: { aspect: '1:1' } }],
+    patchLayer: [{ type: 'patchLayer', id: defaultSettings().layers[0].id, patch: { size: 0.05 } }],
+    addLayer: [{ type: 'addLayer' }],
+    removeLayer: [{ type: 'removeLayer', id: defaultSettings().layers[0].id }],
+    patchPress: [{ type: 'patchPress', patch: { wear: 0.2 } }],
+    patchFrame: [{ type: 'patchFrame', patch: { width: 0.1, fill: 'muted' } }],
+    setMedia: [loose({ type: 'setMedia', media: { ...photo, palette: other } }), loose({ type: 'setMedia', media: { ...photo, id: 'n', palette: other } })],
+    patchMedia: [loose({ type: 'patchMedia', patch: { palette: other, x: 0.4 } })],
+    setPalette: [{ type: 'setPalette', mediaId: 'm', palette: other }],
+    reset: [{ type: 'reset', settings: base() }],
+  }
+
+  it('no other action writes one: a palette carried in is dropped, the stored one is kept for its photo', () => {
+    for (const [type, actions] of Object.entries(ACTIONS)) {
+      for (const action of actions) {
+        const next = applySettings(base(), action)
+        const kept = next.media?.palette
+        if (type === 'setPalette') expect(kept).toEqual(other)
+        else if (type === 'setMedia') expect(kept, JSON.stringify(action)).toBeUndefined()
+        else expect(kept, JSON.stringify(action)).toEqual(palette)
+      }
+    }
+  })
+
+  it('in the app, only the frame inputs dispatch it', () => {
+    const src = resolve(import.meta.dirname, '..')
+    const hits: string[] = []
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name)
+        if (e.isDirectory()) walk(p)
+        else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) && /type: 'setPalette'/.test(readFileSync(p, 'utf8'))) hits.push(relative(src, p))
+      }
+    }
+    walk(src)
+    // The reducer names it in its action type; the page's hook is the one
+    // place that sends it.
+    expect(hits.sort()).toEqual(['features/media/useFrameInputs.ts', 'state/settingsReducer.ts'])
   })
 })

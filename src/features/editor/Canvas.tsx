@@ -9,7 +9,7 @@ import { type MediaLayer, type TextLayer } from '../../engine/types.ts'
 import { sheetAspect, visibleAspect } from '../../engine/frame.ts'
 import { areaOf, clampPan } from '../../engine/media.ts'
 import { hitLayer, layoutIn, type FontMeasure } from '../../engine/text.ts'
-import { storedFrameInputs } from '../media/frameInputs.ts'
+import type { FrameInputs } from '../../engine/frame.ts'
 import './Canvas.css'
 
 /** A photo's gesture limits. Pinch: a zoom on the cover fit, so 1 exactly
@@ -40,11 +40,15 @@ const PICK_THEN_TAP_MS = 1000
  */
 export default function Canvas({
   media = null,
+  inputs,
   mediaMode = false,
   paused = false,
   onGesture,
 }: {
   media?: ImageBitmap | null
+  /** What the frame's fill is made from (features/media `useFrameInputs`);
+   *  a fill whose input is not there yet draws as Paper. */
+  inputs: FrameInputs
   /** Point the sheet's gestures at the photo instead of the type. Driven by
    *  the open tab, so what you are touching is whatever panel you are in — no
    *  second selection model to keep in sync. */
@@ -59,8 +63,6 @@ export default function Canvas({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
 
-  // What the frame's fill is made from: what the document holds of it.
-  const inputs = useMemo(() => storedFrameInputs(settings), [settings])
   useRenderer(canvasRef, settings, { selectedLayerId }, media, inputs, paused)
 
   const layer = selectedLayer ?? settings.layers[0] ?? null

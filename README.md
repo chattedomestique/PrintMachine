@@ -376,6 +376,20 @@ colour is opaque and takes the stock's veil when "Paper over the photo" is on.
 The document stores the fill's choice, never a colour: the colour comes from
 the photo's palette stored with it (`media.palette`), handed to the engine
 beside the photo (`FrameInputs`); until it is there, the fill draws as Paper.
+The palette is Border Studio's (`engine/palette.ts`, its `palette.js` at
+597ce7a trimmed to the four colours the fill shows: the median cut, the most
+photogenic cluster as the hero, the undertone for a grey hero's hue; Photo,
+Deep, Muted and Comp, always all four even when two are the same hex). It is
+made once a photo, the first time a frame shows one of its colours, from an
+84 px area-averaged sample of one fixed decode of the photo (1024 px on its
+long side, `features/media/frameSource.ts`), never from the preview's copy,
+whose size moves with the zoom; it is stored with the photo (`setPalette`,
+not an undo step, and the one thing that writes it), so the preview, the save
+and every reopen agree, and Save makes it first when it is missing, so a
+press never starts without it. Fed Border Studio's own recorded sample of its
+two block photos, and 36 photograph-like samples Border Studio's own
+`palette.js` keyed, the port gives Border Studio's hex exactly
+(`palette.test.ts`).
 The preview composes the frame into its ground in place, and the export
 composes it a band of rows at a time into a band buffer of its own
 (`FramedGroundRows`, one band more than an unframed press holds), reading the
@@ -454,6 +468,12 @@ live where those are used:
   the photo's true size from the document, and the copy is drawn scaled into
   the same rectangle, so the preview places the photo exactly where the print
   does.
+- **The frame's colours** come from a third decode, made once a photo when a
+  frame first shows one of them: the photo at 1024 px on its long side (or
+  its own size, if smaller), read back and kept for that photo (2.8 MB for a
+  3:2 photo). It waits for the preview's copy to land, and Save makes it, when
+  it is missing, before it decodes the original, so it never runs beside
+  either.
 - **Save** decodes the *original*, in full (4 bytes a pixel of the photo, about
   98 MB for 24 MP, 159 MB for 40 MP), and closes it the moment its last rows
   are in the print, so the print is drawn from the original's pixels, never

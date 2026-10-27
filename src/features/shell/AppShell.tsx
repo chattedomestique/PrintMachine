@@ -10,6 +10,7 @@ import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, offlineJustReady, subscribeSW } from '../../state/swStatus.ts'
 import { useMediaBitmap } from '../media/useMediaBitmap.ts'
+import { useFrameInputs } from '../media/useFrameInputs.ts'
 import { usePhotoImport } from '../media/usePhotoImport.ts'
 import MoreSheet from './MoreSheet.tsx'
 import SaveQuestion from './SaveQuestion.tsx'
@@ -55,6 +56,9 @@ export default function AppShell() {
   // The preview's working copy of the photo. Save does not use it: it decodes
   // the original, so the print is drawn from the original's pixels.
   const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media, sheetAspect(settings), { width: settings.frame.width, mode: effectiveMode(settings) })
+  // What the frame's fill is made from (the photo's palette), made from the
+  // photo once its preview copy has landed.
+  const frameInputs = useFrameInputs(settings, mediaState)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tool, setTool] = useState<ToolId | null>(null)
   const [subs, setSubs] = useState<Subs>(FIRST_SUBS)
@@ -306,7 +310,7 @@ export default function AppShell() {
         <div className="app__canvas-wrap">
           {/* Paused while pressing, so a full-size press and a preview frame
               never hold their buffers at once. */}
-          <Canvas media={media} mediaMode={tool === 'photo'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
+          <Canvas media={media} inputs={frameInputs.inputs} mediaMode={tool === 'photo'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
         </div>
       </main>
 

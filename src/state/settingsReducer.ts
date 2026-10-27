@@ -28,15 +28,19 @@ import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits
  * A join never opens or extends a burst.
  */
 export type SettingsAction =
-  | { type: 'patch'; patch: Partial<PrintSettings>; coalesce?: boolean; join?: boolean }
+  /** Anything but the photo, which `setMedia` and `patchMedia` change. */
+  | { type: 'patch'; patch: Partial<Omit<PrintSettings, 'media'>>; coalesce?: boolean; join?: boolean }
   | { type: 'patchLayer'; id: string; patch: Partial<TextLayer>; coalesce?: boolean; join?: boolean }
   /** `id`: the new plate's, so the UI that adds it can select it. */
   | { type: 'addLayer'; id?: string }
   | { type: 'removeLayer'; id: string }
   | { type: 'patchPress'; patch: Partial<PressProfile>; coalesce?: boolean; join?: boolean }
   | { type: 'patchFrame'; patch: Partial<FrameSettings>; coalesce?: boolean; join?: boolean }
+  /** A new photo (or none). Its palette is computed from its pixels
+   *  (`setPalette`): one handed in with it is dropped. */
   | { type: 'setMedia'; media: MediaLayer | null }
-  | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean; join?: boolean }
+  /** The photo's placement. Never its palette: that is `setPalette`'s. */
+  | { type: 'patchMedia'; patch: Partial<Omit<MediaLayer, 'palette'>>; coalesce?: boolean; join?: boolean }
   /** The photo's frame colours, computed from it: derived data, not an
    *  edit, so it is never an undo step. For the photo `mediaId` only: a
    *  palette that arrives after its photo was replaced is dropped. */
@@ -153,8 +157,10 @@ function patchLayer(state: PrintSettings, l: TextLayer, patch: Partial<TextLayer
 export function applySettings(state: PrintSettings, action: SettingsAction): PrintSettings {
   switch (action.type) {
     case 'patch': {
-      const next = { ...state, ...action.patch }
-      return 'aspect' in action.patch || 'media' in action.patch ? withCover(next) : next
+      // Never the photo (held for anything typed loosely too).
+      const { media: _media, ...patch } = action.patch as Partial<PrintSettings>
+      const next = { ...state, ...patch }
+      return 'aspect' in patch ? withCover(next) : next
     }
 
     case 'patchLayer': {
@@ -197,10 +203,13 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
     }
 
     case 'setMedia': {
+      // The photo's colours are its pixels', computed once it is here: never
+      // carried in with it.
+      const media = action.media && withoutPalette(action.media)
       // Replacing a photo keeps the sheet the person chose (an Original sheet
       // takes the new photo's shape); removing one from an Original sheet
       // leaves 4:5 (withCover).
-      if (!action.media || state.media) return withCover({ ...state, media: action.media })
+      if (!media || state.media) return withCover({ ...state, media })
       // The first photo is the moment a single ink stops being enough. Type
       // that was perfectly readable on paper goes invisible over half of any
       // photograph, and the control that fixes it does not even exist in the
@@ -218,7 +227,7 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       return withCover({
         ...state,
         aspect: 'original',
-        media: action.media,
+        media,
         layers: state.layers.map((l) =>
           l.contrastInkId || l.backing ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },
         ),
@@ -228,7 +237,7 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
     case 'patchMedia':
       // A patch with no photo present is a no-op rather than a crash: the
       // gesture layer can fire one as a drag ends just after a clear.
-      return state.media ? withCover({ ...state, media: { ...state.media, ...action.patch } }) : state
+      return state.media ? withCover({ ...state, media: { ...state.media, ...withoutPalette(action.patch) } }) : state
 
     case 'setPalette':
       return state.media?.id === action.mediaId ? { ...state, media: { ...state.media, palette: action.palette } } : state
@@ -236,6 +245,14 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
     case 'reset':
       return action.settings
   }
+}
+
+/** A photo, or a patch of one, without a palette: only `setPalette` writes
+ *  one (the type says so; this holds it for anything typed loosely). */
+function withoutPalette<T extends Partial<MediaLayer>>(m: T): Omit<T, 'palette'> {
+  if (!('palette' in m)) return m
+  const { palette: _palette, ...rest } = m
+  return rest
 }
 
 /** Equality of plain data, which the document is (it is stored as JSON):

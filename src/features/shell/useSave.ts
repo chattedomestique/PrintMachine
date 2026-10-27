@@ -21,7 +21,8 @@ import { snapCopyRect, type DrawRect } from '../../engine/media.ts'
 import { throwIfAborted, type RenderProgress } from '../../engine/render.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { PhotoDecodeError, decodeOriginal, decodeResized } from '../media/decode.ts'
-import { storedFrameInputs } from '../media/frameInputs.ts'
+import { ensureFrameInputs } from '../media/frameInputs.ts'
+import type { FrameInputs } from '../../engine/frame.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
 import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../../state/persist.ts'
 import { canShareFile, deliverFile, detachedCanvas, saveMessage } from './page.ts'
@@ -384,6 +385,9 @@ const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'A
 /** What a press for Save needs from the page: the decodes, the canvases and
  *  the press itself (a test hands in its own). */
 export interface SaveDeps {
+  /** What the frame's fill is made from, made now if the document does not
+   *  hold it (features/media `ensureFrameInputs`). */
+  frameInputs(settings: PrintSettings): Promise<FrameInputs>
   decodeOriginal(id: string): Promise<ImageBitmap>
   decodeResized(id: string, width: number, height: number): Promise<ImageBitmap>
   savePrint: typeof savePrint
@@ -396,6 +400,7 @@ export interface SaveDeps {
 
 /** The page's own. */
 export const PAGE: SaveDeps = {
+  frameInputs: (settings) => ensureFrameInputs(settings),
   decodeOriginal,
   decodeResized,
   savePrint,
@@ -453,6 +458,9 @@ export type SaveResult = { kind: 'pressed'; pressed: PressedPrint } | { kind: 't
  * The press behind Save, with no UI in it: decode the photo, press, and, when
  * this device cannot, find the copy it can.
  *
+ *  - The frame's inputs (the photo's palette) are made first when the
+ *    document does not hold them, so the press never starts without them
+ *    and their decode is over before the original's begins.
  *  - A print at the photo's own size decodes the ORIGINAL in full. If that
  *    fails, it is a question of size only when a smaller decode of the same
  *    file succeeds (the import already decoded it once): then the largest
@@ -488,6 +496,11 @@ export async function pressForSave(
   }
   let photo: ImageBitmap | null = null
   try {
+    // The frame's inputs first: made from a decode of their own (the
+    // photo's colours), which is over before the original is decoded, so
+    // the two never hold their pixels at once.
+    const inputs = await deps.frameInputs(settings)
+    throwIfAborted(signal)
     let rect: DrawRect | undefined
     if (settings.media) {
       if (plan.limit === 'smaller') {
@@ -510,7 +523,7 @@ export async function pressForSave(
     run.onPhotoLoaded?.()
     const decoded = photo
     try {
-      const pressed = await deps.savePrint(settings, decoded, storedFrameInputs(settings), {
+      const pressed = await deps.savePrint(settings, decoded, inputs, {
         format,
         maxHeight,
         signal,

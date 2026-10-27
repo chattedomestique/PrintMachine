@@ -218,11 +218,11 @@ export default function AppShell() {
   // What Save will make: the pixel size, and why when it is not the photo's
   // own pixels. Said in the More sheet (unless the photo cannot be loaded:
   // moreCaption), in Save's name, and in the toast when a save starts.
-  const caption = useMemo(() => describePlan(planPrint(settings), settings.media), [settings])
+  const caption = useMemo(() => describePlan(planPrint(settings), settings), [settings])
   // The lossless PNG's: the same but past a JPEG's edge (65,535 px), and its
   // file's size where this browser cannot compress (stored, 3 bytes a pixel).
   const pngPlan = useMemo(() => planPrint(settings, { format: 'png' }), [settings])
-  const pngCaption = useMemo(() => describePlan(pngPlan, settings.media), [pngPlan, settings.media])
+  const pngCaption = useMemo(() => describePlan(pngPlan, settings), [pngPlan, settings])
   const pngMeta = pngCompresses() ? pngCaption.size : `${pngCaption.size} (about ${fileSize(storedSize(pngPlan.width, pngPlan.height))})`
   const button = saveButton(save.state, mediaState)
   const status = saveStatus(save.state, mediaState)
@@ -458,7 +458,7 @@ export default function AppShell() {
         onAnswer={(height) => {
           // The size the answer saves, said as the save starts.
           const format = save.state.kind === 'tooBig' || save.state.kind === 'interrupted' ? save.state.format : 'jpeg'
-          const c = describePlan(planPrint(settings, { maxHeight: height, format }), settings.media)
+          const c = describePlan(planPrint(settings, { maxHeight: height, format }), settings)
           announce(`Saving ${c.size} ${format.toUpperCase()}${c.reason ? `: ${c.reason}` : ''}`, 'info')
           save.answer(height)
         }}

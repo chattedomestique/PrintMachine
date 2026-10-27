@@ -396,14 +396,20 @@ export interface PlanWords {
  * What Save says about the size: the pixel size and the megapixels, the
  * frame when there is one, a very large print as such, and, when the print
  * is not at the photo's own pixels, why — in numbers, never quietly.
+ *
+ * @param sheet the document the plan is of: its photo, and its sheet and
+ *   frame, since Fit shows the whole photo and reads no zoom (a zoom kept
+ *   from Crop is not said).
  */
-export function describePlan(plan: ExportPlan, media: Pick<MediaLayer, 'width' | 'height' | 'scale'> | null): PlanWords {
+export function describePlan(plan: ExportPlan, sheet: SheetSpec): PlanWords {
+  const media = sheet.media
   const size = dims(plan.width, plan.height)
   const mp = (plan.width * plan.height) / 1e6
   const megapixels = `${mp.toFixed(1)} MP`
   const frame = plan.border > 0 ? `with a ${plan.border} px frame` : null
   const large = mp > LARGE_PRINT_MP ? 'a very large print: a phone may not finish it' : null
-  const photo = media ? `${dims(media.width, media.height)}${media.scale > 1 ? ` at ${Math.round(media.scale * 100)}% zoom` : ''}` : ''
+  const zoom = media && media.scale > 1 && effectiveMode(sheet) !== 'fit' ? ` at ${Math.round(media.scale * 100)}% zoom` : ''
+  const photo = media ? `${dims(media.width, media.height)}${zoom}` : ''
   const words = { size, megapixels, frame, large }
   switch (plan.limit) {
     case 'native':

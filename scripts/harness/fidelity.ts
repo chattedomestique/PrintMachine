@@ -209,7 +209,7 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
     format,
     stored: { byteForByte, fileBytes: file.size, layer: `${layer.width}x${layer.height}` },
     plan: { width: plan.width, height: plan.height, limit: plan.limit },
-    caption: describePlan(plan, s.media),
+    caption: describePlan(plan, s),
     file: `${out.w}x${out.h}`,
     dimsMatch: same,
     aligned,

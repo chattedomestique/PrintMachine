@@ -657,7 +657,7 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
 })
 
 describe('what Save says', () => {
-  const plan = (s: PrintSettings) => describePlan(planPrint(s), s.media)
+  const plan = (s: PrintSettings) => describePlan(planPrint(s), s)
   const words = (size: string, megapixels: string, reason: string | null = null) => ({ size, megapixels, frame: null, large: null, reason })
 
   it('the pixel size and megapixels, and nothing more when the print is the photo\'s own pixels', () => {
@@ -675,14 +675,14 @@ describe('what Save says', () => {
     const fit = { ...s, frame: { ...s.frame, width: 1 / 14, mode: 'fit' as const } }
     const p = planPrint(fit)
     expect(p).toMatchObject({ width: 18414, height: 10358, limit: 'native' })
-    expect(describePlan(p, fit.media)).toEqual({
+    expect(describePlan(p, fit)).toEqual({
       ...words('18414×10358', '190.7 MP'),
       frame: 'with a 1315 px frame',
       large: 'a very large print: a phone may not finish it',
     })
     // At the line exactly, not yet.
-    expect(describePlan({ ...p, width: 10_000, height: 10_000 }, null).large).toBeNull()
-    expect(describePlan({ ...p, width: 10_000, height: 10_001 }, null).large).not.toBeNull()
+    expect(describePlan({ ...p, width: 10_000, height: 10_000 }, defaultSettings()).large).toBeNull()
+    expect(describePlan({ ...p, width: 10_000, height: 10_001 }, defaultSettings()).large).not.toBeNull()
   })
 
   it('an enlarged photo, in numbers', () => {
@@ -690,6 +690,14 @@ describe('what Save says', () => {
     expect(plan(withPhoto(4032, 3024, { media: makeMedia({ id: 'p', width: 4032, height: 3024, scale: 4 }) })).reason).toBe(
       'photo is 4032×3024 at 400% zoom: upscaled 2.38x',
     )
+  })
+
+  it('Fit reads no zoom, so says none: a zoom kept from Crop is left out, on Original it is said whatever mode is stored', () => {
+    const zoomed = withPhoto(800, 600, { media: makeMedia({ id: 'p', width: 800, height: 600, scale: 2 }) })
+    const framed = (mode: 'crop' | 'fit', over: Partial<PrintSettings> = {}): PrintSettings => ({ ...zoomed, ...over, frame: { ...zoomed.frame, width: 1 / 14, mode } })
+    expect(plan(framed('crop')).reason).toBe('photo is 800×600 at 200% zoom: upscaled 5.14x')
+    expect(plan(framed('fit')).reason).toBe('photo is 800×600: upscaled 1.48x')
+    expect(plan(framed('fit', { aspect: 'original' })).reason).toMatch(/^photo is 800×600 at 200% zoom: upscaled /)
   })
 
   it('no ceiling: a 24 MP and a 40 MP photo on their own sheets and cropped, at their own pixels, with nothing to explain', () => {
@@ -703,12 +711,12 @@ describe('what Save says', () => {
   it('past a JPEG\'s edge (65,535 px), the largest JPEG, and how to get the photo\'s full size', () => {
     // A 3:1 panorama of 120,000 px (the widest an Original sheet is).
     const s = withPhoto(120_000, 40_000, { aspect: 'original' })
-    expect(describePlan(planPrint(s), s.media)).toEqual({
+    expect(describePlan(planPrint(s), s)).toEqual({
       ...words('65535×21845', '1431.6 MP'),
       large: 'a very large print: a phone may not finish it',
       reason: "JPEG holds at most 65,535 px a side: Save lossless PNG for the photo's full size",
     })
-    expect(describePlan(planPrint(s, { format: 'png' }), s.media)).toEqual({
+    expect(describePlan(planPrint(s, { format: 'png' }), s)).toEqual({
       ...words('120000×40000', '4800.0 MP'),
       large: 'a very large print: a phone may not finish it',
     })

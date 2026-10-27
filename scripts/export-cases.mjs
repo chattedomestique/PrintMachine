@@ -46,8 +46,11 @@
  * 13. 61 MP, 9504x6336 Original at the widest frame: 13976x10808 (151 MP);
  * 14. the owner's 40 MP portrait, 5152x7728, on 16:9 Fit: 18414x10358
  *     (191 MP, 4.8x the photo, the worst realistic default);
- * 15. the same at the widest frame: 31864x17924 (571 MP), memory only.
- * 13 to 15 run with FULL=1.
+ * 15. the same at the widest frame: 31864x17924 (571 MP), memory only;
+ * 16. case 11 in Frosted at its heaviest blur (240): 9016x6440, 18 MP of
+ *     border sampled from the field twice (the second ink's luminance and
+ *     the press), the photo's frame source and the field held through it.
+ * 13 to 16 run with FULL=1.
  *
  * Gated in megabytes like 6 to 10, at what they measured x 1.25, and under
  * a stated CEILING that does not come from their own measurement (a gate
@@ -61,7 +64,9 @@
  * gate (125 MB): 162.5 MB. Measured when the frame went in (typed / whole,
  * ceiling): 11, 118.0 / 379.1 MB (467.9); 12, 120.1 / 413.8 (510.1); 13,
  * 147.5 / 619.1 (828.6); 14, 168.7 / 613.6 (871.1); 15, 262.2 / 1238.8
- * (1794.8). The typed arrays grow far slower than the width: a band is
+ * (1794.8); and when Frosted's field went in, 16, 123.1 / 384.2 (467.9):
+ * 5.1 MB more than case 11 (the frame source and the field, held through
+ * the press). The typed arrays grow far slower than the width: a band is
  * BAND_PIXELS over the width, so a wider sheet presses fewer rows at a time.
  *
  * And the same-width pairs (`pair`): a 4000x10000 photo on Original (a
@@ -224,6 +229,14 @@ export function exportCases({ defaultSettings, makeLayer, makeMedia, contrastPar
       ceiling: true,
       full: true,
       doc: () => framed(defaultDoc(5152, 7728, '16:9'), { mode: 'fit' }),
+    },
+    {
+      id: '16',
+      name: '40 MP, 7728x5152 Original, default document, the first photo\'s frame in Frosted at Blur 240',
+      gate: { typed: 154, total: 467 },
+      ceiling: true,
+      full: true,
+      doc: () => framed(defaultDoc(7728, 5152, 'original'), { fill: 'frosted', blur: 240 }),
     },
     {
       id: '15',

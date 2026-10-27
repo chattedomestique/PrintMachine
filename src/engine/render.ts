@@ -1651,7 +1651,7 @@ function* exportSteps(
       ground = new TiledGroundRows(grid, B, groundTiles(canvases.tile, media, r, grid))
     }
     // Unframed, the photo's ground is the ground, as it always was.
-    if (!isUnframed(layout)) ground = new FramedGroundRows(ground, layout, fillFor(s, inputs), B)
+    if (!isUnframed(layout)) ground = new FramedGroundRows(ground, layout, fillFor(s, inputs, w, h), B)
   } else {
     opts.onGround?.()
   }
@@ -1883,7 +1883,7 @@ function* previewSteps(
     drawGroundPart(scratch, media, layout.photo!, { x0: 0, y0: 0, w, h })
     ground = new Uint8ClampedArray(w * h * 4)
     readRgba(scratch, w, h, ground, w)
-    if (!isUnframed(layout) && !previewSeam().skipFrameCompose) composeFrameRows(layout, fillFor(s, inputs), ground, 0, h, ground)
+    if (!isUnframed(layout) && !previewSeam().skipFrameCompose) composeFrameRows(layout, fillFor(s, inputs, w, h), ground, 0, h, ground)
   }
   onGround?.()
 

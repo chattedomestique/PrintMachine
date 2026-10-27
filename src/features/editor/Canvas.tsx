@@ -5,7 +5,7 @@ import { useRenderer } from './useRenderer.ts'
 import { useLayerGestures } from './useLayerGestures.ts'
 import type { GestureLimits, GesturePatch, GestureTarget, Pt } from './gesture.ts'
 import { stepSize } from '../controls/sizeScale.ts'
-import { type MediaLayer, type TextLayer } from '../../engine/types.ts'
+import { type MediaLayer, type PrintSettings, type TextLayer } from '../../engine/types.ts'
 import { sheetAspect, visibleAspect } from '../../engine/frame.ts'
 import { areaOf, clampPan } from '../../engine/media.ts'
 import { hitLayer, layoutIn, type FontMeasure } from '../../engine/text.ts'
@@ -40,15 +40,16 @@ const PICK_THEN_TAP_MS = 1000
  */
 export default function Canvas({
   media = null,
-  inputs,
+  inputsFor,
   mediaMode = false,
   paused = false,
   onGesture,
 }: {
   media?: ImageBitmap | null
-  /** What the frame's fill is made from (features/media `useFrameInputs`);
-   *  a fill whose input is not there yet draws as Paper. */
-  inputs: FrameInputs
+  /** What the frame's fill is made from, for a document and whether the
+   *  frame is a draft (features/media `useFrameInputs`); a fill whose input
+   *  is not there yet draws as Paper. */
+  inputsFor: (s: PrintSettings, draft: boolean) => FrameInputs
   /** Point the sheet's gestures at the photo instead of the type. Driven by
    *  the open tab, so what you are touching is whatever panel you are in — no
    *  second selection model to keep in sync. */
@@ -63,7 +64,7 @@ export default function Canvas({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
 
-  useRenderer(canvasRef, settings, { selectedLayerId }, media, inputs, paused)
+  useRenderer(canvasRef, settings, { selectedLayerId }, media, inputsFor, paused)
 
   const layer = selectedLayer ?? settings.layers[0] ?? null
 

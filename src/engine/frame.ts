@@ -29,6 +29,7 @@
  * Pure: no DOM.
  */
 
+import { frostSampler, type FrostField } from './frost.ts'
 import { FRAME_CORNER_DIV } from './limits.ts'
 import { coverRect, snapRect, type Area, type DrawRect } from './media.ts'
 import { ASPECTS, type FramePalette, type FrameSettings, type PrintSettings } from './types.ts'
@@ -313,23 +314,32 @@ export function cornerCoverage(r: number, x: number, y: number): number {
  * computed from the photo by the page (features/media) and handed to the
  * engine beside the photo. The engine never decodes and never caches it.
  *  - `palette`: the photo's four colours (stored with the photo,
- *    `media.palette`).
+ *    `media.palette`);
+ *  - `frost`: Frosted's field (frost.ts), made for the sheet's shape and the
+ *    blur.
  */
 export interface FrameInputs {
   palette?: FramePalette
+  frost?: FrostField
 }
 
 /**
- * The document's fill choice, looked up in its inputs: Paper is bare paper;
- * Photo, Deep, Muted and Comp are the photo's own colours. The document
- * stores the choice, never a colour, so a new photo re-keys the frame by
- * itself. A fill whose input is not there (yet) is Paper, the bare stock,
- * never a wrong colour; the page renders again once it arrives. Frosted is
- * Paper until its field is handed in (the frost field lands with Frosted).
+ * The document's fill choice on a w x h sheet, looked up in its inputs:
+ * Paper is bare paper; Photo, Deep, Muted and Comp are the photo's own
+ * colours; Frosted is its field, sampled over the sheet. The document stores
+ * the choice, never a colour, so a new photo re-keys the frame by itself. A
+ * fill whose input is not there (yet) is Paper, the bare stock, never a
+ * wrong colour; the page renders again once it arrives. A field made for
+ * another sheet shape or another blur is not there.
  */
-export function fillFor(s: Pick<PrintSettings, 'frame'>, inputs: FrameInputs): FrameFill {
+export function fillFor(s: Pick<PrintSettings, 'frame' | 'aspect' | 'media'>, inputs: FrameInputs, w: number, h: number): FrameFill {
   const fill = s.frame.fill
-  if (fill === 'paper' || fill === 'frosted') return fillRgba(null)
+  if (fill === 'paper') return fillRgba(null)
+  if (fill === 'frosted') {
+    const field = inputs.frost
+    const fits = field !== undefined && field.blur === s.frame.blur && field.aspect === sheetAspect(s)
+    return fillRgba(fits ? frostSampler(field, w, h) : null)
+  }
   return fillRgba(inputs.palette?.[fill] ?? null)
 }
 

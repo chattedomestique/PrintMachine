@@ -25,9 +25,14 @@ import { JpegEncoder } from '../../src/engine/encode/jpeg.ts'
 import { PngEncoder } from '../../src/engine/encode/png.ts'
 import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
 import { detachedCanvas } from '../../src/features/shell/page.ts'
-import { storedFrameInputs as inputsOf } from '../../src/features/media/frameInputs.ts'
+import { needsFrost, storedFrameInputs } from '../../src/features/media/frameInputs.ts'
+import { PAGE_SOURCE_DEPS, frameSourceSize, frameSources } from '../../src/features/media/frameSource.ts'
+import { frostFields } from '../../src/features/media/frostField.ts'
 import { type FramePalette, type FrameSettings, type PrintSettings } from '../../src/engine/types.ts'
-import { effectiveMode, sheetAspect } from '../../src/engine/frame.ts'
+import { effectiveMode, sheetAspect, type FrameInputs } from '../../src/engine/frame.ts'
+import { frostField } from '../../src/engine/frost.ts'
+import { FROST_DRAFT_LONG, FROST_FIELD_LONG } from '../../src/engine/limits.ts'
+import type { RgbaImage } from '../../src/engine/resample.ts'
 import { previewArea, workingSize } from '../../src/features/media/decode.ts'
 import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
 import plain from './docs/plain.json'
@@ -38,6 +43,7 @@ import frameOriginal from './docs/frame-original.json'
 import frameFit from './docs/frame-fit.json'
 import frameCorners from './docs/frame-corners.json'
 import frameCropZoomed from './docs/frame-crop-zoomed.json'
+import frameFrosted from './docs/frame-frosted.json'
 
 /**
  * The frozen documents, plus some built live from the build under test:
@@ -106,13 +112,18 @@ const DOCS: Record<string, () => unknown> = {
   'frame-fit': () => frameFit,
   'frame-corners': () => frameCorners,
   'frame-crop-zoomed': () => frameCropZoomed,
+  // Frosted, text-free: Original, a wide frame, half-round, Blur 120, the
+  // veil on. Its field is made from the test photo generated at the frame
+  // source's size (`inputsOf`), not decoded, so its hash does not depend on
+  // the browser's decoder.
+  'frame-frosted': () => frameFrosted,
 }
 
 /** Every document is one tile of the band engine's glyph grid at every
  *  height recorded (300, 1000, 1800): the 4:5 ones are 1440 px wide at
  *  1800, and the frame documents at most 2291x1800 (4.12 MP, under the
- *  tile's 4.19 MP). A document of another shape needs its own check that the
- *  heights recorded stay one tile. */
+ *  tile's 4.19 MP; frame-frosted is 2223x1800). A document of another shape
+ *  needs its own check that the heights recorded stay one tile. */
 function withPhoto(s: PrintSettings, width: number, height: number): PrintSettings {
   s.media = makeMedia({ id: 'harness-photo', width, height })
   return s
@@ -156,8 +167,13 @@ function photoCanvas(w: number, h: number): HTMLCanvasElement {
   c.height = h
   const ctx = c.getContext('2d')
   if (!ctx) throw new Error('no 2D context')
-  const img = ctx.createImageData(w, h)
-  const d = img.data
+  ctx.putImageData(new ImageData(photoPixels(w, h), w, h), 0, 0)
+  return c
+}
+
+/** The test photo's pixels, RGBA, w x h (`photoCanvas`). */
+function photoPixels(w: number, h: number): Uint8ClampedArray<ArrayBuffer> {
+  const d = new Uint8ClampedArray(w * h * 4)
   const cx = w / 2
   const cy = h / 2
   const k = Math.PI / (2 * Math.max(w, h))
@@ -179,8 +195,35 @@ function photoCanvas(w: number, h: number): HTMLCanvasElement {
       d[o + 3] = 255
     }
   }
-  ctx.putImageData(img, 0, 0)
-  return c
+  return d
+}
+
+/** The test photo as the frame's source (features/media frameSource.ts):
+ *  generated at the source's size, one per size, never decoded. */
+const sources = new Map<string, RgbaImage>()
+function frameSourceOf(media: { width: number; height: number }): RgbaImage {
+  const { width: w, height: h } = frameSourceSize(media.width, media.height)
+  const key = `${w}x${h}`
+  let src = sources.get(key)
+  if (!src) {
+    src = { w, h, rgba: photoPixels(w, h) }
+    sources.set(key, src)
+  }
+  return src
+}
+
+/** The harness's fields, kept as the page keeps them. */
+const fields = frostFields()
+
+/**
+ * What a document's frame is drawn from: the palette it stores, and for
+ * Frosted the field the page would make (`fieldLong`, the settled and the
+ * saved size unless asked), from the test photo at the source's size.
+ */
+function inputsOf(s: PrintSettings, fieldLong = FROST_FIELD_LONG): FrameInputs {
+  const inputs = storedFrameInputs(s)
+  if (s.media && needsFrost(s)) inputs.frost = fields.field(s.media.id, frameSourceOf(s.media), sheetAspect(s), s.frame.blur, fieldLong)
+  return inputs
 }
 
 const photos = new Map<string, ImageBitmap>()
@@ -887,10 +930,25 @@ async function parityBorders(c: ParityCase): Promise<{ w: number; h: number; pm:
   if (JSON.stringify(settings.frame) !== JSON.stringify(c.frame) || JSON.stringify(settings.media?.palette) !== JSON.stringify(c.photo.palette)) {
     throw new Error(`the normaliser changed the parity document: ${JSON.stringify(settings.frame)} ${JSON.stringify(settings.media?.palette)}`)
   }
-  const photo = await createImageBitmap(new ImageData(unb64(c.photo.rgba), c.photo.width, c.photo.height))
+  const pixels = new ImageData(unb64(c.photo.rgba), c.photo.width, c.photo.height)
+  const photo = await createImageBitmap(pixels)
+  // Frosted's field as the app makes it: the photo's bytes (a PNG of the
+  // block photo, lossless) through the app's own frame source (decoded at
+  // its fixed size and read back), then the field at the save's size.
+  const inputs = storedFrameInputs(settings)
+  if (settings.frame.fill === 'frosted') {
+    const png = context(true)
+    png.canvas.width = c.photo.width
+    png.canvas.height = c.photo.height
+    png.putImageData(pixels, 0, 0)
+    const blob = await new Promise<Blob>((resolve, reject) => png.canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'))
+    png.canvas.width = 0
+    const src = await frameSources({ ...PAGE_SOURCE_DEPS, getBlob: async () => blob }).load(settings.media!)
+    inputs.frost = frostField(src, sheetAspect(settings), FROST_FIELD_LONG, settings.frame.blur)
+  }
   const out = context(false)
   const scratch = context(true)
-  await renderPrintAsync(out, scratch, settings, c.height, photo, inputsOf(settings), { makeCanvas: () => context(true) })
+  await renderPrintAsync(out, scratch, settings, c.height, photo, inputs, { makeCanvas: () => context(true) })
   photo.close()
   const { width: w, height: h } = out.canvas
   const pm = out.getImageData(0, 0, w, h).data
@@ -922,14 +980,19 @@ const COST_DOCS: Record<string, () => { settings: PrintSettings; copy: boolean }
 }
 
 /** What the frame-cost gate frames a document with: the first photo's
- *  width, round corners, the photo's own colour; in Crop or in Fit. */
+ *  width, round corners, the photo's own colour, in Crop or in Fit; or
+ *  Frosted at its default Blur, in Crop. */
 const COST_FRAMES: Record<string, Partial<FrameSettings> | null> = {
   none: null,
   crop: { width: 1 / 14, corners: 1, fill: 'photo', mode: 'crop' },
   fit: { width: 1 / 14, corners: 1, fill: 'photo', mode: 'fit' },
+  frosted: { width: 1 / 14, corners: 1, fill: 'frosted', blur: 60, mode: 'crop' },
 }
 
-const costRigs = new Map<string, { settings: PrintSettings; media: ImageBitmap; height: number; out: CanvasRenderingContext2D; scratch: CanvasRenderingContext2D; cache: { current: RenderCache | null } }>()
+const costRigs = new Map<
+  string,
+  { settings: PrintSettings; media: ImageBitmap; height: number; out: CanvasRenderingContext2D; scratch: CanvasRenderingContext2D; cache: { current: RenderCache | null }; inputs: FrameInputs; fieldLong: number }
+>()
 
 /**
  * A preview render of a document, framed or not, at the settled or the
@@ -937,13 +1000,16 @@ const costRigs = new Map<string, { settings: PrintSettings; media: ImageBitmap; 
  * of the frame. Each (document, frame, size) keeps its canvases and its
  * render cache across calls, as the preview does, and is rendered once
  * untimed first; so a timing is the steady cost of a frame of the preview,
- * the photo drawn and the frame composed afresh every time. `bare` renders
+ * the photo drawn and the frame composed afresh every time. Frosted's field
+ * is made once, as the page keeps it (480 settled, 160 draft). `bare` renders
  * the same framed document with the same canvases and cache, its frame's
  * compose skipped (the preview's test seam, README "Test seams"): the photo
  * drawn into the same rectangle, so the two differ by the frame's own work
- * alone.
+ * alone. `remake` (Frosted) makes the field again inside the timed render,
+ * at a blur one off the last, as a Blur change (or a Width change on
+ * Original, which changes the sheet's shape) does.
  */
-async function frameCost(doc: string, frame: string, draft: boolean, bare = false): Promise<{ ms: number; w: number; h: number }> {
+async function frameCost(doc: string, frame: string, draft: boolean, bare = false, remake = false): Promise<{ ms: number; w: number; h: number }> {
   const key = `${doc}|${frame}|${draft}`
   let rig = costRigs.get(key)
   if (!rig) {
@@ -961,18 +1027,26 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
     const c = photoCanvas(size.width, size.height)
     const media = await createImageBitmap(c)
     c.width = 0
-    rig = { settings, media, height: (draft ? draftSize(aspect) : previewSize(aspect)).h, out: context(false), scratch: context(true), cache: { current: null } }
+    const fieldLong = draft ? FROST_DRAFT_LONG : FROST_FIELD_LONG
+    rig = { settings, media, height: (draft ? draftSize(aspect) : previewSize(aspect)).h, out: context(false), scratch: context(true), cache: { current: null }, inputs: inputsOf(settings, fieldLong), fieldLong }
     costRigs.set(key, rig)
-    renderPrint(rig.out, rig.scratch, settings, rig.cache, null, rig.height, media, inputsOf(settings))
+    renderPrint(rig.out, rig.scratch, settings, rig.cache, null, rig.height, media, rig.inputs)
   }
   const seam = globalThis as { __PM_TEST__?: unknown }
   const before = seam.__PM_TEST__
   if (bare) seam.__PM_TEST__ = { skipFrameCompose: true }
   try {
+    const r = rig
     const t0 = performance.now()
-    renderPrint(rig.out, rig.scratch, rig.settings, rig.cache, null, rig.height, rig.media, inputsOf(rig.settings))
+    if (remake) {
+      // A blur one off the last: a field that is not kept, made now.
+      const blur = r.settings.frame.blur === 60 ? 61 : 60
+      r.settings = { ...r.settings, frame: { ...r.settings.frame, blur } }
+      r.inputs = { ...r.inputs, frost: frostField(frameSourceOf(r.settings.media!), sheetAspect(r.settings), r.fieldLong, blur) }
+    }
+    renderPrint(r.out, r.scratch, r.settings, r.cache, null, r.height, r.media, r.inputs)
     const ms = performance.now() - t0
-    return { ms, w: rig.out.canvas.width, h: rig.out.canvas.height }
+    return { ms, w: r.out.canvas.width, h: r.out.canvas.height }
   } finally {
     seam.__PM_TEST__ = before
   }

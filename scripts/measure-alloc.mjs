@@ -3,7 +3,7 @@
  *
  *   node scripts/measure-alloc.mjs            (every case; exits 1 over a gate)
  *   FULL=1 node scripts/measure-alloc.mjs     (and case 8, the 61 MP worst press, and the framed
- *                                             13-15: 151, 191 and 571 MP)
+ *                                             13-16: 151, 191 and 571 MP, and 58 MP Frosted)
  *   node scripts/measure-alloc.mjs 1 3 7g     (just those cases)
  *
  * Each case runs in a process of its own, so nothing one case left behind is
@@ -33,7 +33,7 @@
  * recorded, not gated); cases 6-10 in megabytes, of typed arrays and of the
  * whole (the typed arrays, the canvases, the decoded photo and the file at
  * FILE_BOUND bytes an output pixel, so the gate does not depend on how well
- * the fake print compresses); the framed cases 11-15 the same way, and the
+ * the fake print compresses); the framed cases 11-16 the same way, and the
  * whole under a ceiling scaled from case 6 by the sheet's width (CASE6,
  * checked against case 6 whenever both run); and the same-width pairs, a
  * sheet twice as tall as another of its width, whose peaks may differ by at
@@ -87,8 +87,8 @@ if (!child) {
   }
   const jobs = Math.max(1, Number(process.env.MEASURE_JOBS) || Math.min(4, availableParallelism()))
   console.log(
-    'Peak live typed-array bytes; gates: cases 1-4 per output pixel, cases 6-15 in MB (typed, and with the canvases, photo and file; ' +
-      `the framed 11-15 under a ceiling too), the same-width pairs <= ${SAME_WIDTH}x. ${jobs} at a time.\n`,
+    'Peak live typed-array bytes; gates: cases 1-4 per output pixel, cases 6-16 in MB (typed, and with the canvases, photo and file; ' +
+      `the framed 11-16 under a ceiling too), the same-width pairs <= ${SAME_WIDTH}x. ${jobs} at a time.\n`,
   )
   const run = (id) =>
     new Promise((done) => {
@@ -271,7 +271,10 @@ const { planPrint } = await load('src/engine/export.ts')
 const { defaultSettings, makeLayer, makeMedia } = await load('src/state/defaults.ts')
 const { contrastPartner } = await load('src/engine/inks.ts')
 const limits = await load('src/engine/limits.ts')
-const { storedFrameInputs } = await load('src/features/media/frameInputs.ts')
+const { needsFrost, storedFrameInputs } = await load('src/features/media/frameInputs.ts')
+const { frameSourceSize } = await load('src/features/media/frameSource.ts')
+const { sheetAspect } = await load('src/engine/frame.ts')
+const { frostField } = await load('src/engine/frost.ts')
 // The modules are loaded; the server (its file watcher, its bundler) is shut
 // before anything is counted, so nothing in the background allocates while
 // the export runs.
@@ -312,12 +315,24 @@ for (const c of CASES.filter((k) => k.id === only)) {
   meter.base = process.memoryUsage().arrayBuffers
   Object.assign(meter, { on: true, n, total: 0, peak: 0, gcs: 0, threshold: legacy ? Math.floor(n / 4) : 512 * 1024 })
   let samples = 0
+  // What the frame is made from, as Save makes it and holds it through the
+  // press: for Frosted the photo's frame source (here a smooth synthetic
+  // photo at the source's size) and the field at the save's size.
+  const inputs = storedFrameInputs(s)
+  if (needsFrost(s)) {
+    const { width: fw, height: fh } = frameSourceSize(s.media.width, s.media.height)
+    const rgba = new Uint8ClampedArray(fw * fh * 4)
+    for (let y = 0; y < fh; y++) {
+      for (let x = 0; x < fw; x++) rgba.set([40 + (180 * x) / fw, 90 + 60 * Math.sin(y / 70), 230 - (150 * y) / fh, 255], (y * fw + x) * 4)
+    }
+    inputs.frost = frostField({ w: fw, h: fh, rgba }, sheetAspect(s), limits.FROST_FIELD_LONG, s.frame.blur)
+  }
   // The real encoder, at Save's quality; its file is counted and dropped.
   let fileBytes = 0
   const t0 = performance.now()
   const jpeg = new JpegEncoder(plan.width, plan.height, 95, (chunk) => (fileBytes += chunk.length))
   const sink = { put: (rgba, rows) => jpeg.push(rgba, rows), settled: async () => {}, finish: async () => jpeg.finish(), abort: () => {} }
-  await pressToSink(s, { w: plan.width, h: plan.height }, photo, storedFrameInputs(s), sink, {
+  await pressToSink(s, { w: plan.width, h: plan.height }, photo, inputs, sink, {
     canvases: { tile: scratch, piece: () => measured(fakeContext(), 'piece') },
     onGround: () => sample(),
     onProgress: () => {

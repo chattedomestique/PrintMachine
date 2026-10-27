@@ -15,17 +15,22 @@
  * width as recorded), the paper veil off and one plate with no text, so the
  * sheet is the ground alone, at the reference's height.
  *
- * The cases here are the flat fills: (1) free + Photo, (2) free + corners
- * 100 + Deep, (5) Fit 4:5 + Muted, (6) Fit 9:16 + corners 50 + Comp. Free is
- * Print Machine's Original sheet; Fit a fixed sheet in Fit. (3) and (4),
- * Frosted, join with the frost field.
+ * All six cases: (1) free + Photo, (2) free + corners 100 + Deep, (3) free +
+ * Frosted at Blur 60, (4) free + Frosted at Blur 240, (5) Fit 4:5 + Muted,
+ * (6) Fit 9:16 + corners 50 + Comp. Free is Print Machine's Original sheet;
+ * Fit a fixed sheet in Fit. Frosted's field is made as the app makes it:
+ * the block photo's bytes (a PNG) through the app's frame source (decoded at
+ * its fixed size, read back), then the field at the save's size.
  *
  * What is compared, with the reference's own rectangle for the photo
  * (`shown`) and its corner radius:
  *  - the sheet: the engine's is the reference's size, within 1 px a side;
  *  - the border and, in Fit, the matte (every pixel outside the photo): the
  *    mean absolute error per channel and the largest; and the engine's matte
- *    is the fill's hex exactly;
+ *    is the fill's hex exactly. Frosted's border: the mean and the 99th
+ *    percentile of every channel's difference (the field is twice as fine as
+ *    Border Studio's 240 px one and kept in float where Border Studio rounds
+ *    every pass, so the two frosts differ by a level or two);
  *  - the photo inside the frame, away from the corners: in the free cases,
  *    where both apps draw it at its own pixels, every byte equal; in Fit,
  *    where each app resamples it its own way (Border Studio's canvas at 'low'
@@ -60,7 +65,7 @@ const executablePath =
   ['/opt/pw-browsers/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'].find((p) => existsSync(p))
 
 /** The cases this gate renders (refs.json ids). */
-const CASES = ['free-photo', 'free-corners-deep', 'fit-4x5-muted', 'fit-9x16-corners-comp']
+const CASES = ['free-photo', 'free-corners-deep', 'free-frosted-60', 'free-frosted-240', 'fit-4x5-muted', 'fit-9x16-corners-comp']
 
 /**
  * The bounds, in levels of 0..255 unless said. The plan's first figures
@@ -76,13 +81,23 @@ const CASES = ['free-photo', 'free-corners-deep', 'fit-4x5-muted', 'fit-9x16-cor
  * The engine's own pixels here are exact arithmetic on flat colour (the
  * resampled interior of Fit is masked), so they do not move with the
  * browser; the references are frozen.
+ * Frosted (cases 3 and 4) was first put at a mean of 4 and a 99th
+ * percentile of 12; it measured a mean of 0.48 and 0.49, a 99th percentile
+ * of 3 and 2 (largest 5 and 3), so it is held to <= 0.62 and <= 3.75. A
+ * radius not scaled with the field, the grade's brightness left out, the
+ * 2% overscan left out or the box passes clamped at the edges instead of
+ * shrunk each fail it (mean 2.6 to 19).
  */
+const FROST_MEAN = 0.62
+const FROST_P99 = 3.75
 const BOUNDS = {
   sheetPx: 0,
   borderMean: 0,
   borderMax: 0,
   cornerMean: 1.02,
   cornerOff: 0.0028,
+  frostMean: FROST_MEAN,
+  frostP99: FROST_P99,
 }
 
 const failures = []
@@ -170,13 +185,33 @@ try {
     const inShown = (x, y) => x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h
     const patch = Math.ceil(k.radius)
     const inPatch = (x, y) => patch > 0 && inShown(x, y) && (x < s.x + patch || x >= s.x + s.w - patch) && (y < s.y + patch || y >= s.y + s.h - patch)
-    const fill = hexRgb(photo.hex[k.print_machine.frame.fill])
+    const frosted = k.print_machine.frame.fill === 'frosted'
+    const fill = frosted ? null : hexRgb(photo.hex[k.print_machine.frame.fill])
 
     // The border, and in Fit the matte.
-    const border = compare(pm, ref, r.w, r.refW, [0, 0, w, h], (x, y) => !inShown(x, y), fill)
     const fit = k.print_machine.frame.mode === 'fit'
-    check(border.mean <= BOUNDS.borderMean && border.max <= BOUNDS.borderMax, `border${fit ? ' and matte' : ''}: ${border.n} px, mean ${border.mean.toFixed(4)} (<= ${BOUNDS.borderMean}), max ${border.max} (<= ${BOUNDS.borderMax}), ${border.differ} differ`)
-    check(border.notColour === 0, `the engine's ${fit ? 'border and matte are' : 'border is'} the fill ${photo.hex[k.print_machine.frame.fill]} exactly (${border.notColour} pixels are not)`)
+    if (frosted) {
+      // Frosted: the photo blurred and graded, from a field twice as fine
+      // as Border Studio's, in float where it rounds every pass: the mean
+      // and the 99th percentile of every channel's difference.
+      const diffs = []
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (inShown(x, y)) continue
+          const p = (y * r.w + x) * 4
+          const q = (y * r.refW + x) * 4
+          for (let c = 0; c < 3; c++) diffs.push(Math.abs(pm[p + c] - ref[q + c]))
+        }
+      }
+      diffs.sort((a, b) => a - b)
+      const mean = diffs.reduce((a, b) => a + b, 0) / diffs.length
+      const p99 = diffs[Math.floor(0.99 * (diffs.length - 1))]
+      check(mean <= BOUNDS.frostMean && p99 <= BOUNDS.frostP99, `Frosted border: ${diffs.length / 3} px, mean ${mean.toFixed(4)} (<= ${BOUNDS.frostMean}), 99th percentile ${p99} (<= ${BOUNDS.frostP99}), max ${diffs[diffs.length - 1]}`)
+    } else {
+      const border = compare(pm, ref, r.w, r.refW, [0, 0, w, h], (x, y) => !inShown(x, y), fill)
+      check(border.mean <= BOUNDS.borderMean && border.max <= BOUNDS.borderMax, `border${fit ? ' and matte' : ''}: ${border.n} px, mean ${border.mean.toFixed(4)} (<= ${BOUNDS.borderMean}), max ${border.max} (<= ${BOUNDS.borderMax}), ${border.differ} differ`)
+      check(border.notColour === 0, `the engine's ${fit ? 'border and matte are' : 'border is'} the fill ${photo.hex[k.print_machine.frame.fill]} exactly (${border.notColour} pixels are not)`)
+    }
 
     // The photo, away from the corners.
     if (!fit) {

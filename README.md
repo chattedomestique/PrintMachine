@@ -390,17 +390,39 @@ press never starts without it. Fed Border Studio's own recorded sample of its
 two block photos, and 36 photograph-like samples Border Studio's own
 `palette.js` keyed, the port gives Border Studio's hex exactly
 (`palette.test.ts`).
+
+Frosted is a border made of the photo itself (`engine/frost.ts`, Border
+Studio's `drawFrostedBg`), with Blur its one setting (10 to 240). The frame's
+source is cover-filled into a small FIELD of the sheet's shape, 480 px on its
+long side (160 while a control is dragged), by an area average, blurred by
+Border Studio's three box passes whose windows shrink at the edges (`blur.ts`,
+the same passes the plates use, with an edge rule; the plates' are unchanged
+to the byte) at a radius that scales with the field (14 at Blur 60, 44 at
+240), and graded as Border Studio ships it (brightness x 0.85, then
+saturation x 1.6 about Rec. 709 luma). The field's size is a function of the
+sheet's shape alone, never of a rendered size, so the preview and the save
+sample the same field; it stays in float, and each sheet pixel samples it
+bilinearly (with Border Studio's 2% overscan) and is rounded to a byte once.
+Rounding the field to bytes first would leave a stair as wide as a field
+pixel (19 sheet pixels at 58 MP); here the only step is the one-level step
+rounding must make. The field is made by the page from the photo's frame
+source and kept (a few, by photo, sheet shape and blur:
+`features/media/frostField.ts`), never in the render cache, and a field made
+for another shape or blur is not used (the border is Paper until the right
+one is there). Save makes it at 480 before it presses.
+
 The preview composes the frame into its ground in place, and the export
 composes it a band of rows at a time into a band buffer of its own
 (`FramedGroundRows`, one band more than an unframed press holds), reading the
 photo only for the rows it shows; each pixel is a function of its place and
 its own photo pixel, so every band height gives the same bytes and the
 preview's ground is the export's rows put together (`frame.test.ts`,
-`banded.test.ts`, `frameRender.test.ts`; the harness's `--bands`, `--parity`
-and `--file-parity` on four frame documents; `check-bands` in CI on two, one
-of them at its native height, so its photo is pressed from its own rows). A
-print without a frame (width 0, square corners, Crop) composes nothing and
-presses the bytes it always did.
+`frost.test.ts`, `banded.test.ts`, `frameRender.test.ts`; the harness's
+`--bands`, `--parity` and `--file-parity` on five frame documents, one of
+them Frosted; `check-bands` in CI on two, one of them at its native height,
+so its photo is pressed from its own rows). A print without a frame (width
+0, square corners, Crop) composes nothing and presses the bytes it always
+did.
 
 `node scripts/parity-borders.mjs` (not yet in CI) renders Border Studio's own
 frozen frames (`scripts/parity-borders/`: its preview canvas at 597ce7a, on
@@ -408,12 +430,22 @@ generated flat-block photos) through this engine and compares: the sheet's
 size, the border and the matte every byte equal, the photo at its own pixels
 every byte equal, and each rounded corner within a mean of 1.02 levels
 (measured 0.24 to 0.81: the references are a canvas's antialiased clip, the
-engine's corner the exact area). `npm run harness -- --out c.json --no-hashes
+engine's corner the exact area). Frosted, at Blur 60 and 240, its field made
+from the block photo's bytes through the app's own frame source: a mean of
+0.48 and 0.49 levels against Border Studio's, a 99th percentile of 3 and 2
+(held to 0.62 and 3.75; a radius not scaled with the field, the grade's
+brightness or the overscan left out, or the passes clamped at the edges,
+each fails it). `npm run harness -- --out c.json --no-hashes
 --frame-cost` times the preview framed (a photo at its own size and a 12 MP
-photo from its working copy, in Crop and in Fit, settled and draft) against
-the same print unframed, what a person waits for, and against the same framed
-render with the fill and the corners left out (a test seam), the frame's own
-work: at most 1.10x settled and 1.25x draft, each. A shared machine's
+photo from its working copy, in Crop and in Fit, and in Frosted with its field
+kept, settled and draft) against the same print unframed, what a person waits
+for, and against the same framed render with the fill and the corners left
+out (a test seam), the frame's own work: at most 1.10x settled and 1.25x
+draft, each. Frosted with its field made again inside the render (a Blur
+change; a Width change on Original, which changes the sheet's shape) is
+timed too, against the print unframed, and held to what it measured x 1.25:
+1.78x settled, 3.73x draft (it measured 1.26 to 1.42 and 2.03 to 2.98; most
+of it is the area average of the 1024 px source). A shared machine's
 interference only ever adds time and comes in spells that can outlast a
 document's rounds taken back to back, so the two documents at the two sizes
 are measured round by round in turn (15 rounds, one render a sample), a
@@ -895,7 +927,17 @@ Laplacian 1.0000); every pixel of the frame and the matte is the fill's colour
 (18.2 million at 40 MP); every corner pixel is the photo over the fill at the
 corner's exact coverage, within the half level of one rounding; Fit's
 rectangle holds the photo's shape to half a pixel; and the 40 MP framed print
-saved as Save's JPEG is a 9016x6440 SOF0 sampled 4:4:4. A JPEG
+saved as Save's JPEG is a 9016x6440 SOF0 sampled 4:4:4. Frosted at its
+heaviest blur (240) on a 40 MP photo that fades over a smooth colour gradient
+(case 16; a grey zone plate frosts to one flat grey, where nothing could
+show): its field made from the stored file as Save makes it (about half a
+second), every one of the frame's 18.2 million pixels is that field sampled
+there; along the middle row of the left border, no run of one value is longer
+than the field's own there, sampled exactly and rounded once, plus one (167,
+644 and 177 px in red, green and blue, against 167, 644 and 177: green runs
+the whole border because the gradient runs down, not across); and it presses
+in 1.01x to 1.07x the time of the same print in the photo's colour (held to
+1.25x). A JPEG
 whose EXIF says to rotate it saves upright, a PNG's
 transparent hole prints as paper (never black), a document whose stored photo
 is gone is refused rather than printed on bare paper, and the default print
@@ -1128,6 +1170,7 @@ the ceiling:
 | 13. 61 MP on Original, the widest frame | 13976x10808 (151 MP) | 147.5 MB (184) | 619.1 MB (773) | 828.6 MB |
 | 14. A 40 MP portrait (5152x7728) on 16:9 Fit | 18414x10358 (191 MP) | 168.7 MB (210) | 613.6 MB (767) | 871.1 MB |
 | 15. The same at the widest frame (memory only) | 31864x17924 (571 MP) | 262.2 MB (327) | 1238.8 MB (1548) | 1794.8 MB |
+| 16. Case 11 in Frosted at Blur 240 (the frame source and the field held through the press) | 9016x6440 (58.1 MP) | 123.1 MB (154) | 384.2 MB (467) | 467.9 MB |
 
 The frame adds one band buffer to the press (the framed ground's own); the
 rest grows with the width as before, and slower than it, since a wider sheet
@@ -1149,8 +1192,8 @@ once Save pressed into the encoder, x 1.25 (9.1, 7.8, 8.0 and 6.3 bytes of
 typed arrays an output pixel; case 5 is recorded, not gated); cases 6-10 in
 megabytes, the typed arrays and the whole, at the ceilings the band engine
 was designed to or at what they measured x 1.25 where that is lower (case 7:
-144); cases 11-15 as above; the same-width pairs at 1.15 times. Case 8
-(81 s in node) and the framed 13 to 15 (209, 272 and 807 s) run with
+144); cases 11-16 as above; the same-width pairs at 1.15 times. Case 8
+(81 s in node) and the framed 13 to 16 (209, 272, 807 and 93 s) run with
 `FULL=1`; CI runs the rest, four processes at a time (4 min 51 s here with
 the framed 11 and 12 and the framed pair, 3 min 39 s without them, on the
 same day; 2 min 16 s without them on a faster one).

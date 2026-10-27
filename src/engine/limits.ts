@@ -137,6 +137,23 @@ export const FRAME_SOURCE_LONG = 1024
 export const PALETTE_SAMPLE = 84
 
 /**
+ * Frosted's field (engine/frost.ts), the photo blurred into a small image the
+ * border is sampled from:
+ *
+ *  - FROST_FIELD_LONG, 480: its long side for the settled preview and the
+ *    save. Fixed, so the preview and the save sample the same field.
+ *  - FROST_DRAFT_LONG, 160: its long side while a control is being dragged,
+ *    so a Blur drag stays fluid; the blur's radius scales with the field, so
+ *    the draft's frost looks the same.
+ *  - FROST_GRADE: Border Studio's shipped grade (brightness -15, saturation
+ *    +60), applied after the blur. Its Contrast and Vibrance shipped at 0,
+ *    which its own code skips as no change, so they are not here.
+ */
+export const FROST_FIELD_LONG = 480
+export const FROST_DRAFT_LONG = 160
+export const FROST_GRADE = { brightness: -15, saturation: 60 } as const
+
+/**
  * Above this many megapixels, what Save says about a print (export.ts
  * `describePlan`) adds that it is very large and a phone may not finish it.
  * Said, never acted on: the print is still pressed at its size, and nothing

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "note": "Committed hashes for the text-free documents. text-free-photo recorded at 8d17b48 (before the simplification); the four frame-* documents at the commit that put the frame in the engine, Chromium 141.0.7390.37. Re-record only when a commit changes the photo ground or the frame on purpose, and say so.",
+    "note": "Committed hashes for the text-free documents. text-free-photo recorded at 8d17b48 (before the simplification); the four frame-* documents at the commit that put the frame in the engine, and frame-frosted at the commit that put Frosted's field in, Chromium 141.0.7390.37. Re-record only when a commit changes the photo ground or the frame on purpose, and say so.",
     "commit": "8d17b48",
     "chromium": "141.0.7390.37"
   },
@@ -78,6 +78,21 @@
     "frame-crop-zoomed@1800": {
       "sha256": "95d301a92c9598182f72ba3d6dc4318a22fa4055ffe4b7b594cf96a6553d90a8",
       "w": 1800,
+      "h": 1800
+    },
+    "frame-frosted@300": {
+      "sha256": "5d9c526198ecf29bb1102b2326ae4f206ca5b2382adc30f866401e65ec8df30a",
+      "w": 370,
+      "h": 300
+    },
+    "frame-frosted@1000": {
+      "sha256": "0a42b52b3ebbb115e5ccece72c3f23b9e1df85b6f13c52aa3c2e7c075139b772",
+      "w": 1235,
+      "h": 1000
+    },
+    "frame-frosted@1800": {
+      "sha256": "205da38daa86a5b2d536089178fbc4fce9d0b45d1ff57ff345517945fa388a6f",
+      "w": 2223,
       "h": 1800
     }
   }

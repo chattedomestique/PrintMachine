@@ -1,0 +1,49 @@
+{
+  "aspect": "original",
+  "media": {
+    "id": "harness-photo",
+    "width": 1600,
+    "height": 1200,
+    "native": true,
+    "scale": 1,
+    "x": 0.5,
+    "y": 0.5
+  },
+  "paperVeil": true,
+  "paperId": "natural",
+  "press": {
+    "method": "halftone",
+    "screenPitch": 9,
+    "density": 0.84,
+    "misregistration": 5,
+    "edge": 0.55,
+    "wear": 0.22
+  },
+  "frame": {
+    "width": 0.12,
+    "corners": 0.5,
+    "fill": "frosted",
+    "blur": 120,
+    "mode": "crop"
+  },
+  "seed": 4321,
+  "layers": [
+    {
+      "id": "layer-1",
+      "text": "",
+      "inkId": "fluorescentpink",
+      "fontId": "poster",
+      "bold": true,
+      "size": 0.1,
+      "lineHeight": 0.94,
+      "tracking": -0.02,
+      "contrastInkId": null,
+      "contrastThreshold": 0.5,
+      "align": "center",
+      "x": 0.5,
+      "y": 0.5,
+      "rotation": 0,
+      "backing": null
+    }
+  ]
+}

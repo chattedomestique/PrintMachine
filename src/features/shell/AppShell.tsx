@@ -56,8 +56,8 @@ export default function AppShell() {
   // The preview's working copy of the photo. Save does not use it: it decodes
   // the original, so the print is drawn from the original's pixels.
   const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media, sheetAspect(settings), { width: settings.frame.width, mode: effectiveMode(settings) })
-  // What the frame's fill is made from (the photo's palette), made from the
-  // photo once its preview copy has landed.
+  // What the frame's fill is made from (the photo's palette, Frosted's
+  // field), made from the photo once its preview copy has landed.
   const frameInputs = useFrameInputs(settings, mediaState)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tool, setTool] = useState<ToolId | null>(null)
@@ -310,7 +310,7 @@ export default function AppShell() {
         <div className="app__canvas-wrap">
           {/* Paused while pressing, so a full-size press and a preview frame
               never hold their buffers at once. */}
-          <Canvas media={media} inputs={frameInputs.inputs} mediaMode={tool === 'photo'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
+          <Canvas media={media} inputsFor={frameInputs.inputsFor} mediaMode={tool === 'photo'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
         </div>
       </main>
 

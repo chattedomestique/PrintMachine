@@ -34,7 +34,13 @@
  *    drew (the original, or the copy), Laplacian 1.0000; every pixel of the
  *    frame and the matte is the fill; each corner pixel is the photo over the
  *    fill at the corner's exact coverage, rounded once; Fit's contained
- *    rectangle is the photo's shape to under a pixel.
+ *    rectangle is the photo's shape to under a pixel. And case 16: a 40 MP
+ *    one fading out over a smooth colour gradient, in Frosted at Blur 240
+ *    (its field made as Save makes it, from the stored file): every pixel of the frame is the field sampled there;
+ *    along the middle row of the left border no run of one value is longer
+ *    than the field's own, rounded once, plus one (no stair from rounding
+ *    the field before it is stretched); and it presses in at most 1.25x the
+ *    time of the same print in the photo's colour.
  *  - a JPEG whose EXIF says rotate 90 saves upright; a PNG's transparent hole
  *    prints as paper, never black; a document whose stored photo is gone is
  *    refused, never printed on bare paper.
@@ -59,6 +65,10 @@ const executablePath =
   ['/opt/pw-browsers/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'].find((p) => existsSync(p))
 
 const LAPLACIAN = 0.98
+/** Case 16, Frosted at Blur 240 on the 40 MP photo: its press may take at
+ *  most this many times the same print in the photo's colour. */
+const FROSTED_TIME = 1.25
+const FROSTED = '40 MP Original, round, Frosted 240'
 const CORRELATION = 0.999
 // Per document. Type at 20% has a halftone lattice under 4 px at 1800, so a
 // point-sampled raster aliases it and the two heights can only agree so far;
@@ -157,7 +167,14 @@ try {
       // Its smaller copy (60% of the height): decoded at its contained
       // rectangle and drawn 1:1, never stretched.
       ['Fit 4:5, a smaller copy at 60%', 3000, 2000, '4:5', { ...round, fill: 'muted', mode: 'fit' }, { smaller: 0.6 }, '2191x2739', 'smaller'],
+      // Case 16: a 40 MP photo in Frosted at its heaviest blur, the veil
+      // off: 18 MP of border sampled from the field. The zone plate fades
+      // out over a smooth colour gradient (a grey zone plate frosts to one
+      // flat grey, where no stair could show). Its time against the same
+      // print in the photo's colour (the first row), and its banding.
+      [FROSTED, 7728, 5152, 'original', { ...round, fill: 'frosted', blur: 240 }, { sky: true }, '9016x6440', 'native'],
     ]
+    const timed = {}
     for (const [name, w, h, aspect, frame, opts, size, limit] of rows) {
       const t = Date.now()
       const r = await p.evaluate(([w, h, a, f, o]) => window.F.framed(w, h, a, f, o), [w, h, aspect, frame, opts])
@@ -181,6 +198,21 @@ try {
           (frame.mode === 'fit' ? `; the photo's shape held to ${r.aspectError.toFixed(3)} px ${gate(r.aspectError < 1, `${name}: the photo's shape is off by ${r.aspectError} px`)}` : '') +
           `; ${(r.ms / 1000).toFixed(1)} s`,
       )
+      timed[name] = r.ms
+      if (r.banding) {
+        const b = r.banding
+        const ok = b.print.every((run, c) => run <= b.field[c] + 1)
+        console.log(
+          `  ${''.padEnd(32)} banding along row ${b.row}, the left border's ${b.pixels} px: longest run of one value ${b.print.join(' / ')} (R / G / B), ` +
+            `the field's own, rounded once, ${b.field.join(' / ')} ${gate(ok, `${name}: a run of ${b.print.join('/')} where the field gives ${b.field.join('/')}: the frost is stepped`)}`,
+        )
+        const base = timed[rows[0][0]]
+        const ratio = r.ms / base
+        console.log(
+          `  ${''.padEnd(32)} pressed in ${(r.ms / 1000).toFixed(1)} s against ${(base / 1000).toFixed(1)} s in the photo's colour: ${ratio.toFixed(3)}x ` +
+            `${gate(ratio <= FROSTED_TIME, `${name}: ${ratio.toFixed(3)}x the time of the same print in a colour (bound ${FROSTED_TIME})`)} (bound ${FROSTED_TIME}); its field made in ${(r.inputsMs / 1000).toFixed(2)} s`,
+        )
+      }
       if (r.jpeg) {
         const j = r.jpeg
         console.log(

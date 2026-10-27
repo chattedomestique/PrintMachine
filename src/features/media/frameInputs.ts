@@ -9,16 +9,22 @@
  *    stored with it (`media.palette`, through the reducer's `setPalette`,
  *    the one thing that writes it), so the preview, the save and every
  *    reopen agree.
+ *  - Frosted's field (engine/frost.ts) is made from the same source for the
+ *    sheet's shape and the blur, and kept (frostField.ts), not stored: it is
+ *    tens of milliseconds to make again.
  *
  * Until an input is there the fill draws as Paper (the bare stock), never a
  * wrong colour; the page draws again once it arrives. Save waits for it
  * (`ensureFrameInputs`), so a press never starts without its inputs.
  */
 
-import { effectiveMode, type FrameInputs } from '../../engine/frame.ts'
+import { effectiveMode, sheetAspect, type FrameInputs } from '../../engine/frame.ts'
+import type { FrostField } from '../../engine/frost.ts'
+import { FROST_FIELD_LONG } from '../../engine/limits.ts'
 import { framePalette } from '../../engine/palette.ts'
 import type { FillKey, FramePalette, PrintSettings } from '../../engine/types.ts'
 import { pageFrameSources, paletteSample, type frameSources } from './frameSource.ts'
+import { pageFrostFields } from './frostField.ts'
 
 /** The inputs a document already holds: the palette stored with its photo
  *  (`media.palette`), when it has been computed. A fill whose input is not
@@ -40,6 +46,10 @@ export const fillShows = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>):
 export const needsPalette = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>): boolean =>
   fillShows(s) && PALETTE_FILLS.has(s.frame.fill) && !s.media?.palette
 
+/** Whether the frame shows Frosted, which is made from the photo's frame
+ *  source every time the sheet's shape or the blur changes. */
+export const needsFrost = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>): boolean => fillShows(s) && s.frame.fill === 'frosted'
+
 /**
  * The palettes, one photo's at a time, from its frame source: asked again
  * for the same photo, the same answer without a second computation (a photo
@@ -59,16 +69,38 @@ export function framePalettes(sources: ReturnType<typeof frameSources> = pageFra
 /** The page's. */
 export const pageFramePalettes = framePalettes()
 
+/** What `ensureFrameInputs` makes the inputs with (a test hands in its
+ *  own). */
+export interface FrameMakers {
+  palette(media: { id: string; width: number; height: number }): Promise<FramePalette | null>
+  /** Frosted's field of the photo, for a sheet of `aspect`, at `blur`,
+   *  `fieldLong` on its long side. */
+  frost(media: { id: string; width: number; height: number }, aspect: number, blur: number, fieldLong: number): Promise<FrostField>
+}
+
+/** The page's: one decode of each photo (frameSource.ts), its palette made
+ *  once, its fields kept (frostField.ts). */
+export const PAGE_MAKERS: FrameMakers = {
+  palette: (media) => pageFramePalettes.palette(media),
+  frost: async (media, aspect, blur, fieldLong) => pageFrostFields.field(media.id, await pageFrameSources.load(media), aspect, blur, fieldLong),
+}
+
 /**
  * The inputs a press of this document needs, made now if they are not held:
  * Save awaits this before it presses, so a press never starts without them.
- * A palette made here is not stored (the page's `useFrameInputs` stores it);
- * it is the same palette, from the same decode. Rejects when the photo
+ * The palette is made only when the document does not hold it, and not
+ * stored here (the page's `useFrameInputs` stores it; it is the same
+ * palette, from the same decode); Frosted's field at the save's size
+ * (FROST_FIELD_LONG, the settled preview's too). Rejects when the photo
  * cannot be read for them.
  */
-export async function ensureFrameInputs(s: PrintSettings, palettes = pageFramePalettes): Promise<FrameInputs> {
-  const held = storedFrameInputs(s)
-  if (!s.media || !needsPalette(s)) return held
-  const palette = await palettes.palette(s.media)
-  return palette ? { ...held, palette } : held
+export async function ensureFrameInputs(s: PrintSettings, makers: FrameMakers = PAGE_MAKERS): Promise<FrameInputs> {
+  const inputs = storedFrameInputs(s)
+  if (!s.media) return inputs
+  if (needsPalette(s)) {
+    const palette = await makers.palette(s.media)
+    if (palette) inputs.palette = palette
+  }
+  if (needsFrost(s)) inputs.frost = await makers.frost(s.media, sheetAspect(s), s.frame.blur, FROST_FIELD_LONG)
+  return inputs
 }

@@ -206,3 +206,28 @@ export function makeGround(w: number, h: number, seed: number): Uint8ClampedArra
   }
   return out
 }
+
+/**
+ * A frame source (the photo at its fixed decode, features/media
+ * frameSource.ts) of w x h: a warm-to-cool sky down the frame, a bright
+ * disc, a little seeded grain; opaque but for a clear corner. What Frosted's
+ * field is made from in the tests.
+ */
+export function makeFrameSource(w: number, h: number, seed: number): { w: number; h: number; rgba: Uint8ClampedArray } {
+  const rng = mulberry32(seed)
+  const rgba = new Uint8ClampedArray(w * h * 4)
+  for (let y = 0; y < h; y++) {
+    const t = y / Math.max(1, h - 1)
+    for (let x = 0; x < w; x++) {
+      const u = x / Math.max(1, w - 1)
+      const disc = (u - 0.62) ** 2 + (t - 0.4) ** 2 < 0.02 ? 1 : 0
+      const n = (rng() - 0.5) * 12
+      const o = (y * w + x) * 4
+      rgba[o] = 240 - 170 * t + 15 * disc + n
+      rgba[o + 1] = 150 + 40 * u - 30 * t + 80 * disc + n
+      rgba[o + 2] = 90 + 140 * t + n
+      rgba[o + 3] = x < w / 8 && y < h / 8 ? 0 : 255
+    }
+  }
+  return { w, h, rgba }
+}

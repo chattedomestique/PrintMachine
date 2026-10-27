@@ -47,7 +47,8 @@ export interface FrameSourceDeps {
   read(bitmap: { width: number; height: number; close(): void }, w: number, h: number): Uint8ClampedArray
 }
 
-const PAGE: FrameSourceDeps = {
+/** The page's: the stored photo, decoded and read back in this page. */
+export const PAGE_SOURCE_DEPS: FrameSourceDeps = {
   getBlob: getMedia,
   decode: decodeOriented,
   read: (bitmap, w, h) => {
@@ -104,7 +105,7 @@ async function decodeSource(media: { id: string; width: number; height: number }
  * one held is let go. A failure is kept with its photo (asked again, it
  * fails again, without another decode): a new photo is a new id.
  */
-export function frameSources(deps: FrameSourceDeps = PAGE) {
+export function frameSources(deps: FrameSourceDeps = PAGE_SOURCE_DEPS) {
   let held: { id: string; source: Promise<RgbaImage> } | null = null
   return {
     load(media: { id: string; width: number; height: number }): Promise<RgbaImage> {

@@ -14,7 +14,12 @@ import { areaAverage, type RgbaImage } from '../../engine/resample.ts'
 import type { FramePalette, PrintSettings } from '../../engine/types.ts'
 import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { FrameSourceError, frameSourceSize, frameSources, paletteSample, type FrameSourceDeps } from './frameSource.ts'
-import { ensureFrameInputs, fillShows, framePalettes, needsPalette, storedFrameInputs } from './frameInputs.ts'
+import { ensureFrameInputs, fillShows, framePalettes, needsFrost, needsPalette, storedFrameInputs, type FrameMakers } from './frameInputs.ts'
+import { frostFields } from './frostField.ts'
+import { sheetAspect } from '../../engine/frame.ts'
+import { frostField } from '../../engine/frost.ts'
+import { FROST_FIELD_LONG } from '../../engine/limits.ts'
+import { makeFrameSource } from '../../engine/__tests__/fields.ts'
 // @ts-expect-error: a plain .mjs module, the generator the parity gate uses
 import { PHOTOS, blockPhoto } from '../../../scripts/parity-borders/photos.mjs'
 
@@ -154,19 +159,23 @@ describe('the inputs a press needs', () => {
     const s = defaultSettings()
     return { ...s, aspect: '4:5', media: makeMedia({ id: 'p', width: 3000, height: 2000, ...(palette ? { palette } : {}) }), frame: { ...s.frame, ...frame } }
   }
-  /** Palettes that count what they were asked for. */
+  /** Makers that count what they were asked for. */
   const counting = (palette: FramePalette | null | Error) => {
     const asked: string[] = []
-    return {
-      asked,
-      palettes: {
-        palette: async (m: { id: string }) => {
-          asked.push(m.id)
-          if (palette instanceof Error) throw palette
-          return palette
-        },
+    const fields: string[] = []
+    const palettes: FrameMakers = {
+      palette: async (m) => {
+        asked.push(m.id)
+        if (palette instanceof Error) throw palette
+        return palette
+      },
+      frost: async (m, aspect, blur, long) => {
+        fields.push(`${m.id} ${aspect.toFixed(4)} ${blur} ${long}`)
+        if (palette instanceof Error) throw palette
+        return frostField(makeFrameSource(60, 40, 1), aspect, long, blur)
       },
     }
+    return { asked, fields, palettes }
   }
 
   it('the fill shows with a photo and a border, round corners or Fit; not unframed, not without a photo', () => {
@@ -198,6 +207,19 @@ describe('the inputs a press needs', () => {
     expect(c.asked).toEqual(['p'])
   })
 
+  it("Frosted: Save makes its field at the settled size, for the sheet's shape and the blur; never a palette", async () => {
+    const c = counting(PALETTE)
+    const s = doc({ width: 0.05, fill: 'frosted', blur: 170 })
+    const got = await ensureFrameInputs(s, c.palettes)
+    expect(c.fields).toEqual([`p ${sheetAspect(s).toFixed(4)} 170 ${FROST_FIELD_LONG}`])
+    expect(c.asked).toEqual([])
+    expect(got.frost).toMatchObject({ w: 384, h: 480, aspect: sheetAspect(s), blur: 170 })
+    expect(needsFrost(s)).toBe(true)
+    expect(needsFrost({ ...s, frame: { ...s.frame, width: 0, corners: 0 } })).toBe(false)
+    expect(await ensureFrameInputs({ ...s, frame: { ...s.frame, width: 0, corners: 0 } }, c.palettes)).toEqual({})
+    await expect(ensureFrameInputs(s, counting(new FrameSourceError('no')).palettes)).rejects.toBeInstanceOf(FrameSourceError)
+  })
+
   it('a photo with no colour (nothing opaque) presses its colour fills as Paper; one that cannot be read rejects', async () => {
     expect(await ensureFrameInputs(doc({ width: 0.05 }), counting(null).palettes)).toEqual({})
     await expect(ensureFrameInputs(doc({ width: 0.05 }), counting(new FrameSourceError('no')).palettes)).rejects.toBeInstanceOf(FrameSourceError)
@@ -216,5 +238,25 @@ describe('the inputs a press needs', () => {
     expect(storedFrameInputs(doc({}, PALETTE))).toEqual({ palette: PALETTE })
     expect(storedFrameInputs(doc({}))).toEqual({})
     expect(storedFrameInputs({ media: null })).toEqual({})
+  })
+})
+
+describe("Frosted's fields, kept", () => {
+  it('one per sheet shape, blur and size, made once, the most recent kept, another photo\'s let go', () => {
+    const src = makeFrameSource(80, 60, 2)
+    const fields = frostFields(3)
+    const a = fields.field('p', src, 1.25, 60, 480)
+    expect(fields.field('p', src, 1.25, 60, 480)).toBe(a)
+    const b = fields.field('p', src, 1.25, 61, 160)
+    expect(b).not.toBe(a)
+    expect(b).toMatchObject({ w: 160, h: 128, blur: 61 })
+    fields.field('p', src, 1.5, 60, 480)
+    fields.field('p', src, 1.5, 61, 480)
+    // Four made, three kept: the first (least recently used) went.
+    expect(fields.field('p', src, 1.25, 60, 480)).not.toBe(a)
+    // Another photo's: everything of the first photo goes.
+    const c = fields.field('q', src, 1.25, 60, 480)
+    expect(fields.field('q', src, 1.25, 60, 480)).toBe(c)
+    expect(fields.field('p', src, 1.5, 61, 480)).not.toBe(b)
   })
 })

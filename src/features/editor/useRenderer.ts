@@ -23,7 +23,7 @@ interface Pending {
   settings: PrintSettings
   overlay: OverlaySpec
   media: ImageBitmap | null
-  inputs: FrameInputs
+  inputsFor: (s: PrintSettings, draft: boolean) => FrameInputs
 }
 
 /**
@@ -43,9 +43,11 @@ export function useRenderer(
   settings: PrintSettings,
   overlay: OverlaySpec,
   media: ImageBitmap | null,
-  /** What the frame's fill is made from (engine/frame.ts `FrameInputs`); a
-   *  fill whose input is not here yet draws as Paper. */
-  inputs: FrameInputs,
+  /** What the frame's fill is made from (engine/frame.ts `FrameInputs`), for
+   *  a document and whether the frame is a draft (Frosted's field is made
+   *  smaller while a control moves); a fill whose input is not there yet
+   *  draws as Paper. */
+  inputsFor: (s: PrintSettings, draft: boolean) => FrameInputs,
   /**
    * Render nothing while true: a save is pressing the print at full size, and
    * a preview frame then would hold its buffers alongside the press's on a
@@ -113,14 +115,14 @@ export function useRenderer(
         pending.overlay,
         (draft ? draftSize(aspect) : previewSize(aspect)).h,
         pending.media,
-        pending.inputs,
+        pending.inputsFor(pending.settings, draft),
       )
     }
     frameRef.current = requestAnimationFrame(run)
   }, [canvasRef, getScratch])
 
   useEffect(() => {
-    pendingRef.current = { settings, overlay, media, inputs }
+    pendingRef.current = { settings, overlay, media, inputsFor }
     // Anything arriving now is treated as motion. The timer below is what
     // decides it has stopped — a control that is still moving keeps pushing it
     // out, so the expensive frame is only paid for once, at the end.
@@ -131,7 +133,7 @@ export function useRenderer(
       schedule()
     }, SETTLE_MS)
     schedule()
-  }, [settings, overlay, media, inputs, schedule])
+  }, [settings, overlay, media, inputsFor, schedule])
 
   useEffect(() => () => window.clearTimeout(settleRef.current), [])
 

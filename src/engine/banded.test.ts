@@ -45,12 +45,14 @@ vi.mock('./composite.ts', async (importOriginal) => {
 })
 
 import { FramedGroundRows, TiledGroundRows, maxWindow, outputSize, plateGeometry, printSheet, printSheetSteps, sampledNoise, type GroundRows, type ToneSource } from './render.ts'
-import { composeFrameRows, fillFor, layoutSheet, sheetAspect } from './frame.ts'
+import { composeFrameRows, fillFor, layoutSheet, sheetAspect, type FrameInputs } from './frame.ts'
+import { frostField } from './frost.ts'
+import { FROST_FIELD_LONG } from './limits.ts'
 import { tileAt, tileGrid } from './tiles.ts'
 import type { PrintSettings, TextLayer } from './types.ts'
 import { lumaCell } from './media.ts'
 import { allocations, allocationsAsync, stillHeld } from './__tests__/alloc.ts'
-import { makeGround } from './__tests__/fields.ts'
+import { makeFrameSource, makeGround } from './__tests__/fields.ts'
 import { DOCS, SIZES, syntheticTones } from './__tests__/documents.ts'
 
 const sha = (b: Uint8ClampedArray | Uint8Array) => createHash('sha256').update(b).digest('hex')
@@ -238,7 +240,16 @@ describe('framed documents, in bands, on forced small tiles: equal to the whole 
     ['Original, corners 0.5, Paper, grain', doc({ aspect: 'original', frame: { width: 1 / 14, corners: 0.5, fill: 'paper', blur: 60, mode: 'crop' }, press: { method: 'grain', screenPitch: 12, density: 0.9, misregistration: 9, edge: 0.7, wear: 0.4 } })],
     ['Crop 1:1 at 250%, widest, Photo, the veil off', doc({ aspect: '1:1', paperVeil: false, media: { id: 'p', width: 1600, height: 1200, scale: 2.5, x: 0.3, y: 0.7, palette }, frame: { width: 0.16, corners: 0, fill: 'photo', blur: 60, mode: 'crop' } })],
     ['Crop 4:5 framed, no palette yet: Paper', doc({ media: { id: 'p', width: 1600, height: 1200, scale: 1, x: 0.5, y: 0.5 }, frame: { width: 0.05, corners: 0.3, fill: 'deep', blur: 60, mode: 'crop' } })],
+    ['Original, round, Frosted at Blur 240', doc({ aspect: 'original', frame: { width: 0.12, corners: 1, fill: 'frosted', blur: 240, mode: 'crop' } })],
+    ['Fit 4:5, Frosted at Blur 10, the veil off', doc({ paperVeil: false, frame: { width: 0.06, corners: 0.5, fill: 'frosted', blur: 10, mode: 'fit' } })],
   ]
+
+  /** What the fill is made from: the stored palette, and for Frosted its
+   *  field, made from a synthetic source as the page makes it. */
+  const inputsOf = (s: PrintSettings): FrameInputs =>
+    s.frame.fill === 'frosted'
+      ? { palette: s.media?.palette, frost: frostField(makeFrameSource(400, 300, 5), sheetAspect(s), FROST_FIELD_LONG, s.frame.blur) }
+      : { palette: s.media?.palette }
 
   /** The photo's ground on a grid of forced 64x32 tiles, each tile row read
    *  out of the whole synthetic ground as the export reads it off a canvas,
@@ -251,7 +262,7 @@ describe('framed documents, in bands, on forced small tiles: equal to the whole 
         for (let r = 0; r < t.h; r++) slot.set(ground.subarray(((t.y0 + r) * w + t.x0) * 4, ((t.y0 + r) * w + t.x0 + t.w) * 4), (r * w + t.x0) * 4)
       }
     })
-    return new FramedGroundRows(tiled, layoutSheet(s, w, h), fillFor(s, { palette: s.media?.palette }), B)
+    return new FramedGroundRows(tiled, layoutSheet(s, w, h), fillFor(s, inputsOf(s), w, h), B)
   }
 
   for (const [name, settings] of cases) {
@@ -273,7 +284,7 @@ describe('framed documents, in bands, on forced small tiles: equal to the whole 
       for (const B of [1, 7, 97]) expect(run(B), `bands of ${B}`).toEqual(whole)
       // The preview's way: the whole ground composed in place, pressed whole.
       const composed = g.slice()
-      composeFrameRows(layoutSheet(settings, w, h), fillFor(settings, { palette: settings.media?.palette }), composed, 0, h, composed)
+      composeFrameRows(layoutSheet(settings, w, h), fillFor(settings, inputsOf(settings), w, h), composed, 0, h, composed)
       expect(printed(JSON.parse(JSON.stringify(settings)), composed, tones, w, h, undefined, false), "the preview's ground").toEqual(whole)
       // The frame is really there: not the unframed print.
       expect(printed(JSON.parse(JSON.stringify(settings)), g, tones, w, h, undefined, false).rgba).not.toBe(whole.rgba)

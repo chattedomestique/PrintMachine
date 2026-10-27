@@ -13,10 +13,11 @@
 
 import { MissingPhotoError, describePlan, planPrint, savePrint, type ExportFormat } from '../../src/engine/export.ts'
 import { cornerCoverage, layoutSheet } from '../../src/engine/frame.ts'
+import { frostSampler, type FrostField } from '../../src/engine/frost.ts'
 import { groundRect } from '../../src/engine/render.ts'
 import type { FrameSettings, PrintSettings } from '../../src/engine/types.ts'
 import { decodeOriginal, decodeOriented, decodeResized } from '../../src/features/media/decode.ts'
-import { storedFrameInputs } from '../../src/features/media/frameInputs.ts'
+import { ensureFrameInputs, storedFrameInputs } from '../../src/features/media/frameInputs.ts'
 import { importMedia } from '../../src/features/media/importMedia.ts'
 import { detachedCanvas } from '../../src/features/shell/page.ts'
 import { copyRect } from '../../src/features/shell/useSave.ts'
@@ -36,8 +37,10 @@ const encode = (c: HTMLCanvasElement, type: string, quality?: number) =>
   new Promise<Blob>((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error(`could not encode ${type}`))), type, quality))
 
 /** A zone plate: cos(k r^2) about the centre, its local frequency k r / pi
- *  reaching 0.45 cycles per pixel at the corners. */
-function zonePlate(w: number, h: number): HTMLCanvasElement {
+ *  reaching 0.45 cycles per pixel at the corners. With `sky`, its rings fade
+ *  out toward the edges over a smooth colour gradient (warm to cool across,
+ *  dark to light down): what a frosted border must carry without a stair. */
+function zonePlate(w: number, h: number, sky = false): HTMLCanvasElement {
   const ctx = canvas(w, h)
   const img = ctx.createImageData(w, h)
   const d = img.data
@@ -48,9 +51,16 @@ function zonePlate(w: number, h: number): HTMLCanvasElement {
     const dy = y - cy
     for (let x = 0; x < w; x++) {
       const dx = x - cx
-      const v = 128 + 110 * Math.cos(k * (dx * dx + dy * dy))
       const o = (y * w + x) * 4
-      d[o] = d[o + 1] = d[o + 2] = v
+      if (sky) {
+        const fade = Math.max(0, 1 - Math.hypot(dx / cx, dy / cy))
+        const ring = 60 * fade * Math.cos(k * (dx * dx + dy * dy))
+        d[o] = 60 + (150 * x) / w + ring
+        d[o + 1] = 70 + (110 * y) / h + ring
+        d[o + 2] = 210 - (130 * x) / w + ring
+      } else {
+        d[o] = d[o + 1] = d[o + 2] = 128 + 110 * Math.cos(k * (dx * dx + dy * dy))
+      }
       d[o + 3] = 255
     }
   }
@@ -293,16 +303,21 @@ const hexRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
  * `copyRect`, `decodeResized`) and drawn 1:1. Every pixel of the file is
  * checked against what it must be:
  *  - outside the photo's rectangle (`shown`): the fill's colour exactly (the
- *    paper veil is off);
+ *    paper veil is off); Frosted's, the field sampled at that pixel, its
+ *    field made as Save makes it (`ensureFrameInputs`: the photo's frame
+ *    source decoded from the stored file, the field at the save's size);
  *  - inside it, away from the corners: the photo Save drew (the original, or
  *    the smaller copy), at its own pixels, every byte;
  *  - in the corners' patches: the photo over the fill at the corner's exact
  *    coverage, c P + (1 - c) F, rounded once (within half a level).
  * And the Laplacian energy of the photo's rectangle (the corners masked)
- * against the same rectangle of the photo itself.
+ * against the same rectangle of the photo itself. Frosted also measures its
+ * banding: along the sheet's middle row through the left border, the longest
+ * run of one value in each channel, against the run the field itself gives
+ * there (sampled exactly, in float64, and rounded once).
  */
-async function framed(w: number, h: number, aspect: PrintSettings['aspect'], frame: Partial<FrameSettings>, opts: { jpeg?: boolean; smaller?: number } = {}) {
-  const file = await encode(zonePlate(w, h), 'image/jpeg', 0.92)
+async function framed(w: number, h: number, aspect: PrintSettings['aspect'], frame: Partial<FrameSettings>, opts: { jpeg?: boolean; smaller?: number; sky?: boolean } = {}) {
+  const file = await encode(zonePlate(w, h, opts.sky), 'image/jpeg', 0.92)
   const imported = (await importMedia(file)).layer
   const layer = { ...imported, palette: FRAME_PALETTE }
   const s = photoOnly(layer, aspect)
@@ -315,9 +330,14 @@ async function framed(w: number, h: number, aspect: PrintSettings['aspect'], fra
   // its rectangle.
   const rect = opts.smaller ? (copyRect(s, plan) ?? undefined) : undefined
   const decode = () => (rect ? decodeResized(layer.id, rect.dw, rect.dh) : decodeOriginal(layer.id))
+  // What Save makes the frame from (useSave `pressForSave`): Frosted's
+  // field made now, from the stored photo; a colour from the palette held.
+  const t00 = performance.now()
+  const inputs = s.frame.fill === 'frosted' ? await ensureFrameInputs(s) : storedFrameInputs(s)
+  const inputsMs = performance.now() - t00
   const photo = await decode()
   const t0 = performance.now()
-  const pressed = await savePrint(s, photo, storedFrameInputs(s), { format: 'png', maxHeight, rect, makeCanvas: detachedCanvas, onGround: () => photo.close() })
+  const pressed = await savePrint(s, photo, inputs, { format: 'png', maxHeight, rect, makeCanvas: detachedCanvas, onGround: () => photo.close() })
   const ms = performance.now() - t0
   const out = await pixelsOf(pressed.blob)
   // The reference: the same decode, read at its own size.
@@ -331,7 +351,19 @@ async function framed(w: number, h: number, aspect: PrintSettings['aspect'], fra
   rc.canvas.width = 0
   const drawn = rect ?? layout.photo!
   const aligned = drawn.dw === rw && drawn.dh === rh && Number.isInteger(drawn.dx) && Number.isInteger(drawn.dy)
-  const fill = hexRgb(FRAME_PALETTE[s.frame.fill as keyof typeof FRAME_PALETTE])
+  // The fill at a pixel: the colour, or Frosted's field sampled there.
+  const frost = inputs.frost ? frostSampler(inputs.frost, plan.width, plan.height) : null
+  const flat = frost ? null : hexRgb(FRAME_PALETTE[s.frame.fill as keyof typeof FRAME_PALETTE])
+  const fillRow = new Uint8ClampedArray(plan.width * 4)
+  let fillY = -1
+  const fillAt = (x: number, y: number): ArrayLike<number> => {
+    if (!frost) return flat!
+    if (fillY !== y) {
+      frost(y, 0, plan.width, fillRow, 0)
+      fillY = y
+    }
+    return fillRow.subarray(x * 4, x * 4 + 3)
+  }
   const { x0, y0, w: sw, h: sh } = layout.shown
   const patch = Math.ceil(layout.radius)
   const W = out.w
@@ -348,12 +380,14 @@ async function framed(w: number, h: number, aspect: PrintSettings['aspect'], fra
       for (let x = 0; x < out.w; x++) {
         const o = (y * W + x) * 4
         if (x < x0 || x >= x0 + sw || y < y0 || y >= y0 + sh) {
+          const fill = fillAt(x, y)
           if (out.data[o] !== fill[0] || out.data[o + 1] !== fill[1] || out.data[o + 2] !== fill[2]) notFill++
           continue
         }
         const r = ((y - drawn.dy) * rw + (x - drawn.dx)) * 4
         if (inPatch(x, y)) {
           const c = cornerCoverage(layout.radius, Math.min(x - x0, x0 + sw - 1 - x), Math.min(y - y0, y0 + sh - 1 - y))
+          const fill = fillAt(x, y)
           for (let k = 0; k < 3; k++) cornerDev = Math.max(cornerDev, Math.abs(out.data[o + k] - (c * ref[r + k] + (1 - c) * fill[k])))
           cornerPx++
           continue
@@ -384,11 +418,13 @@ async function framed(w: number, h: number, aspect: PrintSettings['aspect'], fra
       }
     }
   }
+  // Frosted's banding, along the middle row through the left border.
+  const banding = inputs.frost && same ? bandingOf(out.data, W, plan.height, layout.shown.x0, inputs.frost) : null
   let jpeg: (ReturnType<typeof frameOf> & { bytes: number; ms: number }) | null = null
   if (opts.jpeg) {
     const again = await decode()
     const t1 = performance.now()
-    const saved = await savePrint(s, again, storedFrameInputs(s), { format: 'jpeg', maxHeight, rect, makeCanvas: detachedCanvas, onGround: () => again.close() })
+    const saved = await savePrint(s, again, inputs, { format: 'jpeg', maxHeight, rect, makeCanvas: detachedCanvas, onGround: () => again.close() })
     jpeg = { ...frameOf(new Uint8Array(await saved.blob.arrayBuffer())), bytes: saved.blob.size, ms: Math.round(performance.now() - t1) }
   }
   await deleteMedia(layer.id)
@@ -411,8 +447,50 @@ async function framed(w: number, h: number, aspect: PrintSettings['aspect'], fra
     lapRatio: eRef > 0 ? eOut / eRef : NaN,
     aspectError,
     ms: Math.round(ms),
+    inputsMs: Math.round(inputsMs),
+    banding,
     jpeg,
   }
+}
+
+/**
+ * The longest run of one value along the middle row of a W x H print, over
+ * its first `border` pixels (the left border), in each channel; and the same
+ * for the field itself along that row: sampled there exactly (bilinear, in
+ * float64, from the field's own float values) and rounded once. A print that
+ * rounded the field to bytes before stretching it over the sheet would show
+ * runs as long as a field pixel is wide.
+ */
+function bandingOf(data: Uint8ClampedArray, W: number, H: number, border: number, field: FrostField) {
+  const y = H >> 1
+  const pad = Math.round(0.02 * Math.max(W, H))
+  const at = (v: number, n: number, f: number) => Math.min(f - 1, Math.max(0, ((v + 0.5 + pad) / (n + 2 * pad)) * f - 0.5))
+  const fy = at(y, H, field.h)
+  const j0 = Math.floor(fy)
+  const j1 = Math.min(field.h - 1, j0 + 1)
+  const s = fy - j0
+  const runs = (value: (x: number, c: number) => number) =>
+    [0, 1, 2].map((c) => {
+      let longest = 1
+      let run = 1
+      for (let x = 1; x < border; x++) {
+        run = value(x, c) === value(x - 1, c) ? run + 1 : 1
+        longest = Math.max(longest, run)
+      }
+      return longest
+    })
+  const planes = [field.r, field.g, field.b]
+  const exact = (x: number, c: number) => {
+    const fx = at(x, W, field.w)
+    const i0 = Math.floor(fx)
+    const i1 = Math.min(field.w - 1, i0 + 1)
+    const t = fx - i0
+    const p = planes[c]
+    const top = p[j0 * field.w + i0] + (p[j0 * field.w + i1] - p[j0 * field.w + i0]) * t
+    const bottom = p[j1 * field.w + i0] + (p[j1 * field.w + i1] - p[j1 * field.w + i0]) * t
+    return Uint8ClampedArray.of(top + (bottom - top) * s)[0]
+  }
+  return { row: y, pixels: border, print: runs((x, c) => data[(y * W + x) * 4 + c]), field: runs(exact) }
 }
 
 /** A JPEG stored sideways with EXIF Orientation 6 (rotate 90 clockwise): its

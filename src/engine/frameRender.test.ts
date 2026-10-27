@@ -27,6 +27,9 @@ vi.mock('./composite.ts', async (importOriginal) => {
 })
 
 import { layoutSheet, sheetAspect, fillFor, type FrameInputs } from './frame.ts'
+import { frostField, frostSampler } from './frost.ts'
+import { FROST_FIELD_LONG } from './limits.ts'
+import { makeFrameSource } from './__tests__/fields.ts'
 import { outputSize, renderPrint, renderPrintAsync } from './render.ts'
 import type { PrintSettings } from './types.ts'
 import { defaultSettings, makeMedia } from '../state/defaults.ts'
@@ -100,7 +103,7 @@ describe('the frame through the preview and the export', () => {
       expect(exported.drawn).toEqual(preview.drawn)
       expect(Buffer.from(exported.base).equals(Buffer.from(preview.base))).toBe(true)
       // Outside the photo, the fill; well inside it, the photo's own pixels.
-      const fill = [...fillFor(s, { palette }).flat!]
+      const fill = [...fillFor(s, { palette }, w, h).flat!]
       expect(fill[3]).toBe(255)
       expect(px(preview.base, w, 0, 0)).toEqual(fill)
       expect(px(preview.base, w, w - 1, h - 1)).toEqual(fill)
@@ -144,14 +147,54 @@ describe('the frame through the preview and the export', () => {
 })
 
 describe('fillFor: the choice, looked up', () => {
-  const s = (fill: PrintSettings['frame']['fill']) => ({ frame: { ...framed({}).frame, fill } })
+  const s = (fill: PrintSettings['frame']['fill']) => framed({ fill })
+  const fillOf = (d: PrintSettings, inputs: FrameInputs) => fillFor(d, inputs, 400, 320)
   it('Paper is bare paper; a photo colour is its hex, opaque, or Paper until the palette is there; Frosted is Paper until its field is', () => {
-    expect(fillFor(s('paper'), { palette }).flat).toEqual([0, 0, 0, 0])
-    expect(fillFor(s('photo'), { palette }).flat).toEqual([0x28, 0x96, 0xc8, 255])
-    expect(fillFor(s('deep'), { palette }).flat).toEqual([0x15, 0x22, 0x28, 255])
-    expect(fillFor(s('muted'), { palette }).flat).toEqual([0x90, 0xb1, 0xc1, 255])
-    expect(fillFor(s('comp'), { palette }).flat).toEqual([0xcb, 0x71, 0x2e, 255])
-    for (const fill of ['photo', 'deep', 'muted', 'comp', 'frosted'] as const) expect(fillFor(s(fill), {}).flat).toEqual([0, 0, 0, 0])
-    expect(fillFor(s('frosted'), { palette }).flat).toEqual([0, 0, 0, 0])
+    expect(fillOf(s('paper'), { palette }).flat).toEqual([0, 0, 0, 0])
+    expect(fillOf(s('photo'), { palette }).flat).toEqual([0x28, 0x96, 0xc8, 255])
+    expect(fillOf(s('deep'), { palette }).flat).toEqual([0x15, 0x22, 0x28, 255])
+    expect(fillOf(s('muted'), { palette }).flat).toEqual([0x90, 0xb1, 0xc1, 255])
+    expect(fillOf(s('comp'), { palette }).flat).toEqual([0xcb, 0x71, 0x2e, 255])
+    for (const fill of ['photo', 'deep', 'muted', 'comp', 'frosted'] as const) expect(fillOf(s(fill), {}).flat).toEqual([0, 0, 0, 0])
+    expect(fillOf(s('frosted'), { palette }).flat).toEqual([0, 0, 0, 0])
+  })
+
+  it("Frosted is its field, sampled over the sheet; a field made for another blur or another sheet shape is not there (Paper)", () => {
+    const d = framed({ fill: 'frosted', blur: 120 })
+    const field = frostField(makeFrameSource(300, 200, 3), sheetAspect(d), FROST_FIELD_LONG, 120)
+    const f = fillOf(d, { frost: field })
+    expect(f.flat).toBeNull()
+    const row = new Uint8ClampedArray(400 * 4)
+    f.row(10, 0, 400, row, 0)
+    const want = new Uint8ClampedArray(400 * 4)
+    frostSampler(field, 400, 320)(10, 0, 400, want, 0)
+    expect(row).toEqual(want)
+    expect(row[3]).toBe(255)
+    expect(fillOf({ ...d, frame: { ...d.frame, blur: 121 } }, { frost: field }).flat).toEqual([0, 0, 0, 0])
+    expect(fillOf({ ...d, aspect: '1:1' }, { frost: field }).flat).toEqual([0, 0, 0, 0])
+  })
+})
+
+describe('Frosted through the preview and the export', () => {
+  it('the same ground from both entry points, the border sampled from the field, the photo untouched', async () => {
+    const s = framed({ fill: 'frosted', blur: 200, corners: 0.6 }, 'original')
+    const frost = frostField(makeFrameSource(320, 240, 9), sheetAspect(s), FROST_FIELD_LONG, 200)
+    const preview = await groundOf(s, 360, { frost }, 'preview')
+    const exported = await groundOf(s, 360, { frost }, 'export')
+    expect(Buffer.from(exported.base).equals(Buffer.from(preview.base))).toBe(true)
+    const { w, h } = preview
+    const l = layoutSheet(s, w, h)
+    const sample = frostSampler(frost, w, h)
+    const row = new Uint8ClampedArray(w * 4)
+    for (const y of [0, l.shown.y0 >> 1, h - 1]) {
+      sample(y, 0, w, row, 0)
+      expect(Buffer.from(preview.base.subarray(y * w * 4, (y + 1) * w * 4)).equals(Buffer.from(row))).toBe(true)
+    }
+    const cx = l.shown.x0 + (l.shown.w >> 1)
+    const cy = l.shown.y0 + (l.shown.h >> 1)
+    expect(px(preview.base, w, cx, cy)).toEqual(photoAt(cx, cy))
+    // Without its field: Paper.
+    const without = await groundOf(s, 360, {}, 'preview')
+    expect(px(without.base, w, 0, 0)).toEqual([0, 0, 0, 0])
   })
 })

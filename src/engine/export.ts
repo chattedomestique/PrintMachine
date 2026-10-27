@@ -131,7 +131,7 @@ export function checkNative(plan: ExportPlan, layout: SheetLayout, media: Pick<M
   if (plan.limit !== 'native' || !media) return
   const r = layout.photo
   if (r && isNativeRect(r, media.width, media.height)) return
-  const drawn = r ? `${r.dw}x${r.dh} at (${r.dx}, ${r.dy})` : 'nowhere'
+  const drawn = r ? `${dims(r.dw, r.dh)} at (${r.dx}, ${r.dy})` : 'nowhere'
   throw new Error(`A ${dims(plan.width, plan.height)} print planned at the photo's own pixels would draw its ${dims(media.width, media.height)} photo ${drawn}.`)
 }
 

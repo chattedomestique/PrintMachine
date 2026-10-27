@@ -251,7 +251,7 @@ describe('a native plan is pressed at the photo\'s own pixels, or not at all', (
     const err = await savePrint(s, decoded(4032, 3024), {}, { makeCanvas: c.makeCanvas }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(Error)
     expect(err).not.toBeInstanceOf(CanvasLimitError)
-    expect((err as Error).message).toMatch(/^A 2419×3024 print planned at the photo's own pixels would draw its 4032×3024 photo 4032x3024 at \(/)
+    expect((err as Error).message).toMatch(/^A 2419×3024 print planned at the photo's own pixels would draw its 4032×3024 photo 4032×3024 at \(/)
     expect(c.made).toHaveLength(0)
   })
 })

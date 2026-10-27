@@ -234,18 +234,23 @@ export interface FrameFill {
 /** Paper: no colour, the bare stock. */
 export const PAPER_RGBA: Rgba = [0, 0, 0, 0]
 
-/** One pixel repeated over a run: written once, then doubled. */
+/** One pixel repeated over `count` pixels of `out` from byte `o`: written
+ *  once, then doubled. */
+function fillRun(px: Rgba, out: Uint8ClampedArray, o: number, count: number): void {
+  const n = count * 4
+  if (n <= 0) return
+  out[o] = px[0]
+  out[o + 1] = px[1]
+  out[o + 2] = px[2]
+  out[o + 3] = px[3]
+  for (let k = 4; k < n; k *= 2) out.copyWithin(o + k, o, o + Math.min(k, n - k))
+}
+
+/** A flat fill's rows: the one pixel over the run. */
 const flatRow =
   (px: Rgba): RowSampler =>
-  (_y, x0, x1, out, o) => {
-    const n = (x1 - x0) * 4
-    if (n <= 0) return
-    out[o] = px[0]
-    out[o + 1] = px[1]
-    out[o + 2] = px[2]
-    out[o + 3] = px[3]
-    for (let k = 4; k < n; k *= 2) out.copyWithin(o + k, o, o + Math.min(k, n - k))
-  }
+  (_y, x0, x1, out, o) =>
+    fillRun(px, out, o, x1 - x0)
 
 /** '#rrggbb' as an opaque pixel. */
 function hexRgba(hex: string): Rgba {
@@ -426,13 +431,10 @@ function patchCoverage(r: number, left: number, right: number, top: number, bott
 }
 
 /** Whole rows of fill, [y0, y1), into `out` from byte `o`. A flat fill is
- *  written once and doubled. */
+ *  written once over all of them and doubled. */
 function fillRows(fill: FrameFill, y0: number, y1: number, w: number, out: Uint8ClampedArray, o: number): void {
   if (y1 <= y0) return
-  if (fill.flat) {
-    fill.row(y0, 0, w * (y1 - y0), out, o)
-    return
-  }
+  if (fill.flat) return fillRun(fill.flat, out, o, w * (y1 - y0))
   for (let y = y0; y < y1; y++) fill.row(y, 0, w, out, o + (y - y0) * w * 4)
 }
 

@@ -325,11 +325,13 @@ try {
     // Fit) against the same unframed, each at the settled and the draft
     // size, rendered the way the preview renders a frame (its canvases and
     // cache kept; the photo drawn and the frame composed every time),
-    // interleaved, median of 5. The framed may take at most FRAME_COST of
-    // the unframed. Pinned at measured x 1.25 or the plan's 1.10 settled and
-    // 1.25 draft, whichever is lower: the plan's are (measured over four
-    // runs on the frame's first commit: settled 0.85 to 1.04, draft 0.88 to
-    // 1.20; the frame's own work is a few ms, under the noise of a render).
+    // interleaved, median of 5 (a draft sample the mean of 10 renders: one
+    // is a few ms, under the timer's and the collector's noise). The framed
+    // may take at most FRAME_COST of the unframed. Pinned at measured x 1.25
+    // or the plan's 1.10 settled and 1.25 draft, whichever is lower: the
+    // plan's are (measured on the frame's first commits: settled 0.85 to
+    // 1.04 over seven runs; draft 0.88 to 1.20 one render a sample, 0.84 to
+    // 1.11 ten; the frame's own work is a few ms, under a render's noise).
     const FRAME_COST = { settled: 1.1, draft: 1.25 }
     const runs = opts.runs ?? 5
     const { page, errors } = await openPage()
@@ -340,7 +342,8 @@ try {
         let size = ''
         for (let i = -1; i < runs; i++) {
           for (const f of frames) {
-            const r = await page.evaluate(([d, ff, dr]) => window.H.frameCost(d, ff, dr), [doc, f, draft])
+            // A draft render is a few ms: each sample is the mean of 10.
+            const r = await page.evaluate(([d, ff, dr]) => window.H.frameCost(d, ff, dr, dr ? 10 : 1), [doc, f, draft])
             // The first round only warms the canvases and the cache.
             if (i >= 0) times[f].push(r.ms)
             if (f === 'none') size = `${r.w}x${r.h}`

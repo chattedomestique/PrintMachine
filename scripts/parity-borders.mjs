@@ -95,32 +95,36 @@ const hexRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
 const b64 = (bytes) => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
 const unb64 = (s) => new Uint8Array(Buffer.from(s, 'base64'))
 
-/** Every pixel of a region: its mean absolute error per channel against the
- *  reference, the largest, and how many differ at all. */
-function compare(pm, ref, pmW, refW, pixels) {
+/**
+ * The pixels of [x0, x1) x [y0, y1) that `keep(x, y)` takes, the engine's
+ * against the reference's: the mean absolute error per channel, the largest,
+ * how many differ at all, and, given a colour, how many of the engine's are
+ * not it.
+ */
+function compare(pm, ref, pmW, refW, [x0, y0, x1, y1], keep = () => true, colour = null) {
   let sum = 0
   let max = 0
   let n = 0
   let differ = 0
-  for (const [x, y] of pixels) {
-    const p = (y * pmW + x) * 4
-    const r = (y * refW + x) * 4
-    let d = 0
-    for (let c = 0; c < 3; c++) {
-      const e = Math.abs(pm[p + c] - ref[r + c])
-      sum += e
-      d = Math.max(d, e)
+  let notColour = 0
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      if (!keep(x, y)) continue
+      const p = (y * pmW + x) * 4
+      const r = (y * refW + x) * 4
+      let d = 0
+      for (let c = 0; c < 3; c++) {
+        const e = Math.abs(pm[p + c] - ref[r + c])
+        sum += e
+        d = Math.max(d, e)
+      }
+      if (colour && (pm[p] !== colour[0] || pm[p + 1] !== colour[1] || pm[p + 2] !== colour[2])) notColour++
+      if (d) differ++
+      max = Math.max(max, d)
+      n++
     }
-    if (d) differ++
-    max = Math.max(max, d)
-    n++
   }
-  return { mean: n ? sum / (3 * n) : 0, max, differ, n }
-}
-
-/** The pixels [x0, x1) x [y0, y1). */
-function* rect(x0, y0, x1, y1) {
-  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) yield [x, y]
+  return { mean: n ? sum / (3 * n) : 0, max, differ, n, notColour }
 }
 
 const server = await createServer({
@@ -169,32 +173,24 @@ try {
     const fill = hexRgb(photo.hex[k.print_machine.frame.fill])
 
     // The border, and in Fit the matte.
-    const outside = [...rect(0, 0, w, h)].filter(([x, y]) => !inShown(x, y))
-    const border = compare(pm, ref, r.w, r.refW, outside)
+    const border = compare(pm, ref, r.w, r.refW, [0, 0, w, h], (x, y) => !inShown(x, y), fill)
     const fit = k.print_machine.frame.mode === 'fit'
     check(border.mean <= BOUNDS.borderMean && border.max <= BOUNDS.borderMax, `border${fit ? ' and matte' : ''}: ${border.n} px, mean ${border.mean.toFixed(4)} (<= ${BOUNDS.borderMean}), max ${border.max} (<= ${BOUNDS.borderMax}), ${border.differ} differ`)
-    let notFill = 0
-    for (const [x, y] of outside) {
-      const p = (y * r.w + x) * 4
-      if (pm[p] !== fill[0] || pm[p + 1] !== fill[1] || pm[p + 2] !== fill[2]) notFill++
-    }
-    check(notFill === 0, `the engine's ${fit ? 'border and matte are' : 'border is'} the fill ${photo.hex[k.print_machine.frame.fill]} exactly (${notFill} pixels are not)`)
+    check(border.notColour === 0, `the engine's ${fit ? 'border and matte are' : 'border is'} the fill ${photo.hex[k.print_machine.frame.fill]} exactly (${border.notColour} pixels are not)`)
 
     // The photo, away from the corners.
     if (!fit) {
-      const interior = [...rect(s.x, s.y, s.x + s.w, s.y + s.h)].filter(([x, y]) => !inPatch(x, y))
-      const c = compare(pm, ref, r.w, r.refW, interior)
+      const c = compare(pm, ref, r.w, r.refW, [s.x, s.y, s.x + s.w, s.y + s.h], (x, y) => !inPatch(x, y))
       check(c.differ === 0, `the photo at its own pixels, outside the corners: ${c.n} px, ${c.differ} differ (max ${c.max}): every byte equal`)
     } else {
       // Only the flat squares at the photo's corners: the rest is resampled
       // by each app its own way. Two pixels in from where the square ends,
       // so a resampled edge is never in it.
       const side = Math.floor((photo.corner * s.w) / gen.width) - 2
-      const flat = []
-      for (const [x0, y0] of [[s.x, s.y], [s.x + s.w - side, s.y], [s.x, s.y + s.h - side], [s.x + s.w - side, s.y + s.h - side]]) {
-        for (const p of rect(x0, y0, x0 + side, y0 + side)) if (!inPatch(p[0], p[1])) flat.push(p)
-      }
-      const c = compare(pm, ref, r.w, r.refW, flat)
+      const parts = [[s.x, s.y], [s.x + s.w - side, s.y], [s.x, s.y + s.h - side], [s.x + s.w - side, s.y + s.h - side]].map(([x0, y0]) =>
+        compare(pm, ref, r.w, r.refW, [x0, y0, x0 + side, y0 + side], (x, y) => !inPatch(x, y)),
+      )
+      const c = { n: parts.reduce((a, q) => a + q.n, 0), differ: parts.reduce((a, q) => a + q.differ, 0), max: Math.max(...parts.map((q) => q.max)) }
       check(c.differ === 0, `the photo's flat corner squares (${side} px a side, outside the corner patches; the resampled rest masked): ${c.n} px, ${c.differ} differ (max ${c.max}): every byte equal`)
     }
 
@@ -204,15 +200,16 @@ try {
       const ch = [0, 1, 2].reduce((a, b) => (Math.abs(P[b] - fill[b]) > Math.abs(P[a] - fill[a]) ? b : a), 0)
       const coverage = (v) => (v - fill[ch]) / (P[ch] - fill[ch])
       for (const [name, x0, y0] of [['top left', s.x, s.y], ['top right', s.x + s.w - patch, s.y], ['bottom left', s.x, s.y + s.h - patch], ['bottom right', s.x + s.w - patch, s.y + s.h - patch]]) {
-        const px_ = [...rect(x0, y0, x0 + patch, y0 + patch)]
-        const c = compare(pm, ref, r.w, r.refW, px_)
+        const c = compare(pm, ref, r.w, r.refW, [x0, y0, x0 + patch, y0 + patch])
         let off = 0
         let partial = 0
-        for (const [x, y] of px_) {
-          const a = coverage(pm[(y * r.w + x) * 4 + ch])
-          const b = coverage(ref[(y * r.refW + x) * 4 + ch])
-          if (a > 0.02 && a < 0.98) partial++
-          if (Math.abs(a - b) > 0.25) off++
+        for (let y = y0; y < y0 + patch; y++) {
+          for (let x = x0; x < x0 + patch; x++) {
+            const a = coverage(pm[(y * r.w + x) * 4 + ch])
+            const b = coverage(ref[(y * r.refW + x) * 4 + ch])
+            if (a > 0.02 && a < 0.98) partial++
+            if (Math.abs(a - b) > 0.25) off++
+          }
         }
         check(
           c.mean <= BOUNDS.cornerMean && off / c.n < BOUNDS.cornerOff,

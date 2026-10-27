@@ -388,7 +388,7 @@ every byte equal, and each rounded corner within a mean of 1.02 levels
 engine's corner the exact area). `npm run harness -- --out c.json --no-hashes
 --frame-cost` times the preview framed against unframed (a photo at its own
 size and a 12 MP photo from its working copy, settled and draft): at most
-1.10x settled and 1.25x draft; measured 0.85 to 1.04 and 0.88 to 1.20, the
+1.10x settled and 1.25x draft; measured 0.85 to 1.04 and 0.84 to 1.11, the
 frame's own work being a few milliseconds.
 
 #### The photo is stored exactly as it came

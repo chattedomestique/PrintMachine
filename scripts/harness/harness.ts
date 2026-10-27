@@ -929,14 +929,16 @@ const COST_FRAMES: Record<string, Partial<FrameSettings> | null> = {
 const costRigs = new Map<string, { settings: PrintSettings; media: ImageBitmap; height: number; out: CanvasRenderingContext2D; scratch: CanvasRenderingContext2D; cache: { current: RenderCache | null } }>()
 
 /**
- * One preview render of a document, framed or not, at the settled or the
- * draft size, timed (ms): what a person waits for at each change of the
- * frame. Each (document, frame, size) keeps its canvases and its render
- * cache across calls, as the preview does, and is rendered once untimed
- * first; so a timing is the steady cost of a frame of the preview, the
- * photo drawn and the frame composed afresh every time.
+ * A preview render of a document, framed or not, at the settled or the
+ * draft size, timed (ms a render): what a person waits for at each change
+ * of the frame. Each (document, frame, size) keeps its canvases and its
+ * render cache across calls, as the preview does, and is rendered once
+ * untimed first; so a timing is the steady cost of a frame of the preview,
+ * the photo drawn and the frame composed afresh every time. A draft render
+ * is a few milliseconds, under a timer's and a collector's noise, so it is
+ * timed `repeat` times in a row and the mean taken.
  */
-async function frameCost(doc: string, frame: string, draft: boolean): Promise<{ ms: number; w: number; h: number }> {
+async function frameCost(doc: string, frame: string, draft: boolean, repeat = 1): Promise<{ ms: number; w: number; h: number }> {
   const key = `${doc}|${frame}|${draft}`
   let rig = costRigs.get(key)
   if (!rig) {
@@ -959,8 +961,8 @@ async function frameCost(doc: string, frame: string, draft: boolean): Promise<{ 
     renderPrint(rig.out, rig.scratch, settings, rig.cache, null, rig.height, media, inputsOf(settings))
   }
   const t0 = performance.now()
-  renderPrint(rig.out, rig.scratch, rig.settings, rig.cache, null, rig.height, rig.media, inputsOf(rig.settings))
-  const ms = performance.now() - t0
+  for (let i = 0; i < repeat; i++) renderPrint(rig.out, rig.scratch, rig.settings, rig.cache, null, rig.height, rig.media, inputsOf(rig.settings))
+  const ms = (performance.now() - t0) / repeat
   return { ms, w: rig.out.canvas.width, h: rig.out.canvas.height }
 }
 

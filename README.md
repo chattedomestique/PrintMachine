@@ -697,9 +697,18 @@ which the photo's cover fit reaches 1:1 on the side that binds. An Original
 sheet must HOLD the photo: the smallest sheet on which the whole photo fits at
 its own pixels on both sides, so at 100% it saves every row and column of it.
 (A cover lands a row early on a photo taller than 1:2, and a 4000x12000 photo
-used to save at 4000x11999.) The planner steps the sheet's long side a pixel
-at a time, from an estimate up to the first size that lands and back down
-to the smallest (`engine/exportPlan.ts`); a test holds it to a scan from 1.
+used to save at 4000x11999.) Zoomed past 100%, an Original sheet holds the
+part of the photo the zoom shows on both sides, where the cover was at 1:1 on
+one; so an Original print zoomed past 100% may save a pixel or two larger or
+smaller than it did before the frame came in, both at the photo's own pixels:
+larger where the cover's sheet was a row or a column short of holding it (a
+4730x6159 photo at 200%: 2365x3079 then, 2365x3080 now), smaller where a
+smaller sheet holds it too (7500x4203 at 200%: 3751x2102 then, 3750x2102
+now). A test holds every such plan within 2 px a side of the old one, larger
+only where the old one did not hold. The planner steps the sheet's long
+side a pixel at a time, from an estimate up to the first size that lands
+and back down to the smallest (`engine/exportPlan.ts`); a test holds it to a
+scan from 1.
 A floor, a smaller copy and the JPEG's edge are sized by the height, the
 width following from the shape, as the preview is.
 

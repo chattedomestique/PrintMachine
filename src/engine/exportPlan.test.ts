@@ -312,6 +312,62 @@ describe('unframed, the plan is the one it was, but where it was wrong', () => {
     }
     expect(taller).toBeGreaterThan(100)
   })
+
+  it('on Original zoomed past 100%: within 2 px a side of c8c0910\'s, larger only where its sheet did not hold the zoomed photo, never larger where it did', () => {
+    // c8c0910 covered (one side at 1:1 was enough); the Original rule HOLDS
+    // the part of the photo the zoom shows, on both sides. Where c8c0910's
+    // sheet held it too, stepping the long side may find a pixel smaller;
+    // where it fell a row or a column short, the sheet grows to hold it.
+    // Both are the photo's own pixels.
+    const named: [number, number, number, string, string][] = [
+      [4730, 6159, 2, '2365x3079', '2365x3080'],
+      [3024, 4032, 1.08, '2800x3733', '2801x3734'],
+      [3024, 4032, 1.4, '2160x2880', '2161x2881'],
+      [7500, 4203, 2, '3751x2102', '3750x2102'],
+      [4032, 3024, 1.1, '3667x2750', '3666x2750'],
+      [7728, 5152, 1.05, '7361x4907', '7360x4907'],
+    ]
+    for (const [mw, mh, z, before, now] of named) {
+      const p = photo(mw, mh, z)
+      expect(dims(planBefore(own(p).aspect, p)), `${dims(p)} at ${z}`).toBe(before)
+      expect(dims(planExport(own(p), p)), `${dims(p)} at ${z}`).toBe(now)
+    }
+    const rand = mulberry32(0x200)
+    const cases: PlanPhoto[] = []
+    for (let i = 0; i < 4000; i++) cases.push(photo(600 + Math.floor(rand() * 9000), 600 + Math.floor(rand() * 9000), 1 + (1 + Math.floor(rand() * 300)) / 100))
+    for (const [w, h] of [[4032, 3024], [5712, 4284], [7728, 5152], [9504, 6336], [8064, 6048], [6000, 4000]]) {
+      for (let z = 101; z <= 400; z += 3) cases.push(photo(w, h, z / 100), photo(h, w, z / 100))
+    }
+    let larger = 0
+    let smaller = 0
+    for (const p of cases) {
+      const where = `${dims(p)} at ${p.scale}`
+      const a = own(p).aspect
+      const plan = planExport(own(p), p)
+      const before = planBefore(a, p)
+      const { vw, vh } = originalVisible(p.width, p.height)
+      const holds = (w: number, h: number) => w * p.scale >= vw && h * p.scale >= vh
+      const dw = plan.width - before.width
+      const dh = plan.height - before.height
+      expect(Math.max(Math.abs(dw), Math.abs(dh)), where).toBeLessThanOrEqual(2)
+      // A native c8c0910 plan stays native (a floor may become native, at
+      // the floor's height or a pixel or two from it).
+      if (before.height > REFERENCE_HEIGHT) expect(plan.limit, where).toBe('native')
+      if (plan.limit !== 'native') continue
+      expect(holds(plan.width, plan.height), where).toBe(true)
+      expectNativeLayout(spec('original', media(p)), plan, where)
+      if (holds(before.width, before.height)) {
+        expect(dw <= 0 && dh <= 0, where).toBe(true)
+        if (dw || dh) smaller++
+      } else {
+        expect(dw >= 0 && dh >= 0 && dw + dh > 0, where).toBe(true)
+        larger++
+      }
+    }
+    // Both happen, often: a change that moves these plans further fails above.
+    expect(larger).toBeGreaterThan(500)
+    expect(smaller).toBeGreaterThan(50)
+  })
 })
 
 describe('every plan, over 2000 random photos, sheets and zooms', () => {

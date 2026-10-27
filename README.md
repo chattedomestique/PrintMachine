@@ -302,27 +302,25 @@ so no sheet is a sliver. `sheetAspect` is the one place a sheet becomes a
 number, and everything downstream — the cover fit, the pan limits, Fit, the
 preview and the export — takes that number.
 
-At the height where the sheet holds the photo at its own pixels, the blit is
+At the size where the sheet holds the photo at its own pixels, the blit is
 **snapped**: drawn at exactly the photo's size, at a whole-pixel offset, kept
 inside the travel that still covers the sheet (`snapRect`). Centred, the 4:5
 crop of a 12 MP photo sits half a pixel off the grid, and a bilinear blit at a
 half-pixel offset blurs every pixel into its neighbour: measured, 0.753 of the
 original's Laplacian energy unsnapped, 1.000 snapped. A zoomed photo snaps the
-same way at its own native height. "Holds the photo at its own pixels" means a
-scale within 2.5 px of 1:1 over the sheet's shorter side (`SNAP_PX`): the
-planner's native height can land up to a pixel and a half past 1:1 across the
-sheet's shorter side on the app's sheets, so on a tall sheet whose width binds
-(a 2268x4032 photo on its own sheet at 113% is drawn at 1.0005) a tolerance
-taken over the height let a resample of every pixel through. A test plans real
-and random photo sizes on every sheet the app makes, at exactly 100% and at
+same way at its own native size. "Holds the photo at its own pixels" means a
+scale within 2.5 px of 1:1 over the sheet's shorter side (`SNAP_PX`): on a
+tall sheet whose width binds (a 2268x4032 photo on its own sheet at 113% is
+drawn at 1.0005) a tolerance taken over the height let a resample of every
+pixel through. The planner steps the sheet's long side a pixel at a time (a
+landscape sheet's width, any other's height), so the side that binds reaches
+the photo's exactly: 3001x2251 on a fixed 3:2 sheet saves at 3001x2001, at
+its own pixels (stepping the height made it 3002x2001, a pixel too wide for
+the photo to cover, and resampled it). A test plans real and random photo
+sizes on every sheet, the landscape ones included, at exactly 100% and at
 every zoom to 400%, and the planner's random photos on any aspect zoomed past
 100%, and checks that each native plan is drawn at the photo's own pixels, at
-a whole-pixel offset. The claim stops there on purpose: on a fixed landscape
-sheet, which the app does not make, the native width at exactly 100% can be a
-pixel or two wider than the photo (3001x2251 on 3:2 plans 3002x2001), the
-photo at its own size would not cover it, and the blit stays a cover-fit
-resample; such a sheet would need the planner to fit its width to the photo's
-first, and a test pins the case. A preview is 1:1
+a whole-pixel offset. A preview is 1:1
 when the photo lands on it at its own size (a photo no larger than the
 preview, or one zoomed to that point), and snaps then too; a blit that is not
 1:1 (a large photo's preview at 100%, a small photo enlarged to the reference
@@ -647,6 +645,18 @@ engine, the export was one canvas and was capped at its area; a 40 MP photo
 on its own sheet saved at 42% of its pixels.) The one limit left is the JPEG
 format's own: 65,535 px a side, which only a photo wider than that meets;
 Save then says so and offers the PNG, which has none.
+
+"Lands pixel for pixel" depends on how the photo is placed. A cropped sheet
+(4:5, 1:1...) is covered by the photo, so its plan is the smallest sheet on
+which the photo's cover fit reaches 1:1 on the side that binds. An Original
+sheet must HOLD the photo: the smallest sheet on which the whole photo fits at
+its own pixels on both sides, so at 100% it saves every row and column of it.
+(A cover lands a row early on a photo taller than 1:2, and a 4000x12000 photo
+used to save at 4000x11999.) The planner steps the sheet's long side a pixel
+at a time, from an estimate up to the first size that lands and back down
+to the smallest (`engine/exportPlan.ts`); a test holds it to a scan from 1.
+A floor, a smaller copy and the JPEG's edge are sized by the height, the
+width following from the shape, as the preview is.
 
 It says so **before** the tap. The More sheet's first row reads "Saves
 2419×3024", and when the print is not the photo's own pixels, why, in numbers:
@@ -985,7 +995,7 @@ photograph and would put case 6 at about 379 MB. The gate in brackets):
 | 10. 3:1 on Original, type at 10%, second ink (the luminance at one cell a pixel) | 6399x2133 | 149.2 MB (185) | 245.1 MB (290) | 5.6 s: 410 (346 + 64) | +261 MB |
 
 What the press holds grows with the sheet's WIDTH (its tile rings and band
-buffers), not its height: a 4000x10000 photo on Original (a 4000x9999 sheet)
+buffers), not its height: a 4000x10000 photo on Original (a 4000x10000 sheet)
 holds 109.2 MB of typed arrays at its peak against 107.4 MB for a 4000x5000
 one under case 2's document (1.017 times), and 120.8 against 113.2 MB under
 its worst press (1.068 times).

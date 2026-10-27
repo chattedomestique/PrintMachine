@@ -17,23 +17,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BAND_HALVINGS,
   CanvasLimitError,
-  ENCODINGS,
-  JPEG_QUALITY,
-  MissingPhotoError,
-  SMALLER_STEP,
-  SMALLEST_COPY_HEIGHT,
   describePlan,
+  ENCODINGS,
   fileSize,
   findSmallerPlanAsync,
   fitsCanvas,
+  JPEG_QUALITY,
+  MissingPhotoError,
   planPrint,
+  planSheet,
   pressCanvases,
   printFile,
   savePrint,
+  SMALLER_STEP,
+  SMALLEST_COPY_HEIGHT,
 } from './export.ts'
 import { planExport } from './exportPlan.ts'
 import { DRAFT_HEIGHT, PREVIEW_HEIGHT, renderPrint, renderPrintAsync, type RenderProgress } from './render.ts'
-import { REFERENCE_HEIGHT, bandHeight } from './limits.ts'
+import { LARGE_PRINT_MP, REFERENCE_HEIGHT, bandHeight } from './limits.ts'
+import { sheetAspect } from './frame.ts'
 import { quantTable, LUMA_QUANT } from './encode/jpeg.ts'
 import type { PrintSettings } from './types.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
@@ -164,11 +166,17 @@ describe('the export height: the planner, never the preview', () => {
     }
   })
 
-  it('plans from the photo\'s true size and zoom, through the sheet\'s numeric aspect, in the file\'s format', () => {
+  it('plans from the photo\'s true size and zoom, through the sheet\'s numeric aspect and its frame, in the file\'s format', () => {
     const s = withPhoto(5712, 4284, { aspect: 'original' })
-    expect(planPrint(s)).toEqual(planExport(5712 / 4284, { width: 5712, height: 4284, scale: 1 }, { format: 'jpeg' }))
-    expect(planPrint(s, { format: 'png' })).toEqual(planExport(5712 / 4284, { width: 5712, height: 4284, scale: 1 }))
-    expect(planPrint(defaultSettings())).toEqual(planExport(4 / 5, null))
+    const own = { aspect: 5712 / 4284, original: true, width: 0, mode: 'crop' as const }
+    expect(planSheet(s)).toEqual(own)
+    expect(planPrint(s)).toEqual(planExport(own, { width: 5712, height: 4284, scale: 1 }, { format: 'jpeg' }))
+    expect(planPrint(s, { format: 'png' })).toEqual(planExport(own, { width: 5712, height: 4284, scale: 1 }))
+    expect(planPrint(defaultSettings())).toEqual(planExport({ aspect: 4 / 5 }, null))
+    // The frame and the mode the layout uses: an Original sheet is Crop.
+    const framed = { ...s, frame: { ...s.frame, width: 0.05, mode: 'fit' as const } }
+    expect(planSheet(framed)).toEqual({ ...own, aspect: sheetAspect(framed), width: 0.05 })
+    expect(planSheet({ ...framed, aspect: '4:5' })).toEqual({ aspect: 4 / 5, original: false, width: 0.05, mode: 'fit' })
   })
 
   it('presses at the planned size: the file\'s frame is the plan\'s, for a print with a photo and one without', { timeout: 30_000 }, async () => {
@@ -588,35 +596,60 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
 
 describe('what Save says', () => {
   const plan = (s: PrintSettings) => describePlan(planPrint(s), s.media)
+  const words = (size: string, megapixels: string, reason: string | null = null) => ({ size, megapixels, frame: null, large: null, reason })
 
-  it('the pixel size, and nothing more when the print is the photo\'s own pixels', () => {
-    expect(plan(withPhoto(4032, 3024))).toEqual({ size: '2419×3024', reason: null })
-    expect(plan(defaultSettings())).toEqual({ size: '2880×3600', reason: null })
+  it('the pixel size and megapixels, and nothing more when the print is the photo\'s own pixels', () => {
+    expect(plan(withPhoto(4032, 3024))).toEqual(words('2419×3024', '7.3 MP'))
+    expect(plan(defaultSettings())).toEqual(words('2880×3600', '10.4 MP'))
+  })
+
+  it('a frame, in pixels: it adds pixels the photo does not have', () => {
+    const s = withPhoto(7728, 5152, { aspect: 'original' })
+    expect(plan({ ...s, frame: { ...s.frame, width: 1 / 14 } })).toEqual({ ...words('9016×6440', '58.1 MP'), frame: 'with a 644 px frame' })
+  })
+
+  it(`over ${LARGE_PRINT_MP} MP, that a phone may not finish it; nothing is made smaller for it`, () => {
+    const s = withPhoto(5152, 7728, { aspect: '16:9' })
+    const fit = { ...s, frame: { ...s.frame, width: 1 / 14, mode: 'fit' as const } }
+    const p = planPrint(fit)
+    expect(p).toMatchObject({ width: 18414, height: 10358, limit: 'native' })
+    expect(describePlan(p, fit.media)).toEqual({
+      ...words('18414×10358', '190.7 MP'),
+      frame: 'with a 1315 px frame',
+      large: 'a very large print: a phone may not finish it',
+    })
+    // At the line exactly, not yet.
+    expect(describePlan({ ...p, width: 10_000, height: 10_000 }, null).large).toBeNull()
+    expect(describePlan({ ...p, width: 10_000, height: 10_001 }, null).large).not.toBeNull()
   })
 
   it('an enlarged photo, in numbers', () => {
-    expect(plan(withPhoto(1600, 1200))).toEqual({ size: '1440×1800', reason: 'photo is 1600×1200: upscaled 1.5x' })
+    expect(plan(withPhoto(1600, 1200))).toEqual(words('1440×1800', '2.6 MP', 'photo is 1600×1200: upscaled 1.5x'))
     expect(plan(withPhoto(4032, 3024, { media: makeMedia({ id: 'p', width: 4032, height: 3024, scale: 4 }) })).reason).toBe(
       'photo is 4032×3024 at 400% zoom: upscaled 2.38x',
     )
   })
 
   it('no ceiling: a 24 MP and a 40 MP photo on their own sheets and cropped, at their own pixels, with nothing to explain', () => {
-    expect(plan(withPhoto(5712, 4284, { aspect: 'original' }))).toEqual({ size: '5712×4284', reason: null })
-    expect(plan(withPhoto(5712, 4284))).toEqual({ size: '3427×4284', reason: null })
-    expect(plan(withPhoto(7728, 5152, { aspect: 'original' }))).toEqual({ size: '7728×5152', reason: null })
-    expect(plan(withPhoto(7728, 5152))).toEqual({ size: '4122×5152', reason: null })
-    expect(plan(withPhoto(7728, 5152, { aspect: '1:1' }))).toEqual({ size: '5152×5152', reason: null })
+    expect(plan(withPhoto(5712, 4284, { aspect: 'original' }))).toEqual(words('5712×4284', '24.5 MP'))
+    expect(plan(withPhoto(5712, 4284))).toEqual(words('3427×4284', '14.7 MP'))
+    expect(plan(withPhoto(7728, 5152, { aspect: 'original' }))).toEqual(words('7728×5152', '39.8 MP'))
+    expect(plan(withPhoto(7728, 5152))).toEqual(words('4122×5152', '21.2 MP'))
+    expect(plan(withPhoto(7728, 5152, { aspect: '1:1' }))).toEqual(words('5152×5152', '26.5 MP'))
   })
 
   it('past a JPEG\'s edge (65,535 px), the largest JPEG, and how to get the photo\'s full size', () => {
     // A 3:1 panorama of 120,000 px (the widest an Original sheet is).
     const s = withPhoto(120_000, 40_000, { aspect: 'original' })
     expect(describePlan(planPrint(s), s.media)).toEqual({
-      size: '65535×21845',
+      ...words('65535×21845', '1431.6 MP'),
+      large: 'a very large print: a phone may not finish it',
       reason: "JPEG holds at most 65,535 px a side: Save lossless PNG for the photo's full size",
     })
-    expect(describePlan(planPrint(s, { format: 'png' }), s.media)).toEqual({ size: '120000×40000', reason: null })
+    expect(describePlan(planPrint(s, { format: 'png' }), s.media)).toEqual({
+      ...words('120000×40000', '4800.0 MP'),
+      large: 'a very large print: a phone may not finish it',
+    })
   })
 
   it('a size in MB or KB', () => {

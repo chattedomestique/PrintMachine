@@ -38,7 +38,7 @@
  * where that is lower (case 7: 115.2 MB typed, so 144).
  *
  * And the same-width pairs (`pair`): a 4000x10000 photo on Original (a
- * 4000x9999 sheet: the shortest on which it lands 1:1) against a 4000x5000
+ * 4000x10000 sheet: the whole photo, at its own pixels) against a 4000x5000
  * one, for case 2's document and for its worst-press variant. The
  * press holds what grows with the sheet's width, not its height, so the
  * taller one's peak typed bytes may be at most 1.15 times the shorter's.

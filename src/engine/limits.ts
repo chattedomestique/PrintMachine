@@ -122,6 +122,15 @@ export const BLUR_MIN = 10
 export const BLUR_MAX = 240
 export const BLUR_DEFAULT = 60
 
+/**
+ * Above this many megapixels Save's caption adds that the print is very large
+ * and a phone may not finish it. Said, never acted on: the print is still
+ * pressed at its size, and nothing smaller is made unless a press fails and
+ * the person chooses a smaller copy. 100 is a first guess, the owner's to
+ * tune: no phone has yet been seen to save a print of any size.
+ */
+export const LARGE_PRINT_MP = 100
+
 /** How many times the press runs for this document. */
 export function passCount(settings: { layers: readonly { backing: string | null }[] }): number {
   return settings.layers.length + settings.layers.filter((l) => l.backing).length

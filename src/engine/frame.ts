@@ -46,8 +46,12 @@ const ORIGINAL_MAX_RATIO = 3
  *  document holds 'original' only with a photo; this is the fallback). */
 const ORIGINAL_WITHOUT_PHOTO = ASPECTS['4:5']
 
-/** The border, in pixels, of a w x h sheet: `width` of its long side. */
-export const borderPx = (width: number, w: number, h: number): number => Math.round(width * Math.max(w, h))
+/** The border, in pixels, of a w x h sheet: `width` of its long side. Never
+ *  so wide that nothing is left inside it (only a sheet a few pixels across
+ *  could meet that: the widest frame takes 0.32 of the long side, and no
+ *  sheet's short side is under a third of it). */
+export const borderPx = (width: number, w: number, h: number): number =>
+  Math.min(Math.round(width * Math.max(w, h)), Math.floor((Math.min(w, h) - 1) / 2))
 
 /**
  * The part of a photo an Original sheet shows, at the photo's own pixels: the
@@ -169,13 +173,12 @@ export interface SheetLayout {
  *
  * Unframed (width 0) in Crop, the visible rectangle is the sheet and the
  * photo's rectangle is exactly the cover fit of the sheet, as it always was.
- * A sheet only a few pixels across keeps at least one visible pixel.
  */
 export function layoutSheet(s: SheetSpec, w: number, h: number): SheetLayout {
   const sheet: Area = { x0: 0, y0: 0, w, h }
   const media = s.media
   if (!media) return { w, h, border: 0, visible: sheet, shown: sheet, photo: null, radius: 0 }
-  const border = Math.min(borderPx(s.frame.width, w, h), Math.floor((Math.min(w, h) - 1) / 2))
+  const border = borderPx(s.frame.width, w, h)
   const visible: Area = { x0: border, y0: border, w: w - 2 * border, h: h - 2 * border }
   let shown: Area
   let photo: DrawRect

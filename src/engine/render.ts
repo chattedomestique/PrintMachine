@@ -110,9 +110,17 @@ const PITCH_PER_GRAIN = 3
 export const grainCell = (screenPitch: number, scale: number): number =>
   Math.max(1, (screenPitch / PITCH_PER_GRAIN) * scale)
 
+/** A sheet's pixel size. */
+export interface SheetSize {
+  w: number
+  h: number
+}
+
 /** Output pixel dimensions for a sheet's width over its height (a number:
- *  `sheetAspect`) at a given render height. The one place the width is made. */
-export function outputSize(aspect: number, height: number = REFERENCE_HEIGHT): { w: number; h: number } {
+ *  `sheetAspect`) at a given render height: the preview's, the harness's and
+ *  every height-driven plan's. (A native plan of a landscape sheet steps its
+ *  width instead, and hands the press its own w x h: exportPlan.ts.) */
+export function outputSize(aspect: number, height: number = REFERENCE_HEIGHT): SheetSize {
   return { w: Math.round(height * aspect), h: height }
 }
 
@@ -1579,12 +1587,11 @@ export interface ExportPressOptions {
 function* exportSteps(
   out: SheetOutput,
   s: PrintSettings,
-  height: number,
+  { w, h }: SheetSize,
   media: CanvasImageSource | null,
   canvases: ExportCanvases,
   opts: ExportPressOptions,
 ): Generator<RenderProgress, void> {
-  const { w, h } = outputSize(sheetAspect(s), height)
   const grid = tileGrid(w, h, opts.tileBudget)
   const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? bandHeight(w, h))))
   const noise = sampledNoise(s, w, h)
@@ -1686,7 +1693,8 @@ export async function renderPrintAsync(
   media: CanvasImageSource | null,
   opts: AsyncRenderOptions = {},
 ): Promise<void> {
-  const { w, h } = outputSize(sheetAspect(s), height)
+  const size = outputSize(sheetAspect(s), height)
+  const { w, h } = size
   sizeCanvas(ctx, w, h)
   // The sheet is printed a band of rows at a time into one band-sized buffer,
   // and each band put on the canvas: the canvas already holds the print, so
@@ -1694,7 +1702,7 @@ export async function renderPrintAsync(
   const rows = Math.max(1, Math.min(h, Math.floor(PRINT_BAND_PIXELS / w)))
   const image = ctx.createImageData(w, rows)
   const out: SheetOutput = { band: image.data, rows, put: (y0, y1) => ctx.putImageData(image, 0, y0, 0, 0, w, y1 - y0) }
-  await drive(exportSteps(out, s, height, media, { tile: scratch, piece: opts.makeCanvas }, opts), opts)
+  await drive(exportSteps(out, s, size, media, { tile: scratch, piece: opts.makeCanvas }, opts), opts)
 }
 
 /**
@@ -1731,19 +1739,22 @@ export interface PressOptions extends ExportPressOptions {
  * the page painting its progress and taking a Cancel. No canvas, array or
  * file buffer of the sheet's size: the band buffer here (`bandRows` rows) is
  * the only output the press holds. `sink.finish()` is the caller's.
+ *
+ * @param size the sheet, w x h: the plan's (exportPlan.ts), which steps a
+ *   landscape sheet's width, so it is not always round(height x aspect).
  */
 export async function pressToSink(
   s: PrintSettings,
-  height: number,
+  size: SheetSize,
   media: CanvasImageSource | null,
   sink: RowSink,
   opts: PressOptions,
 ): Promise<void> {
-  const { w, h } = outputSize(sheetAspect(s), height)
+  const { w, h } = size
   const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? bandHeight(w, h))))
   const band = new Uint8ClampedArray(B * w * 4)
   const out: SheetOutput = { band, rows: B, put: (y0, y1) => sink.put(band.subarray(0, (y1 - y0) * w * 4), y1 - y0) }
-  await drive(exportSteps(out, s, height, media, opts.canvases, { ...opts, bandRows: B }), opts, () => sink.settled())
+  await drive(exportSteps(out, s, size, media, opts.canvases, { ...opts, bandRows: B }), opts, () => sink.settled())
 }
 
 /** Run a press's steps, yielding to the page (and awaiting `settled`, when

@@ -20,14 +20,14 @@
 
 import { JpegEncoder } from './encode/jpeg.ts'
 import { PngEncoder } from './encode/png.ts'
-import { planExport, type ExportPlan } from './exportPlan.ts'
-import { MIN_BAND_ROWS, bandHeight } from './limits.ts'
+import { planExport, type ExportPlan, type PlanSheet } from './exportPlan.ts'
+import { effectiveMode, layoutSheet, sheetAspect, type SheetSpec } from './frame.ts'
+import { LARGE_PRINT_MP, MIN_BAND_ROWS, bandHeight } from './limits.ts'
 import type { DrawRect, LumaGrid } from './media.ts'
-import { groundRect, isNativeRect, outputSize, pressToSink, sourceSize, throwIfAborted, type RenderProgress, type RowSink } from './render.ts'
+import { isNativeRect, pressToSink, sourceSize, throwIfAborted, type RenderProgress, type RowSink } from './render.ts'
 import type { GlyphPlan } from './text.ts'
 import { TILE_BUDGET, tileGrid, type TileBudget } from './tiles.ts'
 import { type MediaLayer, type PrintSettings } from './types.ts'
-import { sheetAspect } from './frame.ts'
 
 export type ExportFormat = 'jpeg' | 'png'
 
@@ -60,11 +60,21 @@ export class MissingPhotoError extends Error {
   }
 }
 
-/** The size this print saves at: from its sheet and its photo's TRUE size
- *  (never the preview's working copy), at its zoom, in its format. */
+/** The document's sheet as the planner reads it: its shape, whether it is
+ *  Original, its frame's width and the mode the layout uses. */
+export const planSheet = (s: SheetSpec): PlanSheet => ({
+  aspect: sheetAspect(s),
+  original: s.aspect === 'original',
+  width: s.frame.width,
+  mode: effectiveMode(s),
+})
+
+/** The size this print saves at: from its sheet and frame and its photo's
+ *  TRUE size (never the preview's working copy), at its zoom, in its
+ *  format. */
 export function planPrint(settings: PrintSettings, opts: { maxHeight?: number; format?: ExportFormat } = {}): ExportPlan {
   const m = settings.media
-  return planExport(sheetAspect(settings), m ? { width: m.width, height: m.height, scale: m.scale } : null, { maxHeight: opts.maxHeight, format: opts.format ?? 'jpeg' })
+  return planExport(planSheet(settings), m ? { width: m.width, height: m.height, scale: m.scale } : null, { maxHeight: opts.maxHeight, format: opts.format ?? 'jpeg' })
 }
 
 export interface PressedPrint {
@@ -165,10 +175,12 @@ export async function savePrint(settings: PrintSettings, media: CanvasImageSourc
   if (settings.media && !media) throw new MissingPhotoError()
   const format = opts.format ?? 'jpeg'
   const plan = planPrint(settings, { maxHeight: opts.maxHeight, format })
-  const { w, h } = outputSize(sheetAspect(settings), plan.height)
-  // The press makes the width from the same aspect; a sheet of any other
-  // size is not the print the caption promised.
-  if (w !== plan.width) throw new Error(`The print would come out ${w}×${h}, not the planned ${plan.width}×${plan.height}.`)
+  const { width: w, height: h } = plan
+  // The press lays the sheet out at the plan's size (frame.ts `layoutSheet`);
+  // a layout whose frame is not the plan's is not the print the caption
+  // promised.
+  const layout = layoutSheet(settings, w, h)
+  if (layout.border !== plan.border) throw new Error(`The print's frame would be ${layout.border} px, not the planned ${plan.border} px.`)
   const seam = testSeam()
   const budget = seam.tileBudget ?? TILE_BUDGET
   const made: CanvasRenderingContext2D[] = []
@@ -186,7 +198,8 @@ export async function savePrint(settings: PrintSettings, media: CanvasImageSourc
   }
   try {
     const size = media ? sourceSize(media) : null
-    const native = !!settings.media && !!size && isNativeRect(opts.rect ?? groundRect(settings, w, h), size.width, size.height)
+    const rect = opts.rect ?? layout.photo
+    const native = !!rect && !!size && isNativeRect(rect, size.width, size.height)
     // Every canvas the press makes, proved at its real size before any work:
     // over its limit an iOS canvas does not throw, it hands back a blank one,
     // and the print would come out empty.
@@ -206,7 +219,7 @@ export async function savePrint(settings: PrintSettings, media: CanvasImageSourc
       const chunks: Uint8Array[] = []
       const sink = encoderSink(format, w, h, B, chunks)
       try {
-        await pressToSink(settings, plan.height, media, sink, {
+        await pressToSink(settings, { w, h }, media, sink, {
           bandRows: B,
           tileBudget: budget,
           rect: opts.rect,
@@ -345,25 +358,44 @@ export function fileSize(bytes: number): string {
 
 const times = (k: number): string => `${Number(k.toFixed(2))}x`
 
-/**
- * What Save says about the size: the pixel size, and, when the print is not
- * at the photo's own pixels, why — in numbers, never quietly.
- */
-export function describePlan(plan: ExportPlan, media: Pick<MediaLayer, 'width' | 'height' | 'scale'> | null): {
+/** What Save says about a plan (`describePlan`). */
+export interface PlanWords {
+  /** "9016×6440". */
   size: string
+  /** "58.1 MP". */
+  megapixels: string
+  /** "with a 644 px frame", or null unframed: the frame adds pixels the
+   *  photo does not have, so the caption says how many. */
+  frame: string | null
+  /** Over LARGE_PRINT_MP: that a phone may not finish it. Said before the
+   *  tap; nothing is made smaller for it. */
+  large: string | null
+  /** When the print is not the photo's own pixels: why, in numbers. */
   reason: string | null
-} {
+}
+
+/**
+ * What Save says about the size: the pixel size and the megapixels, the
+ * frame when there is one, a very large print as such, and, when the print
+ * is not at the photo's own pixels, why — in numbers, never quietly.
+ */
+export function describePlan(plan: ExportPlan, media: Pick<MediaLayer, 'width' | 'height' | 'scale'> | null): PlanWords {
   const size = dims(plan.width, plan.height)
+  const mp = (plan.width * plan.height) / 1e6
+  const megapixels = `${mp.toFixed(1)} MP`
+  const frame = plan.border > 0 ? `with a ${plan.border} px frame` : null
+  const large = mp > LARGE_PRINT_MP ? 'a very large print: a phone may not finish it' : null
   const photo = media ? `${dims(media.width, media.height)}${media.scale > 1 ? ` at ${Math.round(media.scale * 100)}% zoom` : ''}` : ''
+  const words = { size, megapixels, frame, large }
   switch (plan.limit) {
     case 'native':
     case 'none':
-      return { size, reason: null }
+      return { ...words, reason: null }
     case 'floor':
-      return { size, reason: `photo is ${photo}: upscaled ${times(plan.upscale ?? 1)}` }
+      return { ...words, reason: `photo is ${photo}: upscaled ${times(plan.upscale ?? 1)}` }
     case 'format':
-      return { size, reason: 'JPEG holds at most 65,535 px a side: Save lossless PNG for the photo\'s full size' }
+      return { ...words, reason: 'JPEG holds at most 65,535 px a side: Save lossless PNG for the photo\'s full size' }
     case 'smaller':
-      return { size, reason: 'a smaller copy, as asked' }
+      return { ...words, reason: 'a smaller copy, as asked' }
   }
 }

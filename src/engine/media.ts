@@ -159,36 +159,23 @@ export function isReducedCopy(media: { width: number; height: number; native?: b
 
 /**
  * How near 1:1 a blit must be to be drawn at the photo's own pixels: within
- * this many pixels over the shorter side of the area it covers (the sheet's,
- * unframed: the sheet is the area there, and every figure below is of it).
+ * this many pixels over the shorter side of the area it covers (the visible
+ * rectangle; unframed, the sheet).
  *
- * It has to cover every height the export planner calls native
- * (exportPlan.ts): the smallest height at which the photo lands at least 1:1,
- * so over it by at most a row on the binding side, plus the width's rounding.
- * Over the sheet's short side (sheet a = w/h, height H) that is under:
- *  - 1.5 x (1 + 1/H) for every sheet the app makes: a fixed sheet (a <= 1),
- *    or an Original one, whose two sides bind together (1 + 0.5/a at or over
- *    1:1, a + 0.5 under it; the worst is an Original sheet of about 1:1);
- *  - (floor(a) + 1) / a x (1 + 2/H), just over 2 at most, for a sheet wider
- *    than 1:1 whose WIDTH binds — a photo narrower than a landscape sheet,
- *    which only a fixed landscape sheet could make (there is none).
- * A tolerance of 1.5 over the sheet's HEIGHT missed every tall sheet whose
- * width binds: a 2268x4032 photo on its own sheet at 113% was planned native
- * and resampled by 1.0005, losing a third of its finest detail. 2.5 holds
- * both bounds with room.
- *
- * The tolerance is not the whole story on a fixed landscape sheet. At exactly
- * 100% there, the native width can come out a pixel or two WIDER than the
- * photo (the width steps by up to ceil(a) px a row), so the photo at its own
- * size would not cover the sheet and the snap keeps the cover fit: a resample
- * under a `native` label. So the claim is for the sheets the app makes (the
- * fixed ones, none wider than 1:1, and Original, which binds on both sides),
- * at every zoom, and for any aspect only above 100%; a fixed landscape sheet
- * would need the planner to fit its width to the photo's. exportPlan.test.ts
- * checks each of those sweeps, and pins the landscape case.
+ * It has to cover every size the export planner calls native (exportPlan.ts):
+ * the smallest sheet on which the photo lands at least 1:1. The planner steps
+ * the sheet's long side a pixel at a time, so neither side of the area grows
+ * by more than a pixel a step, and there the photo is a hair over its own
+ * size: well inside 2.5 px over the area's shorter side. The tolerance is
+ * taken over the SHORTER side because over the height it missed every tall
+ * sheet whose width binds: a 2268x4032 photo on its own sheet at 113% was
+ * planned native and resampled by 1.0005, losing a third of its finest
+ * detail. exportPlan.test.ts checks that every native plan, on every sheet
+ * (the landscape ones too), framed or not, at every zoom, is drawn at the
+ * photo's own pixels at a whole-pixel offset.
  *
  * Snapping a little early costs nothing visible: a snap only ever draws the
- * photo at its own size, still covering the sheet, and the crop moves by
+ * photo at its own size, still covering the area, and the crop moves by
  * (scale - 1) x the photo's size — a few pixels at most.
  */
 export const SNAP_PX = 2.5

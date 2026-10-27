@@ -10,8 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import { CanvasLimitError, MissingPhotoError, planPrint } from '../../engine/export.ts'
 import { planExport } from '../../engine/exportPlan.ts'
-import { type PrintSettings } from '../../engine/types.ts'
-import { sheetAspect } from '../../engine/frame.ts'
+import type { PrintSettings } from '../../engine/types.ts'
 import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { PhotoDecodeError } from '../media/decode.ts'
 import {
@@ -34,8 +33,8 @@ import {
 } from './useSave.ts'
 
 const photo = { width: 3024, height: 4032, scale: 1 }
-const plan = planExport(4 / 5, photo)
-const planAt = (maxHeight: number) => planExport(4 / 5, photo, { maxHeight })
+const plan = planExport({ aspect: 4 / 5 }, photo)
+const planAt = (maxHeight: number) => planExport({ aspect: 4 / 5 }, photo, { maxHeight })
 const file = new File([new Uint8Array(6_200_000)], 'print-machine.jpg', { type: 'image/jpeg' })
 const run = (events: SaveEvent[], from: SaveState = IDLE) => events.reduce(saveReducer, from)
 const kinds = (events: SaveEvent[]) => {
@@ -355,8 +354,7 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
       },
       savePrint: async (settings, _media, opts) => {
         log.pressed.push(opts)
-        const m = settings.media
-        const p = planExport(sheetAspect(settings), m ? { width: m.width, height: m.height, scale: m.scale } : null, { maxHeight: opts?.maxHeight, format: opts?.format })
+        const p = planPrint(settings, { maxHeight: opts?.maxHeight, format: opts?.format })
         opts?.onGround?.()
         return { blob: new Blob([new Uint8Array(10)]), plan: p, format: opts?.format ?? 'jpeg' }
       },

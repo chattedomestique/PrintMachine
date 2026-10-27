@@ -301,7 +301,7 @@ for (const c of CASES.filter((k) => k.id === only)) {
   const t0 = performance.now()
   const jpeg = new JpegEncoder(plan.width, plan.height, 95, (chunk) => (fileBytes += chunk.length))
   const sink = { put: (rgba, rows) => jpeg.push(rgba, rows), settled: async () => {}, finish: async () => jpeg.finish(), abort: () => {} }
-  await pressToSink(s, plan.height, photo, sink, {
+  await pressToSink(s, { w: plan.width, h: plan.height }, photo, sink, {
     canvases: { tile: scratch, piece: () => measured(fakeContext(), 'piece') },
     onGround: () => sample(),
     onProgress: () => {

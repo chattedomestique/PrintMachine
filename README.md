@@ -405,15 +405,16 @@ document's rounds taken back to back, so the two documents at the two sizes
 are measured round by round in turn (15 rounds, one render a sample), a
 render's time is the mean of its three fastest samples (thirty in draft, ten
 a round), and a document and size with a row over its bound is measured
-again, up to twice, its samples pooled; it fails only if still over. Over 50
-runs on one machine, in two batches of 25 half an hour apart, every run
-passed and one measured again (a photo at its own size, settled Crop: 1.12x
-unframed on 15 rounds, 1.02x on 30); the verdicts were 0.85 to 1.08 against
-unframed (under 1 in Fit, which draws the photo smaller) and 0.90 to 1.08
-against the compose skipped. The compose run ten times over fails the gate in
-every run (a 12 MP photo in Fit then sits at the bound: its frame, a flat
-matte round a photo a third of the sheet, is about 1% of the render); twenty
-times over fails every row of both documents in every run.
+again, up to twice, its samples pooled; it fails only if still over. Over 75
+runs on one machine, in three batches of 25, every run passed; five measured
+one document and size again, and each was within its bound at the second
+measurement (a photo at its own size, settled Crop: 1.12x unframed on 15
+rounds, 1.02x on 30). The verdicts were 0.85 to 1.08 against unframed (under
+1 in Fit, which draws the photo smaller) and 0.90 to 1.09 against the compose
+skipped. The compose run ten times over fails the gate in every run (a 12 MP
+photo in Fit then sits at the bound: its frame, a flat matte round a photo a
+third of the sheet, is about 1% of the render); twenty times over fails every
+row of both documents in every run.
 
 #### The photo is stored exactly as it came
 

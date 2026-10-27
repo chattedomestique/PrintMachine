@@ -215,8 +215,14 @@ describe('every plan, over 2000 random photos, sheets and zooms', () => {
 })
 
 describe('every native plan is drawn at the photo\'s own pixels (the snap covers the planner)', () => {
-  // The sheets the app makes: the four fixed ones and the photo's own.
-  const KEYS: PrintSettings['aspect'][] = [...(Object.keys(ASPECTS) as PrintSettings['aspect'][]), 'original']
+  // The sheets the app makes: the four fixed ones and the photo's own. The
+  // landscape twins (aspect.ts) are in the document but no control makes one,
+  // and at 100% a fixed landscape sheet whose width binds is not covered (the
+  // pinned case below).
+  const KEYS: PrintSettings['aspect'][] = [
+    ...(Object.keys(ASPECTS) as (keyof typeof ASPECTS)[]).filter((k) => ASPECTS[k] <= 1),
+    'original',
+  ]
 
   /** Plan the photo on the sheet and draw it as the press does: a native
    *  plan must put the photo at its own size, at a whole-pixel offset,

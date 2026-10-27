@@ -173,15 +173,21 @@ export interface PrintSettings {
   layers: TextLayer[]
 }
 
-/** A sheet shape with a fixed ratio. */
-export type FixedAspect = '1:1' | '4:5' | '3:4' | '2:3'
+/** A sheet shape with a fixed ratio: square, or a portrait ratio and its
+ *  landscape twin (aspect.ts `flipOf`). */
+export type FixedAspect = '1:1' | '4:5' | '5:4' | '3:4' | '4:3' | '2:3' | '3:2' | '9:16' | '16:9'
 
 /** Width over height of each fixed sheet shape. */
 export const ASPECTS: Record<FixedAspect, number> = {
   '1:1': 1,
   '4:5': 4 / 5,
+  '5:4': 5 / 4,
   '3:4': 3 / 4,
+  '4:3': 4 / 3,
   '2:3': 2 / 3,
+  '3:2': 3 / 2,
+  '9:16': 9 / 16,
+  '16:9': 16 / 9,
 }
 
 /** How far from square an Original sheet may go: a photo more extreme than

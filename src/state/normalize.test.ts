@@ -14,6 +14,9 @@ import maximal from './__fixtures__/legacy-maximal.json'
 import photoSecondInk from './__fixtures__/legacy-photo-second-ink.json'
 import preSplit from './__fixtures__/legacy-pre-split.json'
 import unknownIds from './__fixtures__/legacy-unknown-ids.json'
+// What c8c0910's normaliser made of the five documents above (written by that
+// build; the generator is not kept). No layer id in them is minted.
+import normalizedAtC8c0910 from './__fixtures__/legacy-normalized.json'
 import { defaultSettings, makeLayer, makeMedia } from './defaults.ts'
 import {
   LAYER_FIELDS,
@@ -355,10 +358,20 @@ describe('legacy documents', () => {
     })
   }
 
-  it('legacy-garbage: every corrupt document opens as exactly the defaults', () => {
+  it('every frozen document opens exactly as it did before the frame (legacy-normalized.json)', () => {
+    const before = normalizedAtC8c0910 as Record<string, unknown>
+    expect(Object.keys(before).sort()).toEqual(Object.keys(FIXTURES).sort())
+    for (const [name, doc] of Object.entries(FIXTURES)) expect(normalizeSettings(copy(doc)), name).toEqual(before[name])
+  })
+
+  it('legacy-garbage: every corrupt document opens as exactly the defaults, but for a sheet this build has', () => {
     for (const doc of garbage as unknown[]) {
       const s = normalizeSettings(copy(doc))
-      expect(withoutIds(s)).toEqual(withoutIds(defaultSettings()))
+      // One document stores '16:9' beside a broken photo and layers. When the
+      // fixture was frozen no build had that sheet (none could have saved
+      // one); it is the landscape twin of 9:16 now, a valid value, so it stays.
+      const aspect = (doc as Doc | null)?.aspect === '16:9' ? '16:9' : defaultSettings().aspect
+      expect(withoutIds(s)).toEqual(withoutIds({ ...defaultSettings(), aspect }))
       expect(normalizeSettings(copy(s))).toEqual(s)
     }
   })

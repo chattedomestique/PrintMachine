@@ -114,6 +114,13 @@ is null (a chosen second ink is a string, its default `null`).
 Frozen documents written by older builds live in `state/__fixtures__/`, and the
 tests load each one: it opens, normalising it twice changes nothing, no key
 survives that the current model does not have, and no valid value is lost.
+A print saved before the frame has no `frame` and opens with the template's,
+whose width is 0: unframed, as it was saved. `legacy-normalized.json` is what
+the last build before the frame made of each legacy document, and a test holds
+the normaliser to it, plus that unframed frame; `merge-pre-frame.json` is a
+print that build saved (a photo zoomed and panned on its own sheet, a second
+ink, a backing, the press at the ends of its ranges), and `merge-frame-edges.json`
+two framed ones with every frame field at both ends of its range.
 
 Every feature under "Removed on purpose" is gone from old prints too: a print
 that used one opens without it (the smear, a second press, a dither algorithm,

@@ -17,10 +17,18 @@ import unknownIds from './__fixtures__/legacy-unknown-ids.json'
 // What c8c0910's normaliser made of the five documents above (written by that
 // build; the generator is not kept). No layer id in them is minted.
 import normalizedAtC8c0910 from './__fixtures__/legacy-normalized.json'
-import { defaultSettings, makeLayer, makeMedia } from './defaults.ts'
+// A document as c8c0910 saves it, written by that build (photo, Original
+// sheet zoomed and panned, a Poster plate with a second ink, a backing plate,
+// the press at the ends of its ranges), and two framed ones at both ends of
+// every frame field, with a palette and a landscape sheet.
+import preFrame from './__fixtures__/merge-pre-frame.json'
+import frameEdges from './__fixtures__/merge-frame-edges.json'
+import { defaultSettings, frameDefaults, makeLayer, makeMedia } from './defaults.ts'
 import {
   LAYER_FIELDS,
+  FRAME_FIELDS,
   MEDIA_FIELDS,
+  PALETTE_FIELDS,
   PRESS_FIELDS,
   SETTINGS_FIELDS,
   mediaTemplate,
@@ -41,6 +49,13 @@ const FIXTURES: Record<string, unknown> = {
   'legacy-unknown-ids': unknownIds,
 }
 
+/** The documents written for the frame: one from before it, two with it. */
+const MERGE_FIXTURES: Record<string, unknown> = {
+  'merge-pre-frame': preFrame,
+  'merge-frame-edges (low)': (frameEdges as unknown[])[0],
+  'merge-frame-edges (high)': (frameEdges as unknown[])[1],
+}
+
 const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 const keys = (o: object) => Object.keys(o).sort()
 
@@ -58,14 +73,19 @@ function expectNoExtraKeys(s: PrintSettings) {
   const d = defaultSettings()
   expect(keys(s)).toEqual(keys(d))
   expect(keys(s.press)).toEqual(keys(d.press))
+  expect(keys(s.frame)).toEqual(keys(frameDefaults()))
   for (const l of s.layers) {
     expect(keys(l)).toEqual(keys(makeLayer()))
   }
   if (s.media) {
     const optional = MEDIA_FIELDS.filter((r) => r.optional).map((r) => r.key)
     expect(keys(s.media).filter((k) => !optional.includes(k))).toEqual(keys(makeMedia({ id: 'x', width: 1, height: 1 })))
+    if (s.media.palette) expect(keys(s.media.palette)).toEqual(['comp', 'deep', 'muted', 'photo'])
   }
 }
+
+/** A valid palette. */
+const PALETTE = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
 
 describe('the model is locked', () => {
   it('the press has exactly its six fields', () => {
@@ -94,12 +114,19 @@ describe('the model is locked', () => {
     )
   })
 
-  it('a photo has exactly its placement (and one optional flag), and the document its seven fields', () => {
+  it('a photo has exactly its placement (and two optional fields), and the document its eight fields', () => {
     expect(keys(makeMedia({ id: 'm', width: 1, height: 1 }))).toEqual(['height', 'id', 'scale', 'width', 'x', 'y'])
     // `native` marks a photo stored as imported; its absence marks an older
-    // build's 2048 px copy, so no template may fill it in.
-    expect(MEDIA_FIELDS.filter((r) => r.optional).map((r) => r.key)).toEqual(['native'])
-    expect(keys(defaultSettings())).toEqual(['aspect', 'layers', 'media', 'paperId', 'paperVeil', 'press', 'seed'])
+    // build's 2048 px copy, so no template may fill it in. `palette` is
+    // computed from the photo, so no template may invent one either.
+    expect(MEDIA_FIELDS.filter((r) => r.optional).map((r) => r.key)).toEqual(['native', 'palette'])
+    expect(keys(defaultSettings())).toEqual(['aspect', 'frame', 'layers', 'media', 'paperId', 'paperVeil', 'press', 'seed'])
+  })
+
+  it('the frame has exactly its five fields, and its template is unframed', () => {
+    expect(keys(frameDefaults())).toEqual(['blur', 'corners', 'fill', 'mode', 'width'])
+    expect(frameDefaults().width).toBe(0)
+    expect(defaultSettings().frame).toEqual(frameDefaults())
   })
 })
 
@@ -112,6 +139,8 @@ describe('the schema matches the model', () => {
     expect(names(PRESS_FIELDS)).toEqual(keys(d.press))
     expect(names(LAYER_FIELDS)).toEqual(keys(makeLayer()))
     expect(names(MEDIA_FIELDS)).toEqual(keys(mediaTemplate()))
+    expect(names(FRAME_FIELDS)).toEqual(keys(d.frame))
+    expect(names(PALETTE_FIELDS)).toEqual(keys(PALETTE))
   })
 
   it('accepts every default as valid — normalising the defaults changes nothing', () => {
@@ -144,6 +173,7 @@ const LEVELS: { name: string; path: Path; rows: readonly Row[] }[] = [
   { name: 'press', path: ['press'], rows: PRESS_FIELDS },
   { name: 'media', path: ['media'], rows: MEDIA_FIELDS },
   { name: 'layer', path: ['layers', 0], rows: LAYER_FIELDS },
+  { name: 'frame', path: ['frame'], rows: FRAME_FIELDS },
 ]
 
 /** Fields a photo is refused without: an invalid one drops the whole photo. */
@@ -263,6 +293,8 @@ function defaultsFor(level: string): Doc {
       return mediaTemplate()
     case 'layer':
       return makeLayer() as unknown as Doc
+    case 'frame':
+      return d.frame as Doc
   }
   throw new Error(level)
 }
@@ -358,10 +390,12 @@ describe('legacy documents', () => {
     })
   }
 
-  it('every frozen document opens exactly as it did before the frame (legacy-normalized.json)', () => {
-    const before = normalizedAtC8c0910 as Record<string, unknown>
+  it('every frozen document opens exactly as it did before the frame, plus an unframed frame (legacy-normalized.json)', () => {
+    const before = normalizedAtC8c0910 as Record<string, object>
     expect(Object.keys(before).sort()).toEqual(Object.keys(FIXTURES).sort())
-    for (const [name, doc] of Object.entries(FIXTURES)) expect(normalizeSettings(copy(doc)), name).toEqual(before[name])
+    for (const [name, doc] of Object.entries(FIXTURES)) {
+      expect(normalizeSettings(copy(doc)), name).toEqual({ ...before[name], frame: frameDefaults() })
+    }
   })
 
   it('legacy-garbage: every corrupt document opens as exactly the defaults, but for a sheet this build has', () => {
@@ -879,3 +913,78 @@ describe('what each removed field becomes', () => {
   })
 })
 
+
+/* ── The frame and the photo's palette ───────────────────────────────── */
+
+describe('the frame in saved prints', () => {
+  for (const [name, doc] of Object.entries(MERGE_FIXTURES)) {
+    it(`${name}: opens with no key the model does not have, and normalising twice is the same as once`, () => {
+      const s = normalizeSettings(copy(doc))
+      expectNoExtraKeys(s)
+      expect(normalizeSettings(copy(s))).toEqual(s)
+    })
+  }
+
+  it('merge-pre-frame: a print c8c0910 saved opens as it was, unframed (width 0)', () => {
+    const s = normalizeSettings(copy(preFrame))
+    expect(s).toEqual({ ...preFrame, frame: frameDefaults() })
+    expect(s.frame.width).toBe(0)
+    // Its zoom and pan on the Original sheet are kept, not re-centred.
+    expect([s.aspect, s.media!.scale, s.media!.x, s.media!.y]).toEqual(['original', 2, 0.3, 0.6])
+  })
+
+  it('merge-frame-edges: every frame field at both ends of its range, a palette and a landscape sheet survive unchanged', () => {
+    for (const doc of frameEdges as unknown[]) expect(normalizeSettings(copy(doc))).toEqual(doc)
+    const [low, high] = (frameEdges as PrintSettings[]).map((d) => d.frame)
+    expect(low).toEqual({ width: 0, corners: 0, fill: 'paper', blur: 10, mode: 'crop' })
+    expect(high).toEqual({ width: 0.16, corners: 1, fill: 'frosted', blur: 240, mode: 'fit' })
+  })
+
+  it('a frame that is not an object is the template frame, and its unknown keys go', () => {
+    for (const frame of [null, 'thick', 3, []]) {
+      const d = copy(preFrame) as unknown as Doc
+      d.frame = frame
+      expect(normalizeSettings(d).frame).toEqual(frameDefaults())
+    }
+    const d = copy(preFrame) as unknown as Doc
+    d.frame = { ...frameDefaults(), width: 0.05, colour: '#ff0000', shadow: true }
+    expect(normalizeSettings(d).frame).toEqual({ ...frameDefaults(), width: 0.05 })
+  })
+})
+
+describe("the photo's palette", () => {
+  const withPalette = (palette: unknown): Doc => {
+    const d = copy(preFrame) as unknown as Doc
+    ;(d.media as Doc).palette = palette
+    return d
+  }
+
+  it('a whole, valid palette is kept exactly', () => {
+    expect(normalizeSettings(withPalette(PALETTE)).media!.palette).toEqual(PALETTE)
+  })
+
+  it('one bad colour, a missing colour or the wrong type drops the whole palette, never half of it', () => {
+    for (const bad of [
+      { ...PALETTE, deep: '#15222' },
+      { ...PALETTE, muted: '#90B1C1' },
+      { ...PALETTE, comp: 'tomato' },
+      { ...PALETTE, photo: 0x2896c8 },
+      { photo: PALETTE.photo, deep: PALETTE.deep, muted: PALETTE.muted },
+      '#2896c8',
+      [PALETTE.photo, PALETTE.deep, PALETTE.muted, PALETTE.comp],
+      null,
+    ]) {
+      const s = normalizeSettings(withPalette(bad))
+      expect(s.media).not.toBeNull()
+      expect('palette' in s.media!).toBe(false)
+    }
+  })
+
+  it('an extra colour goes, the four stay', () => {
+    expect(normalizeSettings(withPalette({ ...PALETTE, soft: '#eef0f2' })).media!.palette).toEqual(PALETTE)
+  })
+
+  it('a photo without one gets none: it is computed from the photo, never filled from a default', () => {
+    expect('palette' in normalizeSettings(copy(preFrame)).media!).toBe(false)
+  })
+})

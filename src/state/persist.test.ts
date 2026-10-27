@@ -21,7 +21,7 @@ import photoSecondInk from './__fixtures__/legacy-photo-second-ink.json'
 import preSplit from './__fixtures__/legacy-pre-split.json'
 import unknownIds from './__fixtures__/legacy-unknown-ids.json'
 import { defaultSettings } from './defaults.ts'
-import { clearExportInFlight, loadPrefs, loadSettings, markExportInFlight, savePrefs, takeExportInFlight } from './persist.ts'
+import { clearExportInFlight, loadPrefs, loadSettings, markExportInFlight, savePrefs, saveSettings, takeExportInFlight } from './persist.ts'
 
 const KEY = 'printmachine:settings:v1'
 
@@ -98,6 +98,26 @@ describe('the storage path', () => {
     expect(withoutIds(loadSettings())).toEqual(withoutIds(defaultSettings()))
     store.set(KEY, '{not json')
     expect(withoutIds(loadSettings())).toEqual(withoutIds(defaultSettings()))
+  })
+
+  it('keeps a frame and a palette through a save and a load', () => {
+    const s = {
+      ...defaultSettings(),
+      aspect: '3:2' as const,
+      media: {
+        id: 'm',
+        width: 4032,
+        height: 3024,
+        scale: 1,
+        x: 0.5,
+        y: 0.5,
+        native: true,
+        palette: { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' },
+      },
+      frame: { width: 0.16, corners: 1, fill: 'frosted' as const, blur: 240, mode: 'fit' as const },
+    }
+    saveSettings(s)
+    expect(loadSettings()).toEqual(s)
   })
 
   it('no longer writes or reads the one-shot repair marker', () => {

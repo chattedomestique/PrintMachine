@@ -1,4 +1,5 @@
-import type { MediaLayer, PressProfile, PrintSettings, TextLayer } from '../engine/types.ts'
+import { BLUR_DEFAULT } from '../engine/limits.ts'
+import type { FrameSettings, MediaLayer, PressProfile, PrintSettings, TextLayer } from '../engine/types.ts'
 
 /**
  * Opinionated defaults. Every one of these is a decision made once here so it
@@ -79,6 +80,16 @@ export function pressProfile(): PressProfile {
   }
 }
 
+/**
+ * The frame a document holds until someone frames it: width 0, so no frame.
+ * A print saved before the frame opens with this and prints as it did. The
+ * rest are what the first frame starts from: the photo's own colour, square
+ * corners, Crop, and Frosted's blur at its default.
+ */
+export function frameDefaults(): FrameSettings {
+  return { width: 0, corners: 0, fill: 'photo', blur: BLUR_DEFAULT, mode: 'crop' }
+}
+
 export function defaultSettings(): PrintSettings {
   return {
     aspect: '4:5',
@@ -92,6 +103,8 @@ export function defaultSettings(): PrintSettings {
     paperId: 'natural',
 
     press: pressProfile(),
+
+    frame: frameDefaults(),
 
     seed: 12345,
     // The headline at 90% and the stamp at 60%: both inside the Size slider's

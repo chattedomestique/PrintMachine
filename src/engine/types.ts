@@ -38,6 +38,44 @@ export interface MediaLayer {
    *  photo still covers the sheet (media.ts `panBounds`). */
   x: number
   y: number
+  /** The frame's four photo-keyed colours, computed once from this photo and
+   *  stored with it, so the preview, the save and every reopen agree. Absent
+   *  until computed; never set by hand (the reducer's `setPalette`). */
+  palette?: FramePalette
+}
+
+/** The four colours a frame can take from its photo, as '#rrggbb'. */
+export interface FramePalette {
+  photo: string
+  deep: string
+  muted: string
+  comp: string
+}
+
+/** What fills the frame: bare paper, one of the photo's four colours, or a
+ *  blurred copy of the photo. The document stores the choice, never a
+ *  colour, so a new photo re-keys the frame by itself. */
+export type FillKey = 'paper' | keyof FramePalette | 'frosted'
+
+/**
+ * The frame round the photo.
+ *
+ * A document from before the frame opens with the template's width of 0:
+ * unframed, exactly as it was saved.
+ */
+export interface FrameSettings {
+  /** The border, as a fraction of the sheet's long side, 0..FRAME_WIDTH_MAX.
+   *  0 is no frame. */
+  width: number
+  /** 0..1: the radius of the photo's corners, as a fraction of an eighth of
+   *  the photo's shorter side. 0 is square. */
+  corners: number
+  fill: FillKey
+  /** Frosted's blur, BLUR_MIN..BLUR_MAX; read only when the fill is Frosted. */
+  blur: number
+  /** Crop fills the sheet's frame with the photo; Fit shows the whole photo
+   *  inside it, matted by the fill. An Original sheet is always Crop. */
+  mode: 'crop' | 'fit'
 }
 
 /** Screening method. A duplicator's RIP does one or the other, not both. */
@@ -168,6 +206,9 @@ export interface PrintSettings {
 
   /** How the type is pulled. */
   press: PressProfile
+
+  /** The frame round the photo (none at width 0). */
+  frame: FrameSettings
 
   seed: number
   layers: TextLayer[]

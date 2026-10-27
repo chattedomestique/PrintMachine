@@ -1,5 +1,7 @@
 import {
   sheetAspect,
+  type FramePalette,
+  type FrameSettings,
   type MediaLayer,
   type PressProfile,
   type PrintSettings,
@@ -39,8 +41,13 @@ export type SettingsAction =
   | { type: 'addLayer'; id?: string }
   | { type: 'removeLayer'; id: string }
   | { type: 'patchPress'; patch: Partial<PressProfile>; coalesce?: boolean; join?: boolean }
+  | { type: 'patchFrame'; patch: Partial<FrameSettings>; coalesce?: boolean; join?: boolean }
   | { type: 'setMedia'; media: MediaLayer | null }
   | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean; join?: boolean }
+  /** The photo's frame colours, computed from it: derived data, not an
+   *  edit, so it is never an undo step. For the photo `mediaId` only: a
+   *  palette that arrives after its photo was replaced is dropped. */
+  | { type: 'setPalette'; mediaId: string; palette: FramePalette }
   | { type: 'reset'; settings: PrintSettings }
 
 export type HistoryAction =
@@ -187,6 +194,9 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
     case 'patchPress':
       return { ...state, press: { ...state.press, ...action.patch } }
 
+    case 'patchFrame':
+      return { ...state, frame: { ...state.frame, ...action.patch } }
+
     case 'setMedia': {
       // Replacing a photo keeps the sheet the person chose (an Original sheet
       // takes the new photo's shape); removing one from an Original sheet
@@ -220,6 +230,9 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       // A patch with no photo present is a no-op rather than a crash: the
       // gesture layer can fire one as a drag ends just after a clear.
       return state.media ? withCover({ ...state, media: { ...state.media, ...action.patch } }) : state
+
+    case 'setPalette':
+      return state.media?.id === action.mediaId ? { ...state, media: { ...state.media, palette: action.palette } } : state
 
     case 'reset':
       return action.settings
@@ -272,6 +285,13 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
 
     case 'endBurst':
       return state.bursting ? { ...state, bursting: false } : state
+
+    // Derived from the photo, not chosen: the present takes it in place, and
+    // the history, the burst and what may be joined are left as they were.
+    case 'setPalette': {
+      const present = applySettings(state.present, action)
+      return present === state.present ? state : { ...state, present }
+    }
 
     default: {
       const next = applySettings(state.present, action)

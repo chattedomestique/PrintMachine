@@ -250,6 +250,7 @@ function field(row: Row, raw: unknown, fallback: unknown): unknown {
   switch (row.kind) {
     case 'string':
       if (typeof raw !== 'string' || (row.nonEmpty && raw.length === 0)) return invalid
+      if (row.pattern && !row.pattern.test(raw)) return invalid
       return raw
 
     case 'number': {

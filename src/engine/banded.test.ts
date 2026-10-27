@@ -142,6 +142,7 @@ describe('more documents, in bands: equal to the whole sheet', { timeout: 60_000
     paperVeil: true,
     paperId: 'natural',
     press: { method: 'halftone', screenPitch: 9, density: 0.84, misregistration: 5, edge: 0.55, wear: 0.22 },
+    frame: { width: 0, corners: 0, fill: 'photo', blur: 60, mode: 'crop' },
     seed: 7,
     layers: [],
     ...over,

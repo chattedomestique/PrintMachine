@@ -102,6 +102,26 @@ export const SIZE_MAX = 1.2
 export const MAX_TEXT_PLATES = 3
 export const MAX_PRESSED_PASSES = 4
 
+/**
+ * The frame's ranges (types.ts `FrameSettings`).
+ *
+ *  - FRAME_WIDTH_MAX, 0.16: the widest border, as a fraction of the sheet's
+ *    long side. Border Studio's widest, 400 px, is 0.154 of its free sheet.
+ *  - FRAME_WIDTH_FIRST, 1/14: the border a first photo is framed with, and
+ *    what Width resets to. Border Studio's 150 px default on its free sheet
+ *    (150 of 2100).
+ *  - FRAME_CORNER_DIV, 8: at Corners 1 the radius is the photo's shorter side
+ *    over this (Border Studio's Round: a quarter of half the side).
+ *  - BLUR_MIN, BLUR_MAX, BLUR_DEFAULT: Frosted's blur, 10..240, 60 (Border
+ *    Studio's range and default).
+ */
+export const FRAME_WIDTH_MAX = 0.16
+export const FRAME_WIDTH_FIRST = 1 / 14
+export const FRAME_CORNER_DIV = 8
+export const BLUR_MIN = 10
+export const BLUR_MAX = 240
+export const BLUR_DEFAULT = 60
+
 /** How many times the press runs for this document. */
 export function passCount(settings: { layers: readonly { backing: string | null }[] }): number {
   return settings.layers.length + settings.layers.filter((l) => l.backing).length

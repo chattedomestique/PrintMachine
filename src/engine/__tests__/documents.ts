@@ -46,6 +46,8 @@ const doc = (over: Partial<PrintSettings>): PrintSettings => ({
   paperVeil: true,
   paperId: 'natural',
   press: press(),
+  // Unframed, as every document was before the frame.
+  frame: { width: 0, corners: 0, fill: 'photo', blur: 60, mode: 'crop' },
   seed: 12345,
   layers: [],
   ...over,

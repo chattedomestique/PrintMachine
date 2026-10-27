@@ -387,3 +387,61 @@ describe('the undo history', () => {
     expect(h.past).toHaveLength(2)
   })
 })
+
+describe('the frame', () => {
+  const photo = makeMedia({ id: 'm', width: 4000, height: 3000 })
+
+  it('a frame edit changes the frame and nothing else: no plate is rewritten', () => {
+    const s = applySettings(defaultSettings(), { type: 'setMedia', media: photo })
+    const next = applySettings(s, { type: 'patchFrame', patch: { width: 0.1, corners: 0.5, fill: 'deep', blur: 120, mode: 'fit' } })
+    expect(next.frame).toEqual({ width: 0.1, corners: 0.5, fill: 'deep', blur: 120, mode: 'fit' })
+    expect(next.layers).toEqual(s.layers)
+    expect({ ...next, frame: s.frame }).toEqual(s)
+  })
+
+  it('a drag on a frame setting coalesces into one undo step, and a double tap joins it, as the press does', () => {
+    let h = initHistory(applySettings(defaultSettings(), { type: 'setMedia', media: photo }))
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.05 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.08 }, coalesce: true })
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.12 }, coalesce: true })
+    expect(h.past).toHaveLength(1)
+    expect(h.present.frame.width).toBe(0.12)
+    h = historyReducer(h, { type: 'endBurst' })
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: 1 / 14 }, join: true })
+    expect(h.past).toHaveLength(1)
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present.frame.width).toBe(0)
+  })
+})
+
+describe("the photo's palette", () => {
+  const photo = makeMedia({ id: 'm', width: 4000, height: 3000 })
+  const palette = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
+
+  it('is stored with the photo it was computed from, and is never an undo step', () => {
+    let h = initHistory(defaultSettings())
+    h = historyReducer(h, { type: 'setMedia', media: photo })
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.07 }, coalesce: true })
+    const { past, future, bursting, joinable } = h
+    h = historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })
+    expect(h.present.media!.palette).toEqual(palette)
+    // The history, the burst and what may be joined are as they were.
+    expect(h.past).toBe(past)
+    expect(h.future).toBe(future)
+    expect([h.bursting, h.joinable]).toEqual([bursting, joinable])
+    // The drag goes on into the same step, and keeps the palette.
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.09 }, coalesce: true })
+    expect(h.past).toBe(past)
+    expect(h.present.media!.palette).toEqual(palette)
+  })
+
+  it('arriving after its photo was replaced or removed, it changes nothing', () => {
+    let h = initHistory(applySettings(defaultSettings(), { type: 'setMedia', media: photo }))
+    h = historyReducer(h, { type: 'setMedia', media: makeMedia({ id: 'n', width: 3000, height: 4000 }) })
+    const replaced = h
+    expect(historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })).toBe(replaced)
+    h = historyReducer(h, { type: 'setMedia', media: null })
+    const removed = h
+    expect(historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })).toBe(removed)
+  })
+})

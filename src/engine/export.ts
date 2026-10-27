@@ -26,7 +26,8 @@ import type { DrawRect, LumaGrid } from './media.ts'
 import { groundRect, isNativeRect, outputSize, pressToSink, sourceSize, throwIfAborted, type RenderProgress, type RowSink } from './render.ts'
 import type { GlyphPlan } from './text.ts'
 import { TILE_BUDGET, tileGrid, type TileBudget } from './tiles.ts'
-import { sheetAspect, type MediaLayer, type PrintSettings } from './types.ts'
+import { type MediaLayer, type PrintSettings } from './types.ts'
+import { sheetAspect } from './frame.ts'
 
 export type ExportFormat = 'jpeg' | 'png'
 

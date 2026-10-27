@@ -48,7 +48,8 @@ import { drawBacking, drawGlyphs, planGlyphs, plateFontSize, rasterizeBacking, r
 import { readAlpha, readRgba } from './readback.ts'
 import { TILE_BUDGET, TileRowCache, ringRows, rowsFromTiles, tileAt, tileGrid, type TileBudget, type TileGrid } from './tiles.ts'
 import { REFERENCE_HEIGHT, bandHeight } from './limits.ts'
-import { sheetAspect, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
+import { type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
+import { sheetAspect } from './frame.ts'
 
 /**
  * The preview renders smaller than the export so a slider drag stays smooth on

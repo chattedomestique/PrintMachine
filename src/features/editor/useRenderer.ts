@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { draftSize, previewSize, renderPrint, type OverlaySpec, type RenderCache } from '../../engine/render.ts'
-import { sheetAspect, type PrintSettings } from '../../engine/types.ts'
+import { type PrintSettings } from '../../engine/types.ts'
+import { sheetAspect } from '../../engine/frame.ts'
 
 /** Quiet gap that counts as "the control has stopped". Long enough to span the
  *  pauses inside a real drag, short enough that letting go feels immediate. */

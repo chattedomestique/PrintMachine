@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest'
 
 import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
 import { contrastPartner } from '../engine/inks.ts'
-import { sheetAspect, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { sheetAspect } from '../engine/frame.ts'
 import { clampPan } from '../engine/media.ts'
 import { defaultSettings, makeLayer, makeMedia } from './defaults.ts'
 import {

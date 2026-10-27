@@ -37,7 +37,8 @@ import {
 import { normalizeSettings } from './normalize.ts'
 import { fitSize, layoutText, type FontMeasure } from '../engine/text.ts'
 import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from '../engine/limits.ts'
-import { sheetAspect, type PrintSettings } from '../engine/types.ts'
+import { type PrintSettings } from '../engine/types.ts'
+import { sheetAspect } from '../engine/frame.ts'
 
 type Doc = Record<string, unknown>
 

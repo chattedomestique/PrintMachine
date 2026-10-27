@@ -54,7 +54,8 @@ import { applySettings } from '../state/settingsReducer.ts'
 import { REFERENCE_HEIGHT, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from './limits.ts'
 import { blurInPlace } from './blur.ts'
 import { roughenInPlace, type RoughOptions } from './rough.ts'
-import { ASPECTS, FONTS, sheetAspect, type PrintSettings, type TextLayer } from './types.ts'
+import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'
+import { sheetAspect } from './frame.ts'
 
 const W = 24
 const H = 24

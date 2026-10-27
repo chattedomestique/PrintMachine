@@ -1,12 +1,5 @@
-import {
-  sheetAspect,
-  type FramePalette,
-  type FrameSettings,
-  type MediaLayer,
-  type PressProfile,
-  type PrintSettings,
-  type TextLayer,
-} from '../engine/types.ts'
+import { type FramePalette, type FrameSettings, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { sheetAspect } from '../engine/frame.ts'
 import { makeLayer } from './defaults.ts'
 import { contrastPartner } from '../engine/inks.ts'
 import { clampPan } from '../engine/media.ts'

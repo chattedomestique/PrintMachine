@@ -28,7 +28,8 @@
  */
 
 import { clampPan } from '../engine/media.ts'
-import { ASPECTS, sheetAspect, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { ASPECTS, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { sheetAspect } from '../engine/frame.ts'
 import { fitSize, type FontMeasure } from '../engine/text.ts'
 import { defaultSettings, makeLayer } from './defaults.ts'
 import { INK_IDS, LAYER_FIELDS, SETTINGS_FIELDS, acceptMedia, type Row } from './fields.ts'

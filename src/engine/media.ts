@@ -34,6 +34,15 @@ export interface DrawRect {
   dh: number
 }
 
+/** A rectangle of the sheet, in sheet pixels, from (x0, y0), w x h: the part
+ *  of the sheet the photo is placed on (frame.ts `layoutSheet`). */
+export interface Area {
+  x0: number
+  y0: number
+  w: number
+  h: number
+}
+
 /** Where the photo's centre may sit, in sheet fractions, and still cover. */
 export interface PanBounds {
   xLo: number

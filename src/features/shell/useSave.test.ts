@@ -10,7 +10,8 @@ import { describe, expect, it } from 'vitest'
 
 import { CanvasLimitError, MissingPhotoError, planPrint } from '../../engine/export.ts'
 import { planExport } from '../../engine/exportPlan.ts'
-import { sheetAspect, type PrintSettings } from '../../engine/types.ts'
+import { type PrintSettings } from '../../engine/types.ts'
+import { sheetAspect } from '../../engine/frame.ts'
 import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { PhotoDecodeError } from '../media/decode.ts'
 import {

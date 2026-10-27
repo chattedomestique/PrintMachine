@@ -13,7 +13,8 @@ import { NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'
 import { SNAP_PX, coverRect } from './media.ts'
 import { groundRect } from './render.ts'
 import { mulberry32 } from './rng.ts'
-import { ASPECTS, sheetAspect, type PrintSettings } from './types.ts'
+import { ASPECTS, type PrintSettings } from './types.ts'
+import { sheetAspect } from './frame.ts'
 
 const SHEETS = { '1:1': 1, '4:5': 4 / 5, '3:4': 3 / 4, '2:3': 2 / 3 } as const
 const photo = (width: number, height: number, scale = 1): PlanPhoto => ({ width, height, scale })

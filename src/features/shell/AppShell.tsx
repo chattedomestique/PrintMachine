@@ -11,6 +11,7 @@ import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, offlineJustReady, subscribeSW } from '../../state/swStatus.ts'
 import { useMediaBitmap } from '../media/useMediaBitmap.ts'
 import { useFrameInputs } from '../media/useFrameInputs.ts'
+import { frameState } from '../media/frameInputs.ts'
 import { usePhotoImport } from '../media/usePhotoImport.ts'
 import MoreSheet from './MoreSheet.tsx'
 import SaveQuestion from './SaveQuestion.tsx'
@@ -55,10 +56,15 @@ export default function AppShell() {
   const { settings, undo, redo, canUndo, canRedo } = useSettings()
   // The preview's working copy of the photo. Save does not use it: it decodes
   // the original, so the print is drawn from the original's pixels.
-  const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media, sheetAspect(settings), { width: settings.frame.width, mode: effectiveMode(settings) })
+  const { bitmap: media, state: decoded } = useMediaBitmap(settings.media, sheetAspect(settings), { width: settings.frame.width, mode: effectiveMode(settings) })
   // What the frame's fill is made from (the photo's palette, Frosted's
   // field), made from the photo once its preview copy has landed.
-  const frameInputs = useFrameInputs(settings, mediaState)
+  const frameInputs = useFrameInputs(settings, decoded)
+  // The photo, as Save and the panels see it: a photo the frame's fill cannot
+  // be made from (it needs the frame source, which would not decode) is a
+  // photo that could not be loaded, and is said the same way; its frame
+  // stays Paper.
+  const mediaState = frameState(decoded, frameInputs.state)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tool, setTool] = useState<ToolId | null>(null)
   const [subs, setSubs] = useState<Subs>(FIRST_SUBS)

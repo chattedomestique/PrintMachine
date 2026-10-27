@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import {
   CanvasLimitError,
+  MissingPhotoError,
   PHOTO_MISSING,
   SMALLER_STEP,
   SMALLEST_COPY_HEIGHT,
@@ -498,8 +499,15 @@ export async function pressForSave(
   try {
     // The frame's inputs first: made from a decode of their own (the
     // photo's colours), which is over before the original is decoded, so
-    // the two never hold their pixels at once.
-    const inputs = await deps.frameInputs(settings)
+    // the two never hold their pixels at once. A photo they cannot be made
+    // from is refused as a photo that cannot be loaded: never pressed with
+    // a frame quietly Paper.
+    let inputs: FrameInputs
+    try {
+      inputs = await deps.frameInputs(settings)
+    } catch {
+      throw new MissingPhotoError()
+    }
     throwIfAborted(signal)
     let rect: DrawRect | undefined
     if (settings.media) {

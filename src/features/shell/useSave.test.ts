@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CanvasLimitError, MissingPhotoError, planPrint } from '../../engine/export.ts'
+import { CanvasLimitError, MissingPhotoError, PHOTO_MISSING, planPrint } from '../../engine/export.ts'
 import { planExport } from '../../engine/exportPlan.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { defaultSettings, makeMedia } from '../../state/defaults.ts'
@@ -393,9 +393,12 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     expect((await pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, d)).kind).toBe('pressed')
     expect(order).toEqual(['inputs', 'original'])
     expect(inputs).toEqual([{ palette }])
-    // Inputs that cannot be made: nothing is decoded or pressed.
+    // Inputs that cannot be made: refused as a photo that cannot be loaded,
+    // with the same words, and nothing is decoded or pressed.
     const failing = deps({ frameInputs: async () => Promise.reject(new Error("The photo's colours could not be read: no")) })
-    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, failing.d)).rejects.toThrow(/colours could not be read/)
+    const refused = pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, failing.d)
+    await expect(refused).rejects.toBeInstanceOf(MissingPhotoError)
+    await expect(refused).rejects.toThrow(PHOTO_MISSING)
     expect([failing.log.full, failing.log.pressed]).toEqual([[], []])
   })
 

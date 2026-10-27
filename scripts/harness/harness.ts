@@ -25,15 +25,17 @@ import { JpegEncoder } from '../../src/engine/encode/jpeg.ts'
 import { PngEncoder } from '../../src/engine/encode/png.ts'
 import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
 import { detachedCanvas } from '../../src/features/shell/page.ts'
-import { needsFrost, storedFrameInputs } from '../../src/features/media/frameInputs.ts'
-import { PAGE_SOURCE_DEPS, frameSourceSize, frameSources } from '../../src/features/media/frameSource.ts'
+import { ensureFrameInputs, needsFrost, pageFramePalettes, previewFrameInputs, storedFrameInputs } from '../../src/features/media/frameInputs.ts'
+import { importMedia } from '../../src/features/media/importMedia.ts'
+import { deleteMedia } from '../../src/state/mediaStore.ts'
+import { PAGE_SOURCE_DEPS, frameSourceSize, frameSources, pageFrameSources } from '../../src/features/media/frameSource.ts'
 import { frostFields } from '../../src/features/media/frostField.ts'
 import { type FramePalette, type FrameSettings, type PrintSettings } from '../../src/engine/types.ts'
 import { effectiveMode, sheetAspect, type FrameInputs } from '../../src/engine/frame.ts'
 import { frostField } from '../../src/engine/frost.ts'
 import { FROST_DRAFT_LONG, FROST_FIELD_LONG } from '../../src/engine/limits.ts'
 import type { RgbaImage } from '../../src/engine/resample.ts'
-import { previewArea, workingSize } from '../../src/features/media/decode.ts'
+import { decodeOriginal, previewArea, workingSize } from '../../src/features/media/decode.ts'
 import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
 import plain from './docs/plain.json'
 import photoAsShot from './docs/photo-asshot.json'
@@ -968,6 +970,66 @@ async function parityBorders(c: ParityCase): Promise<{ w: number; h: number; pm:
   return { w, h, pm: b64(pm), refW, refH, ref: b64(ref) }
 }
 
+/**
+ * The whole chain, Frosted (the one fill that needs the photo's own pixels at
+ * Save): a photo imported for real (into this page's IndexedDB), its palette
+ * made by the page's maker from it and stored with it (as `setPalette` does,
+ * then through the normaliser, as a reopened document is), a document with a
+ * plate over it in Frosted. The preview's inputs as the page's preview makes
+ * them (`previewFrameInputs`: the frame source decoded from the stored file,
+ * the settled field), Save's as Save makes them (`ensureFrameInputs`); the
+ * same field, kept. Then the preview's render, the export's and the file the
+ * real `savePrint` writes (a PNG), at one height: the same bytes from all
+ * three, or the preview is not the print.
+ */
+async function chain(height: number): Promise<{ preview: string; exported: string; file: string; same: boolean; sameField: boolean; w: number; h: number; palette: FramePalette | null }> {
+  const c = photoCanvas(1600, 1200)
+  const png = await new Promise<Blob>((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'))
+  c.width = 0
+  const { layer } = await importMedia(png)
+  try {
+    const palette = await pageFramePalettes.palette(layer)
+    if (!palette) throw new Error('chain: the photo keyed no palette')
+    const base = defaultSettings()
+    const raw: PrintSettings = {
+      ...base,
+      aspect: 'original',
+      media: { ...layer, palette },
+      frame: { ...base.frame, width: 0.1, corners: 0.6, fill: 'frosted', blur: 150 },
+      layers: [base.layers[0]],
+    }
+    const settings = normalizeSettings ? normalizeSettings(JSON.parse(JSON.stringify(raw)), { measure: canvasMeasure?.() }) : raw
+    if (JSON.stringify(settings.media?.palette) !== JSON.stringify(palette)) throw new Error('chain: the stored palette did not survive the normaliser')
+    // Save's inputs, then the settled preview's, as each is made in the page.
+    const inputs = await ensureFrameInputs(settings)
+    const shown = previewFrameInputs(settings, { id: layer.id, src: await pageFrameSources.load(layer) }, false)
+    if (!inputs.frost || !shown.frost) throw new Error('chain: no frost field made')
+    const photo = await decodeOriginal(layer.id)
+    const pressed = await savePrint(settings, photo, inputs, { format: 'png', maxHeight: height, makeCanvas: detachedCanvas })
+    const file = await fileDigest(pressed.blob)
+    const at = pressed.plan.height
+    const media = await decodeOriginal(layer.id)
+    const shaOf = async (ctx: CanvasRenderingContext2D) => {
+      const d = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height).data
+      return hex(await crypto.subtle.digest('SHA-256', d))
+    }
+    const a = context(false)
+    renderPrint(a, context(true), settings, { current: null }, null, at, media, shown)
+    const preview = await shaOf(a)
+    const b = context(false)
+    await renderPrintAsync(b, context(true), settings, at, media, inputs, { makeCanvas: () => context(true) })
+    const exported = await shaOf(b)
+    const w = b.canvas.width
+    const h = b.canvas.height
+    for (const ctx of [a, b]) ctx.canvas.width = 0
+    media.close()
+    const sameField = shown.frost === inputs.frost
+    return { preview, exported, file: file.sha256, same: sameField && preview === exported && exported === file.sha256 && file.w === w && file.h === h, sameField, w, h, palette }
+  } finally {
+    await deleteMedia(layer.id)
+  }
+}
+
 /** The palette the frame-cost documents carry. */
 const COST_PALETTE: FramePalette = { photo: '#3d7fa6', deep: '#16222b', muted: '#9fb3c0', comp: '#c4783a' }
 
@@ -1069,9 +1131,10 @@ declare global {
       pngCheck: typeof pngCheck
       parityBorders: typeof parityBorders
       frameCost: typeof frameCost
+      chain: typeof chain
       normalized: boolean
     }
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, seam, fontCap, fileParity, retry, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, parityBorders, frameCost, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, seam, fontCap, fileParity, retry, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, parityBorders, frameCost, chain, normalized: !!normalizeSettings }

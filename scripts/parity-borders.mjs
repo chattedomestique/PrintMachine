@@ -2,9 +2,10 @@
  * The frame against Border Studio's own: Print Machine's engine renders the
  * frozen parity cases (scripts/parity-borders/: Border Studio 597ce7a's
  * frame, captured once) and is compared with them under stated bounds.
- * Exits 1 if any is broken.
+ * Exits 1 if any is broken. CI runs it in the verify job, after
+ * check-bands (deploy.yml).
  *
- *   node scripts/parity-borders.mjs
+ *   node scripts/parity-borders.mjs     (npm run check:parity-borders)
  *
  * Each case is rendered in Chromium through the render harness's page
  * (scripts/harness, `H.parityBorders`) by the EXPORT entry (renderPrintAsync,

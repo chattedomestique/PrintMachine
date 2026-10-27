@@ -14,11 +14,11 @@ import { areaAverage, type RgbaImage } from '../../engine/resample.ts'
 import type { FramePalette, PrintSettings } from '../../engine/types.ts'
 import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { FrameSourceError, frameSourceSize, frameSources, paletteSample, type FrameSourceDeps } from './frameSource.ts'
-import { ensureFrameInputs, fillShows, framePalettes, needsFrost, needsPalette, storedFrameInputs, type FrameMakers } from './frameInputs.ts'
+import { ensureFrameInputs, fillShows, frameInputState, framePalettes, frameState, needsFrost, needsPalette, previewFrameInputs, storedFrameInputs, type FrameMakers } from './frameInputs.ts'
 import { frostFields } from './frostField.ts'
 import { sheetAspect } from '../../engine/frame.ts'
 import { frostField } from '../../engine/frost.ts'
-import { FROST_FIELD_LONG } from '../../engine/limits.ts'
+import { FROST_DRAFT_LONG, FROST_FIELD_LONG } from '../../engine/limits.ts'
 import { makeFrameSource } from '../../engine/__tests__/fields.ts'
 // @ts-expect-error: a plain .mjs module, the generator the parity gate uses
 import { PHOTOS, blockPhoto } from '../../../scripts/parity-borders/photos.mjs'
@@ -258,5 +258,93 @@ describe("Frosted's fields, kept", () => {
     const c = fields.field('q', src, 1.25, 60, 480)
     expect(fields.field('q', src, 1.25, 60, 480)).toBe(c)
     expect(fields.field('p', src, 1.5, 61, 480)).not.toBe(b)
+  })
+})
+
+describe('where the inputs are, and a photo they cannot be made from', () => {
+  const PALETTE: FramePalette = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
+  const doc = (frame: Partial<PrintSettings['frame']>, palette?: FramePalette): PrintSettings => {
+    const s = defaultSettings()
+    return { ...s, aspect: '4:5', media: makeMedia({ id: 'p', width: 3000, height: 2000, ...(palette ? { palette } : {}) }), frame: { ...s.frame, ...frame } }
+  }
+
+  it('nothing to make with nothing of the frame showing; preparing while held back; ready once there', () => {
+    expect(frameInputState(doc({ width: 0 }), null, null)).toBe('none')
+    // A palette colour: held back (the source not decoded yet), then
+    // stored with the photo.
+    expect(frameInputState(doc({ width: 0.05, fill: 'photo' }), null, null)).toBe('preparing')
+    expect(frameInputState(doc({ width: 0.05, fill: 'photo' }, PALETTE), null, null)).toBe('ready')
+    // A photo with no colour: made, and Paper.
+    expect(frameInputState(doc({ width: 0.05, fill: 'photo' }), 'colourless', null)).toBe('ready')
+    // Frosted: held back until this photo's source is here.
+    expect(frameInputState(doc({ width: 0.05, fill: 'frosted' }), null, null)).toBe('preparing')
+    expect(frameInputState(doc({ width: 0.05, fill: 'frosted' }), null, 'another')).toBe('preparing')
+    expect(frameInputState(doc({ width: 0.05, fill: 'frosted' }), null, 'p')).toBe('ready')
+    expect(frameInputState(doc({ width: 0.05, fill: 'paper' }), null, null)).toBe('ready')
+  })
+
+  it('a failed decode is one state while the fill needs it, and Save sees the photo as one that cannot be loaded', () => {
+    // Kept with the photo, whatever else is held: a palette colour not
+    // stored, and Frosted, need the source that would not decode.
+    for (const fill of ['photo', 'deep', 'muted', 'comp', 'frosted'] as const) {
+      expect(frameInputState(doc({ width: 0.05, fill }), 'failed', null)).toBe('failed')
+      expect(frameInputState(doc({ width: 0.05, fill }), 'failed', 'p')).toBe('failed')
+    }
+    expect(frameInputState(doc({ width: 0.05, fill: 'frosted' }, PALETTE), 'failed', 'p')).toBe('failed')
+    // A fill that needs nothing made prints what the preview shows: Paper,
+    // or a palette colour already stored with the photo.
+    expect(frameInputState(doc({ width: 0.05, fill: 'paper' }), 'failed', null)).toBe('ready')
+    expect(frameInputState(doc({ width: 0.05, fill: 'muted' }, PALETTE), 'failed', null)).toBe('ready')
+    // No frame showing: nothing to make, nothing to refuse.
+    expect(frameInputState(doc({ width: 0, fill: 'photo' }), 'failed', null)).toBe('none')
+    expect(frameState('ready', 'failed')).toBe('failed')
+    expect(frameState('ready', 'preparing')).toBe('ready')
+    expect(frameState('loading', 'failed')).toBe('loading')
+    expect(frameState('none', 'none')).toBe('none')
+  })
+
+  it('a held-back source is waited for, and a failing one is the same failure every time it is asked, without another decode', async () => {
+    let release: (() => void) | null = null
+    let decodes = 0
+    const held = frameSources({
+      getBlob: async () => new Blob([new Uint8Array(4)]),
+      decode: (_b, size) => {
+        decodes++
+        return new Promise((resolve) => (release = () => resolve({ ...(size ?? { width: 300, height: 200 }), close: () => {} })))
+      },
+      read: (_b, w, h) => new Uint8ClampedArray(w * h * 4).fill(90),
+    })
+    let landed = false
+    const p = held.load(photo(300, 200)).then(() => (landed = true))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(landed).toBe(false)
+    release!()
+    await p
+    expect(landed).toBe(true)
+    expect(decodes).toBe(1)
+    const failing = frameSources({ ...fakeDeps(() => new Error('no')).deps })
+    const errors = await Promise.all([failing.load(photo(300, 200)).catch((e) => e), failing.load(photo(300, 200)).catch((e) => e)])
+    expect(errors[0]).toBeInstanceOf(FrameSourceError)
+    expect(errors[1]).toBe(errors[0])
+  })
+
+  it("the preview draws Frosted from the field Save presses: the settled one is Save's, the draft one smaller, none without the source", async () => {
+    const src = makeFrameSource(300, 200, 7)
+    const fields = frostFields()
+    const s = doc({ width: 0.05, fill: 'frosted', blur: 90 }, PALETTE)
+    // No source yet, or another photo's: what the document holds, Frosted Paper.
+    expect(previewFrameInputs(s, null, false, fields)).toEqual({ palette: PALETTE })
+    expect(previewFrameInputs(s, { id: 'q', src }, false, fields)).toEqual({ palette: PALETTE })
+    const settled = previewFrameInputs(s, { id: 'p', src }, false, fields)
+    const draft = previewFrameInputs(s, { id: 'p', src }, true, fields)
+    expect(Math.max(settled.frost!.w, settled.frost!.h)).toBe(FROST_FIELD_LONG)
+    expect(Math.max(draft.frost!.w, draft.frost!.h)).toBe(FROST_DRAFT_LONG)
+    // Save's inputs, made through the same kept fields: the very field.
+    const makers: FrameMakers = { palette: async () => PALETTE, frost: async (m, aspect, blur, long) => fields.field(m.id, src, aspect, blur, long) }
+    const saved = await ensureFrameInputs(s, makers)
+    expect(saved.frost).toBe(settled.frost)
+    expect(saved.palette).toEqual(PALETTE)
+    // Not Frosted: no field, whatever is held.
+    expect(previewFrameInputs({ ...s, frame: { ...s.frame, fill: 'deep' } }, { id: 'p', src }, false, fields)).toEqual({ palette: PALETTE })
   })
 })

@@ -49,6 +49,13 @@
  *     in-flight mark; Save again writes a file that is 7728x5152, a baseline
  *     JPEG (SOF0) with every component sampled 1x1 (4:4:4), read from its
  *     own header; the in-flight mark is set while it presses and gone after.
+ * 10. The frame's inputs (no control makes a frame yet, so the stored
+ *     document is given one): with the photo's frame source held back, the
+ *     border is Paper and no palette is stored; released, the palette is
+ *     stored with the photo and the border drawn in its colour. With a frame
+ *     source that will not decode: the card and Save's name say the photo
+ *     could not be loaded, Save cannot be tapped and no file appears, and
+ *     the border stays Paper.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -659,6 +666,118 @@ try {
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     console.log(`  (${((Date.now() - t) / 1000).toFixed(0)} s in all)`)
     await ctx.close()
+  }
+
+  console.log("\n10. The frame's inputs: held back, then made; and a photo they cannot be made from")
+  {
+    // The frame's source is the photo decoded at 1024 px on its long side
+    // (features/media/frameSource.ts): the one decode of that size. Held
+    // back until released, or failing, by a stand-in for createImageBitmap.
+    const stub = `
+      window.__frameDecodes = 0
+      const real = window.createImageBitmap
+      window.createImageBitmap = function (src, ...rest) {
+        const o = rest.length === 1 ? rest[0] : rest[4]
+        if (o && Math.max(o.resizeWidth ?? 0, o.resizeHeight ?? 0) === 1024) {
+          window.__frameDecodes++
+          if (sessionStorage.getItem('frame-decode') === 'fail') return Promise.reject(new Error('injected: this decode fails'))
+          if (sessionStorage.getItem('frame-decode') === 'hold') return new Promise((res, rej) => (window.__releaseFrame = () => real.call(window, src, ...rest).then(res, rej)))
+        }
+        return real.call(window, src, ...rest)
+      }
+    `
+    // A document given a frame before the app reads it (no control makes
+    // one yet), its palette left out, on the next load.
+    const frameNext = (page, frame, decode) =>
+      page.addInitScript(
+        ([frame, decode]) => {
+          if (sessionStorage.getItem('framed') === JSON.stringify(frame)) return
+          sessionStorage.setItem('framed', JSON.stringify(frame))
+          sessionStorage.setItem('frame-decode', decode)
+          const k = 'printmachine:settings:v1'
+          const s = JSON.parse(localStorage.getItem(k))
+          s.frame = { ...s.frame, ...frame }
+          if (s.media) delete s.media.palette
+          localStorage.setItem(k, JSON.stringify(s))
+        },
+        [frame, decode],
+      )
+    // The sheet's top-left pixel, in the border, as the preview shows it.
+    const corner = (page) =>
+      page.evaluate(() => {
+        const c = document.querySelector('.sheet canvas')
+        return [...c.getContext('2d').getImageData(2, 2, 1, 1).data]
+      })
+    const stored = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.palette ?? null)
+
+    const ctx = await newContext()
+    const { page, errors } = await open(ctx, stub)
+    await choosePhoto(page, 1600, 1200)
+    // Paper first: the border as bare paper looks.
+    await frameNext(page, { width: 0.08, fill: 'paper' }, 'pass')
+    await page.reload()
+    await page.waitForSelector('.sheet canvas')
+    await page.waitForTimeout(1500)
+    const paper = await corner(page)
+    // The photo's colour, its source held back: Paper until it is made.
+    await frameNext(page, { width: 0.08, fill: 'photo' }, 'hold')
+    await page.reload()
+    await page.waitForSelector('.sheet canvas')
+    await page.waitForFunction(() => window.__frameDecodes > 0 && typeof window.__releaseFrame === 'function', null, { timeout: 30_000 })
+    await page.waitForTimeout(1500)
+    const held = await corner(page)
+    const heldSave = await page.locator(SAVE).getAttribute('aria-disabled')
+    check(
+      held.join() === paper.join() && (await stored(page)) === null && heldSave !== 'true',
+      `held back: the border is Paper (${held.join(',')} = ${paper.join(',')}), no palette stored, Save still offered (it makes the inputs itself)`,
+    )
+    await page.evaluate(() => window.__releaseFrame())
+    await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.palette, null, { timeout: 30_000 })
+    await page.waitForTimeout(1500)
+    const made = await corner(page)
+    const palette = await stored(page)
+    const decodes = await page.evaluate(() => window.__frameDecodes)
+    check(
+      made.join() !== paper.join() && /^#[0-9a-f]{6}$/.test(palette?.photo ?? '') && Object.keys(palette).join() === 'photo,deep,muted,comp' && decodes === 1,
+      `released: the palette stored with the photo (${Object.values(palette ?? {}).join(' ')}), the border drawn in it (${made.join(',')}), one decode (${decodes})`,
+    )
+    check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+    await ctx.close()
+
+    // A photo whose frame source will not decode: one state, said as a photo
+    // that cannot be loaded; Save refuses; the border stays Paper.
+    const ctx2 = await newContext()
+    const second = await open(ctx2, stub)
+    const p2 = second.page
+    await choosePhoto(p2, 1600, 1200)
+    await frameNext(p2, { width: 0.08, fill: 'photo' }, 'fail')
+    await p2.reload()
+    await p2.waitForSelector('.sheet canvas')
+    await p2.waitForFunction(() => window.__frameDecodes > 0, null, { timeout: 30_000 })
+    await p2.waitForTimeout(1500)
+    const why = 'This photo could not be loaded. Choose it again.'
+    const state = await p2.evaluate(
+      ([SAVE, LINE, CANCEL]) => ({
+        line: document.querySelector(LINE)?.textContent ?? null,
+        role: document.querySelector(LINE)?.getAttribute('role') ?? null,
+        action: document.querySelector(CANCEL)?.textContent ?? null,
+        label: document.querySelector(SAVE)?.getAttribute('aria-label') ?? null,
+        disabled: document.querySelector(SAVE)?.getAttribute('aria-disabled') === 'true',
+      }),
+      [SAVE, LINE, CANCEL],
+    )
+    let downloaded = false
+    p2.on('download', () => (downloaded = true))
+    await p2.locator(SAVE).click({ force: true })
+    await p2.waitForTimeout(2000)
+    const failed = await corner(p2)
+    check(
+      state.line === why && state.role === 'alert' && state.action === 'Choose again' && state.label === `Save: ${why}` && state.disabled && !downloaded,
+      `failing: the card says "${state.line}" (${state.role}, "${state.action}"), Save is "${state.label}", cannot be tapped, no file`,
+    )
+    check(failed.join() === paper.join() && (await stored(p2)) === null, `and the border stays Paper (${failed.join(',')}), nothing stored`)
+    check(second.errors.length === 0, `no page errors ${second.errors.join(' | ')}`)
+    await ctx2.close()
   }
 } finally {
   await browser.close()

@@ -1,22 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { sheetAspect, type FrameInputs } from '../../engine/frame.ts'
-import { FROST_DRAFT_LONG, FROST_FIELD_LONG } from '../../engine/limits.ts'
+import type { FrameInputs } from '../../engine/frame.ts'
 import type { RgbaImage } from '../../engine/resample.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { useSettings } from '../../state/settingsStore.ts'
-import { fillShows, needsFrost, needsPalette, pageFramePalettes, storedFrameInputs } from './frameInputs.ts'
+import { frameInputState, needsFrost, needsPalette, pageFramePalettes, previewFrameInputs, type FrameInputState } from './frameInputs.ts'
 import { pageFrameSources } from './frameSource.ts'
 import { pageFrostFields } from './frostField.ts'
 import type { MediaState } from './useMediaBitmap.ts'
-
-/**
- * Where the frame's inputs are:
- *  - `none`       nothing to make (no photo, or nothing of the frame shows);
- *  - `preparing`  being made from the photo: the fill draws as Paper;
- *  - `ready`      the fill has what it needs;
- *  - `failed`     the photo could not be read for them.
- */
-export type FrameInputState = 'none' | 'preparing' | 'ready' | 'failed'
 
 /** The page's makers (a test hands in its own). */
 const PAGE = { palettes: pageFramePalettes, sources: pageFrameSources, fields: pageFrostFields }
@@ -73,18 +63,8 @@ export function useFrameInputs(
 
   // What a frame of `s` is drawn from: what the document holds, and
   // Frosted's field for its sheet and blur once the source is here.
-  const inputsFor = useCallback(
-    (s: PrintSettings, draft: boolean): FrameInputs => {
-      const inputs = storedFrameInputs(s)
-      if (!s.media || !needsFrost(s) || source?.id !== s.media.id) return inputs
-      inputs.frost = makers.fields.field(s.media.id, source.src, sheetAspect(s), s.frame.blur, draft ? FROST_DRAFT_LONG : FROST_FIELD_LONG)
-      return inputs
-    },
-    [source, makers],
-  )
+  const inputsFor = useCallback((s: PrintSettings, draft: boolean): FrameInputs => previewFrameInputs(s, source, draft, makers.fields), [source, makers])
 
   const outcome = settled && settled.id === id ? settled.outcome : null
-  const waiting = (wantPalette && outcome !== 'colourless') || (wantFrost && source?.id !== id)
-  const state: FrameInputState = !fillShows(settings) ? 'none' : outcome === 'failed' ? 'failed' : waiting ? 'preparing' : 'ready'
-  return { inputsFor, state }
+  return { inputsFor, state: frameInputState(settings, outcome, source?.id ?? null) }
 }

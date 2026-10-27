@@ -46,13 +46,17 @@ npm run build && npm run check:save   # the save flow in the built app, tapped
 npm run build && npm run check:touch  # tap-to-select on the sheet, touched
 npm run check:spike       # the device spike page still runs (see below)
 npm run check:encode      # the save's JPEG and PNG encoders, decoded by Chromium (fails over a bound)
+npm run check:parity-borders  # the frame against Border Studio's own frozen frames (fails outside a bound)
 ```
 
-The six that can fail run in CI after `verify`, `verify:offline` and
-`verify:geometry`, with the harness's parity gate (`npm run harness -- --out
-p.json --no-hashes --parity 1000`: the preview's entry point and the export's
-give the same bytes); `measure:export` runs there too, for the record (see
-"Every pixel of the photo, measured" and "What an export holds").
+The seven that can fail run in CI after `verify`, `verify:offline` and
+`verify:geometry`, with `check-bands` and the harness's gates (`npm run
+harness -- --out p.json --no-hashes --parity 1000`: the preview's entry point
+and the export's give the same bytes; `--chain`: the whole chain in Frosted,
+from an imported photo to Save's file; `--frame-cost`: what the frame costs
+the preview, "The frame is ground"); `measure:export` runs there too, for the
+record (see "Every pixel of the photo, measured" and "What an export
+holds").
 
 `scripts/device-spike/spike.html` is a page for a phone, not part of the app:
 one self-contained file, no network, that measures what only a device can
@@ -386,10 +390,17 @@ long side, `features/media/frameSource.ts`), never from the preview's copy,
 whose size moves with the zoom; it is stored with the photo (`setPalette`,
 not an undo step, and the one thing that writes it), so the preview, the save
 and every reopen agree, and Save makes it first when it is missing, so a
-press never starts without it. Fed Border Studio's own recorded sample of its
-two block photos, and 36 photograph-like samples Border Studio's own
-`palette.js` keyed, the port gives Border Studio's hex exactly
-(`palette.test.ts`).
+press never starts without it. A photo whose frame source will not decode
+is one state, kept with the photo until another is chosen: while its fill
+needs that source (a palette colour not yet stored, or Frosted) the frame
+stays Paper, the status card and Save's name say the photo could not be
+loaded (the words of a photo that is gone), and Save refuses it rather than
+press a frame that is quietly bare (`check-save` step 10, with the decode
+held back and failing); Paper, or a colour already stored with the photo,
+saves as it shows.
+Fed Border Studio's own recorded sample of its two block photos, and 36
+photograph-like samples Border Studio's own `palette.js` keyed, the port
+gives Border Studio's hex exactly (`palette.test.ts`).
 
 Frosted is a border made of the photo itself (`engine/frost.ts`, Border
 Studio's `drawFrostedBg`), with Blur its one setting (10 to 240). The frame's
@@ -424,7 +435,7 @@ so its photo is pressed from its own rows). A print without a frame (width
 0, square corners, Crop) composes nothing and presses the bytes it always
 did.
 
-`node scripts/parity-borders.mjs` (not yet in CI) renders Border Studio's own
+`node scripts/parity-borders.mjs` (in CI) renders Border Studio's own
 frozen frames (`scripts/parity-borders/`: its preview canvas at 597ce7a, on
 generated flat-block photos) through this engine and compares: the sheet's
 size, the border and the matte every byte equal, the photo at its own pixels

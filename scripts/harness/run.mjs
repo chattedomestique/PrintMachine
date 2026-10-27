@@ -13,6 +13,8 @@
  *   ... --bands 1,7,97,full --tile 512,65536   (the same on a grid of forced 512x128 tiles: --tile edge,pixels)
  *   node scripts/harness/run.mjs --out f.json --no-hashes --file-parity 1000 --retry   (P-5: the real savePrint's PNG decodes to
  *       the export entry's canvas, every document; P-6: a RangeError injected once at set-up and once mid-press gives the same file)
+ *   node scripts/harness/run.mjs --out c.json --no-hashes --chain   (the whole chain in Frosted: a photo imported for real, its
+ *       palette stored, its inputs made as Save makes them; the preview, the export and Save's PNG the same bytes; exits 1 if not)
  *   node scripts/harness/run.mjs --out c.json --no-hashes --frame-cost   (the frame's cost in the preview: photo documents framed
  *       (Crop, Fit, Frosted) against unframed and against the same framed render with its compose skipped, and Frosted with
  *       its field made again against unframed, settled and draft, each render the mean of its fastest samples over 15
@@ -41,7 +43,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 function parseArgs(argv) {
-  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], seam: [], parity: null, fileParity: null, retry: false, bands: null, tile: null, frameCost: false, photoMp: undefined, runs: null, hashes: true, out: null, png: null }
+  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], seam: [], parity: null, fileParity: null, retry: false, chain: false, bands: null, tile: null, frameCost: false, photoMp: undefined, runs: null, hashes: true, out: null, png: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -57,6 +59,7 @@ function parseArgs(argv) {
     else if (a === '--parity') opts.parity = Number(next())
     else if (a === '--file-parity') opts.fileParity = Number(next())
     else if (a === '--retry') opts.retry = true
+    else if (a === '--chain') opts.chain = true
     else if (a === '--frame-cost') opts.frameCost = true
     else if (a === '--bands') opts.bands = next().split(',').map((b) => (b === 'full' ? null : Number(b)))
     else if (a === '--tile') opts.tile = next().split(',').map(Number)
@@ -138,6 +141,7 @@ const result = {
   parity: {},
   fileParity: {},
   retry: {},
+  chain: null,
   bands: {},
   seam: {},
   frameCost: {},
@@ -237,6 +241,22 @@ try {
         console.log(`retry ${doc}@${h} ${at}`.padEnd(32), ok ? 'SAME' : 'FAILED', `${r.cleanBands} bands, after the fault ${r.faultedBands}`, r.clean.slice(0, 12), r.faulted.slice(0, 12))
       }
     }
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
+  if (opts.chain) {
+    // The whole chain in Frosted: a photo imported for real, its palette
+    // stored, its inputs made as Save makes them; the preview, the export
+    // and the file Save writes, the same bytes.
+    const { page, errors } = await openPage()
+    const r = await page.evaluate((h) => window.H.chain(h), 1000)
+    if (!r.same) {
+      failed = true
+      failure = r.sameField ? 'the whole chain: the preview, the export and the file differ' : "the whole chain: the preview's field is not the one Save presses"
+    }
+    result.chain = r
+    console.log(`chain frosted@1000`.padEnd(32), r.same ? 'SAME' : 'DIFFERS', `${r.w}x${r.h}`, r.preview.slice(0, 12), r.exported.slice(0, 12), r.file.slice(0, 12), r.sameField ? "the preview's field is Save's" : 'ANOTHER FIELD')
     if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
     await page.close()
   }

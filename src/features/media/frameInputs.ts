@@ -20,11 +20,13 @@
 
 import { effectiveMode, sheetAspect, type FrameInputs } from '../../engine/frame.ts'
 import type { FrostField } from '../../engine/frost.ts'
-import { FROST_FIELD_LONG } from '../../engine/limits.ts'
+import { FROST_DRAFT_LONG, FROST_FIELD_LONG } from '../../engine/limits.ts'
 import { framePalette } from '../../engine/palette.ts'
+import type { RgbaImage } from '../../engine/resample.ts'
 import type { FillKey, FramePalette, PrintSettings } from '../../engine/types.ts'
 import { pageFrameSources, paletteSample, type frameSources } from './frameSource.ts'
-import { pageFrostFields } from './frostField.ts'
+import { pageFrostFields, type frostFields } from './frostField.ts'
+import type { MediaState } from './useMediaBitmap.ts'
 
 /** The inputs a document already holds: the palette stored with its photo
  *  (`media.palette`), when it has been computed. A fill whose input is not
@@ -49,6 +51,67 @@ export const needsPalette = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'
 /** Whether the frame shows Frosted, which is made from the photo's frame
  *  source every time the sheet's shape or the blur changes. */
 export const needsFrost = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>): boolean => fillShows(s) && s.frame.fill === 'frosted'
+
+/**
+ * Where the frame's inputs are:
+ *  - `none`       nothing to make (no photo, or nothing of the frame shows);
+ *  - `preparing`  being made from the photo: the fill draws as Paper;
+ *  - `ready`      the fill has what it needs (or needs nothing made: Paper,
+ *                 or a palette colour whose palette is stored);
+ *  - `failed`     the fill needs the photo's frame source, and it would not
+ *                 decode.
+ */
+export type FrameInputState = 'none' | 'preparing' | 'ready' | 'failed'
+
+/**
+ * Where a document's frame inputs are, from what the page has of them: the
+ * last attempt's outcome for its photo (`colourless`: made, and the photo
+ * has no colour, so its colour fills are Paper; `failed`: its frame source
+ * would not decode), and which photo's frame source is held. A failure is
+ * kept with its photo until another is chosen, and counts while the fill
+ * needs something made from it: a fill that needs nothing (Paper, or a
+ * palette colour already stored) prints what the preview shows.
+ */
+export function frameInputState(
+  s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>,
+  outcome: 'colourless' | 'failed' | null,
+  sourceId: string | null,
+): FrameInputState {
+  if (!fillShows(s)) return 'none'
+  const palette = needsPalette(s)
+  const frost = needsFrost(s)
+  if (!palette && !frost) return 'ready'
+  if (outcome === 'failed') return 'failed'
+  const waiting = (palette && outcome !== 'colourless') || (frost && sourceId !== s.media?.id)
+  return waiting ? 'preparing' : 'ready'
+}
+
+/**
+ * The photo's state as Save and the panels see it: a photo the frame's
+ * inputs cannot be made from is `failed`, as one that cannot be decoded at
+ * all is, and Save refuses it with the same words (export.ts PHOTO_MISSING)
+ * rather than pressing a frame that is quietly Paper.
+ */
+export const frameState = (media: MediaState, inputs: FrameInputState): MediaState => (media === 'ready' && inputs === 'failed' ? 'failed' : media)
+
+/**
+ * What the preview draws a frame of `s` from: what the document holds, and,
+ * once its photo's frame source is here, Frosted's field for its sheet and
+ * blur, at the draft's size (FROST_DRAFT_LONG) while a control moves and at
+ * the settled one (FROST_FIELD_LONG, the size Save presses) otherwise, each
+ * kept. Without the source, Frosted is Paper until it lands.
+ */
+export function previewFrameInputs(
+  s: PrintSettings,
+  source: { id: string; src: RgbaImage } | null,
+  draft: boolean,
+  fields: ReturnType<typeof frostFields> = pageFrostFields,
+): FrameInputs {
+  const inputs = storedFrameInputs(s)
+  if (!s.media || !needsFrost(s) || source?.id !== s.media.id) return inputs
+  inputs.frost = fields.field(s.media.id, source.src, sheetAspect(s), s.frame.blur, draft ? FROST_DRAFT_LONG : FROST_FIELD_LONG)
+  return inputs
+}
 
 /**
  * The palettes, one photo's at a time, from its frame source: asked again

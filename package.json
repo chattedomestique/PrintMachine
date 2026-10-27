@@ -23,7 +23,8 @@
     "check:touch": "node scripts/check-touch.mjs",
     "check:spike": "node scripts/check-spike.mjs",
     "check:encode": "node scripts/check-encode.mjs",
-    "check:bands": "node scripts/check-bands.mjs"
+    "check:bands": "node scripts/check-bands.mjs",
+    "check:parity-borders": "node scripts/parity-borders.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

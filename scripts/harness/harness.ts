@@ -214,6 +214,9 @@ export interface RenderResult {
   ms: number
   w: number
   h: number
+  /** Whether the photo lands on this sheet at its own pixels (false without
+   *  one): the ground then comes from the photo's own rows, not a resample. */
+  native: boolean
   /** A PNG data URL of the render, when `png` was asked for. */
   png?: string
 }
@@ -269,7 +272,7 @@ async function render(
   // Let the big buffers go before the next render.
   out.canvas.width = 0
   scratch.canvas.width = 0
-  return { sha256, ms, w, h, png }
+  return { sha256, ms, w, h, native: groundNative(settings, w, h), png }
 }
 
 /** A render through the export entry, its pixels and where any plate inked

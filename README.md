@@ -383,7 +383,8 @@ photo only for the rows it shows; each pixel is a function of its place and
 its own photo pixel, so every band height gives the same bytes and the
 preview's ground is the export's rows put together (`frame.test.ts`,
 `banded.test.ts`, `frameRender.test.ts`; the harness's `--bands`, `--parity`
-and `--file-parity` on four frame documents; `check-bands` on one in CI). A
+and `--file-parity` on four frame documents; `check-bands` in CI on two, one
+of them at its native height, so its photo is pressed from its own rows). A
 print without a frame (width 0, square corners, Crop) composes nothing and
 presses the bytes it always did.
 

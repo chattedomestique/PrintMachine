@@ -11,8 +11,14 @@
  *     switch point beside a backing, turned) at 1000 and 1800 px, pressed in
  *     bands of 7 and 97 rows and whole, on a grid of forced 512x128 tiles (so
  *     a 1000 px sheet is 16 tiles and every band reads across tile rows): the
- *     same bytes at every band height. And one framed: frame-fit (Fit on
- *     4:5, the matte, round corners on the photo), the same way.
+ *     same bytes at every band height. And two framed, the same way:
+ *     frame-fit (Fit on 4:5, the matte, round corners on the photo, the
+ *     photo resampled) at 1000 and 1800, and frame-corners (an Original
+ *     portrait in a Paper frame, round corners) at 1778, its native height:
+ *     the photo at its own pixels, so the framed ground is composed over the
+ *     photo's own rows (the path every framed save at full size takes, and
+ *     the halved bands of a retry), asserted native so it cannot quietly
+ *     become a resample.
  *  2. Tiles against one canvas: photo-second-ink at 1000 on those tiles, the
  *     type's share (the photo drawn once as one canvas draws it): at most 1%
  *     of the inked pixels differ, at most 0.05% by more than 128 levels, and
@@ -69,15 +75,20 @@ try {
   await page.waitForFunction(() => window.H !== undefined, null, { timeout: 60_000 })
 
   console.log('1. Bands on forced 512x128 tiles, through the export entry: the same bytes at every band height')
-  for (const doc of ['photo-second-ink', 'backing-second-ink', 'frame-fit']) {
-    for (const height of [1000, 1800]) {
-      const hashes = []
-      for (const bandRows of [7, 97, null]) {
-        const r = await page.evaluate(([d, h, b, t]) => window.H.render(d, h, { async: true, tile: t, ...(b === null ? {} : { bandRows: b }) }), [doc, height, bandRows, TILE])
-        hashes.push(`${bandRows ?? 'whole'}:${r.sha256.slice(0, 12)}`)
-      }
-      check(new Set(hashes.map((x) => x.split(':')[1])).size === 1, `${doc}@${height}: ${hashes.join(' ')}`)
+  const cases = [
+    ...['photo-second-ink', 'backing-second-ink', 'frame-fit'].flatMap((doc) => [1000, 1800].map((height) => ({ doc, height }))),
+    { doc: 'frame-corners', height: 1778, native: true },
+  ]
+  for (const { doc, height, native } of cases) {
+    const hashes = []
+    const lands = []
+    for (const bandRows of [7, 97, null]) {
+      const r = await page.evaluate(([d, h, b, t]) => window.H.render(d, h, { async: true, tile: t, ...(b === null ? {} : { bandRows: b }) }), [doc, height, bandRows, TILE])
+      hashes.push(`${bandRows ?? 'whole'}:${r.sha256.slice(0, 12)}`)
+      lands.push(`${r.w}x${r.h} ${r.native ? 'native' : 'resampled'}`)
     }
+    if (native) check(lands.every((l) => l.endsWith(' native')), `${doc}@${height}: the photo at its own pixels (${lands[0]})`)
+    check(new Set(hashes.map((x) => x.split(':')[1])).size === 1, `${doc}@${height}: ${hashes.join(' ')}`)
   }
 
   console.log('\n2. Tiles against one canvas: the type\'s share, on forced 512x128 tiles')

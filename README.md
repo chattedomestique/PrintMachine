@@ -386,10 +386,19 @@ size, the border and the matte every byte equal, the photo at its own pixels
 every byte equal, and each rounded corner within a mean of 1.02 levels
 (measured 0.24 to 0.81: the references are a canvas's antialiased clip, the
 engine's corner the exact area). `npm run harness -- --out c.json --no-hashes
---frame-cost` times the preview framed against unframed (a photo at its own
-size and a 12 MP photo from its working copy, settled and draft): at most
-1.10x settled and 1.25x draft; measured 0.85 to 1.04 and 0.84 to 1.11, the
-frame's own work being a few milliseconds.
+--frame-cost` times the preview framed (a photo at its own size and a 12 MP
+photo from its working copy, in Crop and in Fit, settled and draft) against
+the same print unframed, what a person waits for, and against the same framed
+render with the fill and the corners left out (a test seam), the frame's own
+work: at most 1.10x settled and 1.25x draft, each. A render's time is the
+mean of its three fastest of 15 rounds taken in turn, since interference
+only ever adds time and varies a settled render of ~200 ms by a third.
+Over 25 consecutive runs on one machine every run passed: 0.85 to 1.04
+against unframed (under 1 in Fit, which draws the photo smaller) and 0.96 to
+1.07 against the compose skipped. The compose run ten times over fails the
+gate in every run (a 12 MP photo in Fit then sits at the bound: its frame, a
+flat matte round a photo a third of the sheet, is about 1% of the render);
+twenty times over fails every row of both documents.
 
 #### The photo is stored exactly as it came
 
@@ -875,16 +884,21 @@ header).
 
 #### Test seams
 
-The gates need a press slow enough to tap Cancel in, and small tiles on a small
-sheet. Save reads `globalThis.__PM_TEST__` once per press (`engine/export.ts`),
-and nothing else reads it; absent, it does nothing:
+The gates need a press slow enough to tap Cancel in, small tiles on a small
+sheet, and a framed preview without its frame's work. Save reads
+`globalThis.__PM_TEST__` once per press (`engine/export.ts`), the preview one
+field of it once per framed render (`engine/render.ts`), and nothing else
+reads it; absent, it does nothing:
 
 - `finishDelayMs`: the file's writing waits this long after the last band
   (check-save and verify-geometry hold it 1.5 to 3 s, as a phone's can take);
 - `onFinishStart`: called as the file's writing starts (check-save times its
   Cancel from it);
 - `tileBudget: { edge, pixels }`: the tile grid's budget instead of 4096 and
-  2^22.
+  2^22;
+- `skipFrameCompose`: the preview draws a framed photo into its rectangle and
+  leaves the fill and the corners out, so the harness's `--frame-cost` can
+  time the frame's own work against the same render without it.
 
 ### What an export holds
 

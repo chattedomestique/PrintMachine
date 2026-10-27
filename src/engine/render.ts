@@ -1837,6 +1837,14 @@ export function throwIfAborted(signal: AbortSignal | undefined): void {
 }
 
 /**
+ * The test seam the preview reads (README "Test seams"), once a framed render,
+ * from `globalThis.__PM_TEST__`, inert when absent: `skipFrameCompose` leaves a
+ * framed ground uncomposed, so the harness's frame-cost gate can time a
+ * framed render against the same render without its frame's own work.
+ */
+const previewSeam = (): { skipFrameCompose?: boolean } => (globalThis as { __PM_TEST__?: { skipFrameCompose?: boolean } }).__PM_TEST__ ?? {}
+
+/**
  * The preview's render, in stages: the whole sheet in one canvas, its glyph
  * rasters and noise cached across frames (`RenderCache`). A preview is under
  * 2 MP, so it is one band and one tile: the band engine presses it whole.
@@ -1875,7 +1883,7 @@ function* previewSteps(
     drawGroundPart(scratch, media, layout.photo!, { x0: 0, y0: 0, w, h })
     ground = new Uint8ClampedArray(w * h * 4)
     readRgba(scratch, w, h, ground, w)
-    if (!isUnframed(layout)) composeFrameRows(layout, fillFor(s, inputs), ground, 0, h, ground)
+    if (!isUnframed(layout) && !previewSeam().skipFrameCompose) composeFrameRows(layout, fillFor(s, inputs), ground, 0, h, ground)
   }
   onGround?.()
 

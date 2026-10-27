@@ -934,11 +934,13 @@ const costRigs = new Map<string, { settings: PrintSettings; media: ImageBitmap; 
  * of the frame. Each (document, frame, size) keeps its canvases and its
  * render cache across calls, as the preview does, and is rendered once
  * untimed first; so a timing is the steady cost of a frame of the preview,
- * the photo drawn and the frame composed afresh every time. A draft render
- * is a few milliseconds, under a timer's and a collector's noise, so it is
- * timed `repeat` times in a row and the mean taken.
+ * the photo drawn and the frame composed afresh every time. `bare` renders
+ * the same framed document with the same canvases and cache, its frame's
+ * compose skipped (the preview's test seam, README "Test seams"): the photo
+ * drawn into the same rectangle, so the two differ by the frame's own work
+ * alone. The render is timed `repeat` times in a row and the mean taken.
  */
-async function frameCost(doc: string, frame: string, draft: boolean, repeat = 1): Promise<{ ms: number; w: number; h: number }> {
+async function frameCost(doc: string, frame: string, draft: boolean, repeat = 1, bare = false): Promise<{ ms: number; w: number; h: number }> {
   const key = `${doc}|${frame}|${draft}`
   let rig = costRigs.get(key)
   if (!rig) {
@@ -960,10 +962,17 @@ async function frameCost(doc: string, frame: string, draft: boolean, repeat = 1)
     costRigs.set(key, rig)
     renderPrint(rig.out, rig.scratch, settings, rig.cache, null, rig.height, media, inputsOf(settings))
   }
-  const t0 = performance.now()
-  for (let i = 0; i < repeat; i++) renderPrint(rig.out, rig.scratch, rig.settings, rig.cache, null, rig.height, rig.media, inputsOf(rig.settings))
-  const ms = (performance.now() - t0) / repeat
-  return { ms, w: rig.out.canvas.width, h: rig.out.canvas.height }
+  const seam = globalThis as { __PM_TEST__?: unknown }
+  const before = seam.__PM_TEST__
+  if (bare) seam.__PM_TEST__ = { skipFrameCompose: true }
+  try {
+    const t0 = performance.now()
+    for (let i = 0; i < repeat; i++) renderPrint(rig.out, rig.scratch, rig.settings, rig.cache, null, rig.height, rig.media, inputsOf(rig.settings))
+    const ms = (performance.now() - t0) / repeat
+    return { ms, w: rig.out.canvas.width, h: rig.out.canvas.height }
+  } finally {
+    seam.__PM_TEST__ = before
+  }
 }
 
 declare global {

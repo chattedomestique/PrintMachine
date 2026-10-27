@@ -14,7 +14,8 @@
  *   node scripts/harness/run.mjs --out f.json --no-hashes --file-parity 1000 --retry   (P-5: the real savePrint's PNG decodes to
  *       the export entry's canvas, every document; P-6: a RangeError injected once at set-up and once mid-press gives the same file)
  *   node scripts/harness/run.mjs --out c.json --no-hashes --frame-cost   (the frame's cost in the preview: photo documents framed
- *       against unframed, settled and draft, median of 5 (--runs n); exits 1 above the bounds)
+ *       against unframed and against the same framed render with its compose skipped, settled and draft, each render the mean
+ *       of its three fastest of 15 rounds (--runs n); exits 1 above the bounds)
  *   node scripts/harness/run.mjs --out s.json --no-hashes --seam photo-second-ink@3000,default@3600 [--tile 512,65536]
  *       (tiles against one canvas: the export on the tile grid, the real one or --tile's, against the same on a single tile;
  *       prints the differing pixels against the inked ones and the plates whose box crosses a seam; exits 1 outside the bounds)
@@ -322,51 +323,73 @@ try {
   if (opts.frameCost) {
     // The frame's cost in the preview: a photo document framed (the first
     // photo's width, round corners, the photo's own colour; in Crop and in
-    // Fit) against the same unframed, each at the settled and the draft
-    // size, rendered the way the preview renders a frame (its canvases and
-    // cache kept; the photo drawn and the frame composed every time),
-    // interleaved, median of 5 (a draft sample the mean of 10 renders: one
-    // is a few ms, under the timer's and the collector's noise). The framed
-    // may take at most FRAME_COST of the unframed. Pinned at measured x 1.25
-    // or the plan's 1.10 settled and 1.25 draft, whichever is lower: the
-    // plan's are (measured on the frame's first commits: settled 0.85 to
-    // 1.04 over seven runs; draft 0.88 to 1.20 one render a sample, 0.84 to
-    // 1.11 ten; the frame's own work is a few ms, under a render's noise).
+    // Fit) at the settled and the draft size, rendered the way the preview
+    // renders a frame (its canvases and cache kept; the photo drawn and the
+    // frame composed every time), against two others:
+    //  - the same document unframed: what a person waits for with the frame
+    //    on, against without it;
+    //  - the same framed render with its compose skipped (the preview's test
+    //    seam): the photo drawn into the same rectangle, so the ratio is the
+    //    frame's own work alone (in Fit the photo is drawn smaller than
+    //    unframed, and that saving would hide the frame's cost).
+    // Each bounded by FRAME_COST, the plan's 1.10x settled and 1.25x draft.
+    // A sample is one settled render (a draft one the mean of 10, one being
+    // a few ms); the five renders are taken in turn, the order rotated every
+    // round, so drift falls on all of them alike. Interference (the
+    // collector, another process) only ever adds time, and a settled render
+    // of ~200 ms varies by a third with it, so a render's time is the mean
+    // of its three fastest rounds of 15 (`--runs n`): over 25 consecutive
+    // runs on one machine every run passed, every ratio within 0.85 to 1.07
+    // (the median of 5, one render a sample, ranged 0.75 to 1.13 and failed
+    // 2 runs of 13 on the same code). The compose run ten times over fails
+    // every run; twenty times over, every row.
     const FRAME_COST = { settled: 1.1, draft: 1.25 }
-    const runs = opts.runs ?? 5
+    const rounds = Math.max(3, opts.runs ?? 15)
     const { page, errors } = await openPage()
+    const kinds = [
+      ['none', 'none', false],
+      ['crop', 'crop', false],
+      ['crop-bare', 'crop', true],
+      ['fit', 'fit', false],
+      ['fit-bare', 'fit', true],
+    ]
+    const fastest = (xs) => {
+      const v = [...xs].sort((a, b) => a - b)
+      return (v[0] + v[1] + v[2]) / 3
+    }
     for (const doc of ['native-photo', 'photo-12mp']) {
       for (const draft of [false, true]) {
-        const frames = ['none', 'crop', 'fit']
-        const times = Object.fromEntries(frames.map((f) => [f, []]))
+        const times = Object.fromEntries(kinds.map(([k]) => [k, []]))
         let size = ''
-        for (let i = -1; i < runs; i++) {
-          for (const f of frames) {
-            // A draft render is a few ms: each sample is the mean of 10.
-            const r = await page.evaluate(([d, ff, dr]) => window.H.frameCost(d, ff, dr, dr ? 10 : 1), [doc, f, draft])
-            // The first round only warms the canvases and the cache.
-            if (i >= 0) times[f].push(r.ms)
-            if (f === 'none') size = `${r.w}x${r.h}`
+        // The first round only warms the canvases and the cache.
+        for (let i = -1; i < rounds; i++) {
+          const turn = ((i % kinds.length) + kinds.length) % kinds.length
+          for (const [k, f, bare] of [...kinds.slice(turn), ...kinds.slice(0, turn)]) {
+            const r = await page.evaluate(([d, ff, dr, b]) => window.H.frameCost(d, ff, dr, dr ? 10 : 1, b), [doc, f, draft, bare])
+            if (i >= 0) times[k].push(r.ms)
+            if (k === 'none') size = `${r.w}x${r.h}`
           }
         }
-        const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
-        const base = median(times.none)
+        const at = Object.fromEntries(kinds.map(([k]) => [k, fastest(times[k])]))
         const bound = draft ? FRAME_COST.draft : FRAME_COST.settled
         const row = {}
         for (const f of ['crop', 'fit']) {
-          const ratio = median(times[f]) / base
-          const ok = ratio <= bound
+          const waits = at[f] / at.none
+          const own = at[f] / at[`${f}-bare`]
+          const ok = waits <= bound && own <= bound
           if (!ok) {
             failed = true
             failure = 'a framed preview costs more than its bound'
           }
-          row[f] = { median: Number(median(times[f]).toFixed(1)), ratio: Number(ratio.toFixed(3)), ok }
+          row[f] = { ms: Number(at[f].toFixed(2)), bare: Number(at[`${f}-bare`].toFixed(2)), ratio: Number(waits.toFixed(3)), own: Number(own.toFixed(3)), ok }
         }
         const key = `${doc} ${draft ? 'draft' : 'settled'} ${size}`
-        result.frameCost[key] = { unframed: Number(base.toFixed(1)), ...row, bound, runs: times }
+        result.frameCost[key] = { unframed: Number(at.none.toFixed(2)), ...row, bound, runs: times }
         console.log(
-          `frame-cost ${key}`.padEnd(44),
-          `unframed ${base.toFixed(1)} ms, Crop ${row.crop.median} ms (${row.crop.ratio}x), Fit ${row.fit.median} ms (${row.fit.ratio}x), bound ${bound}x`,
+          `frame-cost ${key}`.padEnd(40),
+          `unframed ${at.none.toFixed(1)} ms;`,
+          ['crop', 'fit'].map((f) => `${f === 'crop' ? 'Crop' : 'Fit'} ${row[f].ms.toFixed(1)} ms (${row[f].ratio}x unframed, ${row[f].own}x its own compose skipped)`).join('; '),
+          `bound ${bound}x`,
           row.crop.ok && row.fit.ok ? 'ok' : 'OVER',
         )
       }

@@ -1,8 +1,8 @@
 import { type FramePalette, type FrameSettings, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from '../engine/types.ts'
-import { sheetAspect } from '../engine/frame.ts'
+import { visibleAspect } from '../engine/frame.ts'
 import { makeLayer } from './defaults.ts'
 import { contrastPartner } from '../engine/inks.ts'
-import { clampPan } from '../engine/media.ts'
+import { areaOf, clampPan } from '../engine/media.ts'
 import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
 
 /**
@@ -70,19 +70,21 @@ const NEXT_INK = ['fluorescentpink', 'blue', 'yellow', 'black', 'green', 'fluore
 
 /**
  * Keep the sheet a sheet and the photo covering it. Re-applied by every action
- * that can move the photo, zoom it, replace or remove it, or change the
- * sheet's shape:
+ * that can move the photo, zoom it, replace or remove it, or change the shape
+ * of what it covers (the sheet's shape, or the frame's width):
  *
  *  - An Original sheet takes its shape from the photo, so without one it is
  *    the default 4:5 (removing the photo of an Original sheet lands there).
- *  - The pan is clamped against the NEW numeric aspect, so the stored
+ *  - The pan is clamped against the NEW shape of the visible rectangle (the
+ *    sheet inside its frame: frame.ts `visibleAspect`), so the stored
  *    placement is always one that prints with no bare strip — the renderer
  *    clamps too, but a stored value it has to correct would make the next pan
- *    start from a position the picture is not actually at.
+ *    start from a position the picture is not actually at. In Fit the
+ *    placement is not read, and is kept as Crop would show it.
  */
 function withCover(state: PrintSettings): PrintSettings {
   const sheet: PrintSettings = state.aspect === 'original' && !state.media ? { ...state, aspect: '4:5' } : state
-  return sheet.media ? { ...sheet, media: clampPan(sheet.media, sheetAspect(sheet), 1) } : sheet
+  return sheet.media ? { ...sheet, media: clampPan(sheet.media, areaOf(visibleAspect(sheet), 1)) } : sheet
 }
 
 /** True when the plate budget has no room for another pressed pass. */
@@ -187,8 +189,12 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
     case 'patchPress':
       return { ...state, press: { ...state.press, ...action.patch } }
 
-    case 'patchFrame':
-      return { ...state, frame: { ...state.frame, ...action.patch } }
+    case 'patchFrame': {
+      // A new width changes the visible rectangle's shape, which may leave
+      // the stored pan outside the travel that still covers it.
+      const next = { ...state, frame: { ...state.frame, ...action.patch } }
+      return 'width' in action.patch ? withCover(next) : next
+    }
 
     case 'setMedia': {
       // Replacing a photo keeps the sheet the person chose (an Original sheet

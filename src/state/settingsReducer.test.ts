@@ -9,7 +9,7 @@ import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits
 import { contrastPartner } from '../engine/inks.ts'
 import { type PrintSettings, type TextLayer } from '../engine/types.ts'
 import { sheetAspect } from '../engine/frame.ts'
-import { clampPan } from '../engine/media.ts'
+import { areaOf, clampPan } from '../engine/media.ts'
 import { defaultSettings, makeLayer, makeMedia } from './defaults.ts'
 import {
   applySettings,
@@ -199,10 +199,10 @@ describe('the Original sheet: the photo\'s own shape', () => {
     // ...then the photo's own shape: less travel across, so it is pulled in.
     s = applySettings(s, { type: 'patch', patch: { aspect: 'original' } })
     expect(s.media!.x).toBeGreaterThan(onSquare)
-    expect(clampPan(s.media!, sheetAspect(s), 1)).toEqual(s.media)
+    expect(clampPan(s.media!, areaOf(sheetAspect(s), 1))).toEqual(s.media)
     // Replaced by a portrait photo on the same Original sheet: clamped again.
     s = applySettings(s, { type: 'setMedia', media: { ...portrait, scale: 1.2, x: -5, y: 9 } })
-    expect(clampPan(s.media!, sheetAspect(s), 1)).toEqual(s.media)
+    expect(clampPan(s.media!, areaOf(sheetAspect(s), 1))).toEqual(s.media)
   })
 })
 

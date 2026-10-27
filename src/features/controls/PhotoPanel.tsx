@@ -5,7 +5,7 @@ import type { ChangeHow } from '../../ui/param.ts'
 import { PHOTO_MISSING } from '../../engine/export.ts'
 import { isReducedCopy } from '../../engine/media.ts'
 import { type MediaLayer, type PrintSettings } from '../../engine/types.ts'
-import { sheetAspect } from '../../engine/frame.ts'
+import { visibleAspect } from '../../engine/frame.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
 import type { PhotoImport } from '../media/usePhotoImport.ts'
@@ -103,7 +103,7 @@ export default function PhotoPanel({
 
       {sub === 'frame' &&
         (media ? (
-          <ParamStrip key="frame" params={frameParams(media, sheetAspect(settings), set)} />
+          <ParamStrip key="frame" params={frameParams(media, visibleAspect(settings), set)} />
         ) : (
           <DockEmpty action={chooseButton}>No photo yet: the print is on bare paper.</DockEmpty>
         ))}

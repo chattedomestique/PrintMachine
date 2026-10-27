@@ -184,8 +184,7 @@ export function layoutSheet(s: SheetSpec, w: number, h: number): SheetLayout {
     photo = { dx: shown.x0, dy: shown.y0, dw: shown.w, dh: shown.h }
   } else {
     shown = visible
-    const r = snapRect(coverRect(media, visible.w, visible.h, media), media.width, media.height, visible.w, visible.h)
-    photo = { dx: visible.x0 + r.dx, dy: visible.y0 + r.dy, dw: r.dw, dh: r.dh }
+    photo = snapRect(coverRect(media, visible, media), media.width, media.height, visible)
   }
   return { w, h, border, visible, shown, photo, radius: (s.frame.corners * Math.min(shown.w, shown.h)) / FRAME_CORNER_DIV }
 }

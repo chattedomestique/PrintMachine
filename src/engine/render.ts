@@ -43,13 +43,13 @@ import { PaperSampler, paperField, type PaperField, type PaperOptions, type Pape
 import { FbmSampler, fbm2D, type CellNoise } from './rng.ts'
 import { defaultAngle, screenField, type ScreenOptions } from './screen.ts'
 import { cutKnockoutRows } from './knockout.ts'
-import { LumaAccumulator, SWITCH_BAND, bandMask, coverRect, sampleLumaRows, snapRect, splitInks, type DrawRect, type InkSplit, type LumaGrid } from './media.ts'
+import { LumaAccumulator, SWITCH_BAND, bandMask, sampleLumaRows, splitInks, type DrawRect, type InkSplit, type LumaGrid } from './media.ts'
 import { drawBacking, drawGlyphs, planGlyphs, plateFontSize, rasterizeBacking, rasterizeText, type GlyphPlan, type SheetPart } from './text.ts'
 import { readAlpha, readRgba } from './readback.ts'
 import { TILE_BUDGET, TileRowCache, ringRows, rowsFromTiles, tileAt, tileGrid, type TileBudget, type TileGrid } from './tiles.ts'
 import { REFERENCE_HEIGHT, bandHeight } from './limits.ts'
-import { type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
-import { sheetAspect } from './frame.ts'
+import { type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
+import { layoutSheet, sheetAspect, type SheetSpec } from './frame.ts'
 
 /**
  * The preview renders smaller than the export so a slider drag stays smooth on
@@ -1325,16 +1325,19 @@ export function* printSheetSteps(
 export type SheetOutput = Uint8ClampedArray | { band: Uint8ClampedArray; rows: number; put(y0: number, y1: number): void }
 
 /**
- * Where the photo is drawn on a w x h sheet: from the document's placement and
- * the photo's TRUE size, and nothing else. Whatever bitmap is drawn — the
+ * Where the photo is drawn on a w x h sheet: the layout's (frame.ts
+ * `layoutSheet`), from the document's sheet, frame and placement and the
+ * photo's TRUE size, and nothing else. Whatever bitmap is drawn — the
  * preview's reduced working copy or the full original at Save — fills this
  * same rectangle, so the preview and the print place the photo identically.
  *
  * Snapped (`snapRect`) when the sheet holds the photo at its own pixels, so a
  * native export copies pixels instead of resampling them by a fraction.
  */
-export function groundRect(media: MediaLayer, w: number, h: number): DrawRect {
-  return snapRect(coverRect({ width: media.width, height: media.height }, w, h, media), media.width, media.height, w, h)
+export function groundRect(s: SheetSpec, w: number, h: number): DrawRect {
+  const { photo } = layoutSheet(s, w, h)
+  if (!photo) throw new Error('groundRect: the document has no photo.')
+  return photo
 }
 
 /**
@@ -1590,7 +1593,7 @@ function* exportSteps(
   let ground: GroundRows | undefined
   let piece: CanvasRenderingContext2D | null = null
   if (media && s.media) {
-    const r = opts.rect ?? groundRect(s.media, w, h)
+    const r = opts.rect ?? groundRect(s, w, h)
     const size = sourceSize(media)
     if (isNativeRect(r, size.width, size.height)) {
       if (!canvases.piece) throw new Error('A photo at its own pixels is pressed a band at a time, on a canvas the export hands over.')
@@ -1803,7 +1806,7 @@ function* previewSteps(
   let ground: Uint8ClampedArray | undefined
   if (media && s.media) {
     yield { step: 'photo', band: 0, bands: 1 }
-    drawGroundPart(scratch, media, groundRect(s.media, w, h), { x0: 0, y0: 0, w, h })
+    drawGroundPart(scratch, media, groundRect(s, w, h), { x0: 0, y0: 0, w, h })
     ground = new Uint8ClampedArray(w * h * 4)
     readRgba(scratch, w, h, ground, w)
   }

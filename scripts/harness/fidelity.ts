@@ -170,7 +170,7 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
   const file = await encode(zonePlate(w, h), 'image/jpeg', 0.92)
   const { layer, byteForByte, s, plan, pressed, ms } = await importAndSave(file, aspect, format, zoom)
   const out = await pixelsOf(pressed.blob)
-  const r = groundRect(layer, plan.width, plan.height)
+  const r = groundRect(s, plan.width, plan.height)
   const aligned = r.dw === layer.width && r.dh === layer.height && Number.isInteger(r.dx) && Number.isInteger(r.dy)
   // The reference: the original, decoded as Save decodes it, drawn at the
   // sheet's rectangle (when that is the photo's own pixels, an integer
@@ -252,8 +252,9 @@ async function controls() {
   const h = 3024
   const file = await encode(zonePlate(w, h), 'image/jpeg', 0.92)
   const layer = { id: 'control', width: w, height: h, scale: 1, x: 0.5, y: 0.5 }
-  const plan = planPrint(photoOnly(layer, '4:5'))
-  const r = groundRect(layer, plan.width, plan.height)
+  const s = photoOnly(layer, '4:5')
+  const plan = planPrint(s)
+  const r = groundRect(s, plan.width, plan.height)
   const bmp = await decodeOriented(file)
   const draw = (src: CanvasImageSource, dx: number, dy: number, dw: number, dh: number) => {
     const ctx = canvas(plan.width, plan.height)
@@ -323,9 +324,9 @@ async function pngAlpha() {
   ctx.clearRect(hole.x0, hole.y0, hole.x1 - hole.x0, hole.y1 - hole.y0)
   const file = await encode(ctx.canvas, 'image/png')
   ctx.canvas.width = 0
-  const { layer, byteForByte, plan, pressed } = await importAndSave(file, 'original', 'png')
+  const { layer, byteForByte, s, plan, pressed } = await importAndSave(file, 'original', 'png')
   const out = await pixelsOf(pressed.blob)
-  const r = groundRect(layer, plan.width, plan.height)
+  const r = groundRect(s, plan.width, plan.height)
   const ref = canvas(plan.width, plan.height)
   const bmp = await decodeOriented(file)
   ref.drawImage(bmp, r.dx, r.dy, r.dw, r.dh)

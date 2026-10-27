@@ -10,11 +10,16 @@ import { planExport, type PlanPhoto } from './exportPlan.ts'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { NO_PHOTO_HEIGHT, REFERENCE_HEIGHT } from './limits.ts'
-import { SNAP_PX, coverRect } from './media.ts'
+import { SNAP_PX, areaOf, coverRect } from './media.ts'
 import { groundRect } from './render.ts'
 import { mulberry32 } from './rng.ts'
-import { ASPECTS, type PrintSettings } from './types.ts'
-import { sheetAspect } from './frame.ts'
+import { ASPECTS, type MediaLayer, type PrintSettings } from './types.ts'
+import { sheetAspect, type SheetSpec } from './frame.ts'
+import { frameDefaults } from '../state/defaults.ts'
+
+/** The photo on an unframed sheet: in Crop the layout is the cover of the
+ *  whole sheet, whatever the sheet's key. */
+const unframed = (media: MediaLayer, aspect: PrintSettings['aspect'] = '1:1'): SheetSpec => ({ aspect, media, frame: frameDefaults() })
 
 const SHEETS = { '1:1': 1, '4:5': 4 / 5, '3:4': 3 / 4, '2:3': 2 / 3 } as const
 const photo = (width: number, height: number, scale = 1): PlanPhoto => ({ width, height, scale })
@@ -172,7 +177,7 @@ describe('native follows the photo (every photo, zoom and sheet)', () => {
 
           const drawn = new Set<number>()
           for (const [x, y] of pans) {
-            const r = coverRect(p, W, H, { scale: zoom, x, y })
+            const r = coverRect(p, areaOf(W, H), { scale: zoom, x, y })
             drawn.add(r.dw)
             // Photo pixels per sheet pixel: at native, one, give or take less
             // than a pixel across the sheet; at the floor, fewer (enlarged).
@@ -232,7 +237,7 @@ describe('every native plan is drawn at the photo\'s own pixels (the snap covers
     const media = { id: 'p', width: mw, height: mh, scale: zoom, x, y, native: true }
     const plan = planExport(sheetAspect({ aspect: key, media }), media)
     if (plan.limit !== 'native') return false
-    const r = groundRect(media, plan.width, plan.height)
+    const r = groundRect(unframed(media, key), plan.width, plan.height)
     const where = `${mw}x${mh} on ${key} at ${zoom} -> ${dims(plan)}`
     expect([r.dw, r.dh], where).toEqual([mw, mh])
     expect(Number.isInteger(r.dx) && Number.isInteger(r.dy), where).toBe(true)
@@ -286,7 +291,7 @@ describe('every native plan is drawn at the photo\'s own pixels (the snap covers
       if (plan.limit !== 'native') continue
       native++
       for (const [x, y] of [[0.5, 0.5], [0, 0], [1, 1], [0.3, 0.8]]) {
-        const r = groundRect({ id: 'p', ...p, x, y }, plan.width, plan.height)
+        const r = groundRect(unframed({ id: 'p', ...p, x, y }), plan.width, plan.height)
         const where = `${dims(p)} at ${p.scale} on a = ${a} -> ${dims(plan)}`
         expect([r.dw, r.dh], where).toEqual([p.width, p.height])
         expect(Number.isInteger(r.dx) && Number.isInteger(r.dy), where).toBe(true)
@@ -317,7 +322,7 @@ describe('every native plan is drawn at the photo\'s own pixels (the snap covers
     const p = photo(3001, 2251)
     const plan = planExport(3 / 2, p)
     expect(plan).toMatchObject({ width: 3002, height: 2001, limit: 'native' })
-    const r = groundRect({ id: 'p', ...p, x: 0.5, y: 0.5 }, plan.width, plan.height)
+    const r = groundRect(unframed({ id: 'p', ...p, x: 0.5, y: 0.5 }), plan.width, plan.height)
     expect(r.dw).toBe(3002)
     expect(r.dh).toBeCloseTo(2251.75, 2)
     expect(Number.isInteger(r.dy)).toBe(false)
@@ -330,6 +335,6 @@ describe('every native plan is drawn at the photo\'s own pixels (the snap covers
     const over = plan.upscale! - 1
     expect(over).toBeGreaterThan(1.5 / plan.height)
     expect(over).toBeLessThan(SNAP_PX / Math.min(plan.width, plan.height))
-    expect(groundRect(media, plan.width, plan.height)).toEqual({ dx: -131, dy: -232, dw: 2268, dh: 4032 })
+    expect(groundRect(unframed(media, 'original'), plan.width, plan.height)).toEqual({ dx: -131, dy: -232, dw: 2268, dh: 4032 })
   })
 })

@@ -305,7 +305,7 @@ async function seam(name: string, height: number, tile: [number, number], opts: 
     c.canvas.height = h
     const photo = await photoBitmap(settings.media.width, settings.media.height, opts.photo)
     c.imageSmoothingQuality = 'high'
-    const r = groundRect(settings.media, w, h)
+    const r = groundRect(settings, w, h)
     c.drawImage(photo, r.dx, r.dy, r.dw, r.dh)
     ground = await createImageBitmap(c.canvas)
     c.canvas.width = 0
@@ -433,7 +433,7 @@ function fontCap() {
 /** Whether the document's photo lands on a w x h sheet at its own pixels. */
 function groundNative(s: PrintSettings, w: number, h: number): boolean {
   if (!s.media) return false
-  return isNativeRect(groundRect(s.media, w, h), s.media.width, s.media.height)
+  return isNativeRect(groundRect(s, w, h), s.media.width, s.media.height)
 }
 
 /** Rec. 709 luma of an RGBA buffer, 0..255. */

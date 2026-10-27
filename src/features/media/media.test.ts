@@ -12,7 +12,7 @@ import { SWEEP_AFTER_MS, mediaCreatedAt, sweepMedia, type SweepStore } from '../
 import { isReducedCopy } from '../../engine/media.ts'
 import { importMedia, type ImportDeps } from './importMedia.ts'
 import { PREVIEW_PHOTO_AREA, PREVIEW_PHOTO_AREA_LARGEST, previewArea, workingSize } from './decode.ts'
-import { coverRect } from '../../engine/media.ts'
+import { areaOf, coverRect } from '../../engine/media.ts'
 import { previewSize } from '../../engine/render.ts'
 import { mulberry32 } from '../../engine/rng.ts'
 import { ASPECTS } from '../../engine/types.ts'
@@ -166,7 +166,7 @@ describe("the preview's working copy follows the zoom", () => {
       const z = 1 + rand() * 3
       const { area, copy } = copyOf(w, h, z, a)
       const p = previewSize(a)
-      const r = coverRect({ width: w, height: h }, p.w, p.h, { scale: z, x: 0.5, y: 0.5 })
+      const r = coverRect({ width: w, height: h }, areaOf(p.w, p.h), { scale: z, x: 0.5, y: 0.5 })
       const needed = r.dw * r.dh
       expect(area).toBeLessThanOrEqual(PREVIEW_PHOTO_AREA_LARGEST)
       expect(copy.width * copy.height).toBeLessThanOrEqual(Math.min(PREVIEW_PHOTO_AREA_LARGEST, w * h))

@@ -16,8 +16,9 @@ import {
   type PressedPrint,
 } from '../../engine/export.ts'
 import type { ExportPlan } from '../../engine/exportPlan.ts'
+import { effectiveMode, layoutSheet } from '../../engine/frame.ts'
 import { snapCopyRect, type DrawRect } from '../../engine/media.ts'
-import { groundRect, throwIfAborted, type RenderProgress } from '../../engine/render.ts'
+import { throwIfAborted, type RenderProgress } from '../../engine/render.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { PhotoDecodeError, decodeOriginal, decodeResized } from '../media/decode.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
@@ -412,9 +413,16 @@ export const PAGE: SaveDeps = {
   },
 }
 
-/** The rectangle a smaller copy's photo is decoded to and drawn at, 1:1. */
+/**
+ * The rectangle a smaller copy's photo is decoded to and drawn at, 1:1: the
+ * cover of the visible rectangle rounded up to whole pixels (`snapCopyRect`),
+ * or in Fit the contained rectangle itself, already whole and never widened
+ * to the area it sits in.
+ */
 export function copyRect(settings: PrintSettings, plan: ExportPlan): DrawRect | null {
-  return settings.media ? snapCopyRect(groundRect(settings.media, plan.width, plan.height), plan.width, plan.height) : null
+  const { photo, visible } = layoutSheet(settings, plan.width, plan.height)
+  if (!photo) return null
+  return effectiveMode(settings) === 'fit' ? photo : snapCopyRect(photo, visible)
 }
 
 /**

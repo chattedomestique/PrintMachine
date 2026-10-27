@@ -6,8 +6,8 @@ import { useLayerGestures } from './useLayerGestures.ts'
 import type { GestureLimits, GesturePatch, GestureTarget, Pt } from './gesture.ts'
 import { stepSize } from '../controls/sizeScale.ts'
 import { type MediaLayer, type TextLayer } from '../../engine/types.ts'
-import { sheetAspect } from '../../engine/frame.ts'
-import { clampPan } from '../../engine/media.ts'
+import { sheetAspect, visibleAspect } from '../../engine/frame.ts'
+import { areaOf, clampPan } from '../../engine/media.ts'
 import { hitLayer, layoutIn, type FontMeasure } from '../../engine/text.ts'
 import './Canvas.css'
 
@@ -108,6 +108,9 @@ export default function Canvas({
   // bounds, which is a different feature.
   const mediaTarget = settings.media
   const aspect = sheetAspect(settings)
+  // The pan is a fraction of the visible rectangle inside the frame (the
+  // whole sheet unframed), so that is what it is clamped to.
+  const placeArea = useMemo(() => areaOf(visibleAspect(settings), 1), [settings])
   const photoTarget = useMemo<GestureTarget | null>(
     () =>
       mediaMode && mediaTarget
@@ -126,7 +129,7 @@ export default function Canvas({
       if (Object.keys(next).length === 0) return
       // Clamped while dragging, so the photo stops at its edge on screen
       // rather than the stored value running ahead of what is drawn.
-      const placed = clampPan({ ...mediaTarget, ...next }, aspect, 1)
+      const placed = clampPan({ ...mediaTarget, ...next }, placeArea)
       // A photo that cannot move (100% on its own sheet) clamps straight
       // back, give or take a float's last bit (0.5000000000000001): nothing
       // moved, so nothing is written (no undo step that undoes nothing) and
@@ -140,7 +143,7 @@ export default function Canvas({
       })
       onGesture?.()
     },
-    [dispatch, mediaTarget, aspect, onGesture],
+    [dispatch, mediaTarget, placeArea, onGesture],
   )
 
   const typeGestures = useLayerGestures(surfaceRef, mediaMode ? null : layer, patch, { pick })

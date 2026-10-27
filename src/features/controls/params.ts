@@ -13,7 +13,7 @@
  * Pure: the panels hand in the value and the change; nothing here renders.
  */
 
-import { fromPanFraction, panFraction } from '../../engine/media.ts'
+import { areaOf, fromPanFraction, panFraction } from '../../engine/media.ts'
 import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX, SIZE_STEP } from '../../engine/limits.ts'
 import type { MediaLayer, PressProfile, TextLayer } from '../../engine/types.ts'
 import { makeLayer, makeMedia, pressProfile } from '../../state/defaults.ts'
@@ -198,15 +198,17 @@ export const NO_TRAVEL = 'Zoom in to move the photo'
  * FRACTION OF THE TRAVEL it has (0% shows its left or top edge, 100% its right
  * or bottom), so the slider always spans exactly the positions that keep the
  * sheet covered. Where there is no travel the position is unavailable, and
- * says why.
+ * says why. `aspect` is the shape of what the photo covers: the visible
+ * rectangle inside the frame (frame.ts `visibleAspect`).
  */
 export function frameParams(media: MediaLayer, aspect: number, set: SetPatch<MediaLayer>): Param[] {
   const zoom = rangeOf(MEDIA_FIELDS, 'scale')
+  const area = areaOf(aspect, 1)
   const position = (axis: 'x' | 'y', label: string): Param => {
-    const f = panFraction(media, aspect, 1, axis)
+    const f = panFraction(media, area, axis)
     const travel = (() => {
-      const lo = fromPanFraction(media, aspect, 1, axis, 1)
-      const hi = fromPanFraction(media, aspect, 1, axis, 0)
+      const lo = fromPanFraction(media, area, axis, 1)
+      const hi = fromPanFraction(media, area, axis, 0)
       return hi - lo > 1e-9
     })()
     return {
@@ -218,11 +220,11 @@ export function frameParams(media: MediaLayer, aspect: number, set: SetPatch<Med
       max: 1,
       step: 0.01,
       // The photo as placed on import: centred, which is half its travel.
-      def: panFraction({ ...media, [axis]: MEDIA[axis] }, aspect, 1, axis),
+      def: panFraction({ ...media, [axis]: MEDIA[axis] }, area, axis),
       ...hundred,
       format: percent,
       value: f,
-      onChange: (v, how) => set({ [axis]: fromPanFraction(media, aspect, 1, axis, v) } as Partial<MediaLayer>, how),
+      onChange: (v, how) => set({ [axis]: fromPanFraction(media, area, axis, v) } as Partial<MediaLayer>, how),
       unavailable: travel ? undefined : NO_TRAVEL,
     }
   }

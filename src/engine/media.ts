@@ -20,9 +20,10 @@ export interface MediaSize {
 }
 
 export interface MediaPlacement {
-  /** Zoom on the cover fit, at least 1: 1 exactly fills the sheet. */
+  /** Zoom on the cover fit, at least 1: 1 exactly fills the area. */
   scale: number
-  /** Centre of the media, in sheet fractions. 0.5, 0.5 is the middle. */
+  /** Centre of the media, in fractions of the area it covers (the sheet's
+   *  visible rectangle). 0.5, 0.5 is the middle. */
   x: number
   y: number
 }
@@ -34,8 +35,13 @@ export interface DrawRect {
   dh: number
 }
 
-/** A rectangle of the sheet, in sheet pixels, from (x0, y0), w x h: the part
- *  of the sheet the photo is placed on (frame.ts `layoutSheet`). */
+/**
+ * A rectangle of the sheet, in sheet pixels, from (x0, y0), w x h: the part
+ * of the sheet the photo covers and is placed on, the visible rectangle
+ * inside the frame (frame.ts `layoutSheet`). Unframed it is the whole sheet,
+ * `areaOf(w, h)`. Only its shape matters to the pan's limits, so they take
+ * any area of that shape (`areaOf(aspect, 1)`).
+ */
 export interface Area {
   x0: number
   y0: number
@@ -43,7 +49,11 @@ export interface Area {
   h: number
 }
 
-/** Where the photo's centre may sit, in sheet fractions, and still cover. */
+/** A w x h area at the sheet's origin. */
+export const areaOf = (w: number, h: number): Area => ({ x0: 0, y0: 0, w, h })
+
+/** Where the photo's centre may sit, in fractions of the area, and still
+ *  cover it. */
 export interface PanBounds {
   xLo: number
   xHi: number
@@ -52,32 +62,29 @@ export interface PanBounds {
 }
 
 /** The drawn size at a zoom: the cover fit, the same factor on both axes. */
-function coverSize(media: MediaSize, sheetW: number, sheetH: number, scale: number) {
+function coverSize(media: MediaSize, area: Area, scale: number) {
   const mw = Math.max(1, media.width)
   const mh = Math.max(1, media.height)
   // Never below the cover fit. Zooming out below it has no sane native export
   // size and leaves bare sheet, so the placement cannot ask for it.
-  const s = Math.max(sheetW / mw, sheetH / mh) * Math.max(1, scale)
+  const s = Math.max(area.w / mw, area.h / mh) * Math.max(1, scale)
   return { dw: mw * s, dh: mh * s }
 }
 
 /**
- * How far the photo can travel and still cover the sheet.
+ * How far the photo can travel and still cover the area.
  *
- * A covering photo is at least as large as the sheet on both axes, so its
- * centre may move until one of its edges reaches the trim: `[1 - d/2, d/2]`
- * per axis, with `d` the drawn size over the sheet's. On an axis where the
- * photo exactly fits, the range closes to the middle and there is no travel.
+ * A covering photo is at least as large as the area on both axes, so its
+ * centre may move until one of its edges reaches the area's edge:
+ * `[1 - d/2, d/2]` per axis, with `d` the drawn size over the area's. On an
+ * axis where the photo exactly fits, the range closes to the middle and there
+ * is no travel.
  */
-export function panBounds(
-  media: MediaSize & { scale: number },
-  sheetW: number,
-  sheetH: number,
-): PanBounds {
-  const { dw, dh } = coverSize(media, sheetW, sheetH, media.scale)
+export function panBounds(media: MediaSize & { scale: number }, area: Area): PanBounds {
+  const { dw, dh } = coverSize(media, area, media.scale)
   // max() guards the float case where an exact fit computes a hair under half.
-  const hx = Math.max(0.5, dw / (2 * sheetW))
-  const hy = Math.max(0.5, dh / (2 * sheetH))
+  const hx = Math.max(0.5, dw / (2 * area.w))
+  const hy = Math.max(0.5, dh / (2 * area.h))
   return { xLo: 1 - hx, xHi: hx, yLo: 1 - hy, yHi: hy }
 }
 
@@ -85,11 +92,11 @@ const clampTo = (v: number, lo: number, hi: number): number => (v < lo ? lo : v 
 
 /**
  * The placement with its zoom at least 1 and its centre inside the pan
- * bounds, so the photo covers the sheet. Everything else is returned as given.
+ * bounds, so the photo covers the area. Everything else is returned as given.
  */
-export function clampPan<T extends MediaSize & MediaPlacement>(media: T, sheetW: number, sheetH: number): T {
+export function clampPan<T extends MediaSize & MediaPlacement>(media: T, area: Area): T {
   const scale = Math.max(1, media.scale)
-  const b = panBounds({ ...media, scale }, sheetW, sheetH)
+  const b = panBounds({ ...media, scale }, area)
   return { ...media, scale, x: clampTo(media.x, b.xLo, b.xHi), y: clampTo(media.y, b.yLo, b.yHi) }
 }
 
@@ -97,34 +104,23 @@ export function clampPan<T extends MediaSize & MediaPlacement>(media: T, sheetW:
  * The photo's position as a fraction of the travel it has: 0 shows its left
  * (or top) edge, 1 its right (or bottom) edge. 0.5 when it cannot travel.
  */
-export function panFraction(
-  media: MediaSize & MediaPlacement,
-  sheetW: number,
-  sheetH: number,
-  axis: 'x' | 'y',
-): number {
-  const b = panBounds(media, sheetW, sheetH)
+export function panFraction(media: MediaSize & MediaPlacement, area: Area, axis: 'x' | 'y'): number {
+  const b = panBounds(media, area)
   const [lo, hi] = axis === 'x' ? [b.xLo, b.xHi] : [b.yLo, b.yHi]
   if (hi - lo <= 1e-9) return 0.5
   // The centre sits at `hi` when the photo's left edge is on the trim.
   return clampTo((hi - media[axis]) / (hi - lo), 0, 1)
 }
 
-/** The centre, in sheet fractions, for a fraction of the travel. */
-export function fromPanFraction(
-  media: MediaSize & { scale: number },
-  sheetW: number,
-  sheetH: number,
-  axis: 'x' | 'y',
-  fraction: number,
-): number {
-  const b = panBounds(media, sheetW, sheetH)
+/** The centre, in fractions of the area, for a fraction of the travel. */
+export function fromPanFraction(media: MediaSize & { scale: number }, area: Area, axis: 'x' | 'y', fraction: number): number {
+  const b = panBounds(media, area)
   const [lo, hi] = axis === 'x' ? [b.xLo, b.xHi] : [b.yLo, b.yHi]
   return hi - clampTo(fraction, 0, 1) * (hi - lo)
 }
 
 /**
- * Where to draw the media so it covers the sheet without ever distorting.
+ * Where to draw the media so it covers the area without ever distorting.
  *
  * The scale factor is the *same on both axes* — that single fact is what keeps
  * a photo from being squashed, and it is asserted directly in the tests rather
@@ -139,17 +135,12 @@ export function fromPanFraction(
  * switch to 4:5, and without this a strip of bare sheet prints. No stored
  * placement can produce that, in the preview or in the export.
  */
-export function coverRect(
-  media: MediaSize,
-  sheetW: number,
-  sheetH: number,
-  place: MediaPlacement,
-): DrawRect {
-  const p = clampPan({ ...media, ...place }, sheetW, sheetH)
-  const { dw, dh } = coverSize(media, sheetW, sheetH, p.scale)
+export function coverRect(media: MediaSize, area: Area, place: MediaPlacement): DrawRect {
+  const p = clampPan({ ...media, ...place }, area)
+  const { dw, dh } = coverSize(media, area, p.scale)
   return {
-    dx: p.x * sheetW - dw / 2,
-    dy: p.y * sheetH - dh / 2,
+    dx: area.x0 + p.x * area.w - dw / 2,
+    dy: area.y0 + p.y * area.h - dh / 2,
     dw,
     dh,
   }
@@ -168,7 +159,8 @@ export function isReducedCopy(media: { width: number; height: number; native?: b
 
 /**
  * How near 1:1 a blit must be to be drawn at the photo's own pixels: within
- * this many pixels over the sheet's shorter side.
+ * this many pixels over the shorter side of the area it covers (the sheet's,
+ * unframed: the sheet is the area there, and every figure below is of it).
  *
  * It has to cover every height the export planner calls native
  * (exportPlan.ts): the smallest height at which the photo lands at least 1:1,
@@ -202,26 +194,28 @@ export function isReducedCopy(media: { width: number; height: number; native?: b
 export const SNAP_PX = 2.5
 
 /**
- * The blit, made pixel-exact when the sheet holds the photo at its own pixels.
+ * The blit, made pixel-exact when the area holds the photo at its own pixels.
  *
  * At the native export height the cover fit lands within a hair of 1:1, but
  * the centred placement puts the photo half a pixel off the grid, and a
  * bilinear blit at a half-pixel offset blurs every pixel into its neighbour
  * (measured: Laplacian energy 0.753 of the original at native height; 1.000
- * snapped). So when the scale is within SNAP_PX of 1 over the sheet's SHORTER
+ * snapped). So when the scale is within SNAP_PX of 1 over the area's SHORTER
  * side, draw the photo at exactly its own size, at a whole-pixel offset, kept
- * inside the travel that still covers the sheet — zoomed or not, since a
+ * inside the travel that still covers the area — zoomed or not, since a
  * zoomed photo lands 1:1 at its own (smaller) native height. Anything that is
  * not 1:1 — the preview of a large photo, a zoom at another height — or a
- * photo smaller than the sheet is returned untouched.
+ * photo smaller than the area is returned untouched. The area is whole pixels
+ * (the sheet, or the sheet inset by a whole border), so a whole offset in it
+ * is a whole offset on the sheet.
  */
-export function snapRect(r: DrawRect, mw: number, mh: number, sheetW: number, sheetH: number): DrawRect {
-  if (Math.abs(r.dw / mw - 1) >= SNAP_PX / Math.min(sheetW, sheetH)) return r
-  // Snapped to its own size the photo would not cover the sheet: leave it.
-  if (mw < sheetW || mh < sheetH) return r
+export function snapRect(r: DrawRect, mw: number, mh: number, area: Area): DrawRect {
+  if (Math.abs(r.dw / mw - 1) >= SNAP_PX / Math.min(area.w, area.h)) return r
+  // Snapped to its own size the photo would not cover the area: leave it.
+  if (mw < area.w || mh < area.h) return r
   return {
-    dx: clampTo(Math.round(r.dx), sheetW - mw, 0),
-    dy: clampTo(Math.round(r.dy), sheetH - mh, 0),
+    dx: clampTo(Math.round(r.dx), area.x0 + area.w - mw, area.x0),
+    dy: clampTo(Math.round(r.dy), area.y0 + area.h - mh, area.y0),
     dw: mw,
     dh: mh,
   }
@@ -229,16 +223,22 @@ export function snapRect(r: DrawRect, mw: number, mh: number, sheetW: number, sh
 
 /**
  * The rectangle a smaller copy is drawn at: the photo's rectangle on the
- * smaller sheet (`r`, from the cover fit: fractional), rounded UP to whole
- * pixels and placed at a whole-pixel offset, kept covering the sheet. The
- * copy's photo is decoded at exactly this size (decode.ts `decodeResized`)
- * and drawn 1:1, so a smaller copy is resampled once, by the decoder, and
- * never again by a fractional blit.
+ * smaller sheet (`r`, from the cover fit of `area`: fractional), rounded UP
+ * to whole pixels and placed at a whole-pixel offset, kept covering the area.
+ * The copy's photo is decoded at exactly this size (decode.ts
+ * `decodeResized`) and drawn 1:1, so a smaller copy is resampled once, by the
+ * decoder, and never again by a fractional blit. A cover only: a photo
+ * contained in its area (Fit) is decoded at its own whole rectangle.
  */
-export function snapCopyRect(r: DrawRect, sheetW: number, sheetH: number): DrawRect {
-  const dw = Math.max(Math.ceil(r.dw - 1e-9), sheetW)
-  const dh = Math.max(Math.ceil(r.dh - 1e-9), sheetH)
-  return { dx: clampTo(Math.round(r.dx), sheetW - dw, 0), dy: clampTo(Math.round(r.dy), sheetH - dh, 0), dw, dh }
+export function snapCopyRect(r: DrawRect, area: Area): DrawRect {
+  const dw = Math.max(Math.ceil(r.dw - 1e-9), area.w)
+  const dh = Math.max(Math.ceil(r.dh - 1e-9), area.h)
+  return {
+    dx: clampTo(Math.round(r.dx), area.x0 + area.w - dw, area.x0),
+    dy: clampTo(Math.round(r.dy), area.y0 + area.h - dh, area.y0),
+    dw,
+    dh,
+  }
 }
 
 /** Rec. 709 luma, 0..1. The channel weights a print separation actually uses. */

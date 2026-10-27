@@ -17,10 +17,12 @@ import {
   type SheetSpec,
 } from './frame.ts'
 import { FRAME_CORNER_DIV, FRAME_WIDTH_FIRST, FRAME_WIDTH_MAX } from './limits.ts'
-import type { Area, DrawRect } from './media.ts'
-import { groundRect, isNativeRect, outputSize } from './render.ts'
+import { SNAP_PX, areaOf, clampPan, coverRect, panBounds, snapRect, type Area, type DrawRect } from './media.ts'
+import { isNativeRect, outputSize } from './render.ts'
 import { mulberry32 } from './rng.ts'
 import { ASPECTS, type FrameSettings, type MediaLayer, type PrintSettings } from './types.ts'
+import { defaultSettings } from '../state/defaults.ts'
+import { applySettings, type SettingsAction } from '../state/settingsReducer.ts'
 
 const KEYS = [...Object.keys(ASPECTS), 'original'] as PrintSettings['aspect'][]
 const NAMED = [
@@ -45,7 +47,7 @@ const covers = (p: DrawRect, a: Area, eps = 1e-6) =>
   p.dx <= a.x0 + eps && p.dy <= a.y0 + eps && p.dx + p.dw >= a.x0 + a.w - eps && p.dy + p.dh >= a.y0 + a.h - eps
 
 describe('unframed, the layout is the sheet as it always was', () => {
-  it("width 0, corners 0, Crop: the photo's rectangle is groundRect's, for 500 random photos, sheets, zooms, pans and heights", () => {
+  it("width 0, corners 0, Crop: the photo's rectangle is the cover fit of the whole sheet, snapped, as before the frame, for 500 random photos, sheets, zooms, pans and heights", () => {
     const rand = mulberry32(0x1a)
     const cases: [number, number][] = [...NAMED.map(([w, h]) => [w, h] as [number, number])]
     for (let i = 0; i < 500; i++) cases.push([1 + Math.floor(rand() * 12000), 1 + Math.floor(rand() * 12000)])
@@ -55,7 +57,8 @@ describe('unframed, the layout is the sheet as it always was', () => {
       const height = 1 + Math.floor(rand() * 9000)
       const { w, h } = sheetAt(s, height)
       const l = layoutSheet(s, w, h)
-      expect(l.photo).toEqual(groundRect(m, w, h))
+      // The rule the sheet had: the cover of the w x h sheet at the placement, snapped.
+      expect(l.photo).toEqual(snapRect(coverRect(m, areaOf(w, h), m), mw, mh, areaOf(w, h)))
       expect([l.border, l.visible, l.shown, l.radius]).toEqual([0, { x0: 0, y0: 0, w, h }, { x0: 0, y0: 0, w, h }, 0])
     }
   })
@@ -274,5 +277,98 @@ describe('the corners', () => {
     const fit = layoutSheet(spec('1:1', photo(1800, 1200), { width: 0.1, corners: 0.3, mode: 'fit' }), 1000, 1000)
     expect(fit.radius).toBe((0.3 * Math.min(fit.shown.w, fit.shown.h)) / FRAME_CORNER_DIV)
     expect(fit.shown.h).toBeLessThan(fit.visible.h)
+  })
+})
+
+describe('the photo is placed on the visible rectangle', () => {
+  it('covers it, never uncovers it, on every sheet, width and zoom, for 200 photos at random pans', () => {
+    const rand = mulberry32(0x81)
+    let checked = 0
+    for (let i = 0; i < 200; i++) {
+      const mw = 1 + Math.floor(rand() * 9000)
+      const mh = 1 + Math.floor(rand() * 9000)
+      for (const key of KEYS) {
+        for (const width of [0, 0.02, FRAME_WIDTH_FIRST, FRAME_WIDTH_MAX]) {
+          for (const zoom of [1, 1.5, 4]) {
+            const s = spec(key, photo(mw, mh, { scale: zoom, x: rand() * 2 - 0.5, y: rand() * 2 - 0.5 }), { width })
+            const { w, h } = sheetAt(s, 200 + Math.floor(rand() * 4000))
+            const l = layoutSheet(s, w, h)
+            expect(covers(l.photo!, l.visible), `${mw}x${mh} on ${key} at ${width}, ${zoom}`).toBe(true)
+            checked++
+          }
+        }
+      }
+    }
+    expect(checked).toBe(200 * KEYS.length * 12)
+  })
+
+  it('a stored pan stays inside the travel of the visible rectangle through 200 random edits, frame and sheet changes among them', () => {
+    const rand = mulberry32(0x82)
+    const sizes = [[4032, 3024], [3024, 4032], [12000, 2000], [1000, 1000], [5152, 7728]]
+    let s = applySettings(defaultSettings(), { type: 'setMedia', media: photo(4032, 3024) })
+    const seen = new Set<string>()
+    for (let step = 0; step < 200; step++) {
+      const r = rand()
+      let action: SettingsAction
+      if (r < 0.25) action = { type: 'patchFrame', patch: { width: rand() < 0.2 ? 0 : rand() * FRAME_WIDTH_MAX, mode: rand() < 0.5 ? 'crop' : 'fit' } }
+      else if (r < 0.45) action = { type: 'patch', patch: { aspect: KEYS[Math.floor(rand() * KEYS.length)] } }
+      else if (r < 0.7) action = { type: 'patchMedia', patch: { x: rand() * 4 - 1.5, y: rand() * 4 - 1.5 } }
+      else if (r < 0.9) action = { type: 'patchMedia', patch: { scale: rand() * 5 } }
+      else {
+        const [w, h] = sizes[Math.floor(rand() * sizes.length)]
+        action = { type: 'setMedia', media: { ...photo(w, h), id: `p${step}`, scale: s.media!.scale, x: s.media!.x, y: s.media!.y } }
+      }
+      s = applySettings(s, action)
+      seen.add(action.type)
+      const m = s.media!
+      const area = areaOf(visibleAspect(s), 1)
+      const b = panBounds(m, area)
+      expect(clampPan(m, area), `step ${step}`).toEqual(m)
+      expect(m.x >= b.xLo && m.x <= b.xHi && m.y >= b.yLo && m.y <= b.yHi, `step ${step}`).toBe(true)
+    }
+    expect([...seen].sort()).toEqual(['patch', 'patchFrame', 'patchMedia', 'setMedia'])
+  })
+
+  it('snaps a rectangle within SNAP_PX of 1:1 to the photo\'s own size at a whole offset still covering the area, or leaves it only when the photo cannot cover it', () => {
+    const rand = mulberry32(0x83)
+    let snapped = 0
+    let left = 0
+    for (let i = 0; i < 4000; i++) {
+      const area: Area = { x0: Math.floor(rand() * 400), y0: Math.floor(rand() * 400), w: 200 + Math.floor(rand() * 6000), h: 200 + Math.floor(rand() * 6000) }
+      // A photo about the area's size: a pixel or two either way on each axis.
+      const scale = 1 + rand() * 0.05 * Number(rand() < 0.5)
+      const mw = Math.max(1, Math.round(area.w / scale) + Math.floor(rand() * 5) - 2)
+      const mh = Math.max(1, Math.round(area.h / scale) + Math.floor(rand() * 5) - 2)
+      const r = coverRect({ width: mw, height: mh }, area, { scale, x: rand(), y: rand() })
+      if (Math.abs(r.dw / mw - 1) >= SNAP_PX / Math.min(area.w, area.h)) continue
+      const out = snapRect(r, mw, mh, area)
+      if (mw >= area.w && mh >= area.h) {
+        expect(isNativeRect(out, mw, mh)).toBe(true)
+        expect(covers(out, area, 0)).toBe(true)
+        snapped++
+      } else {
+        expect(out).toBe(r)
+        left++
+      }
+    }
+    expect(snapped).toBeGreaterThan(500)
+    expect(left).toBeGreaterThan(100)
+  })
+
+  it('Original at zoom 2 has travel, and keeps its zoom when a frame is added', () => {
+    const m = photo(4032, 3024, { scale: 2, x: 0.3, y: 0.6 })
+    for (const width of [0, FRAME_WIDTH_FIRST]) {
+      const s = spec('original', m, { width })
+      const area = areaOf(visibleAspect(s), 1)
+      const b = panBounds(m, area)
+      expect(b.xHi - b.xLo).toBeGreaterThan(0.9)
+      expect(clampPan(m, area)).toEqual(m)
+      const { w, h } = sheetAt(s, 1800)
+      const l = layoutSheet(s, w, h)
+      const cover = Math.max(l.visible.w / 4032, l.visible.h / 3024) * 4032
+      expect(l.photo!.dw / cover).toBeCloseTo(2, 9)
+      // The pan is a fraction of the visible rectangle: the same part shows.
+      expect((l.visible.x0 + 0.3 * l.visible.w - l.photo!.dx) / l.photo!.dw).toBeCloseTo(0.5, 9)
+    }
   })
 })

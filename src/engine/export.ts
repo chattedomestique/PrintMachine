@@ -186,7 +186,7 @@ export async function savePrint(settings: PrintSettings, media: CanvasImageSourc
   }
   try {
     const size = media ? sourceSize(media) : null
-    const native = !!settings.media && !!size && isNativeRect(opts.rect ?? groundRect(settings.media, w, h), size.width, size.height)
+    const native = !!settings.media && !!size && isNativeRect(opts.rect ?? groundRect(settings, w, h), size.width, size.height)
     // Every canvas the press makes, proved at its real size before any work:
     // over its limit an iOS canvas does not throw, it hands back a blank one,
     // and the print would come out empty.

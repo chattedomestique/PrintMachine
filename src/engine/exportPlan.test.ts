@@ -51,7 +51,7 @@ function planBefore(a: number, p: PlanPhoto): { width: number; height: number } 
 }
 
 /**
- * What "lands" means (D-7), written out on its own: the sheet at long side L
+ * What "lands" means, written out on its own: the sheet at long side L
  * (a landscape sheet's width, any other's height), its border rounded, and
  * the photo covering (Crop), contained in (Fit) or held by (Original) the
  * visible rectangle.
@@ -355,9 +355,10 @@ describe('the native search finds the smallest sheet that lands [brute force]', 
       const plan = planExport(planSheet(s), p)
       let truth = 1
       while (!landsAt(ruleOf(s), a, width, p, truth)) truth++
-      const L = plan.limit === 'native' ? longSide(plan, a) : null
-      const nativeL = a > 1 ? null : plan.nativeHeight
-      if (plan.limit === 'native' ? L !== truth : nativeL !== null && nativeL !== truth) differ++
+      // The native sheet's height, whatever the plan became (native, or the
+      // floor above it), and its long side when the plan is native.
+      const truthHeight = a > 1 ? Math.max(1, Math.round(truth / a)) : truth
+      if (plan.nativeHeight !== truthHeight || (plan.limit === 'native' && longSide(plan, a) !== truth)) differ++
     }
     expect(differ).toBe(0)
   })
@@ -372,7 +373,7 @@ describe('the native search finds the smallest sheet that lands [brute force]', 
   })
 })
 
-describe('Original keeps the whole photo [FR-1]', () => {
+describe('an Original sheet keeps the whole photo', () => {
   it('Original keeps the whole photo: at 100%, at every width, the plan is the photo and its border, (vw + 2b) x (vh + 2b)', () => {
     const rand = mulberry32(0x0419)
     const sizes: [number, number][] = [[4000, 12000], [12000, 4000], [12000, 2000], [16000, 2000], [2268, 4032], [7728, 5152], [5152, 7728], [2048, 4096], [4096, 2048]]

@@ -365,7 +365,7 @@ export interface PlanWords {
   /** "58.1 MP". */
   megapixels: string
   /** "with a 644 px frame", or null unframed: the frame adds pixels the
-   *  photo does not have, so the caption says how many. */
+   *  photo does not have, so how many is said. */
   frame: string | null
   /** Over LARGE_PRINT_MP: that a phone may not finish it. Said before the
    *  tap; nothing is made smaller for it. */

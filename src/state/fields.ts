@@ -126,7 +126,7 @@ export const PALETTE_FIELDS: readonly Row[] = [
  *  malformed drops it, and the app computes it again from the photo. Half a
  *  palette would leave a chosen fill with no colour. */
 export const acceptPalette = (p: Record<string, unknown>): boolean =>
-  PALETTE_FIELDS.every((r) => typeof p[r.key] === 'string' && r.pattern!.test(p[r.key] as string))
+  PALETTE_FIELDS.every((r) => typeof p[r.key] === 'string' && HEX.test(p[r.key] as string))
 
 export const MEDIA_FIELDS: readonly Row[] = [
   { key: 'id', kind: 'string', nonEmpty: true },

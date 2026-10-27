@@ -110,7 +110,7 @@ export default function Canvas({
   const aspect = sheetAspect(settings)
   // The pan is a fraction of the visible rectangle inside the frame (the
   // whole sheet unframed), so that is what it is clamped to.
-  const placeArea = useMemo(() => areaOf(visibleAspect(settings), 1), [settings])
+  const placeAspect = visibleAspect(settings)
   const photoTarget = useMemo<GestureTarget | null>(
     () =>
       mediaMode && mediaTarget
@@ -129,7 +129,7 @@ export default function Canvas({
       if (Object.keys(next).length === 0) return
       // Clamped while dragging, so the photo stops at its edge on screen
       // rather than the stored value running ahead of what is drawn.
-      const placed = clampPan({ ...mediaTarget, ...next }, placeArea)
+      const placed = clampPan({ ...mediaTarget, ...next }, areaOf(placeAspect, 1))
       // A photo that cannot move (100% on its own sheet) clamps straight
       // back, give or take a float's last bit (0.5000000000000001): nothing
       // moved, so nothing is written (no undo step that undoes nothing) and
@@ -143,7 +143,7 @@ export default function Canvas({
       })
       onGesture?.()
     },
-    [dispatch, mediaTarget, placeArea, onGesture],
+    [dispatch, mediaTarget, placeAspect, onGesture],
   )
 
   const typeGestures = useLayerGestures(surfaceRef, mediaMode ? null : layer, patch, { pick })

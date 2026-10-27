@@ -107,9 +107,8 @@ export const MAX_PRESSED_PASSES = 4
  *
  *  - FRAME_WIDTH_MAX, 0.16: the widest border, as a fraction of the sheet's
  *    long side. Border Studio's widest, 400 px, is 0.154 of its free sheet.
- *  - FRAME_WIDTH_FIRST, 1/14: the border a first photo is framed with, and
- *    what Width resets to. Border Studio's 150 px default on its free sheet
- *    (150 of 2100).
+ *  - FRAME_WIDTH_FIRST, 1/14: the border a first photo is framed with:
+ *    Border Studio's 150 px default on its free sheet (150 of 2100).
  *  - FRAME_CORNER_DIV, 8: at Corners 1 the radius is the photo's shorter side
  *    over this (Border Studio's Round: a quarter of half the side).
  *  - BLUR_MIN, BLUR_MAX, BLUR_DEFAULT: Frosted's blur, 10..240, 60 (Border
@@ -123,11 +122,12 @@ export const BLUR_MAX = 240
 export const BLUR_DEFAULT = 60
 
 /**
- * Above this many megapixels Save's caption adds that the print is very large
- * and a phone may not finish it. Said, never acted on: the print is still
- * pressed at its size, and nothing smaller is made unless a press fails and
- * the person chooses a smaller copy. 100 is a first guess, the owner's to
- * tune: no phone has yet been seen to save a print of any size.
+ * Above this many megapixels, what Save says about a print (export.ts
+ * `describePlan`) adds that it is very large and a phone may not finish it.
+ * Said, never acted on: the print is still pressed at its size, and nothing
+ * smaller is made unless a press fails and the person chooses a smaller copy.
+ * 100 is a first guess, the owner's to tune: no phone has yet been seen to
+ * save a print of any size.
  */
 export const LARGE_PRINT_MP = 100
 

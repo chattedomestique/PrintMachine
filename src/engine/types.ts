@@ -32,10 +32,11 @@ export interface MediaLayer {
    *  build, whose stored copy was cut to a 2048 px long edge (media.ts
    *  `isReducedCopy`). */
   native?: boolean
-  /** Zoom on the cover fit, at least 1: 1 exactly fills the sheet. */
+  /** Zoom on the cover fit, at least 1: 1 exactly fills the visible
+   *  rectangle (the sheet inside its frame; unframed, the sheet). */
   scale: number
-  /** Centre of the photo in sheet fractions, kept inside the range where the
-   *  photo still covers the sheet (media.ts `panBounds`). */
+  /** Centre of the photo in fractions of the visible rectangle, kept inside
+   *  the range where the photo still covers it (media.ts `panBounds`). */
   x: number
   y: number
   /** The frame's four photo-keyed colours, computed once from this photo and
@@ -73,8 +74,9 @@ export interface FrameSettings {
   fill: FillKey
   /** Frosted's blur, BLUR_MIN..BLUR_MAX; read only when the fill is Frosted. */
   blur: number
-  /** Crop fills the sheet's frame with the photo; Fit shows the whole photo
-   *  inside it, matted by the fill. An Original sheet is always Crop. */
+  /** Crop fills the inside of the frame with the photo, trimming what
+   *  overhangs; Fit shows the whole photo inside it, matted by the fill. An
+   *  Original sheet is always Crop. */
   mode: 'crop' | 'fit'
 }
 

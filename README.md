@@ -630,8 +630,8 @@ so an Original sheet of any photo's proportions sizes the same way.
 ### Saving at the photo's own pixels
 
 Save presses the print at the size the planner gives (`engine/exportPlan.ts`),
-never at the preview's: the height at which the photo lands on the sheet pixel
-for pixel, whatever the photo's size. A 12 MP landscape photo on 4:5 saves at
+never at the preview's: the smallest sheet on which the photo lands pixel for
+pixel, whatever the photo's size. A 12 MP landscape photo on 4:5 saves at
 2419×3024, the same photo upright at 3024×3780, a 24 MP iPhone capture on 4:5
 at its own 3427×4284 and on its own Original sheet at 5712×4284; a 40 MP
 photo (7728×5152) at 7728×5152 on Original, 4122×5152 on 4:5 and 5152×5152 on

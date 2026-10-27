@@ -15,7 +15,8 @@
  *       the export entry's canvas, every document; P-6: a RangeError injected once at set-up and once mid-press gives the same file)
  *   node scripts/harness/run.mjs --out c.json --no-hashes --frame-cost   (the frame's cost in the preview: photo documents framed
  *       against unframed and against the same framed render with its compose skipped, settled and draft, each render the mean
- *       of its three fastest of 15 rounds (--runs n); exits 1 above the bounds)
+ *       of its fastest samples over 15 interleaved rounds (--runs n); a document and size with a row over its bound is
+ *       measured again, up to twice, its samples pooled; exits 1 if a row is still over)
  *   node scripts/harness/run.mjs --out s.json --no-hashes --seam photo-second-ink@3000,default@3600 [--tile 512,65536]
  *       (tiles against one canvas: the export on the tile grid, the real one or --tile's, against the same on a single tile;
  *       prints the differing pixels against the inked ones and the plates whose box crosses a seam; exits 1 outside the bounds)
@@ -333,66 +334,116 @@ try {
     //    frame's own work alone (in Fit the photo is drawn smaller than
     //    unframed, and that saving would hide the frame's cost).
     // Each bounded by FRAME_COST, the plan's 1.10x settled and 1.25x draft.
-    // A sample is one settled render (a draft one the mean of 10, one being
-    // a few ms); the five renders are taken in turn, the order rotated every
-    // round, so drift falls on all of them alike. Interference (the
-    // collector, another process) only ever adds time, and a settled render
-    // of ~200 ms varies by a third with it, so a render's time is the mean
-    // of its three fastest rounds of 15 (`--runs n`): over 25 consecutive
-    // runs on one machine every run passed, every ratio within 0.85 to 1.07
-    // (the median of 5, one render a sample, ranged 0.75 to 1.13 and failed
-    // 2 runs of 13 on the same code). The compose run ten times over fails
-    // every run; twenty times over, every row.
+    //
+    // A shared machine's interference only ever adds time, comes in spells
+    // (a fixed piece of plain JavaScript, 145 ms at its fastest, took up to
+    // 274 ms on the machine these numbers come from), and a spell can outlast
+    // every round of a document and size taken back to back. So:
+    //  - a sample is one render. The four documents and sizes are
+    //    interleaved round by round, so each one's rounds spread over the
+    //    whole measurement (15 rounds, `--runs n`; a draft render being
+    //    ~14 ms, a draft round is 10 samples of each). Within a round the
+    //    five renders run in a cycle, started one further on each round and
+    //    reversed every other round, and the first render of each round's
+    //    turn is not timed (the first render after another document or size
+    //    ran 2 to 6% slower);
+    //  - a render's time is the mean of its fastest samples, a fifth of one
+    //    measurement's (3 settled, 30 draft), from every sample taken of it;
+    //  - a document and size with a row (Crop or Fit) over its bound is
+    //    measured again, up to twice, its new samples added to its old, and
+    //    every measurement is printed. A row fails if it is still over after
+    //    the third. More samples only bring a render's time nearer its floor:
+    //    a spell that slowed a framed render in one measurement is outweighed
+    //    by the next, and so is one that slowed the render it is compared
+    //    with, which would otherwise let a costly frame through.
+    // The numbers this gives are in the README ("The frame is ground").
     const FRAME_COST = { settled: 1.1, draft: 1.25 }
-    const rounds = Math.max(3, opts.runs ?? 15)
+    const MEASUREMENTS = 3
+    const DRAFT_SAMPLES = 10
+    const rounds = Math.max(5, opts.runs ?? 15)
     const { page, errors } = await openPage()
+    // No render next to its own bare or framed twin, either way round (a
+    // precaution: measured, a bare render ran no faster straight after its
+    // framed twin's canvases and cache than after another's).
     const kinds = [
       ['none', 'none', false],
       ['crop', 'crop', false],
-      ['crop-bare', 'crop', true],
       ['fit', 'fit', false],
+      ['crop-bare', 'crop', true],
       ['fit-bare', 'fit', true],
     ]
-    const fastest = (xs) => {
-      const v = [...xs].sort((a, b) => a - b)
-      return (v[0] + v[1] + v[2]) / 3
+    // Round i's turn of n timed renders, behind one untimed: the cycle,
+    // reversed on odd rounds, from position i (each kind n / 5 times).
+    const turnOf = (i, n) => {
+      const cycle = i % 2 === 0 ? kinds : [...kinds].reverse()
+      const at = (s) => cycle[(((i + s - 1) % cycle.length) + cycle.length) % cycle.length]
+      return Array.from({ length: n + 1 }, (_, s) => at(s))
     }
-    for (const doc of ['native-photo', 'photo-12mp']) {
-      for (const draft of [false, true]) {
-        const times = Object.fromEntries(kinds.map(([k]) => [k, []]))
-        let size = ''
-        // The first round only warms the canvases and the cache.
-        for (let i = -1; i < rounds; i++) {
-          const turn = ((i % kinds.length) + kinds.length) % kinds.length
-          for (const [k, f, bare] of [...kinds.slice(turn), ...kinds.slice(0, turn)]) {
-            const r = await page.evaluate(([d, ff, dr, b]) => window.H.frameCost(d, ff, dr, dr ? 10 : 1, b), [doc, f, draft, bare])
-            if (i >= 0) times[k].push(r.ms)
-            if (k === 'none') size = `${r.w}x${r.h}`
+    const meanOfFastest = (xs, n) => {
+      const v = [...xs].sort((a, b) => a - b).slice(0, n)
+      return v.reduce((s, x) => s + x, 0) / v.length
+    }
+    const phases = ['native-photo', 'photo-12mp'].flatMap((doc) =>
+      [false, true].map((draft) => ({
+        doc,
+        draft,
+        size: '',
+        samples: Object.fromEntries(kinds.map(([k]) => [k, []])),
+        measurements: [],
+        ok: { crop: false, fit: false },
+      })),
+    )
+    // One measurement of some documents and sizes, their rounds interleaved.
+    // The first round only warms the canvases and the cache.
+    const measure = async (list) => {
+      const times = new Map(list.map((p) => [p, Object.fromEntries(kinds.map(([k]) => [k, []]))]))
+      for (let i = -1; i < rounds; i++) {
+        for (const p of list) {
+          const turn = turnOf(i, kinds.length * (p.draft ? DRAFT_SAMPLES : 1))
+          for (let s = 0; s < turn.length; s++) {
+            const [k, f, bare] = turn[s]
+            const r = await page.evaluate(([d, ff, dr, b]) => window.H.frameCost(d, ff, dr, b), [p.doc, f, p.draft, bare])
+            if (i >= 0 && s > 0) times.get(p)[k].push(r.ms)
+            if (k === 'none') p.size = `${r.w}x${r.h}`
           }
         }
-        const at = Object.fromEntries(kinds.map(([k]) => [k, fastest(times[k])]))
-        const bound = draft ? FRAME_COST.draft : FRAME_COST.settled
-        const row = {}
+      }
+      return times
+    }
+    let pending = phases
+    for (let m = 1; m <= MEASUREMENTS && pending.length > 0; m++) {
+      const times = await measure(pending)
+      for (const p of pending) {
+        for (const [k] of kinds) p.samples[k].push(...times.get(p)[k])
+        const fastest = Math.max(1, Math.round(((p.draft ? DRAFT_SAMPLES : 1) * rounds) / 5))
+        const at = Object.fromEntries(kinds.map(([k]) => [k, meanOfFastest(p.samples[k], fastest)]))
+        const bound = p.draft ? FRAME_COST.draft : FRAME_COST.settled
+        const row = { unframed: Number(at.none.toFixed(2)) }
         for (const f of ['crop', 'fit']) {
           const waits = at[f] / at.none
           const own = at[f] / at[`${f}-bare`]
-          const ok = waits <= bound && own <= bound
-          if (!ok) {
-            failed = true
-            failure = 'a framed preview costs more than its bound'
-          }
-          row[f] = { ms: Number(at[f].toFixed(2)), bare: Number(at[`${f}-bare`].toFixed(2)), ratio: Number(waits.toFixed(3)), own: Number(own.toFixed(3)), ok }
+          p.ok[f] = waits <= bound && own <= bound
+          row[f] = { ms: Number(at[f].toFixed(2)), bare: Number(at[`${f}-bare`].toFixed(2)), ratio: Number(waits.toFixed(3)), own: Number(own.toFixed(3)), ok: p.ok[f] }
         }
-        const key = `${doc} ${draft ? 'draft' : 'settled'} ${size}`
-        result.frameCost[key] = { unframed: Number(at.none.toFixed(2)), ...row, bound, runs: times }
+        // The verdict on every sample so far, and this measurement's own samples.
+        p.measurements.push({ ...row, runs: times.get(p) })
+        const done = p.ok.crop && p.ok.fit
         console.log(
-          `frame-cost ${key}`.padEnd(40),
+          `frame-cost ${p.doc} ${p.draft ? 'draft' : 'settled'} ${p.size}${m > 1 ? ` (${m} measurements)` : ''}`.padEnd(40),
           `unframed ${at.none.toFixed(1)} ms;`,
-          ['crop', 'fit'].map((f) => `${f === 'crop' ? 'Crop' : 'Fit'} ${row[f].ms.toFixed(1)} ms (${row[f].ratio}x unframed, ${row[f].own}x its own compose skipped)`).join('; '),
+          ['crop', 'fit'].map((f) => `${f === 'crop' ? 'Crop' : 'Fit'} ${row[f].ms.toFixed(1)} ms (${row[f].ratio}x unframed, ${row[f].own}x its own compose skipped)${row[f].ok ? '' : ' over'}`).join('; '),
           `bound ${bound}x`,
-          row.crop.ok && row.fit.ok ? 'ok' : 'OVER',
+          done ? 'ok' : m < MEASUREMENTS ? 'OVER, measured again' : `OVER after ${MEASUREMENTS} measurements`,
         )
       }
+      pending = pending.filter((p) => !(p.ok.crop && p.ok.fit))
+    }
+    for (const p of phases) {
+      result.frameCost[`${p.doc} ${p.draft ? 'draft' : 'settled'} ${p.size}`] = { bound: p.draft ? FRAME_COST.draft : FRAME_COST.settled, ok: p.ok, measurements: p.measurements }
+    }
+    if (pending.length > 0) {
+      failed = true
+      failure = 'a framed preview costs more than its bound'
     }
     if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
     await page.close()

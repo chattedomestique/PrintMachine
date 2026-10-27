@@ -399,15 +399,21 @@ engine's corner the exact area). `npm run harness -- --out c.json --no-hashes
 photo from its working copy, in Crop and in Fit, settled and draft) against
 the same print unframed, what a person waits for, and against the same framed
 render with the fill and the corners left out (a test seam), the frame's own
-work: at most 1.10x settled and 1.25x draft, each. A render's time is the
-mean of its three fastest of 15 rounds taken in turn, since interference
-only ever adds time and varies a settled render of ~200 ms by a third.
-Over 25 consecutive runs on one machine every run passed: 0.85 to 1.04
-against unframed (under 1 in Fit, which draws the photo smaller) and 0.96 to
-1.07 against the compose skipped. The compose run ten times over fails the
-gate in every run (a 12 MP photo in Fit then sits at the bound: its frame, a
-flat matte round a photo a third of the sheet, is about 1% of the render);
-twenty times over fails every row of both documents.
+work: at most 1.10x settled and 1.25x draft, each. A shared machine's
+interference only ever adds time and comes in spells that can outlast a
+document's rounds taken back to back, so the two documents at the two sizes
+are measured round by round in turn (15 rounds, one render a sample), a
+render's time is the mean of its three fastest samples (thirty in draft, ten
+a round), and a document and size with a row over its bound is measured
+again, up to twice, its samples pooled; it fails only if still over. Over 50
+runs on one machine, in two batches of 25 half an hour apart, every run
+passed and one measured again (a photo at its own size, settled Crop: 1.12x
+unframed on 15 rounds, 1.02x on 30); the verdicts were 0.85 to 1.08 against
+unframed (under 1 in Fit, which draws the photo smaller) and 0.90 to 1.08
+against the compose skipped. The compose run ten times over fails the gate in
+every run (a 12 MP photo in Fit then sits at the bound: its frame, a flat
+matte round a photo a third of the sheet, is about 1% of the render); twenty
+times over fails every row of both documents in every run.
 
 #### The photo is stored exactly as it came
 

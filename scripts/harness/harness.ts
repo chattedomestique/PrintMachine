@@ -941,9 +941,9 @@ const costRigs = new Map<string, { settings: PrintSettings; media: ImageBitmap; 
  * the same framed document with the same canvases and cache, its frame's
  * compose skipped (the preview's test seam, README "Test seams"): the photo
  * drawn into the same rectangle, so the two differ by the frame's own work
- * alone. The render is timed `repeat` times in a row and the mean taken.
+ * alone.
  */
-async function frameCost(doc: string, frame: string, draft: boolean, repeat = 1, bare = false): Promise<{ ms: number; w: number; h: number }> {
+async function frameCost(doc: string, frame: string, draft: boolean, bare = false): Promise<{ ms: number; w: number; h: number }> {
   const key = `${doc}|${frame}|${draft}`
   let rig = costRigs.get(key)
   if (!rig) {
@@ -970,8 +970,8 @@ async function frameCost(doc: string, frame: string, draft: boolean, repeat = 1,
   if (bare) seam.__PM_TEST__ = { skipFrameCompose: true }
   try {
     const t0 = performance.now()
-    for (let i = 0; i < repeat; i++) renderPrint(rig.out, rig.scratch, rig.settings, rig.cache, null, rig.height, rig.media, inputsOf(rig.settings))
-    const ms = (performance.now() - t0) / repeat
+    renderPrint(rig.out, rig.scratch, rig.settings, rig.cache, null, rig.height, rig.media, inputsOf(rig.settings))
+    const ms = performance.now() - t0
     return { ms, w: rig.out.canvas.width, h: rig.out.canvas.height }
   } finally {
     seam.__PM_TEST__ = before

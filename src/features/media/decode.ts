@@ -23,6 +23,7 @@
  */
 
 import { MissingPhotoError } from '../../engine/export.ts'
+import { borderPx } from '../../engine/frame.ts'
 import { previewSize } from '../../engine/render.ts'
 import { getMedia } from '../../state/mediaStore.ts'
 
@@ -60,12 +61,24 @@ export const PREVIEW_PHOTO_AREA_LARGEST = 16_777_216
  * it (fewer of the photo's pixels land on the sheet), so a zoomed save holds
  * less than one at 100%, where the copy is 4 MP as before.
  */
-export function previewArea(photo: { width: number; height: number; scale: number }, aspect: number): number {
+export function previewArea(
+  photo: { width: number; height: number; scale: number },
+  aspect: number,
+  /** The sheet's frame: its width, and how the layout places the photo
+   *  (frame.ts `effectiveMode`). Unframed Crop by default. */
+  frame: { width: number; mode: 'crop' | 'fit' } = { width: 0, mode: 'crop' },
+): number {
   const mw = Math.max(1, photo.width)
   const mh = Math.max(1, photo.height)
   const { w, h } = previewSize(aspect)
-  // Preview pixels per photo pixel, as the cover fit draws it.
-  const s = Math.max(w / mw, h / mh) * Math.max(1, photo.scale)
+  // Preview pixels per photo pixel, as the layout draws it: the cover of the
+  // visible rectangle at the zoom (Crop, Original), or contained in it (Fit,
+  // where the zoom is not read). A frame takes its border off the sheet, so
+  // a framed photo is drawn smaller and needs no larger a copy.
+  const b = borderPx(frame.width, w, h)
+  const vw = w - 2 * b
+  const vh = h - 2 * b
+  const s = frame.mode === 'fit' ? Math.min(vw / mw, vh / mh) : Math.max(vw / mw, vh / mh) * Math.max(1, photo.scale)
   const needed = mw * mh * s * s
   let area = PREVIEW_PHOTO_AREA
   while (area < needed && area < PREVIEW_PHOTO_AREA_LARGEST) area = Math.min(PREVIEW_PHOTO_AREA_LARGEST, area * 2)

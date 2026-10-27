@@ -31,7 +31,7 @@
 
 import { FRAME_CORNER_DIV } from './limits.ts'
 import { coverRect, snapRect, type Area, type DrawRect } from './media.ts'
-import { ASPECTS, type FrameSettings, type PrintSettings } from './types.ts'
+import { ASPECTS, type FramePalette, type FrameSettings, type PrintSettings } from './types.ts'
 
 /** What the sheet's shape reads of a document. `frame` absent is no frame. */
 export interface SheetShape {
@@ -301,6 +301,31 @@ export function cornerCoverage(r: number, x: number, y: number): number {
   const b = Math.min(hi, xb)
   if (b > a) cut += F(b) - F(a) - y * (b - a)
   return Math.min(1, Math.max(0, 1 - cut))
+}
+
+/**
+ * What the frame's fill is made from beyond the document: derived data,
+ * computed from the photo by the page (features/media) and handed to the
+ * engine beside the photo. The engine never decodes and never caches it.
+ *  - `palette`: the photo's four colours (stored with the photo,
+ *    `media.palette`).
+ */
+export interface FrameInputs {
+  palette?: FramePalette
+}
+
+/**
+ * The document's fill choice, looked up in its inputs: Paper is bare paper;
+ * Photo, Deep, Muted and Comp are the photo's own colours. The document
+ * stores the choice, never a colour, so a new photo re-keys the frame by
+ * itself. A fill whose input is not there (yet) is Paper, the bare stock,
+ * never a wrong colour; the page renders again once it arrives. Frosted is
+ * Paper until its field is handed in (the frost field lands with Frosted).
+ */
+export function fillFor(s: Pick<PrintSettings, 'frame'>, inputs: FrameInputs): FrameFill {
+  const fill = s.frame.fill
+  if (fill === 'paper' || fill === 'frosted') return fillRgba(null)
+  return fillRgba(inputs.palette?.[fill] ?? null)
 }
 
 /** A non-flat fill's pixel, read one at a time where a photo pixel needs it. */

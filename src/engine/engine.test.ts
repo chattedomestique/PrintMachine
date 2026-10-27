@@ -1097,7 +1097,7 @@ describe('whichever decode of the photo is drawn, it fills the rectangle its tru
       const out = fakeContext()
       const scratch = fakeContext()
       let grounded = 0
-      renderPrint(out.ctx, scratch.ctx, s, { current: null }, null, height, bitmap, () => grounded++)
+      renderPrint(out.ctx, scratch.ctx, s, { current: null }, null, height, bitmap, {}, () => grounded++)
       expect(grounded).toBe(1)
       expect(scratch.drawn).toHaveLength(1)
       const [source, dx, dy, dw, dh] = scratch.drawn[0] as [CanvasImageSource, number, number, number, number]
@@ -1120,7 +1120,7 @@ describe('Save never prints a photo as bare paper', () => {
     const s = { ...defaultSettings(), media: makeMedia({ id: 'p', width: 100, height: 100 }) }
     // Refused before any canvas is made.
     let made = 0
-    await expect(savePrint(s, null, { makeCanvas: () => (made++, {} as CanvasRenderingContext2D) })).rejects.toBeInstanceOf(MissingPhotoError)
+    await expect(savePrint(s, null, {}, { makeCanvas: () => (made++, {} as CanvasRenderingContext2D) })).rejects.toBeInstanceOf(MissingPhotoError)
     expect(made).toBe(0)
   })
 })

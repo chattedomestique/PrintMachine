@@ -11,7 +11,8 @@
  *     switch point beside a backing, turned) at 1000 and 1800 px, pressed in
  *     bands of 7 and 97 rows and whole, on a grid of forced 512x128 tiles (so
  *     a 1000 px sheet is 16 tiles and every band reads across tile rows): the
- *     same bytes at every band height.
+ *     same bytes at every band height. And one framed: frame-fit (Fit on
+ *     4:5, the matte, round corners on the photo), the same way.
  *  2. Tiles against one canvas: photo-second-ink at 1000 on those tiles, the
  *     type's share (the photo drawn once as one canvas draws it): at most 1%
  *     of the inked pixels differ, at most 0.05% by more than 128 levels, and
@@ -68,7 +69,7 @@ try {
   await page.waitForFunction(() => window.H !== undefined, null, { timeout: 60_000 })
 
   console.log('1. Bands on forced 512x128 tiles, through the export entry: the same bytes at every band height')
-  for (const doc of ['photo-second-ink', 'backing-second-ink']) {
+  for (const doc of ['photo-second-ink', 'backing-second-ink', 'frame-fit']) {
     for (const height of [1000, 1800]) {
       const hashes = []
       for (const bandRows of [7, 97, null]) {

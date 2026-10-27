@@ -335,7 +335,7 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     const log = {
       full: [] as string[],
       resized: [] as string[],
-      pressed: [] as Parameters<SaveDeps['savePrint']>[2][],
+      pressed: [] as Parameters<SaveDeps['savePrint']>[3][],
       canvases: [] as string[],
       bitmaps: [] as ReturnType<typeof bitmap>[],
     }
@@ -352,7 +352,7 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
         log.bitmaps.push(b)
         return b as unknown as ImageBitmap
       },
-      savePrint: async (settings, _media, opts) => {
+      savePrint: async (settings, _media, _inputs, opts) => {
         log.pressed.push(opts)
         const p = planPrint(settings, { maxHeight: opts?.maxHeight, format: opts?.format })
         opts?.onGround?.()

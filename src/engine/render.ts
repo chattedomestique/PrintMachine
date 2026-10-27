@@ -49,7 +49,7 @@ import { readAlpha, readRgba } from './readback.ts'
 import { TILE_BUDGET, TileRowCache, ringRows, rowsFromTiles, tileAt, tileGrid, type TileBudget, type TileGrid } from './tiles.ts'
 import { REFERENCE_HEIGHT, bandHeight } from './limits.ts'
 import { type PressProfile, type PrintSettings, type TextLayer } from './types.ts'
-import { layoutSheet, sheetAspect, type SheetSpec } from './frame.ts'
+import { composeFrameRows, fillFor, isUnframed, layoutSheet, sheetAspect, type FrameFill, type FrameInputs, type SheetLayout, type SheetSpec } from './frame.ts'
 
 /**
  * The preview renders smaller than the export so a slider drag stays smooth on
@@ -1414,6 +1414,42 @@ class NativeGroundRows implements GroundRows {
   }
 }
 
+/**
+ * The photo's ground framed: the rows of the ground under it (`inner`: the
+ * photo at its own pixels or resampled, alpha 0 where it is not), composed
+ * with the fill and the corners (frame.ts `composeFrameRows`) into a band
+ * buffer of its own. Its own buffer, written on every call and never the
+ * inner one's, so the luminance pass and the press may each ask for a band's
+ * rows (the GroundRows contract), and the inner ground is asked only for the
+ * rows that meet the shown rectangle: a band of border reads no photo. One
+ * band more than the inner ground holds, and nothing of the sheet's size.
+ */
+export class FramedGroundRows implements GroundRows {
+  private readonly band: Uint8ClampedArray
+
+  /** @param rows the most rows a band asks for at once. */
+  constructor(
+    private readonly inner: GroundRows,
+    private readonly layout: SheetLayout,
+    private readonly fill: FrameFill,
+    rows: number,
+  ) {
+    this.band = new Uint8ClampedArray(Math.max(1, Math.min(rows, layout.h)) * layout.w * 4)
+  }
+
+  rows(y0: number, y1: number): Uint8ClampedArray {
+    const { layout } = this
+    const stride = layout.w * 4
+    if ((y1 - y0) * stride > this.band.length) throw new Error(`FramedGroundRows: ${y1 - y0} rows asked of a band of ${this.band.length / stride}`)
+    const a = Math.max(y0, layout.shown.y0)
+    const b = Math.min(y1, layout.shown.y0 + layout.shown.h)
+    const src = b > a ? this.inner.rows(a, b) : null
+    const out = this.band.subarray(0, (y1 - y0) * stride)
+    composeFrameRows(layout, this.fill, src, y0, y1, out, a)
+    return out
+  }
+}
+
 /** Draw a photo, resampled into `part` of a w x h sheet at the rectangle
  *  `r`, on a cleared canvas exactly the part's size: the call the whole
  *  sheet's ground was always drawn with, moved to the part's origin. */
@@ -1581,14 +1617,16 @@ export interface ExportPressOptions {
  * An export's press, in stages: the band engine fed from the tile grid. No
  * canvas, array or tone of the sheet's size is made here: the glyphs come off
  * the tile grid a tile row at a time, the photo a band at a time (at its own
- * pixels) or off the tile grid (resampled), the noise is sampled where it is
- * printed, and the printed rows go to `out` a band at a time.
+ * pixels) or off the tile grid (resampled), framed a band at a time when it
+ * has a frame (`FramedGroundRows`), the noise is sampled where it is printed,
+ * and the printed rows go to `out` a band at a time.
  */
 function* exportSteps(
   out: SheetOutput,
   s: PrintSettings,
   { w, h }: SheetSize,
   media: CanvasImageSource | null,
+  inputs: FrameInputs,
   canvases: ExportCanvases,
   opts: ExportPressOptions,
 ): Generator<RenderProgress, void> {
@@ -1600,7 +1638,10 @@ function* exportSteps(
   let ground: GroundRows | undefined
   let piece: CanvasRenderingContext2D | null = null
   if (media && s.media) {
-    const r = opts.rect ?? groundRect(s, w, h)
+    // The one layout of this sheet (frame.ts): where the photo is drawn,
+    // and the frame round it.
+    const layout = layoutSheet(s, w, h)
+    const r = opts.rect ?? layout.photo!
     const size = sourceSize(media)
     if (isNativeRect(r, size.width, size.height)) {
       if (!canvases.piece) throw new Error('A photo at its own pixels is pressed a band at a time, on a canvas the export hands over.')
@@ -1609,6 +1650,8 @@ function* exportSteps(
     } else {
       ground = new TiledGroundRows(grid, B, groundTiles(canvases.tile, media, r, grid))
     }
+    // Unframed, the photo's ground is the ground, as it always was.
+    if (!isUnframed(layout)) ground = new FramedGroundRows(ground, layout, fillFor(s, inputs), B)
   } else {
     opts.onGround?.()
   }
@@ -1644,18 +1687,21 @@ export function renderPrint(
   s: PrintSettings,
   cacheRef: { current: RenderCache | null },
   overlay: OverlaySpec | null,
-  height: number = REFERENCE_HEIGHT,
+  height: number,
   /** The decoded photo, or null. Drawn with drawImage rather than sampled in
    *  JS: four million bilinear samples per frame is not a phone budget. Any
    *  decode of it will do — the preview's working copy or the original — as it
    *  is drawn scaled into the rectangle the photo's TRUE size (`s.media`)
    *  gives, never one its own size gives. */
-  media: CanvasImageSource | null = null,
+  media: CanvasImageSource | null,
+  /** What the frame's fill is made from (frame.ts `FrameInputs`); a fill
+   *  whose input is absent draws as Paper. */
+  inputs: FrameInputs,
   /** Called once the photo has been copied into the ground, when nothing
    *  further reads `media`. */
   onGround?: () => void,
 ): void {
-  drain(previewSteps(ctx, scratch, s, cacheRef, overlay, height, media, onGround))
+  drain(previewSteps(ctx, scratch, s, cacheRef, overlay, height, media, inputs, onGround))
 }
 
 export interface AsyncRenderOptions extends ExportPressOptions {
@@ -1691,6 +1737,7 @@ export async function renderPrintAsync(
   s: PrintSettings,
   height: number,
   media: CanvasImageSource | null,
+  inputs: FrameInputs,
   opts: AsyncRenderOptions = {},
 ): Promise<void> {
   const size = outputSize(sheetAspect(s), height)
@@ -1702,7 +1749,7 @@ export async function renderPrintAsync(
   const rows = Math.max(1, Math.min(h, Math.floor(PRINT_BAND_PIXELS / w)))
   const image = ctx.createImageData(w, rows)
   const out: SheetOutput = { band: image.data, rows, put: (y0, y1) => ctx.putImageData(image, 0, y0, 0, 0, w, y1 - y0) }
-  await drive(exportSteps(out, s, size, media, { tile: scratch, piece: opts.makeCanvas }, opts), opts)
+  await drive(exportSteps(out, s, size, media, inputs, { tile: scratch, piece: opts.makeCanvas }, opts), opts)
 }
 
 /**
@@ -1747,6 +1794,7 @@ export async function pressToSink(
   s: PrintSettings,
   size: SheetSize,
   media: CanvasImageSource | null,
+  inputs: FrameInputs,
   sink: RowSink,
   opts: PressOptions,
 ): Promise<void> {
@@ -1754,7 +1802,7 @@ export async function pressToSink(
   const B = Math.max(1, Math.min(h, Math.floor(opts.bandRows ?? bandHeight(w, h))))
   const band = new Uint8ClampedArray(B * w * 4)
   const out: SheetOutput = { band, rows: B, put: (y0, y1) => sink.put(band.subarray(0, (y1 - y0) * w * 4), y1 - y0) }
-  await drive(exportSteps(out, s, size, media, opts.canvases, { ...opts, bandRows: B }), opts, () => sink.settled())
+  await drive(exportSteps(out, s, size, media, inputs, opts.canvases, { ...opts, bandRows: B }), opts, () => sink.settled())
 }
 
 /** Run a press's steps, yielding to the page (and awaiting `settled`, when
@@ -1801,6 +1849,7 @@ function* previewSteps(
   overlay: OverlaySpec | null,
   height: number,
   media: CanvasImageSource | null,
+  inputs: FrameInputs,
   onGround: (() => void) | undefined,
 ): Generator<RenderProgress, void> {
   const { w, h } = outputSize(sheetAspect(s), height)
@@ -1814,12 +1863,19 @@ function* previewSteps(
   // type needs to know what is underneath it before it can decide what colour
   // to be. `ground` is a copy, so `scratch` is free for glyph rasterisation
   // immediately after.
+  //
+  // Framed, the fill and the corners are composed into that copy where it
+  // lies (frame.ts `composeFrameRows`, in place: each pixel a function of
+  // itself), the same function the export runs a band at a time, so the
+  // preview's ground is the export's rows put together.
   let ground: Uint8ClampedArray | undefined
   if (media && s.media) {
     yield { step: 'photo', band: 0, bands: 1 }
-    drawGroundPart(scratch, media, groundRect(s, w, h), { x0: 0, y0: 0, w, h })
+    const layout = layoutSheet(s, w, h)
+    drawGroundPart(scratch, media, layout.photo!, { x0: 0, y0: 0, w, h })
     ground = new Uint8ClampedArray(w * h * 4)
     readRgba(scratch, w, h, ground, w)
+    if (!isUnframed(layout)) composeFrameRows(layout, fillFor(s, inputs), ground, 0, h, ground)
   }
   onGround?.()
 

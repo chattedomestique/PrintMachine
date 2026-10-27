@@ -9,6 +9,7 @@ import { type MediaLayer, type TextLayer } from '../../engine/types.ts'
 import { sheetAspect, visibleAspect } from '../../engine/frame.ts'
 import { areaOf, clampPan } from '../../engine/media.ts'
 import { hitLayer, layoutIn, type FontMeasure } from '../../engine/text.ts'
+import { storedFrameInputs } from '../media/frameInputs.ts'
 import './Canvas.css'
 
 /** A photo's gesture limits. Pinch: a zoom on the cover fit, so 1 exactly
@@ -58,7 +59,9 @@ export default function Canvas({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
 
-  useRenderer(canvasRef, settings, { selectedLayerId }, media, paused)
+  // What the frame's fill is made from: what the document holds of it.
+  const inputs = useMemo(() => storedFrameInputs(settings), [settings])
+  useRenderer(canvasRef, settings, { selectedLayerId }, media, inputs, paused)
 
   const layer = selectedLayer ?? settings.layers[0] ?? null
 

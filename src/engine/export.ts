@@ -21,7 +21,7 @@
 import { JpegEncoder } from './encode/jpeg.ts'
 import { PngEncoder } from './encode/png.ts'
 import { planExport, type ExportPlan, type PlanSheet } from './exportPlan.ts'
-import { effectiveMode, layoutSheet, sheetAspect, type SheetSpec } from './frame.ts'
+import { effectiveMode, layoutSheet, sheetAspect, type FrameInputs, type SheetSpec } from './frame.ts'
 import { LARGE_PRINT_MP, MIN_BAND_ROWS, bandHeight } from './limits.ts'
 import type { DrawRect, LumaGrid } from './media.ts'
 import { isNativeRect, pressToSink, sourceSize, throwIfAborted, type RenderProgress, type RowSink } from './render.ts'
@@ -170,8 +170,10 @@ function encoderSink(format: ExportFormat, w: number, h: number, bandRows: numbe
  *
  * @param media the photo decoded from its ORIGINAL bytes (not the preview's
  *   working copy), or a smaller copy decoded to `opts.rect`.
+ * @param inputs what the frame's fill is made from (frame.ts `FrameInputs`):
+ *   the caller has them ready before the press starts.
  */
-export async function savePrint(settings: PrintSettings, media: CanvasImageSource | null, opts: SaveOptions): Promise<PressedPrint> {
+export async function savePrint(settings: PrintSettings, media: CanvasImageSource | null, inputs: FrameInputs, opts: SaveOptions): Promise<PressedPrint> {
   if (settings.media && !media) throw new MissingPhotoError()
   const format = opts.format ?? 'jpeg'
   const plan = planPrint(settings, { maxHeight: opts.maxHeight, format })
@@ -219,7 +221,7 @@ export async function savePrint(settings: PrintSettings, media: CanvasImageSourc
       const chunks: Uint8Array[] = []
       const sink = encoderSink(format, w, h, B, chunks)
       try {
-        await pressToSink(settings, { w, h }, media, sink, {
+        await pressToSink(settings, { w, h }, media, inputs, sink, {
           bandRows: B,
           tileBudget: budget,
           rect: opts.rect,

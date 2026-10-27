@@ -5,7 +5,7 @@ import { FIRST_SUBS, TOOLS, type Subs, type ToolId } from '../controls/tools.ts'
 import { Icon } from '../../ui/ui.tsx'
 import { describePlan, fileSize, planPrint } from '../../engine/export.ts'
 import { pngCompresses, storedSize } from '../../engine/encode/png.ts'
-import { sheetAspect } from '../../engine/frame.ts'
+import { effectiveMode, sheetAspect } from '../../engine/frame.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, offlineJustReady, subscribeSW } from '../../state/swStatus.ts'
@@ -54,7 +54,7 @@ export default function AppShell() {
   const { settings, undo, redo, canUndo, canRedo } = useSettings()
   // The preview's working copy of the photo. Save does not use it: it decodes
   // the original, so the print is drawn from the original's pixels.
-  const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media, sheetAspect(settings))
+  const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media, sheetAspect(settings), { width: settings.frame.width, mode: effectiveMode(settings) })
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tool, setTool] = useState<ToolId | null>(null)
   const [subs, setSubs] = useState<Subs>(FIRST_SUBS)

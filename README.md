@@ -345,6 +345,51 @@ the first cut printed exactly that. Panning can no longer uncover the sheet, but
 the same path carries the knockout under the second ink (the photo's alpha goes
 down there) and a transparent PNG's own transparency, and there is a test that
 uncovered ground is bit-for-bit the paper the app draws with no photo at all.
+(Unframed. Inside a frame a transparent pixel of the photo shows the frame's
+fill, which is bare paper only when the fill is Paper.)
+
+#### The frame is ground, composed a band at a time
+
+The frame is not a plate: the fill, the photo and its rounded corners are the
+ground the ink prints on (`engine/frame.ts`). Every layout has three
+rectangles: the sheet; the visible rectangle, the sheet inset by the border,
+which the photo's zoom and pan are relative to and which lands on the photo
+pixel for pixel; and the shown rectangle, where the photo is (the visible one
+in Crop and on Original; in Fit the whole photo contained in it). Outside the
+shown rectangle every pixel IS the fill: the border, and in Fit the matte
+(the photo's ground is never read there). Inside it the photo is laid over
+the fill in straight alpha, rounded once, its corners cut by the exact area
+under Border Studio's curve (sqrt x + sqrt y = sqrt r, in closed form; tested
+against a numerical integral). An opaque photo pixel away from the corners is
+copied byte for byte, so a native save keeps every pixel of the photo inside
+its frame. Paper is alpha 0, so the press prints the bare stock there; a
+colour is opaque and takes the stock's veil when "Paper over the photo" is on.
+
+The document stores the fill's choice, never a colour: the colour comes from
+the photo's palette stored with it (`media.palette`), handed to the engine
+beside the photo (`FrameInputs`); until it is there, the fill draws as Paper.
+The preview composes the frame into its ground in place, and the export
+composes it a band of rows at a time into a band buffer of its own
+(`FramedGroundRows`, one band more than an unframed press holds), reading the
+photo only for the rows it shows; each pixel is a function of its place and
+its own photo pixel, so every band height gives the same bytes and the
+preview's ground is the export's rows put together (`frame.test.ts`,
+`banded.test.ts`, `frameRender.test.ts`; the harness's `--bands`, `--parity`
+and `--file-parity` on four frame documents; `check-bands` on one in CI). A
+print without a frame (width 0, square corners, Crop) composes nothing and
+presses the bytes it always did.
+
+`node scripts/parity-borders.mjs` (not yet in CI) renders Border Studio's own
+frozen frames (`scripts/parity-borders/`: its preview canvas at 597ce7a, on
+generated flat-block photos) through this engine and compares: the sheet's
+size, the border and the matte every byte equal, the photo at its own pixels
+every byte equal, and each rounded corner within a mean of 1.02 levels
+(measured 0.24 to 0.81: the references are a canvas's antialiased clip, the
+engine's corner the exact area). `npm run harness -- --out c.json --no-hashes
+--frame-cost` times the preview framed against unframed (a photo at its own
+size and a 12 MP photo from its working copy, settled and draft): at most
+1.10x settled and 1.25x draft; measured 0.85 to 1.04 and 0.88 to 1.20, the
+frame's own work being a few milliseconds.
 
 #### The photo is stored exactly as it came
 

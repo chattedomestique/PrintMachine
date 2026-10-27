@@ -18,20 +18,26 @@
  * so there are no binary fixtures and the same pixels come back every run.
  */
 
-import { groundRect, isNativeRect, outputSize, plateGeometry, plateHalo, renderPrint, renderPrintAsync, type AsyncRenderOptions, type RenderCache } from '../../src/engine/render.ts'
+import { draftSize, groundRect, isNativeRect, outputSize, plateGeometry, plateHalo, previewSize, renderPrint, renderPrintAsync, type AsyncRenderOptions, type RenderCache } from '../../src/engine/render.ts'
 import { cssFont, layerFont, lineRects, planGlyphs } from '../../src/engine/text.ts'
 import { tileGrid } from '../../src/engine/tiles.ts'
 import { JpegEncoder } from '../../src/engine/encode/jpeg.ts'
 import { PngEncoder } from '../../src/engine/encode/png.ts'
 import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
 import { detachedCanvas } from '../../src/features/shell/page.ts'
-import { type PrintSettings } from '../../src/engine/types.ts'
-import { sheetAspect } from '../../src/engine/frame.ts'
+import { storedFrameInputs as inputsOf } from '../../src/features/media/frameInputs.ts'
+import { type FramePalette, type FrameSettings, type PrintSettings } from '../../src/engine/types.ts'
+import { effectiveMode, sheetAspect } from '../../src/engine/frame.ts'
+import { previewArea, workingSize } from '../../src/features/media/decode.ts'
 import { defaultSettings, makeMedia } from '../../src/state/defaults.ts'
 import plain from './docs/plain.json'
 import photoAsShot from './docs/photo-asshot.json'
 import photoSecondInk from './docs/photo-second-ink.json'
 import textFreePhoto from './docs/text-free-photo.json'
+import frameOriginal from './docs/frame-original.json'
+import frameFit from './docs/frame-fit.json'
+import frameCorners from './docs/frame-corners.json'
+import frameCropZoomed from './docs/frame-crop-zoomed.json'
 
 /**
  * The frozen documents, plus some built live from the build under test:
@@ -90,12 +96,23 @@ const DOCS: Record<string, () => unknown> = {
   // A 2400x3000 photo on 4:5: at a height of 3000 the export is the photo's
   // own pixels, snapped (every other height resamples it).
   'native-photo': () => withPhoto(defaultSettings(), 2400, 3000),
+  // The frame, text-free (one plate, its text cleared), each carrying its
+  // photo's palette: Original at the first photo's width in the photo's own
+  // colour; Fit on 4:5 with the matte and round corners, the veil off; an
+  // Original portrait with round corners on bare Paper; Crop on 1:1 zoomed
+  // and panned in the widest frame, half-round. Written for the frame (not
+  // by an older build).
+  'frame-original': () => frameOriginal,
+  'frame-fit': () => frameFit,
+  'frame-corners': () => frameCorners,
+  'frame-crop-zoomed': () => frameCropZoomed,
 }
 
-/** Every document is 4:5 (`defaultSettings`): at 1800 px tall a 4:5 sheet is
- *  1440 px wide, one tile of the band engine's glyph grid. A document of
- *  another shape needs its own check that the heights recorded stay one
- *  tile. */
+/** Every document is one tile of the band engine's glyph grid at every
+ *  height recorded (300, 1000, 1800): the 4:5 ones are 1440 px wide at
+ *  1800, and the frame documents at most 2291x1800 (4.12 MP, under the
+ *  tile's 4.19 MP). A document of another shape needs its own check that the
+ *  heights recorded stay one tile. */
 function withPhoto(s: PrintSettings, width: number, height: number): PrintSettings {
   s.media = makeMedia({ id: 'harness-photo', width, height })
   return s
@@ -240,8 +257,8 @@ async function render(
   const cacheRef: { current: RenderCache | null } = { current: null }
 
   const t0 = performance.now()
-  if (opts.async) await renderPrintAsync(out, scratch, settings, height, media, exportOpts)
-  else renderPrint(out, scratch, settings, cacheRef, null, height, media)
+  if (opts.async) await renderPrintAsync(out, scratch, settings, height, media, inputsOf(settings), exportOpts)
+  else renderPrint(out, scratch, settings, cacheRef, null, height, media, inputsOf(settings))
   const ms = performance.now() - t0
 
   const { width: w, height: h } = out.canvas
@@ -262,7 +279,7 @@ async function exportPixels(settings: PrintSettings, height: number, opts: Expor
   const out = context(false)
   const scratch = context(true)
   let inked: Uint8Array | null = null
-  await renderPrintAsync(out, scratch, settings, height, media, {
+  await renderPrintAsync(out, scratch, settings, height, media, inputsOf(settings), {
     ...exportOptions({ ...opts, async: true }),
     onBand: (layers, y0, y1) => {
       const w = out.canvas.width
@@ -473,7 +490,7 @@ async function pixels(name: string, height: number): Promise<{ data: Uint8Clampe
   const media = settings.media ? await photoBitmap(settings.media.width, settings.media.height) : null
   const out = context(false)
   const scratch = context(true)
-  renderPrint(out, scratch, settings, { current: null }, null, height, media)
+  renderPrint(out, scratch, settings, { current: null }, null, height, media, inputsOf(settings))
   const { width: w, height: h } = out.canvas
   const data = out.getImageData(0, 0, w, h).data
   out.canvas.width = 0
@@ -518,7 +535,7 @@ async function save(
   const media = settings.media ? await createImageBitmap(photoCanvas(settings.media.width, settings.media.height)) : null
   const steps: string[] = []
   const t0 = performance.now()
-  const pressed = await savePrint(settings, media, {
+  const pressed = await savePrint(settings, media, inputsOf(settings), {
     format: opts.format,
     makeCanvas: detachedCanvas,
     onProgress: (p) => steps.push(`${p.step} ${p.band}/${p.bands}`),
@@ -573,7 +590,7 @@ async function press(format: ExportFormat = 'jpeg'): Promise<{ w: number; h: num
   const t0 = performance.now()
   let pressMs = 0
   try {
-    const pressed = await savePrint(settings, media, {
+    const pressed = await savePrint(settings, media, inputsOf(settings), {
       format,
       makeCanvas: detachedCanvas,
       onGround: () => media?.close(),
@@ -610,7 +627,7 @@ async function fileDigest(blob: Blob): Promise<{ sha256: string; w: number; h: n
 async function fileParity(name: string, height: number): Promise<{ file: string; canvas: string; same: boolean; w: number; h: number }> {
   const settings = load(name)
   const media = settings.media ? await photoBitmap(settings.media.width, settings.media.height) : null
-  const pressed = await savePrint(settings, media, { format: 'png', maxHeight: height, makeCanvas: detachedCanvas })
+  const pressed = await savePrint(settings, media, inputsOf(settings), { format: 'png', maxHeight: height, makeCanvas: detachedCanvas })
   const file = await fileDigest(pressed.blob)
   const canvas = await render(name, pressed.plan.height, { async: true })
   return { file: file.sha256, canvas: canvas.sha256, same: file.sha256 === canvas.sha256 && file.w === canvas.w && file.h === canvas.h, w: file.w, h: file.h }
@@ -655,7 +672,7 @@ async function retry(
       }
     }
     try {
-      const pressed = await savePrint(settings, media, {
+      const pressed = await savePrint(settings, media, inputsOf(settings), {
         maxHeight: height,
         makeCanvas: detachedCanvas,
         onGround: () => media?.close(),
@@ -823,6 +840,130 @@ async function pngCheck(kind: string) {
   return { kind, w, h, deflate: result.deflate, stored: result.stored, chromiumBytes: theirs.size }
 }
 
+const b64 = (bytes: Uint8Array | Uint8ClampedArray): string => {
+  let s = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(s)
+}
+const unb64 = (s: string): Uint8ClampedArray<ArrayBuffer> => Uint8ClampedArray.from(atob(s), (c) => c.charCodeAt(0))
+
+/** One case of the Border Studio parity gate (scripts/parity-borders.mjs). */
+export interface ParityCase {
+  aspect: PrintSettings['aspect']
+  frame: FrameSettings
+  /** The block photo, RGBA, base64, at its own size; and the hex Border
+   *  Studio keyed from it, which the document carries as its palette. */
+  photo: { width: number; height: number; rgba: string; palette: FramePalette }
+  /** The reference's height: the sheet is rendered at the reference's size. */
+  height: number
+  /** The reference PNG, base64. */
+  ref: string
+}
+
+/**
+ * The frame through the real engine (the export's entry, renderPrintAsync,
+ * what Save presses) against Border Studio's frozen render of the same frame:
+ * the paper veil off and one plate with no text, so the sheet is the ground
+ * alone, the photo the block photo Border Studio framed and the palette the
+ * hex it keyed. Returns both as RGBA (base64); the gate's numbers are the
+ * script's.
+ */
+async function parityBorders(c: ParityCase): Promise<{ w: number; h: number; pm: string; refW: number; refH: number; ref: string }> {
+  const base = defaultSettings()
+  const raw: PrintSettings = {
+    ...base,
+    aspect: c.aspect,
+    paperVeil: false,
+    frame: c.frame,
+    layers: [{ ...base.layers[0], text: '' }],
+    media: makeMedia({ id: 'parity-photo', width: c.photo.width, height: c.photo.height, native: true, palette: c.photo.palette }),
+  }
+  // Through the normaliser, as a stored print would come: what the app can
+  // hold, and nothing it would change.
+  const settings = normalizeSettings ? normalizeSettings(JSON.parse(JSON.stringify(raw)), { measure: canvasMeasure?.() }) : raw
+  if (JSON.stringify(settings.frame) !== JSON.stringify(c.frame) || JSON.stringify(settings.media?.palette) !== JSON.stringify(c.photo.palette)) {
+    throw new Error(`the normaliser changed the parity document: ${JSON.stringify(settings.frame)} ${JSON.stringify(settings.media?.palette)}`)
+  }
+  const photo = await createImageBitmap(new ImageData(unb64(c.photo.rgba), c.photo.width, c.photo.height))
+  const out = context(false)
+  const scratch = context(true)
+  await renderPrintAsync(out, scratch, settings, c.height, photo, inputsOf(settings), { makeCanvas: () => context(true) })
+  photo.close()
+  const { width: w, height: h } = out.canvas
+  const pm = out.getImageData(0, 0, w, h).data
+  out.canvas.width = 0
+  scratch.canvas.width = 0
+  // The reference, decoded as capture.mjs proved Chromium decodes it: the
+  // captured bytes exactly.
+  const bmp = await createImageBitmap(new Blob([unb64(c.ref)], { type: 'image/png' }), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
+  const { width: refW, height: refH } = bmp
+  const r = context(true)
+  r.canvas.width = refW
+  r.canvas.height = refH
+  r.drawImage(bmp, 0, 0)
+  const ref = r.getImageData(0, 0, refW, refH).data
+  bmp.close()
+  r.canvas.width = 0
+  return { w, h, pm: b64(pm), refW, refH, ref: b64(ref) }
+}
+
+/** The palette the frame-cost documents carry. */
+const COST_PALETTE: FramePalette = { photo: '#3d7fa6', deep: '#16222b', muted: '#9fb3c0', comp: '#c4783a' }
+
+/** The frame-cost gate's documents, each with the photo the preview draws
+ *  it from: `native-photo` with its own 2400x3000 photo, and a 12 MP photo
+ *  (4032x3024 on 4:5) from the working copy the preview decodes of it. */
+const COST_DOCS: Record<string, () => { settings: PrintSettings; copy: boolean }> = {
+  'native-photo': () => ({ settings: load('native-photo'), copy: false }),
+  'photo-12mp': () => ({ settings: withPhoto(defaultSettings(), 4032, 3024), copy: true }),
+}
+
+/** What the frame-cost gate frames a document with: the first photo's
+ *  width, round corners, the photo's own colour; in Crop or in Fit. */
+const COST_FRAMES: Record<string, Partial<FrameSettings> | null> = {
+  none: null,
+  crop: { width: 1 / 14, corners: 1, fill: 'photo', mode: 'crop' },
+  fit: { width: 1 / 14, corners: 1, fill: 'photo', mode: 'fit' },
+}
+
+const costRigs = new Map<string, { settings: PrintSettings; media: ImageBitmap; height: number; out: CanvasRenderingContext2D; scratch: CanvasRenderingContext2D; cache: { current: RenderCache | null } }>()
+
+/**
+ * One preview render of a document, framed or not, at the settled or the
+ * draft size, timed (ms): what a person waits for at each change of the
+ * frame. Each (document, frame, size) keeps its canvases and its render
+ * cache across calls, as the preview does, and is rendered once untimed
+ * first; so a timing is the steady cost of a frame of the preview, the
+ * photo drawn and the frame composed afresh every time.
+ */
+async function frameCost(doc: string, frame: string, draft: boolean): Promise<{ ms: number; w: number; h: number }> {
+  const key = `${doc}|${frame}|${draft}`
+  let rig = costRigs.get(key)
+  if (!rig) {
+    const made = COST_DOCS[doc]?.()
+    if (!made || !(frame in COST_FRAMES)) throw new Error(`unknown frame-cost case ${key}`)
+    const { settings, copy } = made
+    const f = COST_FRAMES[frame]
+    if (f) {
+      settings.frame = { ...settings.frame, ...f }
+      settings.media = { ...settings.media!, palette: COST_PALETTE }
+    }
+    const m = settings.media!
+    const aspect = sheetAspect(settings)
+    const size = copy ? (workingSize(m.width, m.height, previewArea(m, aspect, { width: settings.frame.width, mode: effectiveMode(settings) })) ?? { width: m.width, height: m.height }) : { width: m.width, height: m.height }
+    const c = photoCanvas(size.width, size.height)
+    const media = await createImageBitmap(c)
+    c.width = 0
+    rig = { settings, media, height: (draft ? draftSize(aspect) : previewSize(aspect)).h, out: context(false), scratch: context(true), cache: { current: null } }
+    costRigs.set(key, rig)
+    renderPrint(rig.out, rig.scratch, settings, rig.cache, null, rig.height, media, inputsOf(settings))
+  }
+  const t0 = performance.now()
+  renderPrint(rig.out, rig.scratch, rig.settings, rig.cache, null, rig.height, rig.media, inputsOf(rig.settings))
+  const ms = performance.now() - t0
+  return { ms, w: rig.out.canvas.width, h: rig.out.canvas.height }
+}
+
 declare global {
   interface Window {
     H: {
@@ -838,9 +979,11 @@ declare global {
       press: typeof press
       encodeCheck: typeof encodeCheck
       pngCheck: typeof pngCheck
+      parityBorders: typeof parityBorders
+      frameCost: typeof frameCost
       normalized: boolean
     }
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, seam, fontCap, fileParity, retry, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, normalized: !!normalizeSettings }
+window.H = { docs: Object.keys(DOCS), render, seam, fontCap, fileParity, retry, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, parityBorders, frameCost, normalized: !!normalizeSettings }

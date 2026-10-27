@@ -185,7 +185,7 @@ describe('the export height: the planner, never the preview', () => {
       [withPhoto(1600, 1200), decoded(1600, 1200), 700],
       [withPhoto(1600, 1200), decoded(1600, 1200), undefined],
     ] as const) {
-      const pressed = await savePrint(s, media, { maxHeight, makeCanvas: canvases().makeCanvas })
+      const pressed = await savePrint(s, media, {}, { maxHeight, makeCanvas: canvases().makeCanvas })
       const plan = planPrint(s, { maxHeight })
       expect(pressed.plan).toEqual(plan)
       const f = await sof0(pressed.blob)
@@ -199,7 +199,7 @@ describe('the file', () => {
     expect(JPEG_QUALITY).toBe(0.95)
     expect(ENCODINGS.jpeg).toEqual({ mime: 'image/jpeg', ext: 'jpg', quality: 95 })
     expect(ENCODINGS.png).toEqual({ mime: 'image/png', ext: 'png', quality: undefined })
-    const jpeg = await savePrint(defaultSettings(), null, { maxHeight: 600, makeCanvas: canvases().makeCanvas })
+    const jpeg = await savePrint(defaultSettings(), null, {}, { maxHeight: 600, makeCanvas: canvases().makeCanvas })
     expect(jpeg.blob.type).toBe('image/jpeg')
     const f = await sof0(jpeg.blob)
     expect(f).toEqual({ w: 480, h: 600, sampling: [0x11, 0x11, 0x11] })
@@ -211,7 +211,7 @@ describe('the file', () => {
 
     // No CompressionStream here, as on iOS before 16.4: stored deflate.
     vi.stubGlobal('CompressionStream', undefined)
-    const png = await savePrint(defaultSettings(), null, { format: 'png', maxHeight: 600, makeCanvas: canvases().makeCanvas })
+    const png = await savePrint(defaultSettings(), null, {}, { format: 'png', maxHeight: 600, makeCanvas: canvases().makeCanvas })
     const p = new Uint8Array(await png.blob.arrayBuffer())
     expect([...p.subarray(1, 4)].map((c) => String.fromCharCode(c)).join('')).toBe('PNG')
     const view = new DataView(p.buffer, p.byteOffset)
@@ -221,17 +221,17 @@ describe('the file', () => {
 
   it('lets every canvas it made go once the file exists, and when the press fails', async () => {
     const ok = canvases()
-    await savePrint(defaultSettings(), null, { maxHeight: 600, makeCanvas: ok.makeCanvas })
+    await savePrint(defaultSettings(), null, {}, { maxHeight: 600, makeCanvas: ok.makeCanvas })
     expect(ok.made.length).toBeGreaterThan(0)
     for (const c of ok.made) expect(c.ctx.canvas.width).toBe(0)
     const blank = canvases({ maxArea: 1000 })
-    await expect(savePrint(defaultSettings(), null, { maxHeight: 600, makeCanvas: blank.makeCanvas })).rejects.toBeInstanceOf(CanvasLimitError)
+    await expect(savePrint(defaultSettings(), null, {}, { maxHeight: 600, makeCanvas: blank.makeCanvas })).rejects.toBeInstanceOf(CanvasLimitError)
     for (const c of blank.made) expect(c.ctx.canvas.width).toBe(0)
   })
 
   it('never prints a photo document without its photo, and makes no canvas for it', async () => {
     const c = canvases()
-    await expect(savePrint(withPhoto(100, 100), null, { makeCanvas: c.makeCanvas })).rejects.toBeInstanceOf(MissingPhotoError)
+    await expect(savePrint(withPhoto(100, 100), null, {}, { makeCanvas: c.makeCanvas })).rejects.toBeInstanceOf(MissingPhotoError)
     expect(c.made).toEqual([])
   })
 
@@ -247,7 +247,7 @@ describe('the file', () => {
     }
     const c = canvases()
     const steps: RenderProgress['step'][] = []
-    const run = savePrint(defaultSettings(), null, { maxHeight: 600, signal: controller.signal, makeCanvas: c.makeCanvas, onProgress: (p) => steps.push(p.step) })
+    const run = savePrint(defaultSettings(), null, {}, { maxHeight: 600, signal: controller.signal, makeCanvas: c.makeCanvas, onProgress: (p) => steps.push(p.step) })
     await expect(run).rejects.toMatchObject({ name: 'AbortError' })
     expect(started).toBe(1)
     expect(steps[steps.length - 1]).toBe('write')
@@ -294,7 +294,7 @@ describe('every canvas the press makes, proved first, at its real size', () => {
     // Canvases wider than 2000 px read back blank: the 2419 px tile.
     const c = canvases({ maxWidth: 2000 })
     const steps: RenderProgress[] = []
-    const err = await savePrint(s, decoded(4032, 3024), { makeCanvas: c.makeCanvas, onProgress: (p) => steps.push(p) }).catch((e: unknown) => e)
+    const err = await savePrint(s, decoded(4032, 3024), {}, { makeCanvas: c.makeCanvas, onProgress: (p) => steps.push(p) }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(CanvasLimitError)
     expect((err as CanvasLimitError).plan).toEqual(planPrint(s))
     expect((err as Error).message).toBe("This device couldn't press 2419×3024 (a canvas came back blank).")
@@ -303,7 +303,7 @@ describe('every canvas the press makes, proved first, at its real size', () => {
     for (const m of c.made) expect(m.ctx.canvas.width).toBe(0)
     // The photo's band canvas is proved too.
     const piece = canvases({ maxArea: 2419 * 1733 - 1 })
-    const err2 = await savePrint(s, decoded(4032, 3024), { makeCanvas: piece.makeCanvas }).catch((e: unknown) => e)
+    const err2 = await savePrint(s, decoded(4032, 3024), {}, { makeCanvas: piece.makeCanvas }).catch((e: unknown) => e)
     expect(err2).toBeInstanceOf(CanvasLimitError)
   })
 })
@@ -340,7 +340,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
     let grounded = 0
     const restore = fault ? faulty((bytes) => fault(bytes, band)) : () => {}
     try {
-      const pressed = await savePrint(s(), decoded(1600, 1200), {
+      const pressed = await savePrint(s(), decoded(1600, 1200), {}, {
         makeCanvas: canvases().makeCanvas,
         onGround: () => grounded++,
         onProgress: (p) => {
@@ -380,7 +380,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
     let pressedAgain = 0
     const restore = faulty((bytes) => bytes >= 1 << 20 && thrown++ === 0)
     try {
-      await savePrint(defaultSettings(), null, { maxHeight: 1800, makeCanvas: canvases().makeCanvas, onProgress: (p) => (pressedAgain = p.bands) })
+      await savePrint(defaultSettings(), null, {}, { maxHeight: 1800, makeCanvas: canvases().makeCanvas, onProgress: (p) => (pressedAgain = p.bands) })
     } finally {
       restore()
     }
@@ -393,7 +393,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
     let thrown = 0
     const restore = faulty((bytes) => grounded && bytes >= 1 << 18 && thrown++ === 0)
     try {
-      const err = await savePrint(withPhoto(1600, 1200), decoded(1600, 1200), { makeCanvas: canvases().makeCanvas, onGround: () => (grounded = true) }).catch((e: unknown) => e)
+      const err = await savePrint(withPhoto(1600, 1200), decoded(1600, 1200), {}, { makeCanvas: canvases().makeCanvas, onGround: () => (grounded = true) }).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(CanvasLimitError)
       expect((err as CanvasLimitError).why).toBe('Array buffer allocation failed')
     } finally {
@@ -404,7 +404,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
     const restore2 = faulty((bytes) => bytes === 1456 * 1440 * 4 / 2 ** attempts && ++attempts > 0)
     try {
       // 1440 x 1800: bands of 1456 rows, halved exactly.
-      const err = await savePrint(withPhoto(1600, 1200), decoded(1600, 1200), { makeCanvas: canvases().makeCanvas }).catch((e: unknown) => e)
+      const err = await savePrint(withPhoto(1600, 1200), decoded(1600, 1200), {}, { makeCanvas: canvases().makeCanvas }).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(CanvasLimitError)
     } finally {
       restore2()
@@ -419,7 +419,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
       return false
     })
     try {
-      const err = await savePrint(defaultSettings(), null, { maxHeight: 600, makeCanvas: canvases().makeCanvas }).catch((e: unknown) => e)
+      const err = await savePrint(defaultSettings(), null, {}, { maxHeight: 600, makeCanvas: canvases().makeCanvas }).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(TypeError)
     } finally {
       restore()
@@ -447,7 +447,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
         }
         return ctx
       }
-      const err = await savePrint(defaultSettings(), null, { maxHeight: 1800, makeCanvas }).catch((e: unknown) => e)
+      const err = await savePrint(defaultSettings(), null, {}, { maxHeight: 1800, makeCanvas }).catch((e: unknown) => e)
       return { err, reads }
     }
     const bug = await press(() => new Error('rowsFromTiles: rows [1389, 1459) do not fit the span of 69'))
@@ -522,7 +522,7 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
   it('reports every band of the press, and prints what the sync render prints', async () => {
     const seen: RenderProgress[] = []
     let grounded = 0
-    await renderPrintAsync(fakeContext().ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {
+    await renderPrintAsync(fakeContext().ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {}, {
       onProgress: (p) => seen.push(p),
       onGround: () => grounded++,
     })
@@ -557,8 +557,8 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
     const b = fakeContext()
     const asyncOut = capture(a)
     const syncOut = capture(b)
-    await renderPrintAsync(a.ctx, fakeContext().ctx, doc(), 300, decoded(400, 500))
-    renderPrint(b.ctx, fakeContext().ctx, doc(), { current: null }, null, 300, decoded(400, 500))
+    await renderPrintAsync(a.ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {})
+    renderPrint(b.ctx, fakeContext().ctx, doc(), { current: null }, null, 300, decoded(400, 500), {})
     expect(asyncOut.bands).toBeGreaterThan(0)
     expect(asyncOut.data.length).toBe(240 * 300 * 4)
     expect(asyncOut.data).toEqual(syncOut.data)
@@ -567,7 +567,7 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
   it('stops at the next step once cancelled, with an AbortError', async () => {
     const controller = new AbortController()
     let presses = 0
-    const run = renderPrintAsync(fakeContext().ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {
+    const run = renderPrintAsync(fakeContext().ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {}, {
       signal: controller.signal,
       onProgress: (p) => {
         if (p.step === 'press') presses++
@@ -581,7 +581,7 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
   it('a Cancel mid-press of a save: an AbortError at the next step, no file', async () => {
     const controller = new AbortController()
     let steps = 0
-    const run = savePrint(defaultSettings(), null, {
+    const run = savePrint(defaultSettings(), null, {}, {
       maxHeight: 600,
       signal: controller.signal,
       makeCanvas: canvases().makeCanvas,

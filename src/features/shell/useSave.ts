@@ -21,6 +21,7 @@ import { snapCopyRect, type DrawRect } from '../../engine/media.ts'
 import { throwIfAborted, type RenderProgress } from '../../engine/render.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { PhotoDecodeError, decodeOriginal, decodeResized } from '../media/decode.ts'
+import { storedFrameInputs } from '../media/frameInputs.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
 import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../../state/persist.ts'
 import { canShareFile, deliverFile, detachedCanvas, saveMessage } from './page.ts'
@@ -509,7 +510,7 @@ export async function pressForSave(
     run.onPhotoLoaded?.()
     const decoded = photo
     try {
-      const pressed = await deps.savePrint(settings, decoded, {
+      const pressed = await deps.savePrint(settings, decoded, storedFrameInputs(settings), {
         format,
         maxHeight,
         signal,

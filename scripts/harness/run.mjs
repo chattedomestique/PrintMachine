@@ -13,6 +13,8 @@
  *   ... --bands 1,7,97,full --tile 512,65536   (the same on a grid of forced 512x128 tiles: --tile edge,pixels)
  *   node scripts/harness/run.mjs --out f.json --no-hashes --file-parity 1000 --retry   (P-5: the real savePrint's PNG decodes to
  *       the export entry's canvas, every document; P-6: a RangeError injected once at set-up and once mid-press gives the same file)
+ *   node scripts/harness/run.mjs --out c.json --no-hashes --frame-cost   (the frame's cost in the preview: photo documents framed
+ *       against unframed, settled and draft, median of 5 (--runs n); exits 1 above the bounds)
  *   node scripts/harness/run.mjs --out s.json --no-hashes --seam photo-second-ink@3000,default@3600 [--tile 512,65536]
  *       (tiles against one canvas: the export on the tile grid, the real one or --tile's, against the same on a single tile;
  *       prints the differing pixels against the inked ones and the plates whose box crosses a seam; exits 1 outside the bounds)
@@ -36,7 +38,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 function parseArgs(argv) {
-  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], seam: [], parity: null, fileParity: null, retry: false, bands: null, tile: null, photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
+  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], seam: [], parity: null, fileParity: null, retry: false, bands: null, tile: null, frameCost: false, photoMp: undefined, runs: null, hashes: true, out: null, png: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -52,6 +54,7 @@ function parseArgs(argv) {
     else if (a === '--parity') opts.parity = Number(next())
     else if (a === '--file-parity') opts.fileParity = Number(next())
     else if (a === '--retry') opts.retry = true
+    else if (a === '--frame-cost') opts.frameCost = true
     else if (a === '--bands') opts.bands = next().split(',').map((b) => (b === 'full' ? null : Number(b)))
     else if (a === '--tile') opts.tile = next().split(',').map(Number)
     else if (a === '--seam') opts.seam.push(...next().split(','))
@@ -134,6 +137,7 @@ const result = {
   retry: {},
   bands: {},
   seam: {},
+  frameCost: {},
 }
 let failed = false
 let failure = ''
@@ -315,6 +319,59 @@ try {
     await page.close()
   }
 
+  if (opts.frameCost) {
+    // The frame's cost in the preview: a photo document framed (the first
+    // photo's width, round corners, the photo's own colour; in Crop and in
+    // Fit) against the same unframed, each at the settled and the draft
+    // size, rendered the way the preview renders a frame (its canvases and
+    // cache kept; the photo drawn and the frame composed every time),
+    // interleaved, median of 5. The framed may take at most FRAME_COST of
+    // the unframed. Pinned at measured x 1.25 or the plan's 1.10 settled and
+    // 1.25 draft, whichever is lower: the plan's are (measured over four
+    // runs on the frame's first commit: settled 0.85 to 1.04, draft 0.88 to
+    // 1.20; the frame's own work is a few ms, under the noise of a render).
+    const FRAME_COST = { settled: 1.1, draft: 1.25 }
+    const runs = opts.runs ?? 5
+    const { page, errors } = await openPage()
+    for (const doc of ['native-photo', 'photo-12mp']) {
+      for (const draft of [false, true]) {
+        const frames = ['none', 'crop', 'fit']
+        const times = Object.fromEntries(frames.map((f) => [f, []]))
+        let size = ''
+        for (let i = -1; i < runs; i++) {
+          for (const f of frames) {
+            const r = await page.evaluate(([d, ff, dr]) => window.H.frameCost(d, ff, dr), [doc, f, draft])
+            // The first round only warms the canvases and the cache.
+            if (i >= 0) times[f].push(r.ms)
+            if (f === 'none') size = `${r.w}x${r.h}`
+          }
+        }
+        const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+        const base = median(times.none)
+        const bound = draft ? FRAME_COST.draft : FRAME_COST.settled
+        const row = {}
+        for (const f of ['crop', 'fit']) {
+          const ratio = median(times[f]) / base
+          const ok = ratio <= bound
+          if (!ok) {
+            failed = true
+            failure = 'a framed preview costs more than its bound'
+          }
+          row[f] = { median: Number(median(times[f]).toFixed(1)), ratio: Number(ratio.toFixed(3)), ok }
+        }
+        const key = `${doc} ${draft ? 'draft' : 'settled'} ${size}`
+        result.frameCost[key] = { unframed: Number(base.toFixed(1)), ...row, bound, runs: times }
+        console.log(
+          `frame-cost ${key}`.padEnd(44),
+          `unframed ${base.toFixed(1)} ms, Crop ${row.crop.median} ms (${row.crop.ratio}x), Fit ${row.fit.median} ms (${row.fit.ratio}x), bound ${bound}x`,
+          row.crop.ok && row.fit.ok ? 'ok' : 'OVER',
+        )
+      }
+    }
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
   for (const spec of opts.time) {
     const [doc, h] = spec.split('@')
     const height = Number(h)
@@ -322,7 +379,7 @@ try {
     // A fresh page per run, so one render's garbage is not the next one's cost.
     // Through the EXPORT entry (renderPrintAsync, no cache): a timing is of
     // what Save runs, not of the preview's cached path.
-    for (let i = 0; i < opts.runs; i++) {
+    for (let i = 0; i < (opts.runs ?? 3); i++) {
       const { page, errors } = await openPage()
       const r = await page.evaluate(([d, hh, mp]) => window.H.render(d, hh, { photo: mp, async: true }), [doc, height, opts.photoMp])
       if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)

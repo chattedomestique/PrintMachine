@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { draftSize, previewSize, renderPrint, type OverlaySpec, type RenderCache } from '../../engine/render.ts'
 import { type PrintSettings } from '../../engine/types.ts'
-import { sheetAspect } from '../../engine/frame.ts'
+import { sheetAspect, type FrameInputs } from '../../engine/frame.ts'
 
 /** Quiet gap that counts as "the control has stopped". Long enough to span the
  *  pauses inside a real drag, short enough that letting go feels immediate. */
@@ -23,6 +23,7 @@ interface Pending {
   settings: PrintSettings
   overlay: OverlaySpec
   media: ImageBitmap | null
+  inputs: FrameInputs
 }
 
 /**
@@ -41,7 +42,10 @@ export function useRenderer(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   settings: PrintSettings,
   overlay: OverlaySpec,
-  media: ImageBitmap | null = null,
+  media: ImageBitmap | null,
+  /** What the frame's fill is made from (engine/frame.ts `FrameInputs`); a
+   *  fill whose input is not here yet draws as Paper. */
+  inputs: FrameInputs,
   /**
    * Render nothing while true: a save is pressing the print at full size, and
    * a preview frame then would hold its buffers alongside the press's on a
@@ -109,13 +113,14 @@ export function useRenderer(
         pending.overlay,
         (draft ? draftSize(aspect) : previewSize(aspect)).h,
         pending.media,
+        pending.inputs,
       )
     }
     frameRef.current = requestAnimationFrame(run)
   }, [canvasRef, getScratch])
 
   useEffect(() => {
-    pendingRef.current = { settings, overlay, media }
+    pendingRef.current = { settings, overlay, media, inputs }
     // Anything arriving now is treated as motion. The timer below is what
     // decides it has stopped — a control that is still moving keeps pushing it
     // out, so the expensive frame is only paid for once, at the end.
@@ -126,7 +131,7 @@ export function useRenderer(
       schedule()
     }, SETTLE_MS)
     schedule()
-  }, [settings, overlay, media, schedule])
+  }, [settings, overlay, media, inputs, schedule])
 
   useEffect(() => () => window.clearTimeout(settleRef.current), [])
 

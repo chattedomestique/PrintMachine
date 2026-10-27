@@ -298,9 +298,12 @@ chooses, not something the app does for them. Replacing the photo keeps the
 sheet that was chosen (an Original sheet takes the new photo's shape);
 removing the photo from an Original sheet leaves 4:5, since there is no shape
 to take. A photo more extreme than 3:1 (a panorama) is cover-cropped to 3:1,
-so no sheet is a sliver. `sheetAspect` is the one place a sheet becomes a
-number, and everything downstream — the cover fit, the pan limits, Fit, the
-preview and the export — takes that number.
+so no sheet is a sliver. `sheetAspect` (`engine/frame.ts`) is the one place
+a sheet becomes a number, and the preview and the export size the sheet from
+it. The photo is placed on the sheet's visible rectangle, the sheet inside its
+frame (unframed, the whole sheet): the cover fit and the pan limits are
+relative to that rectangle (`visibleAspect`, `layoutSheet`), and Fit is the
+whole photo contained in it.
 
 At the size where the sheet holds the photo at its own pixels, the blit is
 **snapped**: drawn at exactly the photo's size, at a whole-pixel offset, kept
@@ -328,16 +331,21 @@ height) is left alone.
 
 #### The photo always covers the sheet
 
-Panning is limited to where the photo still covers the sheet: its centre can
-move until one of its edges reaches the trim, and no further. That limit is
-enforced **where the sheet is drawn** (`coverRect` clamps whatever placement it
-is handed), and again by every edit that moves the photo, zooms it or changes
-the sheet's shape, so the stored value is honest too. The second place matters
+Panning is limited to where the photo still covers what it is placed on, the
+sheet's visible rectangle (the whole sheet unframed, the sheet inside its
+frame otherwise): its centre can move until one of its edges reaches that
+rectangle's edge, and no further. (Fit shows the whole photo inside the
+rectangle and reads no pan; the stored one is kept, clamped as Crop would
+show it.) That limit is enforced **where the sheet is drawn** (`coverRect`
+clamps whatever placement it is handed), and again by every edit that moves
+the photo, zooms it or changes the sheet's shape or frame, so the stored
+value is honest too. The second place matters
 because a pan that is legal on one sheet is not on another: push a landscape
 photo to one side on a square sheet, switch to 4:5, and without it a strip of
 bare sheet would print. A property test throws random sheet changes (Original
 among them), pans, zooms and replaced photos at the document and checks the
-sheet stays covered after every one.
+sheet stays covered after every one, and another random frame and sheet
+changes, checking the stored pan stays inside the visible rectangle's travel.
 
 The compositor still treats a transparent ground pixel as paper rather than
 black — `getImageData` hands untouched pixels back as transparent *black*, and

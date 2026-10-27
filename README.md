@@ -827,7 +827,20 @@ this app used to draw a photo, and the script fails if either passes. Each
 40 and 61 MP photo is saved a second time as Save saves it by default, a
 JPEG, whose own header must say a baseline frame (SOF0) of the plan's size
 with every component sampled 1x1 (4:4:4): 24.7 MB at 7728x5152 for this
-zone plate, written in 12.2 s. A JPEG
+zone plate, written in 12.2 s.
+
+Framed, the photo still lands at its own pixels, and the gate says so pixel
+by pixel: the 40 MP zone plate on its own sheet with the first photo's frame
+and round corners (9016x6440, a 644 px frame), a 3000x2000 one in Fit on 4:5
+(3652x4565, the photo at (326, 1283)) and that one's smaller copy at 60%
+(2191x2739, the copy decoded at its contained 1799x1199 and drawn 1:1). In
+each, inside the photo's rectangle and outside its corners, every byte is the
+photo Save drew (38.2 million pixels at 40 MP: largest difference 0/255,
+Laplacian 1.0000); every pixel of the frame and the matte is the fill's colour
+(18.2 million at 40 MP); every corner pixel is the photo over the fill at the
+corner's exact coverage, within the half level of one rounding; Fit's
+rectangle holds the photo's shape to half a pixel; and the 40 MP framed print
+saved as Save's JPEG is a 9016x6440 SOF0 sampled 4:4:4. A JPEG
 whose EXIF says to rotate it saves upright, a PNG's
 transparent hole prints as paper (never black), a document whose stored photo
 is gone is refused rather than printed on bare paper, and the default print
@@ -1039,19 +1052,48 @@ photograph and would put case 6 at about 379 MB. The gate in brackets):
 | 9. A 48 MP 3:1 panorama on Original, the default document, second ink | 12000x4000 | 121.2 MB (150) | 400.0 MB (420) | 18.5 s: 386 (320 + 65) | +245 MB |
 | 10. 3:1 on Original, type at 10%, second ink (the luminance at one cell a pixel) | 6399x2133 | 149.2 MB (185) | 245.1 MB (290) | 5.6 s: 410 (346 + 64) | +261 MB |
 
+Framed, a photo at its own pixels inside the first photo's frame (round
+corners, the photo's own colour) or the widest; the sheet grows by the frame
+and, in Fit on a ratio not the photo's own, by much more, and every added
+pixel is the frame's. Each is gated at what it measured x 1.25 and under a
+ceiling that is not its own measurement: case 6's typed peak scaled by the
+sheet's width, plus the decoded photo and the file, x 1.30
+(`scripts/export-cases.mjs`); where measured x 1.25 is over it, the gate is
+the ceiling:
+
+| Case | Sheet | Typed arrays, peak | With canvases, the decoded photo and the file | Ceiling |
+|---|---|---|---|---|
+| 11. 40 MP on Original, the first photo's frame | 9016x6440 (58.1 MP) | 118.0 MB (147.5) | 379.1 MB (467) | 467.9 MB |
+| 12. The same photo on 1:1 Fit | 9016x9016 (81.3 MP) | 120.1 MB (150) | 413.8 MB (510) | 510.1 MB |
+| 13. 61 MP on Original, the widest frame | 13976x10808 (151 MP) | 147.5 MB (184) | 619.1 MB (773) | 828.6 MB |
+| 14. A 40 MP portrait (5152x7728) on 16:9 Fit | 18414x10358 (191 MP) | 168.7 MB (210) | 613.6 MB (767) | 871.1 MB |
+| 15. The same at the widest frame (memory only) | 31864x17924 (571 MP) | 262.2 MB (327) | 1238.8 MB (1548) | 1794.8 MB |
+
+The frame adds one band buffer to the press (the framed ground's own); the
+rest grows with the width as before, and slower than it, since a wider sheet
+is pressed fewer rows at a time. Past 100 MP most of what a save holds is the
+file (at 1.4 bytes a pixel, 800 MB at 571 MP) and the photo, so a very large
+framed print is a matter of the phone's memory for its file, which the
+caption's size says before the tap.
+
 What the press holds grows with the sheet's WIDTH (its tile rings and band
 buffers), not its height: a 4000x10000 photo on Original (a 4000x10000 sheet)
 holds 109.2 MB of typed arrays at its peak against 107.4 MB for a 4000x5000
 one under case 2's document (1.017 times), and 120.8 against 113.2 MB under
-its worst press (1.068 times).
+its worst press (1.068 times); framed, a 3618x6284 photo on Original (a
+4666x7332 sheet) 120.8 MB against 120.1 MB for a 4000x3000 one (4666x3666,
+1.006 times).
 
 The gates (the script exits 1 over any): cases 1-4 at what they measured
 once Save pressed into the encoder, x 1.25 (9.1, 7.8, 8.0 and 6.3 bytes of
 typed arrays an output pixel; case 5 is recorded, not gated); cases 6-10 in
 megabytes, the typed arrays and the whole, at the ceilings the band engine
 was designed to or at what they measured x 1.25 where that is lower (case 7:
-144); the same-width pairs at 1.15 times. Case 8 (81 s in node) runs with
-`FULL=1`; CI runs the rest, four processes at a time (2 min 16 s here).
+144); cases 11-15 as above; the same-width pairs at 1.15 times. Case 8
+(81 s in node) and the framed 13 to 15 (209, 272 and 807 s) run with
+`FULL=1`; CI runs the rest, four processes at a time (4 min 51 s here with
+the framed 11 and 12 and the framed pair, 3 min 39 s without them, on the
+same day; 2 min 16 s without them on a faster one).
 Desktop Chromium's memory is informational (V8 frees short-lived buffers far
 more eagerly than an iPhone's JavaScriptCore), and the phone's own is a
 DEVICE-CHECKLIST item. The legacy five-plate print (kept whole: see "The
@@ -1074,6 +1116,15 @@ the reference machine's 126; its estimate of a 40 MP save, 33 s x R, is 16
 to 17 s, the 33 s being this machine's estimate from before the save was
 measured here at 15.1 s. How long a save takes on a phone is a
 DEVICE-CHECKLIST item.
+
+A framed save costs what its sheet's megapixels cost: in one run of
+`measure:export` (a slower day of this machine than the table above), the
+40 MP photo framed on Original took 33.9 s for 58.1 MP, 584 ms a megapixel,
+and on 1:1 Fit 46.9 s for 81.3 MP, 577, against 23.4 s and 587 for the same
+photo unframed. On a phone the only whole-save figure is the device spike's
+estimate, about 16 s at 40 MP: about 0.4 s a sheet megapixel, so about 23 s
+for the framed 58 MP, 33 s at 81 MP and 76 s at 191 MP. These are estimates;
+the app promises no time.
 
 ### The same print at every size
 

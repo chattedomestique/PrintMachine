@@ -278,7 +278,12 @@ holds"). What only a phone can settle:
       ±16 levels of noise; a grainier photo's file is larger) under those:
       339, 425 and 518 MB
       measured. Write down the phone's own peak beside them; what the
-      browser holds besides is what only a phone shows.
+      browser holds besides is what only a phone shows. Framed (once the
+      frame can be set), the same count is 379 MB for the 40 MP photo framed
+      on Original (9016x6440, 58 MP), 414 MB on 1:1 Fit (81 MP), 619 MB for
+      61 MP at the widest frame (151 MP), 614 MB for a 40 MP portrait on 16:9
+      Fit (191 MP) and 1239 MB at its widest (571 MP), most of it the file:
+      write down where the phone stops.
 - [ ] **Font clamp.** A 61 MP portrait photo on its own sheet (9504 px tall),
       type at 120%: the glyphs in the file are as wide as the preview shows
       them, not 17 to 38% narrower (the device spike read every font up to
@@ -298,7 +303,11 @@ holds"). What only a phone can settle:
       spike measured only the phone's encoder (62 to 65 ms a megapixel on its
       halftone image, R 0.49 to 0.52) and estimated a 40 MP save at about 16
       to 17 s from it (33 s x R, the 33 s an estimate for the reference
-      machine from before its save was measured).
+      machine from before its save was measured). That is about 0.4 s a sheet
+      megapixel; a frame adds pixels, so once the frame can be set write down
+      the framed saves too against the same estimate: about 23 s for the
+      40 MP photo framed on Original (58 MP), 33 s on 1:1 Fit (81 MP), 76 s on
+      16:9 Fit (191 MP). The app promises no time.
 - [ ] **Backgrounding and the screen.** Start a 40 MP save and let the screen
       auto-lock (the Wake Lock should keep it on: iOS 16.4 and later); then
       switch to another app for 10 s and return: either it finished, or the

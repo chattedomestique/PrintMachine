@@ -1,5 +1,5 @@
 /**
- * Does a saved print keep every pixel of the photo? The REAL import
+ * Does a saved print keep every pixel of the photo, framed or not? The REAL import
  * (`importMedia`, into this page's IndexedDB), the REAL decode for Save
  * (`decodeOriginal`) and the REAL `savePrint`, on generated photos, with the
  * type taken off and the paper veil off so that the print IS the photo
@@ -12,12 +12,14 @@
  */
 
 import { MissingPhotoError, describePlan, planPrint, savePrint, type ExportFormat } from '../../src/engine/export.ts'
+import { cornerCoverage, layoutSheet } from '../../src/engine/frame.ts'
 import { groundRect } from '../../src/engine/render.ts'
-import type { PrintSettings } from '../../src/engine/types.ts'
-import { decodeOriginal, decodeOriented } from '../../src/features/media/decode.ts'
+import type { FrameSettings, PrintSettings } from '../../src/engine/types.ts'
+import { decodeOriginal, decodeOriented, decodeResized } from '../../src/features/media/decode.ts'
 import { storedFrameInputs } from '../../src/features/media/frameInputs.ts'
 import { importMedia } from '../../src/features/media/importMedia.ts'
 import { detachedCanvas } from '../../src/features/shell/page.ts'
+import { copyRect } from '../../src/features/shell/useSave.ts'
 import { defaultSettings } from '../../src/state/defaults.ts'
 import { deleteMedia, getMedia } from '../../src/state/mediaStore.ts'
 
@@ -278,6 +280,141 @@ async function controls() {
   return { halfPixel, oldImport }
 }
 
+/** The palette the framed prints carry (the frame's colour is looked up in
+ *  it; computing it from the photo is not what is measured here). */
+const FRAME_PALETTE = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
+const hexRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+
+/**
+ * A zone plate of w x h through the real import and the real Save, framed:
+ * `frame` on `aspect`, as a PNG (and, with `jpeg`, again as Save's JPEG for
+ * its header). With `smaller`, a smaller copy at that fraction of the height,
+ * decoded at the photo's contained rectangle as Save decodes one (useSave
+ * `copyRect`, `decodeResized`) and drawn 1:1. Every pixel of the file is
+ * checked against what it must be:
+ *  - outside the photo's rectangle (`shown`): the fill's colour exactly (the
+ *    paper veil is off);
+ *  - inside it, away from the corners: the photo Save drew (the original, or
+ *    the smaller copy), at its own pixels, every byte;
+ *  - in the corners' patches: the photo over the fill at the corner's exact
+ *    coverage, c P + (1 - c) F, rounded once (within half a level).
+ * And the Laplacian energy of the photo's rectangle (the corners masked)
+ * against the same rectangle of the photo itself.
+ */
+async function framed(w: number, h: number, aspect: PrintSettings['aspect'], frame: Partial<FrameSettings>, opts: { jpeg?: boolean; smaller?: number } = {}) {
+  const file = await encode(zonePlate(w, h), 'image/jpeg', 0.92)
+  const imported = (await importMedia(file)).layer
+  const layer = { ...imported, palette: FRAME_PALETTE }
+  const s = photoOnly(layer, aspect)
+  s.frame = { ...s.frame, ...frame }
+  const full = planPrint(s)
+  const maxHeight = opts.smaller ? Math.round(full.height * opts.smaller) : undefined
+  const plan = planPrint(s, { maxHeight })
+  const layout = layoutSheet(s, plan.width, plan.height)
+  // The photo as Save decodes it: the original, or a smaller copy decoded at
+  // its rectangle.
+  const rect = opts.smaller ? (copyRect(s, plan) ?? undefined) : undefined
+  const decode = () => (rect ? decodeResized(layer.id, rect.dw, rect.dh) : decodeOriginal(layer.id))
+  const photo = await decode()
+  const t0 = performance.now()
+  const pressed = await savePrint(s, photo, storedFrameInputs(s), { format: 'png', maxHeight, rect, makeCanvas: detachedCanvas, onGround: () => photo.close() })
+  const ms = performance.now() - t0
+  const out = await pixelsOf(pressed.blob)
+  // The reference: the same decode, read at its own size.
+  const refBmp = await decode()
+  const rw = refBmp.width
+  const rh = refBmp.height
+  const rc = canvas(rw, rh)
+  rc.drawImage(refBmp, 0, 0)
+  refBmp.close()
+  const ref = rc.getImageData(0, 0, rw, rh).data
+  rc.canvas.width = 0
+  const drawn = rect ?? layout.photo!
+  const aligned = drawn.dw === rw && drawn.dh === rh && Number.isInteger(drawn.dx) && Number.isInteger(drawn.dy)
+  const fill = hexRgb(FRAME_PALETTE[s.frame.fill as keyof typeof FRAME_PALETTE])
+  const { x0, y0, w: sw, h: sh } = layout.shown
+  const patch = Math.ceil(layout.radius)
+  const W = out.w
+  let notFill = 0
+  let photoPx = 0
+  let photoDiff = 0
+  let maxDiff = 0
+  let cornerPx = 0
+  let cornerDev = 0
+  const inPatch = (x: number, y: number) => patch > 0 && Math.min(x - x0, x0 + sw - 1 - x) < patch && Math.min(y - y0, y0 + sh - 1 - y) < patch
+  const same = out.w === plan.width && out.h === plan.height
+  if (same && aligned) {
+    for (let y = 0; y < out.h; y++) {
+      for (let x = 0; x < out.w; x++) {
+        const o = (y * W + x) * 4
+        if (x < x0 || x >= x0 + sw || y < y0 || y >= y0 + sh) {
+          if (out.data[o] !== fill[0] || out.data[o + 1] !== fill[1] || out.data[o + 2] !== fill[2]) notFill++
+          continue
+        }
+        const r = ((y - drawn.dy) * rw + (x - drawn.dx)) * 4
+        if (inPatch(x, y)) {
+          const c = cornerCoverage(layout.radius, Math.min(x - x0, x0 + sw - 1 - x), Math.min(y - y0, y0 + sh - 1 - y))
+          for (let k = 0; k < 3; k++) cornerDev = Math.max(cornerDev, Math.abs(out.data[o + k] - (c * ref[r + k] + (1 - c) * fill[k])))
+          cornerPx++
+          continue
+        }
+        let d = 0
+        for (let k = 0; k < 3; k++) d = Math.max(d, Math.abs(out.data[o + k] - ref[r + k]))
+        if (d) photoDiff++
+        maxDiff = Math.max(maxDiff, d)
+        photoPx++
+      }
+    }
+  }
+  // The finest detail of the photo's rectangle, the corners and the border
+  // pixel round it masked, against the photo's own.
+  const lumaAt = (d: Uint8ClampedArray, i: number) => 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2]
+  let eOut = 0
+  let eRef = 0
+  if (same && aligned) {
+    for (let y = y0 + 1; y < y0 + sh - 1; y++) {
+      for (let x = x0 + 1; x < x0 + sw - 1; x++) {
+        if (inPatch(x, y) || inPatch(x - 1, y) || inPatch(x + 1, y) || inPatch(x, y - 1) || inPatch(x, y + 1)) continue
+        const i = y * W + x
+        const j = (y - drawn.dy) * rw + (x - drawn.dx)
+        const a = 4 * lumaAt(out.data, i) - lumaAt(out.data, i - 1) - lumaAt(out.data, i + 1) - lumaAt(out.data, i - W) - lumaAt(out.data, i + W)
+        const b = 4 * lumaAt(ref, j) - lumaAt(ref, j - 1) - lumaAt(ref, j + 1) - lumaAt(ref, j - rw) - lumaAt(ref, j + rw)
+        eOut += a * a
+        eRef += b * b
+      }
+    }
+  }
+  let jpeg: (ReturnType<typeof frameOf> & { bytes: number; ms: number }) | null = null
+  if (opts.jpeg) {
+    const again = await decode()
+    const t1 = performance.now()
+    const saved = await savePrint(s, again, storedFrameInputs(s), { format: 'jpeg', maxHeight, rect, makeCanvas: detachedCanvas, onGround: () => again.close() })
+    jpeg = { ...frameOf(new Uint8Array(await saved.blob.arrayBuffer())), bytes: saved.blob.size, ms: Math.round(performance.now() - t1) }
+  }
+  await deleteMedia(layer.id)
+  // Fit's contained rectangle: the side that binds is the visible
+  // rectangle's exactly; the other is the photo's shape times it, rounded:
+  // off by under a pixel.
+  const aspectError = layout.shown.w / layout.shown.h > w / h ? Math.abs(layout.shown.w - (layout.shown.h * w) / h) : Math.abs(layout.shown.h - (layout.shown.w * h) / w)
+  return {
+    photo: `${w}x${h}`,
+    plan: { width: plan.width, height: plan.height, limit: plan.limit, border: plan.border },
+    file: `${out.w}x${out.h}`,
+    dimsMatch: same,
+    shown: `${sw}x${sh} at (${x0}, ${y0})`,
+    drawn: `${rw}x${rh} at (${drawn.dx}, ${drawn.dy})`,
+    aligned,
+    radius: layout.radius,
+    border: { pixels: out.w * out.h - sw * sh, notFill },
+    photoRect: { pixels: photoPx, differ: photoDiff, maxDiff },
+    corners: { pixels: cornerPx, maxDev: cornerDev },
+    lapRatio: eRef > 0 ? eOut / eRef : NaN,
+    aspectError,
+    ms: Math.round(ms),
+    jpeg,
+  }
+}
+
 /** A JPEG stored sideways with EXIF Orientation 6 (rotate 90 clockwise): its
  *  left half red, its right half blue, so upright the top is red. */
 async function orientation() {
@@ -401,8 +538,9 @@ declare global {
       orientation: typeof orientation
       pngAlpha: typeof pngAlpha
       missingPhoto: typeof missingPhoto
+      framed: typeof framed
     }
   }
 }
 
-window.F = { zone, controls, orientation, pngAlpha, missingPhoto }
+window.F = { zone, controls, orientation, pngAlpha, missingPhoto, framed }

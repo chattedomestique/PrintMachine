@@ -25,6 +25,16 @@
  *    sampled 1x1 (4:4:4). Two controls prove the gate can fail: the same
  *    photo drawn half a pixel off its grid, and from a 2048 px copy (the old
  *    import), must both fall below it.
+ *  - framed (the photo's pixels inside a frame): the 40 MP 7728x5152 zone
+ *    plate on its own sheet with the first photo's frame, round, in the
+ *    photo's colour (9016x6440, also as Save's JPEG: SOF0, 4:4:4); a 3000x2000
+ *    one in Fit on 4:5, round (the matte above and below); and that one's
+ *    smaller copy at 60%, decoded at its contained rectangle. Inside the
+ *    photo's rectangle, outside the corners, every byte is the photo Save
+ *    drew (the original, or the copy), Laplacian 1.0000; every pixel of the
+ *    frame and the matte is the fill; each corner pixel is the photo over the
+ *    fill at the corner's exact coverage, rounded once; Fit's contained
+ *    rectangle is the photo's shape to under a pixel.
  *  - a JPEG whose EXIF says rotate 90 saves upright; a PNG's transparent hole
  *    prints as paper, never black; a document whose stored photo is gone is
  *    refused, never printed on bare paper.
@@ -131,6 +141,54 @@ try {
     ]) {
       const fails = r.lapRatio < LAPLACIAN || r.corr < CORRELATION
       console.log(`  ${name.padEnd(28)} Laplacian ${f4(r.lapRatio)}, corr ${f4(r.corr)}: below the gate ${gate(fails, `${name} passes the gate: it cannot fail`)}`)
+    }
+  }
+
+  console.log('\nFramed: the photo inside its frame at its own pixels, every byte; the frame its fill; the corners on the photo')
+  {
+    const round = { width: 1 / 14, corners: 1 }
+    const rows = [
+      // The 40 MP photo on its own sheet with the first photo's frame, the
+      // photo's own colour, round: the default a photo is framed with.
+      ['40 MP Original, round, Photo', 7728, 5152, 'original', { ...round, fill: 'photo' }, { jpeg: true }, '9016x6440', 'native'],
+      // Fit of a landscape photo on 4:5, round: the matte above and below,
+      // the corners on the photo, not on the frame.
+      ['Fit 4:5, round, Muted', 3000, 2000, '4:5', { ...round, fill: 'muted', mode: 'fit' }, {}, '3652x4565', 'native'],
+      // Its smaller copy (60% of the height): decoded at its contained
+      // rectangle and drawn 1:1, never stretched.
+      ['Fit 4:5, a smaller copy at 60%', 3000, 2000, '4:5', { ...round, fill: 'muted', mode: 'fit' }, { smaller: 0.6 }, '2191x2739', 'smaller'],
+    ]
+    for (const [name, w, h, aspect, frame, opts, size, limit] of rows) {
+      const t = Date.now()
+      const r = await p.evaluate(([w, h, a, f, o]) => window.F.framed(w, h, a, f, o), [w, h, aspect, frame, opts])
+      const planned = `${r.plan.width}x${r.plan.height}`
+      console.log(
+        `  ${name.padEnd(32)} ${r.photo} -> ${planned} ${r.plan.limit} (${r.plan.border} px frame), file ${r.file}; the photo ${r.drawn}, shown ${r.shown}, radius ${r.radius.toFixed(2)}`,
+      )
+      gate(planned === size && r.plan.limit === limit, `${name}: planned ${planned} ${r.plan.limit}, not ${size} ${limit}`)
+      gate(r.dimsMatch, `${name}: the file is ${r.file}, not the plan's ${planned}`)
+      console.log(
+        `  ${''.padEnd(32)} drawn at its own pixels ${gate(r.aligned, `${name}: the photo is not drawn at its own pixels`)}; ` +
+          `the photo's rectangle outside the corners: ${r.photoRect.pixels} px, ${r.photoRect.differ} differ, largest difference ${r.photoRect.maxDiff}/255 ` +
+          `${gate(r.photoRect.pixels > 0 && r.photoRect.differ === 0, `${name}: ${r.photoRect.differ} pixels of the photo differ (largest ${r.photoRect.maxDiff})`)}, ` +
+          `Laplacian ${f4(r.lapRatio)} ${gate(r.lapRatio >= LAPLACIAN, `${name}: Laplacian ${r.lapRatio}`)}`,
+      )
+      console.log(
+        `  ${''.padEnd(32)} the frame${frame.mode === 'fit' ? ' and the matte' : ''}: ${r.border.pixels} px, ${r.border.notFill} not the fill ` +
+          `${gate(r.border.pixels > 0 && r.border.notFill === 0, `${name}: ${r.border.notFill} pixels of the frame are not the fill`)}; ` +
+          `the corners on the photo: ${r.corners.pixels} px within ${r.corners.maxDev.toFixed(3)} of the exact coverage ` +
+          `${gate(r.corners.pixels > 0 && r.corners.maxDev <= 0.5 + 1e-6, `${name}: a corner pixel is ${r.corners.maxDev} off its exact coverage`)}` +
+          (frame.mode === 'fit' ? `; the photo's shape held to ${r.aspectError.toFixed(3)} px ${gate(r.aspectError < 1, `${name}: the photo's shape is off by ${r.aspectError} px`)}` : '') +
+          `; ${(r.ms / 1000).toFixed(1)} s`,
+      )
+      if (r.jpeg) {
+        const j = r.jpeg
+        console.log(
+          `  ${''.padEnd(32)} and as a JPEG: ${j.marker} ${j.file}, sampling ${j.sampling} ` +
+            `${gate(j.marker === 'SOF0' && j.file === planned && j.sampling === '11 11 11', `${name}: the JPEG is ${j.marker} ${j.file} sampling ${j.sampling}, not SOF0 ${planned} 11 11 11`)} ` +
+            `(${(j.bytes / 1e6).toFixed(1)} MB in ${(j.ms / 1000).toFixed(1)} s; the row ${((Date.now() - t) / 1000).toFixed(0)} s in all)`,
+        )
+      }
     }
   }
 

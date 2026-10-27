@@ -4,8 +4,8 @@
  * more eagerly than an iPhone's JavaScriptCore, which is why the hard gate is
  * measure-alloc.mjs's deterministic count and, on a phone, DEVICE-CHECKLIST.
  *
- *   node scripts/measure-export.mjs           (cases 1-10 of export-cases.mjs;
- *                                               case 8 with FULL=1)
+ *   node scripts/measure-export.mjs           (cases 1-12 of export-cases.mjs;
+ *                                               8 and 13-15 with FULL=1)
  *   node scripts/measure-export.mjs 1 3 7g
  *
  * Each case runs the real Save path (savePrint, JPEG) in a fresh browser, the
@@ -35,7 +35,8 @@ const url = `http://127.0.0.1:${server.httpServer.address().port}/harness.html`
 const load = (p) => server.ssrLoadModule(resolve(root, p))
 const { defaultSettings, makeLayer, makeMedia } = await load('src/state/defaults.ts')
 const { contrastPartner } = await load('src/engine/inks.ts')
-const CASES = exportCases({ defaultSettings, makeLayer, makeMedia, contrastPartner })
+const limits = await load('src/engine/limits.ts')
+const CASES = exportCases({ defaultSettings, makeLayer, makeMedia, contrastPartner, limits })
 
 /** Resident memory of a process and all its descendants, in MB. */
 function treeRss(pid) {

@@ -37,13 +37,52 @@
  * ceilings the band engine was designed to, or what was measured x 1.25
  * where that is lower (case 7: 115.2 MB typed, so 144).
  *
+ * Framed, each a photo at its own pixels inside its frame (the first
+ * photo's width, 1/14 of the sheet's long side, or the widest, 0.16; round
+ * corners; the photo's own colour):
+ *
+ * 11. 40 MP, 7728x5152 Original, the default document: 9016x6440 (58.1 MP);
+ * 12. the same photo on 1:1 Fit: 9016x9016 (81.3 MP);
+ * 13. 61 MP, 9504x6336 Original at the widest frame: 13976x10808 (151 MP);
+ * 14. the owner's 40 MP portrait, 5152x7728, on 16:9 Fit: 18414x10358
+ *     (191 MP, 4.8x the photo, the worst realistic default);
+ * 15. the same at the widest frame: 31864x17924 (571 MP), memory only.
+ * 13 to 15 run with FULL=1.
+ *
+ * Gated in megabytes like 6 to 10, at what they measured x 1.25, and under
+ * a stated CEILING that does not come from their own measurement (a gate
+ * that is only "measured x 1.25" cannot fail on the day it is set): the
+ * press holds what grows with the sheet's WIDTH, so the ceiling scales case
+ * 6's measured typed peak by the width and adds what does not (the decoded
+ * photo, the file at FILE_BOUND), with 30% to spare:
+ * `ceiling = 1.30 x (CASE6.typed x W / CASE6.width + P + FILE_BOUND x pixels)`
+ * (`ceiling` below). Where measured x 1.25 is over the ceiling, the gate is
+ * the ceiling. And 11 and 12's typed arrays at most 1.30 x case 6's typed
+ * gate (125 MB): 162.5 MB. Measured when the frame went in (typed / whole,
+ * ceiling): 11, 118.0 / 379.1 MB (467.9); 12, 120.1 / 413.8 (510.1); 13,
+ * 147.5 / 619.1 (828.6); 14, 168.7 / 613.6 (871.1); 15, 262.2 / 1238.8
+ * (1794.8). The typed arrays grow far slower than the width: a band is
+ * BAND_PIXELS over the width, so a wider sheet presses fewer rows at a time.
+ *
  * And the same-width pairs (`pair`): a 4000x10000 photo on Original (a
  * 4000x10000 sheet: the whole photo, at its own pixels) against a 4000x5000
- * one, for case 2's document and for its worst-press variant. The
- * press holds what grows with the sheet's width, not its height, so the
- * taller one's peak typed bytes may be at most 1.15 times the shorter's.
+ * one, for case 2's document and for its worst-press variant; and framed, a
+ * 3618x6284 photo on Original (a 4666x7332 sheet) against a 4000x3000 one
+ * (4666x3666), case 2's document with the first photo's frame. The press
+ * holds what grows with the sheet's width, not its height, so the taller
+ * one's peak typed bytes may be at most 1.15 times the shorter's.
  */
-export function exportCases({ defaultSettings, makeLayer, makeMedia, contrastPartner }) {
+
+/** Case 6's typed-array peak as measured (MB) and its sheet's width: the
+ *  base of every framed case's ceiling. measure-alloc checks it against
+ *  case 6 whenever both run. */
+export const CASE6 = { typed: 102.3, width: 7728 }
+
+/** A framed case's ceiling, in MB, for a W-wide sheet of `pixels` holding a
+ *  decoded photo of `photoBytes`, the file at `fileBound` bytes a pixel. */
+export const ceiling = (W, photoBytes, pixels, fileBound) => 1.3 * ((CASE6.typed * 1e6 * W) / CASE6.width + photoBytes + fileBound * pixels) / 1e6
+
+export function exportCases({ defaultSettings, makeLayer, makeMedia, contrastPartner, limits }) {
   const secondInk = (l) => ({ ...l, contrastInkId: contrastPartner(l.inkId) })
   const photoDoc = (w, h, aspect, layers) => {
     const s = defaultSettings()
@@ -66,6 +105,13 @@ export function exportCases({ defaultSettings, makeLayer, makeMedia, contrastPar
       secondInk(makeLayer({ text: 'RISO', inkId: 'blue', size: size ?? 0.06, y: 0.76, rotation: -4 })),
       makeLayer({ text: 'TYPE ON A PHOTO', inkId: 'black', size: size ?? 0.03, y: 0.2, backing: 'yellow' }),
     ])
+  /** The first photo's frame: its width (or `over`'s), round corners, the
+   *  photo's own colour from the palette stored with it. */
+  const framed = (s, over = {}) => {
+    s.frame = { ...s.frame, width: limits.FRAME_WIDTH_FIRST, corners: 1, fill: 'photo', ...over }
+    s.media = { ...s.media, palette: { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' } }
+    return s
+  }
   /** The worst legal press: grain at its coarsest pitch, misregistration at
    *  its most, type at 0.16 of the height. */
   const worstPress = (s) => {
@@ -149,9 +195,49 @@ export function exportCases({ defaultSettings, makeLayer, makeMedia, contrastPar
       gate: { typed: 185, total: 290 },
       doc: () => defaultDoc(6399, 2133, 'original', 0.01),
     },
+    {
+      id: '11',
+      name: "40 MP, 7728x5152 Original, default document, the first photo's frame",
+      gate: { typed: 147.5, total: 467 },
+      ceiling: true,
+      doc: () => framed(defaultDoc(7728, 5152, 'original')),
+    },
+    {
+      id: '12',
+      name: "40 MP, 7728x5152 on 1:1 Fit, default document, the first photo's frame",
+      gate: { typed: 150, total: 510 },
+      ceiling: true,
+      doc: () => framed(defaultDoc(7728, 5152, '1:1'), { mode: 'fit' }),
+    },
+    {
+      id: '13',
+      name: '61 MP, 9504x6336 Original, default document, the widest frame',
+      gate: { typed: 184, total: 773 },
+      ceiling: true,
+      full: true,
+      doc: () => framed(defaultDoc(9504, 6336, 'original'), { width: limits.FRAME_WIDTH_MAX }),
+    },
+    {
+      id: '14',
+      name: "the owner's 40 MP portrait, 5152x7728 on 16:9 Fit, default document, the first photo's frame",
+      gate: { typed: 210, total: 767 },
+      ceiling: true,
+      full: true,
+      doc: () => framed(defaultDoc(5152, 7728, '16:9'), { mode: 'fit' }),
+    },
+    {
+      id: '15',
+      name: "the same portrait on 16:9 Fit, the widest frame (memory only)",
+      gate: { typed: 327, total: 1548 },
+      ceiling: true,
+      full: true,
+      doc: () => framed(defaultDoc(5152, 7728, '16:9'), { mode: 'fit', width: limits.FRAME_WIDTH_MAX }),
+    },
     { id: 'w2a', name: "same width: a 4000x5000 photo on Original, case 2's document", pair: 'w2', doc: () => case2Doc(4000, 5000, 'original') },
     { id: 'w2b', name: "same width: a 4000x10000 photo on Original, case 2's document", pair: 'w2', doc: () => case2Doc(4000, 10000, 'original') },
     { id: 'w8a', name: "same width: a 4000x5000 photo on Original, case 2's document, worst press", pair: 'w8', doc: () => worstPress(case2Doc(4000, 5000, 'original', 0.16)) },
     { id: 'w8b', name: "same width: a 4000x10000 photo on Original, case 2's document, worst press", pair: 'w8', doc: () => worstPress(case2Doc(4000, 10000, 'original', 0.16)) },
+    { id: 'wfa', name: "same width, framed: a 4000x3000 photo on Original (4666x3666), case 2's document", pair: 'wf', doc: () => framed(case2Doc(4000, 3000, 'original')) },
+    { id: 'wfb', name: "same width, framed: a 3618x6284 photo on Original (4666x7332), case 2's document", pair: 'wf', doc: () => framed(case2Doc(3618, 6284, 'original')) },
   ]
 }

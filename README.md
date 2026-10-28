@@ -481,7 +481,8 @@ kept too, by photo, sheet shape and field size, so a frame of a Blur drag
 runs only the three passes and the grade: about 2 ms over a draft frame
 with its field kept (it was 11 to 17 ms when each field was made whole). A
 Width drag on Original changes the sheet's shape, so each of its frames
-makes a cover as well. Save makes the field at 480 before it presses.
+makes a cover as well, and the frame-cost gate times that too (below). Save
+makes the field at 480 before it presses.
 
 The preview composes the frame into its ground in place, and the export
 composes it a band of rows at a time into a band buffer of its own
@@ -516,35 +517,61 @@ out (a test seam), the frame's own work: at most 1.10x settled and 1.25x
 draft, each. Frosted with its field made again inside the render, from
 the kept cover, through the page's own `frostFields` (each frame of a Blur
 drag), is timed too, against the print unframed, and held to what it
-measured x 1.25: 1.58x settled, 1.60x draft (it measured 1.12 to 1.26 and
-1.21 to 1.28 over 8 runs; the passes and the grade are 8 to 27 ms over the
-settled frame and 1.6 to 2.0 ms over the draft one). The draft bound fails a
-Blur drag that makes the cover again each frame (2.67x and 3.32x measured);
-the settled one does not see that (1.36x and 1.44x), nor the passes run
-twice (1.27x to 1.36x settled, 1.43x to 1.50x draft): the made-again work is
-a fifth of a settled render now, so a bound that saw its doubling would sit
-within a few percent of a clean run's spread. A shared machine's
+measured x 1.25: 1.58x settled, 1.60x draft (set from 8 runs at 1.12 to 1.26
+and 1.21 to 1.28; 1.10 to 1.24 and 1.23 to 1.32 in the 9 runs of the gate as
+it is now; the passes and the grade are 8 to 27 ms over the settled frame
+and 1.6 to 2.0 ms over the draft one). The draft bound fails a Blur drag
+that makes the cover again each frame (2.67x and 3.32x measured); the
+settled one does not see that (1.36x and 1.44x), nor the passes run twice
+(1.27x to 1.36x settled, 1.43x to 1.50x draft): the made-again work is a
+fifth of a settled render now, so a bound that saw its doubling would sit
+within a few percent of a clean run's spread. And Frosted on Original with
+its field made for a new sheet shape inside the render (each frame of a
+Width drag there: the cover and the field, through the same `frostFields`;
+the timed render steps through six widths a few hundred-thousandths apart,
+each its own shape on the same canvas, so the render cache stays and every
+step misses the kept covers and fields), against the same render with its
+field kept: the making's own share, held to what it measured x 1.25, 1.82x
+settled and 4.03x draft (set from 8 runs at 1.31 to 1.45 and 2.68 to 3.22;
+1.47 settled in a ninth; the
+cover and the field are 40 to 60 ms over the settled frame and 18 ms over
+the draft one). The draft bound fails a Width drag whose cover is made twice
+(5.07x to 5.21x and 4.26x to 4.32x after three measurements); the settled
+one does not (1.60x), for the reason above. A shared machine's
 interference only ever adds time and comes in spells that can outlast a
 document's rounds taken back to back, so the two documents at the two sizes
 are measured round by round in turn (15 rounds, one render a sample), a
 render's time is the mean of its three fastest samples (thirty in draft, ten
 a round), and a document and size with a row over its bound is measured
 again, up to twice, its samples pooled; it fails only if still over. On the
-gate as it is now (Crop, Fit, Frosted kept and Frosted made again, both
-documents at both sizes: 16 rows), 8 runs on one machine all passed, two of
-them measuring one document and size again: against unframed, Crop 0.97 to
-1.04, Fit 0.91 to 1.04 (under 1 in Fit, which draws the photo smaller),
-Frosted 1.00 to 1.10; against the compose skipped, Crop 1.00 to 1.07, Fit
-0.96 to 1.06, Frosted 1.02 to 1.10 (bound 1.10 settled, 1.25 draft). Before
+gate as it is now (Crop, Fit, Frosted kept, Frosted made again and Frosted
+made for a new shape on Original, both documents at both sizes: 20 rows), 9
+runs on one machine all passed; three of them (each once) measured one
+document and size again, each time the 12 MP photo's settled size for its
+kept Frosted row (1.100x and 1.104x its own compose skipped, and 1.144x
+unframed, then in). Their verdicts: against unframed, Crop 0.97 to 1.07,
+Fit 0.94 to 1.03 (under 1 in Fit, which draws the photo smaller), Frosted
+0.97 to 1.07; against the compose skipped, Crop 0.97 to 1.08, Fit 0.96 to
+1.06, Frosted 1.01 to 1.09 (bound 1.10 settled, 1.25 draft); Frosted made
+again 1.10 to 1.24 settled, 1.23 to 1.32 draft; made for a new shape 1.31 to
+1.47 settled, 2.68 to 3.22 draft. The kept Frosted settled row is the
+gate's closest to its bound: its verdicts reach 1.09 to 1.10, and one run in
+three or four measures it again; it has failed once in the runs known to
+date, a run whose mutant could not touch it, so a red there is about one CI
+run in a hundred, and a re-run is the answer. Before
 Frosted, M2's gate (Crop and Fit only) passed 75 runs in three batches of
 25, its verdicts 0.85 to 1.08 and 0.90 to 1.09. With the preview's compose
-run ten times over, the gate fails (11 of its 16 rows: the four Frosted rows
-with the field kept and the two draft made-again ones, a photo at its own
-size's Crop and Fit at both sizes, the 12 MP photo's settled Crop; the 12 MP
-photo's Fit stays in, its frame a flat matte round a photo a third of the
-sheet, about 1% of the render, and so do its draft Crop, at 1.244, and the
-settled made-again rows, whose bound is the looser); twenty times over fails
-all 16.
+run ten times over, the 16-row gate (before the Original rows) failed in
+both runs of it (10 and 11 rows over). In both, over: the four Frosted rows
+with the field kept, the two draft made-again ones, a photo at its own
+size's Crop at both sizes and its settled Fit, the 12 MP photo's settled
+Crop; in: the 12 MP photo's Fit at both sizes (its frame a flat matte round
+a photo a third of the sheet, about 1% of the render) and the settled
+made-again rows, whose bound is the looser. Three rows sit at the 1.25
+draft bound and go either way by run: a photo at its own size's draft Fit
+(1.260 over, 1.242 in) and draft Crop (1.259 and 1.254, over by a hair) and
+the 12 MP photo's draft Crop (1.244 and 1.245, in by a hair). Twenty times
+over failed all 16.
 
 #### The photo is stored exactly as it came
 

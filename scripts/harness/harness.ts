@@ -1060,13 +1060,22 @@ const COST_DOCS: Record<string, () => { settings: PrintSettings; copy: boolean }
 
 /** What the frame-cost gate frames a document with: the first photo's
  *  width, round corners, the photo's own colour, in Crop or in Fit; or
- *  Frosted at its default Blur, in Crop. */
+ *  Frosted at its default Blur, in Crop, on the document's sheet or
+ *  (`frosted-original`) on Original, whose shape moves with the width. */
 const COST_FRAMES: Record<string, Partial<FrameSettings> | null> = {
   none: null,
   crop: { width: 1 / 14, corners: 1, fill: 'photo', mode: 'crop' },
   fit: { width: 1 / 14, corners: 1, fill: 'photo', mode: 'fit' },
   frosted: { width: 1 / 14, corners: 1, fill: 'frosted', blur: 60, mode: 'crop' },
+  'frosted-original': { width: 1 / 14, corners: 1, fill: 'frosted', blur: 60, mode: 'crop' },
 }
+
+/** How many widths a Width drag on Original steps through, each its own
+ *  sheet shape, before it comes back to the first: more than the covers
+ *  (3) and fields (5) kept (frostField.ts), so every step makes both. The
+ *  sheet's shape moves in steps (the border is whole pixels of the photo),
+ *  so a canvas holds only a few (7 to 9 here). */
+const RESHAPE_STEPS = 6
 
 const costRigs = new Map<
   string,
@@ -1081,6 +1090,10 @@ const costRigs = new Map<
     fieldLong: number
     fields: ReturnType<typeof frostFields>
     blur: number
+    /** Original's Width drag: the widths it steps through (each its own
+     *  sheet shape, the same canvas), and the step it is at. */
+    widths: number[]
+    step: number
   }
 >()
 
@@ -1096,11 +1109,16 @@ const costRigs = new Map<
  * compose skipped (the preview's test seam, README "Test seams"): the photo
  * drawn into the same rectangle, so the two differ by the frame's own work
  * alone. `remake` (Frosted) makes the field again inside the timed render,
- * at a blur it has not been made at lately, through the page's own kept
- * fields and covers (frostField.ts), the cover made once untimed: what each
- * frame of a Blur drag costs (the three box passes and the grade).
+ * through the page's own kept fields and covers (frostField.ts): `true` at
+ * a blur it has not been made at lately, the cover made once untimed, what
+ * each frame of a Blur drag costs (the three box passes and the grade);
+ * `'reshape'` (on Original) at the next width of a Width drag, a sheet shape
+ * no cover is kept for, so the cover is made as well as the field, what
+ * each frame of that drag costs. Its widths are chosen so the canvas, and
+ * with it the render cache, stay as they are: the frame's difference from
+ * the same render with its field kept is the field's making alone.
  */
-async function frameCost(doc: string, frame: string, draft: boolean, bare = false, remake = false): Promise<{ ms: number; w: number; h: number }> {
+async function frameCost(doc: string, frame: string, draft: boolean, bare = false, remake: boolean | 'reshape' = false): Promise<{ ms: number; w: number; h: number }> {
   const key = `${doc}|${frame}|${draft}`
   let rig = costRigs.get(key)
   if (!rig) {
@@ -1112,6 +1130,7 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
       settings.frame = { ...settings.frame, ...f }
       settings.media = { ...settings.media!, palette: COST_PALETTE }
     }
+    if (frame === 'frosted-original') settings.aspect = 'original'
     const m = settings.media!
     const aspect = sheetAspect(settings)
     const size = copy ? (workingSize(m.width, m.height, previewArea(m, aspect, { width: settings.frame.width, mode: effectiveMode(settings) })) ?? { width: m.width, height: m.height }) : { width: m.width, height: m.height }
@@ -1122,7 +1141,24 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
     const fields = frostFields()
     const inputs = storedFrameInputs(settings)
     if (needsFrost(settings)) inputs.frost = fields.field(m.id, frameSourceOf(m), aspect, settings.frame.blur, fieldLong)
-    rig = { settings, media, height: (draft ? draftSize(aspect) : previewSize(aspect)).h, out: context(false), scratch: context(true), cache: { current: null }, inputs, fieldLong, fields, blur: 10 }
+    const height = (draft ? draftSize(aspect) : previewSize(aspect)).h
+    // Original's widths: each a sheet shape of its own on the same canvas.
+    const widths: number[] = []
+    if (frame === 'frosted-original') {
+      const canvas = outputSize(aspect, height).w
+      const shapes = new Set([aspect])
+      for (let j = 1; widths.length < RESHAPE_STEPS && j < 4000; j++) {
+        // Either side of the width, a hundred-thousandth at a time.
+        const width = settings.frame.width + (j % 2 ? 1 : -1) * Math.ceil(j / 2) * 1e-5
+        const a = sheetAspect({ ...settings, frame: { ...settings.frame, width } })
+        if (outputSize(a, height).w === canvas && !shapes.has(a)) {
+          shapes.add(a)
+          widths.push(width)
+        }
+      }
+      if (widths.length < RESHAPE_STEPS) throw new Error(`frame-cost: ${key} has ${widths.length} widths of its own shape on one canvas`)
+    }
+    rig = { settings, media, height, out: context(false), scratch: context(true), cache: { current: null }, inputs, fieldLong, fields, blur: 10, widths, step: 0 }
     costRigs.set(key, rig)
     renderPrint(rig.out, rig.scratch, settings, rig.cache, null, rig.height, media, rig.inputs)
   }
@@ -1132,7 +1168,14 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
   try {
     const r = rig
     const t0 = performance.now()
-    if (remake) {
+    if (remake === 'reshape') {
+      // The next width of a drag on Original: a sheet shape whose cover and
+      // field are not kept, both made now.
+      if (r.widths.length === 0) throw new Error(`frame-cost: ${key} is not on Original`)
+      r.step = (r.step + 1) % r.widths.length
+      r.settings = { ...r.settings, frame: { ...r.settings.frame, width: r.widths[r.step] } }
+      r.inputs = { ...r.inputs, frost: r.fields.field(r.settings.media!.id, frameSourceOf(r.settings.media!), sheetAspect(r.settings), r.settings.frame.blur, r.fieldLong) }
+    } else if (remake) {
       // The next blur of a drag over the whole range: a field that is not
       // kept, made now from the kept cover.
       r.blur = r.blur >= 240 ? 10 : r.blur + 1

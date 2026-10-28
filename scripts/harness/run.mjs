@@ -363,7 +363,9 @@ try {
     //    unframed, and that saving would hide the frame's cost).
     // Each bounded by FRAME_COST, the plan's 1.10x settled and 1.25x draft.
     // And Frosted with its field made again inside the render, against the
-    // same document unframed (REMAKE_COST).
+    // same document unframed (REMAKE_COST); and Frosted on Original with its
+    // field made for a new sheet shape (a Width drag there), against the
+    // same render with its field kept (RESHAPE_COST).
     //
     // A shared machine's interference only ever adds time, comes in spells
     // (a fixed piece of plain JavaScript, 145 ms at its fastest, took up to
@@ -372,15 +374,15 @@ try {
     //  - a sample is one render. The four documents and sizes are
     //    interleaved round by round, so each one's rounds spread over the
     //    whole measurement (15 rounds, `--runs n`; a draft render being
-    //    ~14 ms, a draft round is 10 samples of each). Within a round the
-    //    eight renders run in a cycle, started one further on each round and
+    //    ~8 ms, a draft round is 10 samples of each). Within a round the
+    //    ten renders run in a cycle, started one further on each round and
     //    reversed every other round, and the first render of each round's
     //    turn is not timed (the first render after another document or size
     //    ran 2 to 6% slower);
     //  - a render's time is the mean of its fastest samples, a fifth of one
     //    measurement's (3 settled, 30 draft), from every sample taken of it;
-    //  - a document and size with a row (Crop, Fit, Frosted, or Frosted
-    //    made again) over its bound is
+    //  - a document and size with a row (Crop, Fit, Frosted, Frosted made
+    //    again, or Frosted made for a new shape) over its bound is
     //    measured again, up to twice, its new samples added to its old, and
     //    every measurement is printed. A row fails if it is still over after
     //    the third. More samples only bring a render's time nearer its floor:
@@ -397,6 +399,15 @@ try {
     // frame (2.67x, 3.32x); README "The frame is ground" says what the
     // settled one cannot see.
     const REMAKE_COST = { settled: 1.58, draft: 1.6 }
+    // Frosted on Original with its field made again for a new sheet shape
+    // inside the render (each frame of a Width drag there: the cover and
+    // the field), against the same render with its field kept: the
+    // making's own share, what it measured x 1.25 (RESHAPE_COST, set from
+    // a batch at this code: 1.31 to 1.45 settled, 2.68 to 3.22 draft, over
+    // 8 runs). The draft bound fails a drag whose cover is made twice
+    // (4.26x to 5.21x); the settled one cannot see it (1.60x), as the
+    // made-again row's cannot (README "The frame is ground").
+    const RESHAPE_COST = { settled: 1.82, draft: 4.03 }
     const MEASUREMENTS = 3
     const DRAFT_SAMPLES = 10
     const rounds = Math.max(5, opts.runs ?? 15)
@@ -409,10 +420,12 @@ try {
       ['crop', 'crop', false, false],
       ['frosted', 'frosted', false, false],
       ['fit', 'fit', false, false],
+      ['frosted-original', 'frosted-original', false, false],
       ['crop-bare', 'crop', true, false],
       ['frosted-remake', 'frosted', false, true],
       ['fit-bare', 'fit', true, false],
       ['frosted-bare', 'frosted', true, false],
+      ['frosted-reshape', 'frosted-original', false, 'reshape'],
     ]
     const FRAMED = ['crop', 'fit', 'frosted']
     // Round i's turn of n timed renders, behind one untimed: the cycle,
@@ -433,7 +446,7 @@ try {
         size: '',
         samples: Object.fromEntries(kinds.map(([k]) => [k, []])),
         measurements: [],
-        ok: { crop: false, fit: false, frosted: false, 'frosted-remake': false },
+        ok: { crop: false, fit: false, frosted: false, 'frosted-remake': false, 'frosted-reshape': false },
       })),
     )
     // One measurement of some documents and sizes, their rounds interleaved.
@@ -462,6 +475,7 @@ try {
         const at = Object.fromEntries(kinds.map(([k]) => [k, meanOfFastest(p.samples[k], fastest)]))
         const bound = p.draft ? FRAME_COST.draft : FRAME_COST.settled
         const remakeBound = p.draft ? REMAKE_COST.draft : REMAKE_COST.settled
+        const reshapeBound = p.draft ? RESHAPE_COST.draft : RESHAPE_COST.settled
         const row = { unframed: Number(at.none.toFixed(2)) }
         for (const f of FRAMED) {
           const waits = at[f] / at.none
@@ -474,6 +488,11 @@ try {
           p.ok['frosted-remake'] = waits <= remakeBound
           row['frosted-remake'] = { ms: Number(at['frosted-remake'].toFixed(2)), ratio: Number(waits.toFixed(3)), ok: p.ok['frosted-remake'] }
         }
+        {
+          const own = at['frosted-reshape'] / at['frosted-original']
+          p.ok['frosted-reshape'] = own <= reshapeBound
+          row['frosted-reshape'] = { ms: Number(at['frosted-reshape'].toFixed(2)), kept: Number(at['frosted-original'].toFixed(2)), own: Number(own.toFixed(3)), ok: p.ok['frosted-reshape'] }
+        }
         // The verdict on every sample so far, and this measurement's own samples.
         p.measurements.push({ ...row, runs: times.get(p) })
         const done = Object.values(p.ok).every(Boolean)
@@ -483,7 +502,8 @@ try {
           `unframed ${at.none.toFixed(1)} ms;`,
           FRAMED.map((f) => `${name[f]} ${row[f].ms.toFixed(1)} ms (${row[f].ratio}x unframed, ${row[f].own}x its own compose skipped)${row[f].ok ? '' : ' over'}`).join('; '),
           `bound ${bound}x;`,
-          `Frosted, its field made again ${row['frosted-remake'].ms.toFixed(1)} ms (${row['frosted-remake'].ratio}x unframed, bound ${remakeBound}x)${row['frosted-remake'].ok ? '' : ' over'}`,
+          `Frosted, its field made again ${row['frosted-remake'].ms.toFixed(1)} ms (${row['frosted-remake'].ratio}x unframed, bound ${remakeBound}x)${row['frosted-remake'].ok ? '' : ' over'};`,
+          `on Original, made for a new shape ${row['frosted-reshape'].ms.toFixed(1)} ms (${row['frosted-reshape'].own}x its field kept, ${row['frosted-reshape'].kept.toFixed(1)} ms; bound ${reshapeBound}x)${row['frosted-reshape'].ok ? '' : ' over'}`,
           done ? 'ok' : m < MEASUREMENTS ? 'OVER, measured again' : `OVER after ${MEASUREMENTS} measurements`,
         )
       }
@@ -493,6 +513,7 @@ try {
       result.frameCost[`${p.doc} ${p.draft ? 'draft' : 'settled'} ${p.size}`] = {
         bound: p.draft ? FRAME_COST.draft : FRAME_COST.settled,
         remakeBound: p.draft ? REMAKE_COST.draft : REMAKE_COST.settled,
+        reshapeBound: p.draft ? RESHAPE_COST.draft : RESHAPE_COST.settled,
         ok: p.ok,
         measurements: p.measurements,
       }

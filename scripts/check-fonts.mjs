@@ -15,8 +15,12 @@
  * checksum, then `cmap` (formats 4 and 12, every Unicode subtable), `GSUB`'s
  * feature list and `name`. It fails unless:
  *
- *  - A-Z, a-z, 0-9 and the punctuation . , : ; ! ? ' " ( ) - / & @ # each map
- *    to a glyph;
+ *  - every printable ASCII character (U+0020 to U+007E) and what an iPhone
+ *    keyboard types by default for quotes, dashes and the ellipsis
+ *    (U+2018, U+2019, U+201C, U+201D, U+2013, U+2014, U+2026) maps to a
+ *    glyph, but for the ones named in FALLS_BACK (Tanklager: `$`), which
+ *    print in the phone's own face and are said to; a face that loses one
+ *    more fails;
  *  - every lowercase letter maps to a glyph of its own, not its capital's
  *    (a capitals-only face maps both to one glyph). This is a cheap
  *    pre-check only: a face can draw a separate lowercase glyph that is a
@@ -25,14 +29,15 @@
  *    `lowercaseVerdict` in face-checks.mjs);
  *  - GSUB offers none of liga, clig, calt, dlig, rlig.
  *
- * Then it builds three broken copies of the same face in memory (its
- * lowercase unmapped; its lowercase mapped to the capitals; a `liga` feature
- * added), written out as WOFF and read back through the same path, and fails
- * unless each one fails for its reason: a check that cannot fail is not one.
+ * Then it builds four broken copies of the same face in memory (its
+ * lowercase unmapped; the iPhone's apostrophe unmapped; its lowercase mapped
+ * to the capitals; a `liga` feature added), written out as WOFF and read
+ * back through the same path, and fails unless each one fails for its
+ * reason: a check that cannot fail is not one.
  *
  *   node scripts/check-fonts.mjs other.woff       (another face: a WOFF, or a
  *       bare TrueType or CFF file, such as Border Studio's Railroad.ttf)
- *   node scripts/check-fonts.mjs --controls dir/  (also writes the three broken
+ *   node scripts/check-fonts.mjs --controls dir/  (also writes the four broken
  *       copies there, so each can be run on its own and seen to fail)
  */
 
@@ -48,8 +53,19 @@ const FACE = resolve(named[0] ?? resolve(dirname(fileURLToPath(import.meta.url))
 
 const UPPER = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']
 const LOWER = [...'abcdefghijklmnopqrstuvwxyz']
-const DIGITS = [...'0123456789']
-const PUNCTUATION = [...'.,:;!?\'"()-/&@#']
+/** What a plate's text can hold from a keyboard: every printable ASCII
+ *  character, and what an iPhone's keyboard types by default for ' " - and
+ *  ... (Smart Punctuation). A plate is free text, set a character at a time;
+ *  a character the face does not map is set in the next face of Poster's
+ *  stack, which is each phone's own. */
+const TYPED = [...Array.from({ length: 0x7f - 0x20 }, (_, k) => String.fromCodePoint(0x20 + k)), ...'\u2018\u2019\u201c\u201d\u2013\u2014\u2026']
+/** The typed characters the shipped face does not draw, named so that a face
+ *  that loses one more fails: these print in the phone's own face (README
+ *  "Fonts"). Tanklager Kompakt has no dollar sign. */
+const FALLS_BACK = ['$']
+/** Not typed on a phone's first keyboard, but likely: reported, not
+ *  required. */
+const LIKELY = [...'\u20ac\u00a3\u00a9\u2122']
 const JOINING = ['liga', 'clig', 'calt', 'dlig', 'rlig']
 
 const align4 = (n) => (n + 3) & ~3
@@ -281,7 +297,7 @@ function checkFace(bytes) {
   const features = readFeatures(tables.get('GSUB'))
   const problems = []
   const gid = (ch) => map.get(ch.codePointAt(0)) ?? 0
-  const missing = [...UPPER, ...LOWER, ...DIGITS, ...PUNCTUATION].filter((ch) => gid(ch) === 0)
+  const missing = TYPED.filter((ch) => gid(ch) === 0 && !FALLS_BACK.includes(ch))
   if (missing.length) problems.push(`unmapped: ${missing.join(' ')}`)
   const shared = LOWER.filter((ch) => gid(ch) !== 0 && gid(ch) === gid(ch.toUpperCase()))
   if (shared.length) problems.push(`lowercase drawn with its capital's glyph: ${shared.join(' ')}`)
@@ -314,14 +330,18 @@ if (face.problems.length) {
   failed = true
   for (const p of face.problems) console.error(`  FAIL ${p}`)
 } else {
-  console.log(`  A-Z, a-z, 0-9 and ${PUNCTUATION.join(' ')} mapped; lowercase its own glyphs; no ${JOINING.join(' ')}: ok`)
+  console.log(`  every printable ASCII character and ${TYPED.slice(0x7f - 0x20).join(' ')} mapped, but for ${FALLS_BACK.join(' ')}; lowercase its own glyphs; no ${JOINING.join(' ')}: ok`)
 }
+const fallback = [...FALLS_BACK, ...LIKELY].filter((ch) => (face.map.get(ch.codePointAt(0)) ?? 0) === 0)
+console.log(`  set in the phone's own face (not in this one): ${fallback.join(' ') || 'nothing typed'}`)
 
 // The controls: the same face broken three ways, written and read back.
 const lowerless = new Map([...face.map].filter(([cp]) => !LOWER.includes(String.fromCodePoint(cp))))
 const capitals = new Map([...face.map].map(([cp, g]) => [cp, LOWER.includes(String.fromCodePoint(cp)) ? face.map.get(String.fromCodePoint(cp).toUpperCase().codePointAt(0)) : g]))
+const apostropheless = new Map([...face.map].filter(([cp]) => cp !== 0x2019))
 const CONTROLS = [
   { name: 'its lowercase unmapped', file: 'lowercase-unmapped', swap: { cmap: writeCmap(lowerless) }, expect: /^unmapped: a b c/ },
+  { name: "the iPhone's apostrophe unmapped", file: 'apostrophe-unmapped', swap: { cmap: writeCmap(apostropheless) }, expect: /^unmapped: \u2019$/ },
   { name: 'its lowercase set in the capitals', file: 'lowercase-as-capitals', swap: { cmap: writeCmap(capitals) }, expect: /^lowercase drawn with its capital's glyph: a b c/ },
   { name: 'a liga feature', file: 'liga', swap: { GSUB: writeGsub([...face.features, 'liga']) }, expect: /^joining features in GSUB: liga$/ },
 ]

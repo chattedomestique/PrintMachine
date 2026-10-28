@@ -690,13 +690,25 @@ Type Foundry, SIL Open Font License 1.1; one WOFF of 18,908 bytes in
 iPhone does not have, so on the owner's phone the default plate was set in
 Helvetica Neue and on a desktop in Impact: the same print, two faces. A print
 is now set in the same face on every phone, online and off (the face is
-precached). Of Border Studio's 52 faces, nine can set what this app prints
-(A-Z, a-z, 0-9 and punctuation, a lowercase of their own, no ligatures), and
-Tanklager is the one of the nine that is condensed and heavy, as the stack
-meant Impact to be; it is the only one that came across. The other three
-faces stay system stacks. Railroad Gothic, Border Studio's heavier wood type,
-draws capitals only (its lowercase glyphs are capitals), so it is the
-owner's one-file alternative, not the default.
+precached), with one exception a person can type: Tanklager has no dollar
+sign, so a `$` on a Poster plate is set in the next face of the stack, the
+phone's own (and so are characters a phone's first keyboard does not offer,
+such as € £ © ™). Every other printable ASCII character, and the curly
+quotes, dashes and ellipsis an iPhone types by default, are Tanklager's;
+`check-fonts` requires them, names `$` as the one exception, and fails a
+face that loses one more (its controls include the iPhone's apostrophe
+removed). Of Border Studio's 52 faces, nine can set the letters, digits and
+punctuation this app prints with a lowercase of their own and no ligatures,
+and Tanklager is the one of the nine that is condensed and heavy, as the
+stack meant Impact to be; it is the only one that came across. The other
+three faces stay system stacks. Railroad Gothic, Border Studio's heavier
+wood type, draws capitals only (its lowercase glyphs are capitals), and
+choosing it instead would take more than its file: it ships as TrueType
+(`ttf` added to the precache glob), its family name changed where Poster's
+is written (`fonts.css`, `features/media/faces.ts`, `engine/types.ts`,
+`scripts/face-checks.mjs`, `check-fonts.mjs`, `verify-offline.mjs`), and the
+lowercase verdict dropped, which refuses it (its `o` measures 1.00 of its
+`O`): the owner's alternative, at that cost.
 
 It is one weight, so **Bold sets nothing on a Poster plate**, and the switch
 says so: a bold made by the browser from the regular smears the glyphs
@@ -718,11 +730,13 @@ to fake a bold.
 
 **The face is checked, not trusted.** `check-fonts` (in `npm run verify`)
 reads the WOFF itself (its tables inflated and checksummed; `cmap` formats 4
-and 12; `GSUB`'s features) and fails unless A-Z, a-z, 0-9 and
-`. , : ; ! ? ' " ( ) - / & @ #` are mapped, each lowercase letter maps to a
-glyph of its own, and no ligature feature (`liga clig calt dlig rlig`) is
-offered; three broken copies of the face (lowercase unmapped, lowercase set
-in the capitals, a `liga` added) must each fail it (`node
+and 12; `GSUB`'s features) and fails unless every printable ASCII
+character and the iPhone keyboard's ‘ ’ “ ” – — … are mapped (but for the
+one it names, `$`, which it prints as set in the phone's own face, with
+€ £ © ™), each lowercase letter maps to a glyph of its own, and no ligature
+feature (`liga clig calt dlig rlig`) is offered; four broken copies of the
+face (lowercase unmapped, the iPhone's apostrophe unmapped, lowercase set in
+the capitals, a `liga` added) must each fail it (`node
 scripts/check-fonts.mjs --controls dir/` writes them out, and `node
 scripts/check-fonts.mjs dir/liga.woff` checks one, or any other face). Its
 lowercase rule is a pre-check only: Railroad Gothic passes it, its separate

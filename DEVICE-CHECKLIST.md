@@ -34,7 +34,9 @@ So:
 - [ ] *Now* airplane mode → launch from the home screen → it fully boots and is usable
 - [ ] Still in airplane mode: the default plates (PRINT MACHINE, RISO) are set
       in Tanklager, narrow and heavy, not in Helvetica; type a line in lower
-      case on a Poster plate → it prints in lower case
+      case on a Poster plate → it prints in lower case; type `don’t “$5”…`
+      with the iPhone keyboard → the curly quotes, apostrophe and ellipsis
+      are Tanklager's, and only the `$` is in another face (README "Fonts")
 - [ ] Redeploy a visible change → relaunch online once → the new version appears
 
 > `npm run verify:offline` proves the build itself: it serves `dist/` at the

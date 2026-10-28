@@ -3,7 +3,8 @@
    Open Font License 1.1: public/licences.txt). One file, imported here so
    Vite hashes it and the service worker precaches it: the print is set in the
    same face online, offline and on every phone, where a system stack set it
-   in whatever the phone had (README "Fonts").
+   in whatever the phone had (README "Fonts"). The one typed exception: it has
+   no `$`, which prints in the phone's own face (scripts/check-fonts.mjs).
 
    One weight: Bold is off for Poster (engine/types.ts `bold: false`), and no
    weight but 400 is declared, so nothing asks a browser to fake a bold.

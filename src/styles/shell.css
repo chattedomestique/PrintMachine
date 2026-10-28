@@ -315,6 +315,9 @@
   color: var(--ink-soft);
 }
 .app__hint > .btn { flex: none; }
+/* A very large print, said before the tap: the hint's card, with no ×
+   (it stays while it is true), so its words keep the card's inner edge. */
+.app__large { padding-block: var(--chrome-2); padding-inline-end: var(--chrome-4); }
 
 /* ── The More sheet: what Save makes, and whether the app works offline ──
    Facts, not actions, so they sit above the menu's rows. */

@@ -21,12 +21,15 @@ import { SUBS, type SubId } from './tools.ts'
 const MODE_LABELS: Record<FrameSettings['mode'], string> = { crop: 'Crop', fit: 'Fit' }
 const MODES: readonly SegmentedOption<FrameSettings['mode']>[] = FRAME_MODES.map((id) => ({ id, label: MODE_LABELS[id] }))
 
-/** What Crop and Fit do to the photo, for a screen reader (on screen the
- *  sheet shows it, as in Border Studio). */
+/** What Crop and Fit do to the photo, said on the line under them. */
 const MODE_SAID: Record<FrameSettings['mode'], string> = {
-  crop: 'The photo fills the inside of the frame, trimmed to the ratio.',
-  fit: 'The whole photo sits inside the frame, matted, nothing trimmed.',
+  crop: 'Trimmed to fill the frame',
+  fit: 'The whole photo, matted',
 }
+/** Every line the Crop tab can show under Crop | Fit: its box is the tallest
+ *  of them, so choosing a ratio (Original says why the row is off) never
+ *  moves the rows above it. */
+const MODE_LINES = [NO_PHOTO, ORIGINAL_WHOLE, ...FRAME_MODES.map((m) => MODE_SAID[m])]
 
 /**
  * Frame: the photo, and the frame round it (Border Studio's Frame and Fill
@@ -57,7 +60,6 @@ export default function FramePanel({
   photo: PhotoImport
 }) {
   const { settings, dispatch } = useSettings()
-  const modeSaid = useId()
   const modeWhyId = useId()
   const media = settings.media
   const frame = settings.frame
@@ -178,18 +180,22 @@ export default function FramePanel({
               block={false}
               options={MODES.map((o) => ({ ...o, disabled: modeWhy !== null }))}
               onChange={(m) => dispatch({ type: 'patchFrame', patch: { mode: m } })}
-              describedBy={modeWhy ? modeWhyId : modeSaid}
+              describedBy={modeWhyId}
             />
           </div>
-          {modeWhy ? (
+          {/* Why the row is off, or what the chosen one does: always one line
+              of words here, in room for the longest (the others laid under
+              it, unseen), so nothing above moves when a ratio is chosen. */}
+          <div className="controls__say">
             <p className="controls__hint" id={modeWhyId}>
-              {modeWhy}
+              {modeWhy ?? MODE_SAID[mode]}
             </p>
-          ) : (
-            <p className="sr-only" id={modeSaid}>
-              {MODE_SAID[mode]}
-            </p>
-          )}
+            {MODE_LINES.map((t) => (
+              <p key={t} className="controls__hint controls__say-room" aria-hidden="true">
+                {t}
+              </p>
+            ))}
+          </div>
         </>
       )}
 

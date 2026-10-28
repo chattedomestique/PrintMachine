@@ -669,7 +669,8 @@ async function eachState(page, visit) {
  * sheet where it is): with the first photo on its Original sheet, Border
  * (Photo) and Border with Frosted and its Blur; on 4:5, Crop, Crop in Fit,
  * Place and Border in Fit, Photo; the photo removed, Photo, Border, Crop and
- * Place. Leaves the page without a photo, the tools closed.
+ * Place. Crop is visited on Original first, then on 4:5. Leaves the page
+ * without a photo, the tools closed.
  */
 async function eachFrameState(page, visit) {
   const panel = (sub) => page.locator(`.controls__panel[data-sub="${sub}"]`)
@@ -689,6 +690,9 @@ async function eachFrameState(page, visit) {
   await panel('border').locator('[data-chip="photo"]').click()
   await pressed('border', 'photo')
   await openTab(page, 'frame', 'crop')
+  // Crop on Original (Crop | Fit off, saying why), then on 4:5: the tab's
+  // rows must not move between the two (section 5 holds them still).
+  await visit('frame-crop-original', 'original')
   await panel('crop').locator('[data-chip="4:5"]').click()
   await pressed('crop', '4:5')
   await visit('frame-crop', '4:5')
@@ -996,12 +1000,22 @@ try {
         const overflowed = new Set()
         let n = 0
         let targets = 0
+        const cropRows = new Map()
         await eachFrameState(page, async (name, shape) => {
           const at = `${where} › ${name}`
           await settle(page, at)
           await dockAtStart(page, at)
           n++
           const m = await measure(page)
+          if (name === 'frame-crop-original' || name === 'frame-crop')
+            cropRows.set(
+              name,
+              await page.evaluate(() => {
+                const p = document.querySelector('.controls__panel[data-sub="crop"]')
+                const top = (sel) => Math.round((p?.querySelector(sel)?.getBoundingClientRect().top ?? NaN) * 10) / 10
+                return { panel: Math.round((p?.getBoundingClientRect().top ?? NaN) * 10) / 10, tabs: Math.round(document.querySelector('.controls__section[data-tool="frame"] [role=tab]')?.getBoundingClientRect().top * 10) / 10, ratio: top('.chiprow'), mode: top('.segmented') }
+              }),
+            )
           if (!sheets.has(shape)) sheets.set(shape, { name, sheet: m.sheet })
           const first = sheets.get(shape)
           // At 200% text the sheet may shrink to make room; at 100% it holds.
@@ -1018,7 +1032,14 @@ try {
           targets += (await (text === 100 ? checkTargets(page, at) : checkTargetsWholeDock(page, at))).measured
           for (const label of await checkChipRows(page, at, m.sheet)) overflowed.add(label)
         })
-        check(n === 11, `${where}: ${n} Frame states visited (11)`)
+        check(n === 12, `${where}: ${n} Frame states visited (12)`)
+        // Choosing a ratio moves nothing in the Crop tab: its tabs, the ratio
+        // row and Crop | Fit stand where they stood on Original.
+        const [onOriginal, on45] = [cropRows.get('frame-crop-original'), cropRows.get('frame-crop')]
+        check(
+          onOriginal && on45 && Object.keys(on45).every((k) => Math.abs(on45[k] - onOriginal[k]) <= 0.5),
+          `${where}: Frame › Crop moved between Original and 4:5: ${JSON.stringify(onOriginal)} against ${JSON.stringify(on45)}`,
+        )
         // At 320 px both rows run past the dock's width: their scroll is
         // checked, not passed for want of a row to scroll.
         if (vw === 320) check(overflowed.has('Fill') && overflowed.has('Sheet ratio'), `${where}: the rows that overflowed: ${[...overflowed].join(', ') || 'none'} (both)`)

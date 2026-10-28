@@ -385,3 +385,11 @@
    its dot or glyph goes, in the same room (1em, the dot's size), so the row
    does not move when the colour lands. */
 .chiprow > .chip > .spinner { flex: none; font-size: inherit; --_size: 1em; }
+
+/* A line whose words change with a choice (Frame › Crop's, under Crop |
+   Fit): every wording it can take is laid in the same cell, all but the
+   one said unseen, so its box is the tallest of them in every state and the
+   rows above it never move. */
+.controls__say { display: grid; }
+.controls__say > * { grid-area: 1 / 1; }
+.controls__say > .controls__say-room { visibility: hidden; }

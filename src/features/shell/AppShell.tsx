@@ -253,6 +253,13 @@ export default function AppShell() {
     else startSave('jpeg')
   }
 
+  // A very large print is said on screen before the tap, wherever the person
+  // is when they tap Save (D-17): the size and that a phone may not finish
+  // it, in a card over the stage while it is true. Nothing asks; Save
+  // presses it as any other (a failure is asked about after, as ever). Not
+  // while a save's own card is up, which says the size itself.
+  const largeSaid = caption.large && !pressing && status === null ? `Saves ${caption.size} (${caption.megapixels}), ${caption.large}.` : null
+
   // The hint is up from the first photo until it is dismissed. Its card hides
   // while the print is pressed; its words, for a screen reader, stay.
   const hintUp = settings.media !== null && !hintDismissed
@@ -407,6 +414,12 @@ export default function AppShell() {
             <button type="button" className="btn ed-bare" data-shape="circle" data-size="sm" aria-label="Dismiss the hint" onClick={dismissHint}>
               <Icon name="x" />
             </button>
+          </div>
+        )}
+        {largeSaid && (
+          // Save's name says it too; this is its words on screen.
+          <div className="card app__hint app__large">
+            <p className="app__hint-text num">{largeSaid}</p>
           </div>
         )}
         {/* The one live region for state changes ("Saved 2419×3024"). Always

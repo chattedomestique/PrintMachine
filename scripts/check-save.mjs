@@ -54,6 +54,8 @@
  *     in-flight mark; Save again writes a file that is 9016x6440, a baseline
  *     JPEG (SOF0) with every component sampled 1x1 (4:4:4), read from its
  *     own header; the in-flight mark is set while it presses and gone after.
+ *     Then on 9:16 in Fit, past LARGE_PRINT_MP: the size, the megapixels and
+ *     that a phone may not finish it are words on screen before any tap.
  * 10. The frame's inputs (the stored document is given the frame each case
  *     starts from, its palette left out): with the photo's frame source held
  *     back, the border is Paper, no palette is stored, and in Frame › Border
@@ -716,6 +718,27 @@ try {
       mark === JSON.stringify({ height: 6440, format: 'jpeg' }) && (await page.evaluate((F) => localStorage.getItem(F), FLAG)) === null,
       `in flight ${mark}, gone after`,
     )
+    // The same photo matted on 9:16 (Fit): a sheet past LARGE_PRINT_MP. Its
+    // size and that a phone may not finish it are on screen before the tap
+    // (the card over the stage, words a person reads, not only Save's name),
+    // and they were not on Original's 58 MP.
+    {
+      const seen = () => page.evaluate(() => document.querySelector('.app__float')?.innerText ?? '')
+      const before = await seen()
+      await setAspect(page, '9:16')
+      await page.locator('.controls__section[data-tool="frame"] input[type=radio][value="fit"]').check({ force: true })
+      await page.waitForFunction(() => /may not finish/.test(document.querySelector('.app__float')?.innerText ?? ''), null, { timeout: 5_000 }).catch(() => {})
+      const label = (await page.locator(SAVE).getAttribute('aria-label')) ?? ''
+      const size = label.match(/^Save (\d+×\d+)/)?.[1] ?? '?'
+      const after = await seen()
+      await closeTools(page)
+      const closed = await seen()
+      const said = (t) => t.split('\n').find((l) => /may not finish/.test(l)) ?? ''
+      check(
+        !/may not finish/.test(before) && said(after).includes(size) && /\d+\.\d MP/.test(said(after)) && /a phone may not finish it/.test(said(after)) && said(closed) === said(after),
+        `9:16 Fit, ${size}: on screen before the tap, "${said(after)}" (with the tools closed too: "${said(closed)}"); on Original nothing of it`,
+      )
+    }
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     console.log(`  (${((Date.now() - t) / 1000).toFixed(0)} s in all)`)
     await ctx.close()

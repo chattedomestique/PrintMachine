@@ -491,7 +491,10 @@ template's, whose width is 0: unframed.
   at the photo's own pixels" has the sizes); the size, the megapixels and
   the border are said before the tap, past 100 MP with "a very large print:
   a phone may not finish it" (`LARGE_PRINT_MP`), and nothing is capped or
-  made smaller for it. A smaller copy is only ever one the person chose,
+  made smaller for it. Past 100 MP that is on screen too, a card over the
+  stage while it is true, in every tool ("Saves 10358×18414 (190.7 MP), a
+  very large print: a phone may not finish it."): the size the person chose
+  is never only in a name a screen reader hears. A smaller copy is only ever one the person chose,
   after a press that failed or did not finish.
 
 What each part of the frame does to a pixel, and what holds it to the same
@@ -1150,7 +1153,8 @@ that a phone may not finish it (said, never acted on: nothing is made
 smaller for it). Save's
 own name carries the size and the frame, and the very-large note when there
 is one ("Save 2822×3528 JPEG with a 252 px frame"), so the size a frame makes
-is stated before the tap from every tool, the Frame tool's too; the toast repeats size and
+is stated before the tap from every tool, the Frame tool's too, and past
+100 MP the card over the stage says it in words on screen (above); the toast repeats size and
 reason the moment a save starts, and the confirmation repeats the size. Save
 itself stays one word, so the app bar never wraps. Nothing falls back to a
 smaller file: a press that fails stops, with the reason and the numbers, and
@@ -1793,7 +1797,12 @@ The ratio is the sheet's, so it can be chosen on bare paper (Original, the
 photo's own shape, needs a photo, and says so). Every reason is said with
 its control: an unavailable setting's slider and its − and + are described
 by the words that show where its value would, a chip that cannot be chosen
-by the line that says why, Crop | Fit by the line under it.
+by the line that says why, Crop | Fit by the line under it. That line is
+always there, saying why the row is off or what the chosen one does
+("Trimmed to fill the frame", "The whole photo, matted"), in a box sized for
+the longest of its wordings: Border Studio's Crop tab moves nothing when a
+ratio is chosen, and neither does this one (`verify:geometry` holds the tab's
+rows still between Original and 4:5, at 100% and 200% text).
 
 The panel is the same height in every tool and every tab, so **the sheet never
 changes size or place between them** (Border Studio fcd91ff). That is checked,

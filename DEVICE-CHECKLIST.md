@@ -163,6 +163,12 @@ So:
 - [ ] In the Frame tool, VoiceOver reads Save's name with the frame
       ("Save 9016×6440 JPEG with a 644 px frame" for a 40 MP photo on
       Original), so the size the frame makes is heard before the tap
+- [ ] A 40 MP portrait on 16:9 in Fit: before any tap a card over the
+      stage reads "Saves ... (190.7 MP), a very large print: a phone may
+      not finish it.", in every tool; back on Original it goes
+- [ ] Frame › Crop: tap Original, then 4:5, then Original: the ratio row
+      and Crop | Fit stay where they are (only the line under them changes
+      its words)
 - [ ] The gesture hint with Frame open: "Drag to move the photo · pinch to
       zoom · double‑tap to reset" on Original and in Crop; in Fit it names
       no gesture ("Fit shows the whole photo · choose Crop to move or zoom

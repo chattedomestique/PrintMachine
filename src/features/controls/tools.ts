@@ -47,3 +47,21 @@ export type SubId<T extends ToolId> = (typeof SUBS)[T][number]['id']
 export type Subs = { [T in ToolId]: SubId<T> }
 
 export const FIRST_SUBS: Subs = { type: 'text', ink: 'ink', photo: 'sheet', press: 'screen' }
+
+/**
+ * The Frame tool, which takes the Photo tool's place and leads the dock (the
+ * job is to frame a photo, then set type on it), with Border Studio's crop
+ * glyph. Not in TOOLS yet: the dock changes over to it in one step, panel
+ * and gates together. Its sub-tabs: Border (the fill, Width, Corners and
+ * Frosted's Blur), Crop (the ratio chips, then Crop or Fit), Place (Zoom and
+ * Position, the Photo tool's Frame), Photo (Choose, Replace, Remove: the
+ * Photo tool's File).
+ */
+export const FRAME_TOOL = { id: 'frame', label: 'Frame', icon: 'crop' } as const
+
+export const FRAME_SUBS = [
+  { id: 'border', label: 'Border' },
+  { id: 'crop', label: 'Crop' },
+  { id: 'place', label: 'Place' },
+  { id: 'photo', label: 'Photo' },
+] as const

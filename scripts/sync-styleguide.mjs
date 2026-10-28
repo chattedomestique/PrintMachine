@@ -27,15 +27,17 @@ if (!existsSync(join(dist, 'core.min.css'))) {
   process.exit(1)
 }
 
-// Every element a Print Machine screen is built from (14). Border Studio also
-// copies `field` and `divider`, which none of its markup uses, and `chip`, for
-// rows this app does not have (word chips and effect toggles were cut): dead
-// CSS is not shipped.
+// Every element a Print Machine screen is built from (15): `chip` for the
+// frame's ratio chips (ui/ChipRow.tsx). Border Studio also copies `field` and
+// `divider`, which none of its markup uses: dead CSS is not shipped.
 const ELEMENTS = ['button', 'card', 'appbar', 'toolbar', 'tabs', 'segmented', 'slider', 'switch',
-                  'swatch', 'select', 'input', 'dialog', 'menu', 'spinner']
+                  'swatch', 'select', 'input', 'dialog', 'menu', 'spinner', 'chip']
 // The style guide's scripts that only measure layout. The ones that own state
-// (40-tabs, 31-slider, 60-dialog, 63-menu, 42-chip's selection) are left out
-// on purpose: React owns that state, and two owners of aria-selected fight.
+// (40-tabs, 31-slider, 60-dialog, 63-menu, 42-chip) are left out on purpose:
+// React owns that state, and two owners of aria-selected fight. 42-chip also
+// reveals a focused chip in a scrolling row through 40-tabs' SG.revealInline,
+// so it cannot load without the tabs script; ui/ChipRow.tsx does that reveal
+// itself, as ui.tsx's Tabs keeps its chosen tab in view.
 // 70-scrubber is here only because 71-toolbar calls SG.afterParse, which the
 // scrubber script defines; dist/elements/manifest.json lists only 71-toolbar
 // for the toolbar (an upstream gap: without it every page load throws

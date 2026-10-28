@@ -324,6 +324,19 @@
 }
 .controls__section .swatch-set__list::-webkit-scrollbar { display: none; }
 .controls__section .swatch-set__opt { flex: 0 0 auto; min-inline-size: 4.5rem; }
+/* A row of chips (ui/ChipRow.tsx), as Border Studio's ratio row: tighter
+   sides, so more of the choices fit across a phone (spread out when they all
+   do, scrolling when they do not), and the chosen chip is its fill and its
+   flip cue: the style guide's check in front would make it the widest chip
+   by far, and in the tray chosen is the fill (editor.css). */
+.chiprow {
+  justify-content: space-between;
+  gap: var(--chrome-1);
+}
+.chiprow > .chip { --_px: var(--chrome-3); }
+.chiprow > .chip::before { display: none; }
+.chiprow__flip { --ic-size: 0.9em; margin-inline-start: var(--chrome-1); }
+
 /* In the dock the swatch cell is one 44px chip and its name, close under it:
    the style guide's roomier cell would make the Paper panel taller than every
    other, and the sheet would jump for it. */

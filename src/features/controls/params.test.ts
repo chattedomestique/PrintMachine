@@ -6,16 +6,20 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { makeLayer, makeMedia, pressProfile } from '../../state/defaults.ts'
-import { LAYER_FIELDS, MEDIA_FIELDS, PRESS_FIELDS, type Row } from '../../state/fields.ts'
-import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from '../../engine/limits.ts'
-import { committedValue, draftOf, nudge, rangeText, type Param } from '../../ui/param.ts'
+import { frameDefaults, makeLayer, makeMedia, pressProfile } from '../../state/defaults.ts'
+import { FILLS, FRAME_FIELDS, LAYER_FIELDS, MEDIA_FIELDS, PRESS_FIELDS, type Row } from '../../state/fields.ts'
+import { FRAME_WIDTH_FIRST, FRAME_WIDTH_MAX, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from '../../engine/limits.ts'
+import type { FrameSettings } from '../../engine/types.ts'
+import { canNudge, committedValue, draftOf, nudge, rangeText, resetChange, thumbValue, type Param } from '../../ui/param.ts'
 import {
   MINUS,
+  NO_PHOTO,
   NO_TRAVEL,
+  borderParams,
+  cornersWords,
   degrees,
   ems,
-  frameParams,
+  photoPlacementParams,
   percent,
   pixels,
   placeParams,
@@ -51,7 +55,7 @@ describe('every default is the default document\'s', () => {
 
   it('the photo resets to how an import places it: 100%, centred (half its travel)', () => {
     const media = makeMedia({ id: 'p', width: 4032, height: 3024, scale: 2, x: 0.3, y: 0.6 })
-    const [zoom, x, y] = frameParams(media, 4 / 5, noop)
+    const [zoom, x, y] = photoPlacementParams(media, 4 / 5, noop)
     expect(zoom.def).toBe(makeMedia({ id: 'q', width: 1, height: 1 }).scale)
     expect(x.def).toBeCloseTo(0.5, 12)
     expect(y.def).toBeCloseTo(0.5, 12)
@@ -76,7 +80,7 @@ describe('every range is the schema\'s, so a saved value can always be nudged an
 
   it('the press and the zoom', () => {
     for (const p of pressTable()) expect([p.min, p.max], p.key).toEqual(range(PRESS_FIELDS, p.key))
-    const [zoom] = frameParams(makeMedia({ id: 'p', width: 4032, height: 3024 }), 4 / 5, noop)
+    const [zoom] = photoPlacementParams(makeMedia({ id: 'p', width: 4032, height: 3024 }), 4 / 5, noop)
     expect([zoom.min, zoom.max]).toEqual(range(MEDIA_FIELDS, 'scale'))
   })
 })
@@ -115,7 +119,7 @@ describe('the photo\'s position is a fraction of the travel it has', () => {
   it('centred, 0.5; at an edge, 0 or 1; moving it writes the centre that fraction stands for', () => {
     const media = makeMedia({ id: 'p', width: 4032, height: 3024 })
     const changes: unknown[] = []
-    const [, x, y] = frameParams(media, 4 / 5, (patch) => changes.push(patch))
+    const [, x, y] = photoPlacementParams(media, 4 / 5, (patch) => changes.push(patch))
     expect(x.value).toBeCloseTo(0.5, 12)
     expect(x.unavailable).toBeUndefined()
     // A landscape photo on a 4:5 sheet fills its height: no travel up and down.
@@ -123,15 +127,15 @@ describe('the photo\'s position is a fraction of the travel it has', () => {
     x.onChange(0, { discrete: true })
     const left = (changes[0] as { x: number }).x
     expect(left).toBeGreaterThan(0.5)
-    const [, x2] = frameParams({ ...media, x: left }, 4 / 5, noop)
+    const [, x2] = photoPlacementParams({ ...media, x: left }, 4 / 5, noop)
     expect(x2.value).toBeCloseTo(0, 12)
   })
 
   it('on its own sheet at 100% the photo cannot move, and both positions say why', () => {
     const media = makeMedia({ id: 'p', width: 4032, height: 3024 })
-    const [, x, y] = frameParams(media, 4032 / 3024, noop)
+    const [, x, y] = photoPlacementParams(media, 4032 / 3024, noop)
     expect([x.unavailable, y.unavailable]).toEqual([NO_TRAVEL, NO_TRAVEL])
-    const [, xz, yz] = frameParams({ ...media, scale: 1.5 }, 4032 / 3024, noop)
+    const [, xz, yz] = photoPlacementParams({ ...media, scale: 1.5 }, 4032 / 3024, noop)
     expect([xz.unavailable, yz.unavailable]).toEqual([undefined, undefined])
   })
 })
@@ -171,5 +175,91 @@ describe('readouts', () => {
     }
     expect(pixels(1)(9)).toBe('9.0 px')
     expect(sizeParam({ ...layer, size: 0.24 }, noop).format(0.24)).toBe('240%')
+  })
+})
+
+describe('the frame\'s border: Width, Corners, and Blur under Frosted', () => {
+  const frosted = (over: Partial<FrameSettings> = {}): FrameSettings => ({ ...frameDefaults(), fill: 'frosted', ...over })
+  const byKey = (ps: Param[]) => Object.fromEntries(ps.map((p) => [p.key, p]))
+
+  it('Blur is offered only while the fill is Frosted; Width and Corners always', () => {
+    for (const fill of FILLS) {
+      const keys = borderParams({ ...frameDefaults(), fill }, true, noop).map((p) => p.key)
+      expect(keys, fill).toEqual(fill === 'frosted' ? ['width', 'corners', 'blur'] : ['width', 'corners'])
+    }
+  })
+
+  it('every range is the schema\'s, and the slider spans all of it', () => {
+    for (const p of borderParams(frosted(), true, noop)) {
+      expect([p.min, p.max], p.key).toEqual(range(FRAME_FIELDS, p.key))
+      expect([p.trackMin, p.trackMax], p.key).toEqual([p.min, p.max])
+    }
+    expect(byKey(borderParams(frosted(), true, noop)).width.max).toBe(FRAME_WIDTH_MAX)
+  })
+
+  it('Corners and Blur reset to the frame\'s template; Width to the border a first photo gets, never 0', () => {
+    const fresh = frameDefaults() as unknown as Record<string, number>
+    const p = byKey(borderParams(frosted({ width: 0.12, corners: 0.5, blur: 200 }), true, noop))
+    expect(p.corners.def).toBe(fresh.corners)
+    expect(p.blur.def).toBe(fresh.blur)
+    expect(p.width.def).toBe(FRAME_WIDTH_FIRST)
+    expect(p.width.def).not.toBe(fresh.width)
+    expect(resetChange(p.width)).toEqual({ value: FRAME_WIDTH_FIRST, discrete: true })
+    expect(p.width.format(p.width.def)).toBe('7.1%')
+  })
+
+  it('Width reads as a percent of the long side to a tenth, and is typed that way', () => {
+    const p = byKey(borderParams(frosted({ width: FRAME_WIDTH_FIRST }), true, noop)).width
+    expect(p.format(0)).toBe('0.0%')
+    expect(p.format(0.16)).toBe('16.0%')
+    expect(draftOf(p)).toBe('7.1')
+    expect(committedValue(p, '7.1')).toBe(0.071)
+    expect(committedValue(p, '12.5%')).toBe(0.125)
+    expect(committedValue(p, '30')).toBe(FRAME_WIDTH_MAX)
+    expect(rangeText(p)).toBe('0.0% to 16.0%')
+  })
+
+  it('Corners: Square at 0, Round at 100%, the percent between', () => {
+    const p = byKey(borderParams(frameDefaults(), true, noop)).corners
+    expect([p.format(0), p.format(0.4), p.format(1)]).toEqual(['Square', '40%', 'Round'])
+    expect([cornersWords(0.004), cornersWords(0.996)]).toEqual(['Square', 'Round'])
+    expect(rangeText(p)).toBe('Square to Round')
+    expect(committedValue(p, '40')).toBe(0.4)
+  })
+
+  it('Blur shows its number, in Border Studio\'s steps of 2', () => {
+    const p = byKey(borderParams(frosted(), true, noop)).blur
+    expect([p.format(10), p.format(60), p.format(240)]).toEqual(['10', '60', '240'])
+    expect(nudge(p, 1)).toBe(62)
+  })
+
+  it('a stored edge value is shown as it is, never clamped by the control', () => {
+    const p = byKey(borderParams(frosted({ width: FRAME_WIDTH_MAX, corners: 1, blur: 240 }), true, noop))
+    for (const key of ['width', 'corners', 'blur']) {
+      expect(thumbValue(p[key]), key).toBe(p[key].value)
+      expect(canNudge(p[key], 1), key).toBe(false)
+      expect(canNudge(p[key], -1), key).toBe(true)
+    }
+    expect(p.width.format(p.width.value)).toBe('16.0%')
+    // A width between the grid's steps (the seed is 1/14) reads as stored and
+    // steps onto the grid.
+    const seeded = byKey(borderParams(frosted({ width: FRAME_WIDTH_FIRST }), true, noop)).width
+    expect(seeded.value).toBe(FRAME_WIDTH_FIRST)
+    expect(nudge(seeded, 1)).toBe(0.072)
+    expect(nudge(seeded, -1)).toBe(0.07)
+  })
+
+  it('each writes its own field, and nothing else', () => {
+    const patches: unknown[] = []
+    const p = byKey(borderParams(frosted(), true, (patch) => patches.push(patch)))
+    p.width.onChange(0.05, { discrete: true })
+    p.corners.onChange(0.25, { discrete: true })
+    p.blur.onChange(120, { discrete: false })
+    expect(patches).toEqual([{ width: 0.05 }, { corners: 0.25 }, { blur: 120 }])
+  })
+
+  it('without a photo there is nothing to frame, and each says so', () => {
+    for (const p of borderParams(frosted(), false, noop)) expect(p.unavailable, p.key).toBe(NO_PHOTO)
+    for (const p of borderParams(frosted(), true, noop)) expect(p.unavailable, p.key).toBeUndefined()
   })
 })

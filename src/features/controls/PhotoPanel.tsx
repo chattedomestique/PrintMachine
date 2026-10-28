@@ -10,7 +10,7 @@ import { useSettings } from '../../state/settingsStore.ts'
 import type { MediaState } from '../media/useMediaBitmap.ts'
 import type { PhotoImport } from '../media/usePhotoImport.ts'
 import { DockEmpty, DockPanel, Rule } from './Dock.tsx'
-import { frameParams } from './params.ts'
+import { photoPlacementParams } from './params.ts'
 import { SUBS, type SubId } from './tools.ts'
 
 const SHEETS: readonly { value: PrintSettings['aspect']; label: string }[] = [
@@ -103,7 +103,7 @@ export default function PhotoPanel({
 
       {sub === 'frame' &&
         (media ? (
-          <ParamStrip key="frame" params={frameParams(media, visibleAspect(settings), set)} />
+          <ParamStrip key="frame" params={photoPlacementParams(media, visibleAspect(settings), set)} />
         ) : (
           <DockEmpty action={chooseButton}>No photo yet: the print is on bare paper.</DockEmpty>
         ))}

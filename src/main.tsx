@@ -21,6 +21,7 @@ import './vendor/styleguide/elements/input.min.css'
 import './vendor/styleguide/elements/select.min.css'
 import './vendor/styleguide/elements/spinner.min.css'
 import './vendor/styleguide/elements/menu.min.css'
+import './vendor/styleguide/elements/chip.min.css'
 // The app's own CSS is unlayered, so it wins over every sg.* layer without
 // !important. In this order: the bundled face, app facts, the editor's planes
 // and type scale, the dock's panels, the shell.

@@ -87,8 +87,9 @@ src/
              persistence, and one settings reducer + Context over a coalescing
              undo/redo hook. Tested in node like the engine.
   ui/        the style guide's elements as React components (Segmented, Tabs,
-             Switch, SwatchSet, ActionSheet, the Slider and its parameter
-             strip), app-agnostic: nothing in it knows what a print is.
+             Switch, SwatchSet, ActionSheet, ChipRow, the Slider and its
+             parameter strip), app-agnostic: nothing in it knows what a print
+             is (ui/layering.test.ts: it imports only React and itself).
   features/  app-aware composition — the only layer that knows what the app is.
   styles/    the app's own CSS over the style guide: fonts.css (Poster's
              face), index.css (app facts), editor.css (the planes), dock.css
@@ -1514,17 +1515,19 @@ point, and keeps no cache at all: it reads the noise where it prints it (see
 
 The interface is built on the owner's style guide, vendored exactly as Border
 Studio (the app this one follows) vendors it: `scripts/sync-styleguide.mjs`
-copies the core CSS, the icon masks, the Archivo font and fourteen elements
+copies the core CSS, the icon masks, the Archivo font and fifteen elements
 (button, card, appbar, toolbar, tabs, segmented, slider, switch, swatch,
-select, input, dialog, menu, spinner) into `src/vendor/styleguide/`, and the
-layout-only scripts (core's `SG.fit`, the segmented control's fit, the
+select, input, dialog, menu, spinner, chip) into `src/vendor/styleguide/`,
+and the layout-only scripts (core's `SG.fit`, the segmented control's fit, the
 toolbar's paging, and the scrubber script only because the toolbar calls its
 `SG.afterParse`) into `public/sg/`. `VERSION.md` records the commit
 (`e38263e`). The copies are never edited here: `npm run sync:styleguide`
 re-vendors them from a sibling checkout, and `npm run verify:geometry` then
 proves the dock still holds still. The style guide's scripts that own state
-(tabs, slider, dialog, menu) are not loaded: React owns that state, so their
-keyboard patterns are in `ui/` instead (two owners of `aria-selected` fight).
+(tabs, slider, dialog, menu, chip) are not loaded: React owns that state, so
+their keyboard patterns are in `ui/` instead (two owners of `aria-selected`
+fight); so is the chip script's one layout job, scrolling a chip that takes
+focus into view whole (`ui/chips.ts` `revealDelta`).
 
 The app's own CSS is unlayered, so it beats every `sg.*` layer without
 `!important`, and so it holds no bare element rules (a `button {}` would strip

@@ -26,7 +26,9 @@ const PAGE = { palettes: pageFramePalettes, sources: pageFrameSources, fields: p
  * A source that would not decode is kept with its photo while it is shown,
  * and let go when another is (`attemptsShown`): a photo brought back by an
  * Undo reads as at first load until its new attempt ends. While the print
- * needs it, the frame is Paper and `failed` is true (Save refuses). An
+ * needs it, the frame is Paper and `failed` is true (Save refuses): a
+ * failure lets go a source kept for its photo from an earlier decode, so a
+ * photo brought back whose new decode fails is not drawn under the card. An
  * attempt's result is applied only while its photo is the one shown
  * (`attemptEnded`), so a replaced photo's late decode never takes the place
  * of the shown photo's source or failure; the palette it makes is stored

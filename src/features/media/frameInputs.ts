@@ -79,7 +79,7 @@ export const noAttempts = (shown: string | null): FrameAttempts => ({ shown, fai
  * a photo brought back reads as it does at first load (Paper, Save offered
  * and waiting for its source) until its new attempt ends, and is refused
  * again only if that one fails. The source is kept: it is drawn only for
- * its own photo.
+ * its own photo, and let go if that photo's new attempt fails.
  */
 export const attemptsShown = (a: FrameAttempts, shown: string | null): FrameAttempts => (a.shown === shown ? a : { ...a, shown, failedId: null })
 
@@ -87,11 +87,15 @@ export const attemptsShown = (a: FrameAttempts, shown: string | null): FrameAtte
  * An attempt for photo `id` ended: it worked (with Frosted's source, `src`,
  * when it was Frosted's) or failed. Applied only while `id` is the photo
  * shown: a decode that ends after its photo was replaced, or undone, changes
- * nothing of the photo shown now, neither its source nor its failure.
+ * nothing of the photo shown now, neither its source nor its failure. A
+ * failure also lets go a source kept for that photo from an earlier decode
+ * (one made before it was replaced and brought back), so the frame is Paper
+ * whenever the photo is said to be one that could not be loaded.
  */
 export function attemptEnded(a: FrameAttempts, id: string, ok: boolean, src?: RgbaImage): FrameAttempts {
   if (a.shown !== id) return a
-  return { ...a, failedId: ok ? null : id, source: ok && src ? { id, src } : a.source }
+  if (!ok) return { ...a, failedId: id, source: a.source?.id === id ? null : a.source }
+  return { ...a, failedId: null, source: src ? { id, src } : a.source }
 }
 
 /**

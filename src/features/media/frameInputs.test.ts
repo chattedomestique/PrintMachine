@@ -402,6 +402,33 @@ describe('where the inputs are, and a photo they cannot be made from', () => {
     expect(previewFrameInputs(q, late.source, false, fields).frost).toBe(fields.field('q', srcQ, sheetAspect(q), 60, FROST_FIELD_LONG))
   })
 
+  it('a photo brought back whose new attempt fails is refused with its frame Paper, though an earlier decode of it was drawn', () => {
+    const srcP = makeFrameSource(30, 20, 1)
+    const srcQ = makeFrameSource(30, 20, 9)
+    const p = doc({ width: 0.05, fill: 'frosted', blur: 60 })
+    const refused = (s: PrintSettings, at: ReturnType<typeof noAttempts>) => frameFailed(s, at.shown === s.media?.id ? at.failedId : null)
+    const fields = frostFields()
+    // p framed in Frosted, its source decoded: drawn.
+    let at = attemptEnded(noAttempts('p'), 'p', true, srcP)
+    expect(previewFrameInputs(p, at.source, false, fields).frost).toBeDefined()
+    // q chosen, its attempt failing: q refused, p's source kept for p.
+    at = attemptEnded(attemptsShown(at, 'q'), 'q', false)
+    expect(at.source).toEqual({ id: 'p', src: srcP })
+    // Undo to p, decoded again: while that runs, drawn from the source kept.
+    at = attemptsShown(at, 'p')
+    expect(refused(p, at)).toBe(false)
+    expect(previewFrameInputs(p, at.source, false, fields).frost).toBeDefined()
+    // Its new attempt fails: refused, and the frame is Paper (no field), as
+    // the card says: never drawn from the earlier decode under that card.
+    const failed = attemptEnded(at, 'p', false)
+    expect(refused(p, failed)).toBe(true)
+    expect(failed.source).toBeNull()
+    expect(previewFrameInputs(p, failed.source, false, fields)).toEqual({})
+    // A failure lets go only its own photo's source.
+    const kept = attemptEnded(attemptsShown(attemptEnded(noAttempts('q'), 'q', true, srcQ), 'p'), 'p', false)
+    expect(kept.source).toEqual({ id: 'q', src: srcQ })
+  })
+
   it('a held-back source is waited for, and a failing one is the same failure every time it is asked, without another decode', async () => {
     let release: (() => void) | null = null
     let decodes = 0

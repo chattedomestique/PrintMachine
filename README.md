@@ -438,7 +438,9 @@ a frame that is quietly bare; Paper, or a colour already stored with the
 photo, saves as it shows. Another photo shown lets the failure go, so a
 photo an Undo brings back reads as it does at first load (Paper, Save
 offered and waiting for it) while it is decoded again, and is refused again
-only if that fails. A decode that ends after its photo was replaced or
+only if that fails; a photo whose earlier decode is still kept is drawn from
+it meanwhile, and a failure of the new one lets that go too, so the frame is
+Paper whenever the card says the photo could not be loaded. A decode that ends after its photo was replaced or
 undone changes nothing of the photo shown, so a late one never turns the
 shown photo's Frosted border to Paper under a Save that presses it
 (`check-save` step 10: the decode held back and failing, for a palette

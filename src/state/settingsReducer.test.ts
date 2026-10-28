@@ -471,7 +471,6 @@ describe('only setPalette writes the palette', () => {
     setMedia: [loose({ type: 'setMedia', media: { ...photo, palette: other } }), loose({ type: 'setMedia', media: { ...photo, id: 'n', palette: other } })],
     patchMedia: [loose({ type: 'patchMedia', patch: { palette: other, x: 0.4 } })],
     setPalette: [{ type: 'setPalette', mediaId: 'm', palette: other }],
-    reset: [{ type: 'reset', settings: base() }],
   }
 
   it('no other action writes one: a palette carried in is dropped, the stored one is kept for its photo', () => {

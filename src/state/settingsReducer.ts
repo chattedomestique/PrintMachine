@@ -45,7 +45,6 @@ export type SettingsAction =
    *  edit, so it is never an undo step. For the photo `mediaId` only: a
    *  palette that arrives after its photo was replaced is dropped. */
   | { type: 'setPalette'; mediaId: string; palette: FramePalette }
-  | { type: 'reset'; settings: PrintSettings }
 
 export type HistoryAction =
   | SettingsAction
@@ -241,9 +240,6 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
 
     case 'setPalette':
       return state.media?.id === action.mediaId ? { ...state, media: { ...state.media, palette: action.palette } } : state
-
-    case 'reset':
-      return action.settings
   }
 }
 

@@ -55,7 +55,9 @@
  *     stored with the photo and the border drawn in its colour. Under
  *     Frosted the palette is stored too, from the one decode. Under Paper,
  *     Save tapped while that decode is held decodes nothing and writes no
- *     file until it is released (the two decodes never run together). With a frame
+ *     file until it is released (the two decodes never run together), and
+ *     so does Save tapped back on a photo by an Undo (its palette stored,
+ *     needing nothing made) while the replaced photo's decode is held. With a frame
  *     source that will not decode, for a palette colour and for Frosted: the
  *     card and Save's name say the photo could not be loaded, Save cannot be
  *     tapped and no file appears, and the border stays Paper (Frosted on a
@@ -725,6 +727,7 @@ try {
         return [...c.getContext('2d').getImageData(2, 2, 1, 1).data]
       })
     const stored = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.palette ?? null)
+    const mediaId = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.id ?? null)
 
     const ctx = await newContext()
     const { page, errors } = await open(ctx, stub)
@@ -797,6 +800,60 @@ try {
       await ctx.close()
     }
 
+    // A frame-source decode begun for another photo is waited for too: a
+    // photo framed in Paper, its palette stored (it needs nothing made);
+    // another photo chosen, its frame source held back; an Undo back to the
+    // first. Save waits for the replaced photo's decode to end before it
+    // decodes the original, so the two never run together.
+    {
+      const ctx = await newContext()
+      const { page, errors } = await open(ctx, stub)
+      await choosePhoto(page, 1600, 1200)
+      await frameNext(page, { width: 0.08, fill: 'paper' }, 'pass')
+      await page.reload()
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.palette, null, { timeout: 30_000 })
+      await page.waitForTimeout(1500)
+      const shown = await mediaId(page)
+      await page.evaluate(() => {
+        sessionStorage.setItem('frame-decode', 'hold-once')
+        window.__releaseFrame = null
+      })
+      await choosePhoto(page, 1200, 1600)
+      await page.waitForFunction(() => typeof window.__releaseFrame === 'function', null, { timeout: 30_000 })
+      for (let i = 0; i < 3 && (await mediaId(page)) !== shown; i++) {
+        await page.keyboard.press('Control+z')
+        await page.waitForTimeout(300)
+      }
+      await page.waitForFunction(
+        (SAVE) => document.querySelector(SAVE)?.textContent === 'Save' && !document.querySelector(SAVE)?.hasAttribute('aria-disabled'),
+        SAVE,
+        { timeout: 30_000 },
+      )
+      await page.waitForTimeout(1500)
+      const back = (await mediaId(page)) === shown && (await stored(page)) !== null
+      let early = false
+      page.on('download', () => (early = true))
+      const before = await page.evaluate(() => window.__otherDecodes)
+      await page.locator(SAVE).click()
+      await page.waitForTimeout(2500)
+      const held = await page.evaluate(() => window.__otherDecodes)
+      check(
+        back && held === before && !early,
+        `Paper, its palette stored, back by an Undo while the replaced photo's frame source is held: Save tapped, and while it is held the original is not decoded (${held - before} decodes) and no file is written`,
+      )
+      page.removeAllListeners('download')
+      const download = page.waitForEvent('download', { timeout: 60_000 }).catch(() => null)
+      await page.evaluate(() => window.__releaseFrame())
+      const file = await download
+      const after = await page.evaluate(() => window.__otherDecodes)
+      check(
+        file !== null && after > before && (await mediaId(page)) === shown,
+        `released: the original decoded (${after - before}) and the file written (${file?.suggestedFilename() ?? 'none'})`,
+      )
+      check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+      await ctx.close()
+    }
+
     // Frosted shows on a photo with no palette: the palette is made too (the
     // fill row shows all four colours before one is chosen), from the one
     // decode Frosted needs anyway; the border is frosted.
@@ -842,7 +899,6 @@ try {
         }),
         [SAVE, LINE, CANCEL],
       )
-    const mediaId = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.id ?? null)
     for (const { fill, keep } of [
       { fill: 'photo', keep: false },
       { fill: 'frosted', keep: true },

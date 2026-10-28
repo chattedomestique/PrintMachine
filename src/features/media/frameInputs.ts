@@ -25,7 +25,7 @@ import { framePalette } from '../../engine/palette.ts'
 import type { RgbaImage } from '../../engine/resample.ts'
 import type { FillKey, FramePalette, PrintSettings } from '../../engine/types.ts'
 import { pageFrameSources, paletteSample, type frameSources } from './frameSource.ts'
-import { pageFrostFields, type frostFields } from './frostField.ts'
+import { frostFields, pageFrostFields } from './frostField.ts'
 import type { MediaState } from './useMediaBitmap.ts'
 
 /** The inputs a document already holds: the palette stored with its photo
@@ -161,26 +161,41 @@ export interface FrameMakers {
   /** Frosted's field of the photo, for a sheet of `aspect`, at `blur`,
    *  `fieldLong` on its long side. */
   frost(media: { id: string; width: number; height: number }, aspect: number, blur: number, fieldLong: number): Promise<FrostField>
+  /** Resolves once no frame-source decode is running, whatever photo it was
+   *  begun for (frameSource.ts `idle`); never rejects. */
+  idle(): Promise<void>
 }
 
-/** The page's: one decode of each photo (frameSource.ts), its palette made
- *  once, its fields kept (frostField.ts). */
-export const PAGE_MAKERS: FrameMakers = {
-  palette: (media) => pageFramePalettes.palette(media),
-  frost: async (media, aspect, blur, fieldLong) => pageFrostFields.field(media.id, await pageFrameSources.load(media), aspect, blur, fieldLong),
+/** The makers over one set of frame sources: one decode of each photo, its
+ *  palette made once from it, its fields kept (frostField.ts). */
+export function frameMakers(
+  sources: ReturnType<typeof frameSources>,
+  palettes: ReturnType<typeof framePalettes> = framePalettes(sources),
+  fields: ReturnType<typeof frostFields> = frostFields(),
+): FrameMakers {
+  return {
+    palette: (media) => palettes.palette(media),
+    frost: async (media, aspect, blur, fieldLong) => fields.field(media.id, await sources.load(media), aspect, blur, fieldLong),
+    idle: () => sources.idle(),
+  }
 }
+
+/** The page's. */
+export const PAGE_MAKERS: FrameMakers = frameMakers(pageFrameSources, pageFramePalettes, pageFrostFields)
 
 /**
  * The inputs a press of this document needs, made now if they are not held:
  * Save awaits this before it presses, so a press never starts without them,
- * and before it decodes the original, so the frame source's decode is over
- * first and the two never run together. The palette is asked for whenever
- * the page is making it (`wantsPalette`, any framed fill: the same held
- * promise, from the same decode), and awaited under every fill; only a print
- * that shows a palette colour (`needsPalette`) takes it or fails without
- * it, so a source that cannot be read refuses no Paper save. It is not
- * stored here (the page's `useFrameInputs` stores it). Frosted's field at
- * the save's size (FROST_FIELD_LONG, the settled preview's too). Rejects
+ * and before it decodes the original, so every frame-source decode is over
+ * first and none runs beside the original's: the ones this print needs,
+ * and any other still running (`makers.idle`), begun for a photo replaced
+ * or undone, or for a frame that no longer shows. The palette is asked for
+ * whenever the page is making it (`wantsPalette`, any framed fill: the same
+ * held promise, from the same decode), and awaited under every fill; only
+ * a print that shows a palette colour (`needsPalette`) takes it or fails
+ * without it, so a source that cannot be read refuses no Paper save. It is
+ * not stored here (the page's `useFrameInputs` stores it). Frosted's field
+ * at the save's size (FROST_FIELD_LONG, the settled preview's too). Rejects
  * when the photo cannot be read for what the print needs.
  */
 export async function ensureFrameInputs(s: PrintSettings, makers: FrameMakers = PAGE_MAKERS): Promise<FrameInputs> {
@@ -194,5 +209,6 @@ export async function ensureFrameInputs(s: PrintSettings, makers: FrameMakers = 
     } else await made.catch(() => null)
   }
   if (needsFrost(s)) inputs.frost = await makers.frost(s.media, sheetAspect(s), s.frame.blur, FROST_FIELD_LONG)
+  await makers.idle()
   return inputs
 }

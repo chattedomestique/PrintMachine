@@ -14,7 +14,7 @@ import { areaAverage, type RgbaImage } from '../../engine/resample.ts'
 import type { FramePalette, PrintSettings } from '../../engine/types.ts'
 import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { FrameSourceError, frameSourceSize, frameSources, paletteSample, type FrameSourceDeps } from './frameSource.ts'
-import { attemptEnded, attemptsShown, ensureFrameInputs, fillShows, frameFailed, framePalettes, frameState, needsFrost, needsPalette, noAttempts, previewFrameInputs, storedFrameInputs, wantsPalette, type FrameMakers } from './frameInputs.ts'
+import { attemptEnded, attemptsShown, ensureFrameInputs, fillShows, frameFailed, frameMakers, framePalettes, frameState, needsFrost, needsPalette, noAttempts, previewFrameInputs, storedFrameInputs, wantsPalette, type FrameMakers } from './frameInputs.ts'
 import { frostFields } from './frostField.ts'
 import { sheetAspect } from '../../engine/frame.ts'
 import { frostBlur, frostCover, frostField } from '../../engine/frost.ts'
@@ -47,6 +47,33 @@ function fakeDeps(got: (size?: { width: number; height: number }) => { width: nu
 }
 
 const photo = (width: number, height: number, id = 'p') => ({ id, width, height })
+
+const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms))
+
+/** Frame sources whose every decode is held until it is passed or failed,
+ *  in the order begun (`pending`). */
+function heldSources() {
+  const pending: { pass: () => void; fail: () => void }[] = []
+  const sources = frameSources({
+    getBlob: async () => new Blob([new Uint8Array(4)]),
+    decode: (_b, size) =>
+      new Promise((resolve, reject) =>
+        pending.push({ pass: () => resolve({ ...(size ?? { width: 300, height: 200 }), close: () => {} }), fail: () => reject(new Error('injected: no')) }),
+      ),
+    read: (_b, w, h) => new Uint8ClampedArray(w * h * 4).fill(90),
+  })
+  return { sources, pending }
+}
+
+/** Whether a promise has settled, looked at later. */
+function watched(p: Promise<unknown>) {
+  let done = false
+  void p.then(
+    () => (done = true),
+    () => (done = true),
+  )
+  return () => done
+}
 
 describe('the frame source: one decode, at a fixed size', () => {
   it('is the photo at 1024 on its long side, or as it is when smaller', () => {
@@ -104,6 +131,37 @@ describe('the frame source: one decode, at a fixed size', () => {
     await expect(failing.load(photo(300, 200))).rejects.toThrow()
     await expect(failing.load(photo(300, 200))).rejects.toThrow()
     expect(n).toBe(1)
+  })
+
+  it("idle: resolves once every decode begun has ended, a replaced photo's too and one begun while it waits; a failure ends it, never rejects it", async () => {
+    const { sources, pending } = heldSources()
+    // Nothing begun: idle at once.
+    await sources.idle()
+    // q's decode begun, then p asked for: q's is let go, still running.
+    const q = sources.load(photo(300, 200, 'q')).catch((e) => e)
+    const p = sources.load(photo(300, 200, 'p'))
+    await tick()
+    expect(pending.length).toBe(2)
+    const idle = watched(sources.idle())
+    pending[1].pass()
+    await p
+    await tick()
+    expect(idle()).toBe(false)
+    // A decode begun while it waits is waited for too.
+    const r = sources.load(photo(300, 200, 'r'))
+    await tick()
+    pending[0].fail()
+    expect(await q).toBeInstanceOf(FrameSourceError)
+    await tick()
+    expect(idle()).toBe(false)
+    pending[2].pass()
+    await r
+    await tick()
+    expect(idle()).toBe(true)
+    // Asked again for the photo held: no decode begun, idle at once.
+    await sources.load(photo(300, 200, 'r'))
+    expect(pending.length).toBe(3)
+    await sources.idle()
   })
 })
 
@@ -174,6 +232,7 @@ describe('the inputs a press needs', () => {
         if (palette instanceof Error) throw palette
         return frostField(makeFrameSource(60, 40, 1), aspect, long, blur)
       },
+      idle: async () => {},
     }
     return { asked, fields, palettes }
   }
@@ -215,6 +274,7 @@ describe('the inputs a press needs', () => {
       frost: async () => {
         throw new Error('no field under Paper')
       },
+      idle: async () => {},
     }
     const paper = doc({ width: 0.05, fill: 'paper' })
     let done = false
@@ -235,6 +295,39 @@ describe('the inputs a press needs', () => {
     const muted = ensureFrameInputs(doc({ width: 0.05, fill: 'muted' }), held)
     settle!(new FrameSourceError('no'))
     await expect(muted).rejects.toBeInstanceOf(FrameSourceError)
+  })
+
+  it('Save waits for every frame-source decode still running before the original: one begun for a photo since replaced or undone, one for a frame no longer shown; a failing one refuses nothing', async () => {
+    const { sources, pending } = heldSources()
+    const makers = frameMakers(sources)
+    // q chosen (its decode begun, held), then an Undo back to p, framed in
+    // Paper with its palette stored: p needs nothing made, and Save still
+    // waits for q's decode.
+    const q = sources.load(photo(3000, 2000, 'q')).catch(() => null)
+    await tick()
+    const paper = doc({ width: 0.05, fill: 'paper' }, PALETTE)
+    const saved = ensureFrameInputs(paper, makers)
+    const savedDone = watched(saved)
+    await tick(10)
+    expect(savedDone()).toBe(false)
+    pending[0].pass()
+    await q
+    expect(await saved).toEqual({ palette: PALETTE })
+    // p's decode begun while its Fit matte showed, then the sheet set to
+    // Original (Fit reads as Crop there): no frame shows, nothing is made,
+    // and Save waits for that decode; its failure refuses nothing.
+    const p = sources.load(photo(3000, 2000, 'p')).catch(() => null)
+    await tick()
+    const unframed: PrintSettings = { ...doc({ width: 0, corners: 0, mode: 'fit' }), aspect: 'original' }
+    expect(fillShows(unframed)).toBe(false)
+    const plain = ensureFrameInputs(unframed, makers)
+    const plainDone = watched(plain)
+    await tick(10)
+    expect(plainDone()).toBe(false)
+    pending[1].fail()
+    await p
+    expect(await plain).toEqual({})
+    expect(pending.length).toBe(2)
   })
 
   it("Frosted: Save makes its field at the settled size, for the sheet's shape and the blur; never a palette", async () => {
@@ -466,7 +559,7 @@ describe('where the inputs are, and a photo they cannot be made from', () => {
     expect(Math.max(settled.frost!.w, settled.frost!.h)).toBe(FROST_FIELD_LONG)
     expect(Math.max(draft.frost!.w, draft.frost!.h)).toBe(FROST_DRAFT_LONG)
     // Save's inputs, made through the same kept fields: the very field.
-    const makers: FrameMakers = { palette: async () => PALETTE, frost: async (m, aspect, blur, long) => fields.field(m.id, src, aspect, blur, long) }
+    const makers: FrameMakers = { palette: async () => PALETTE, frost: async (m, aspect, blur, long) => fields.field(m.id, src, aspect, blur, long), idle: async () => {} }
     const saved = await ensureFrameInputs(s, makers)
     expect(saved.frost).toBe(settled.frost)
     expect(saved.palette).toEqual(PALETTE)

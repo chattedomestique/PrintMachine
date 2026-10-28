@@ -461,9 +461,9 @@ export type SaveResult = { kind: 'pressed'; pressed: PressedPrint } | { kind: 't
  *
  *  - The frame's inputs (the photo's palette, Frosted's field) are made
  *    first when the document does not hold them, and under any fill the
- *    page's palette decode is waited for (`ensureFrameInputs`), so the press
- *    never starts without them and their decode is over before the
- *    original's begins.
+ *    page's palette decode is waited for, and every other frame-source
+ *    decode still running (`ensureFrameInputs`), so the press never starts
+ *    without them and no such decode runs beside the original's.
  *  - A print at the photo's own size decodes the ORIGINAL in full. If that
  *    fails, it is a question of size only when a smaller decode of the same
  *    file succeeds (the import already decoded it once): then the largest
@@ -500,10 +500,11 @@ export async function pressForSave(
   let photo: ImageBitmap | null = null
   try {
     // The frame's inputs first: made from a decode of their own (the
-    // photo's colours), which is over before the original is decoded, so
-    // the two never hold their pixels at once. A photo they cannot be made
-    // from is refused as a photo that cannot be loaded: never pressed with
-    // a frame quietly Paper.
+    // photo's colours), which is over before the original is decoded, as
+    // is any such decode still running for another photo or a frame no
+    // longer shown, so the two never hold their pixels at once. A photo
+    // they cannot be made from is refused as a photo that cannot be
+    // loaded: never pressed with a frame quietly Paper.
     let inputs: FrameInputs
     try {
       inputs = await deps.frameInputs(settings)

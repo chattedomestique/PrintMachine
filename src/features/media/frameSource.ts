@@ -8,8 +8,10 @@
  * zoom (decode.ts `previewArea`), and colours read from it would depend on
  * the zoom the photo was chosen at. A third decode of the photo (beside the
  * preview's copy and Save's original), made after the preview's copy has
- * landed and before Save decodes the original, never alongside it; it holds
- * a 1024 px image (2.8 MB for a 3:2 photo), once, for the photo in hand.
+ * landed; Save waits for every one of these decodes in flight, whatever
+ * photo it was begun for (`idle`), before it decodes the original, so none
+ * runs alongside it. It holds a 1024 px image (2.8 MB for a 3:2 photo),
+ * once, for the photo in hand.
  */
 
 import { MissingPhotoError } from '../../engine/export.ts'
@@ -104,13 +106,39 @@ async function decodeSource(media: { id: string; width: number; height: number }
  * The frame sources, one photo's at a time: asked for another photo, the
  * one held is let go. A failure is kept with its photo (asked again, it
  * fails again, without another decode): a new photo is a new id.
+ *
+ * A decode let go is not stopped: it runs to its end, its pixels held until
+ * then. So every decode begun is tracked until it settles (never its image,
+ * which is let go with it), and `idle` waits for them all.
  */
 export function frameSources(deps: FrameSourceDeps = PAGE_SOURCE_DEPS) {
   let held: { id: string; source: Promise<RgbaImage> } | null = null
+  // Settles once every decode begun so far has ended, worked or failed.
+  let ended: Promise<void> = Promise.resolve()
   return {
     load(media: { id: string; width: number; height: number }): Promise<RgbaImage> {
-      if (held?.id !== media.id) held = { id: media.id, source: decodeSource(media, deps) }
+      if (held?.id !== media.id) {
+        const source = decodeSource(media, deps)
+        held = { id: media.id, source }
+        const settled = source.then(
+          () => {},
+          () => {},
+        )
+        ended = Promise.all([ended, settled]).then(() => {})
+      }
       return held.source
+    },
+    /**
+     * Resolves once no decode is running: every one begun, for whatever
+     * photo, the ones begun while it waits too, has ended (worked or
+     * failed; it never rejects). Save waits for it before it decodes the
+     * original, so the two never hold their pixels at once.
+     */
+    async idle(): Promise<void> {
+      for (let at = ended; ; at = ended) {
+        await at
+        if (at === ended) return
+      }
     },
   }
 }

@@ -629,9 +629,11 @@ live where those are used:
   its own size, if smaller), read back and kept for that photo (2.8 MB for a
   3:2 photo). It waits for the preview's copy to land, and Save, under every
   fill, waits for it (or makes it, when it is missing) before it decodes the
-  original, so it never runs beside either (check-save step 10 taps Save
-  under Paper with it held back: nothing is decoded and no file written until
-  it ends).
+  original, and for any such decode still running that was begun for
+  another photo (one replaced, or undone) or for a frame that no longer
+  shows, so none runs beside either (check-save step 10 taps Save under
+  Paper with it held back, and back on a photo by an Undo with the replaced
+  photo's held back: nothing is decoded and no file written until it ends).
 - **Save** decodes the *original*, in full (4 bytes a pixel of the photo, about
   98 MB for 24 MP, 159 MB for 40 MP), and closes it the moment its last rows
   are in the print, so the print is drawn from the original's pixels, never

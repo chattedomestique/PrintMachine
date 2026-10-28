@@ -61,13 +61,38 @@ export const needsPalette = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'
 export const needsFrost = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>): boolean => fillShows(s) && s.frame.fill === 'frosted'
 
 /**
- * The photo whose frame source would not decode, after an attempt to make
- * something from photo `id` ends: a failure is kept with that photo; a
- * later attempt for it that works (the photo chosen again, or decoded again
- * after an Undo brought it back) clears it, so what Save allows is what the
- * preview draws.
+ * What the page keeps of its attempts to make the frame's inputs from the
+ * photo shown (`shown`): whether its last attempt failed (`failedId`, its
+ * id, or null), and Frosted's source, once decoded, with the photo it is
+ * of.
  */
-export const afterAttempt = (failedId: string | null, id: string, ok: boolean): string | null => (ok ? (failedId === id ? null : failedId) : id)
+export interface FrameAttempts {
+  shown: string | null
+  failedId: string | null
+  source: { id: string; src: RgbaImage } | null
+}
+
+export const noAttempts = (shown: string | null): FrameAttempts => ({ shown, failedId: null, source: null })
+
+/**
+ * Another photo shown (a Replace, an Undo, a Redo): a failure is let go, so
+ * a photo brought back reads as it does at first load (Paper, Save offered
+ * and waiting for its source) until its new attempt ends, and is refused
+ * again only if that one fails. The source is kept: it is drawn only for
+ * its own photo.
+ */
+export const attemptsShown = (a: FrameAttempts, shown: string | null): FrameAttempts => (a.shown === shown ? a : { ...a, shown, failedId: null })
+
+/**
+ * An attempt for photo `id` ended: it worked (with Frosted's source, `src`,
+ * when it was Frosted's) or failed. Applied only while `id` is the photo
+ * shown: a decode that ends after its photo was replaced, or undone, changes
+ * nothing of the photo shown now, neither its source nor its failure.
+ */
+export function attemptEnded(a: FrameAttempts, id: string, ok: boolean, src?: RgbaImage): FrameAttempts {
+  if (a.shown !== id) return a
+  return { ...a, failedId: ok ? null : id, source: ok && src ? { id, src } : a.source }
+}
 
 /**
  * Whether a press of `s` cannot be made: its photo's frame source would not

@@ -58,9 +58,14 @@
  *     file until it is released (the two decodes never run together). With a frame
  *     source that will not decode, for a palette colour and for Frosted: the
  *     card and Save's name say the photo could not be loaded, Save cannot be
- *     tapped and no file appears, and the border stays Paper; another photo
- *     whose source decodes is drawn and offered, and an Undo back to the
- *     first, decoded again and working now, draws it and offers Save.
+ *     tapped and no file appears, and the border stays Paper (Frosted on a
+ *     photo whose palette is stored, so Frosted's own attempt is the one
+ *     that reports it); another photo whose source decodes is drawn and
+ *     offered, and an Undo back to the first, while it is decoded again,
+ *     shows no card and offers Save, and decoded and working, draws it and
+ *     offers Save. A Replace undone while the replaced photo's source still
+ *     decodes: when that decode ends, the photo shown keeps its Frosted
+ *     border, and the file Save writes has it.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -689,26 +694,29 @@ try {
         if (o && Math.max(o.resizeWidth ?? 0, o.resizeHeight ?? 0) === 1024) {
           window.__frameDecodes++
           if (sessionStorage.getItem('frame-decode') === 'fail') return Promise.reject(new Error('injected: this decode fails'))
-          if (sessionStorage.getItem('frame-decode') === 'hold') return new Promise((res, rej) => (window.__releaseFrame = () => real.call(window, src, ...rest).then(res, rej)))
+          const mode = sessionStorage.getItem('frame-decode')
+          // 'hold-once': this decode held, the next ones not.
+          if (mode === 'hold-once') sessionStorage.setItem('frame-decode', 'pass')
+          if (mode === 'hold' || mode === 'hold-once') return new Promise((res, rej) => (window.__releaseFrame = () => real.call(window, src, ...rest).then(res, rej)))
         } else window.__otherDecodes++
         return real.call(window, src, ...rest)
       }
     `
     // A document given a frame before the app reads it (no control makes
-    // one yet), its palette left out, on the next load.
-    const frameNext = (page, frame, decode) =>
+    // one yet), its palette left out (or kept, `keep`), on the next load.
+    const frameNext = (page, frame, decode, keep = false) =>
       page.addInitScript(
-        ([frame, decode]) => {
+        ([frame, decode, keep]) => {
           if (sessionStorage.getItem('framed') === JSON.stringify(frame)) return
           sessionStorage.setItem('framed', JSON.stringify(frame))
           sessionStorage.setItem('frame-decode', decode)
           const k = 'printmachine:settings:v1'
           const s = JSON.parse(localStorage.getItem(k))
           s.frame = { ...s.frame, ...frame }
-          if (s.media) delete s.media.palette
+          if (s.media && !keep) delete s.media.palette
           localStorage.setItem(k, JSON.stringify(s))
         },
-        [frame, decode],
+        [frame, decode, keep],
       )
     // The sheet's top-left pixel, in the border, as the preview shows it.
     const corner = (page) =>
@@ -814,10 +822,14 @@ try {
 
     // A photo whose frame source will not decode: one state, said as a photo
     // that cannot be loaded; Save refuses; the border stays Paper. For a
-    // palette colour and for Frosted (each has its own path to the state).
-    // Then another photo whose source decodes, and an Undo back to the first:
-    // decoded again, and working now, it is drawn and Save offers it (what
-    // Save allows is what the preview draws).
+    // palette colour (its palette not stored: the palette's attempt reports
+    // it) and for Frosted on a photo whose palette IS stored (made under
+    // Paper first, as a reopened photo's is: Frosted's own attempt is the
+    // only one made, and the only one to report it). Then another photo
+    // whose source decodes, and an Undo back to the first: while it is
+    // decoded again it reads as at first load (Paper, Save offered and
+    // waiting, no card); decoded and working now, it is drawn and Save
+    // offers it (what Save allows is what the preview draws).
     const why = 'This photo could not be loaded. Choose it again.'
     const saveState = (page) =>
       page.evaluate(
@@ -831,12 +843,23 @@ try {
         [SAVE, LINE, CANCEL],
       )
     const mediaId = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.id ?? null)
-    for (const fill of ['photo', 'frosted']) {
+    for (const { fill, keep } of [
+      { fill: 'photo', keep: false },
+      { fill: 'frosted', keep: true },
+    ]) {
       const ctx2 = await newContext()
       const second = await open(ctx2, stub)
       const p2 = second.page
       await choosePhoto(p2, 1600, 1200)
-      await frameNext(p2, { width: 0.08, fill }, 'fail')
+      let kept = null
+      if (keep) {
+        await frameNext(p2, { width: 0.08, fill: 'paper' }, 'pass')
+        await p2.reload()
+        await p2.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.palette, null, { timeout: 30_000 })
+        kept = await stored(p2)
+      }
+      const decodesAtLoad = keep ? await p2.evaluate(() => window.__frameDecodes) : 0
+      await frameNext(p2, { width: 0.08, fill }, 'fail', keep)
       await p2.reload()
       await p2.waitForSelector('.sheet canvas')
       await p2.waitForFunction(() => window.__frameDecodes > 0, null, { timeout: 30_000 })
@@ -847,11 +870,15 @@ try {
       await p2.locator(SAVE).click({ force: true })
       await p2.waitForTimeout(2000)
       const failed = await corner(p2)
+      const what = keep ? `${fill} (its palette stored, ${Object.values(kept ?? {}).join(' ')})` : fill
       check(
         state.line === why && state.role === 'alert' && state.action === 'Choose again' && state.label === `Save: ${why}` && state.disabled && !downloaded,
-        `${fill}, failing: the card says "${state.line}" (${state.role}, "${state.action}"), Save is "${state.label}", cannot be tapped, no file`,
+        `${what}, failing: the card says "${state.line}" (${state.role}, "${state.action}"), Save is "${state.label}", cannot be tapped, no file (${decodesAtLoad} decodes before)`,
       )
-      check(failed.join() === paper.join() && (await stored(p2)) === null, `and the border stays Paper (${failed.join(',')}), nothing stored`)
+      check(
+        failed.join() === paper.join() && JSON.stringify(await stored(p2)) === JSON.stringify(kept),
+        `and the border stays Paper (${failed.join(',')}), ${keep ? 'the palette as it was' : 'nothing stored'}`,
+      )
 
       // Another photo, its source decoding: drawn, and Save offers it.
       const first = await mediaId(p2)
@@ -864,22 +891,103 @@ try {
         other.join() !== paper.join() && !otherState.disabled && (await mediaId(p2)) !== first,
         `${fill}, another photo chosen: its border drawn (${other.join(',')}), Save "${otherState.label ?? 'Save'}" offered`,
       )
-      // Undo back to the first photo: decoded again, and working now.
-      const decodesBefore = await p2.evaluate(() => window.__frameDecodes)
+      // Undo back to the first photo, its new decode held back: it reads as
+      // at first load, not as failed.
+      await p2.evaluate(
+        ([LINE, why]) => {
+          sessionStorage.setItem('frame-decode', 'hold')
+          window.__releaseFrame = null
+          // Whether the card says so at any moment from here.
+          window.__sawFailure = false
+          const look = () => (window.__sawFailure ||= document.querySelector(LINE)?.textContent === why)
+          new MutationObserver(look).observe(document.body, { subtree: true, childList: true, characterData: true })
+        },
+        [LINE, why],
+      )
       for (let i = 0; i < 3 && (await mediaId(p2)) !== first; i++) {
         await p2.keyboard.press('Control+z')
         await p2.waitForTimeout(300)
       }
-      await p2.waitForFunction((d) => window.__frameDecodes > d, decodesBefore, { timeout: 30_000 })
+      await p2.waitForFunction(() => typeof window.__releaseFrame === 'function', null, { timeout: 30_000 })
+      await p2.waitForTimeout(1000)
+      const waiting = await saveState(p2)
+      const waitingCorner = await corner(p2)
+      const alerted = await p2.evaluate(() => window.__sawFailure)
+      check(
+        (await mediaId(p2)) === first && waiting.line !== why && waiting.role !== 'alert' && !waiting.disabled && waiting.label !== `Save: ${why}` && !alerted && waitingCorner.join() === paper.join(),
+        `${fill}, Undo to the first photo, decoded again and held: no card at any moment ("${waiting.line ?? ''}"), Save offered ("${waiting.label ?? 'Save'}"), the border Paper until it lands`,
+      )
+      // Released, and working now: drawn, and Save offers it.
+      await p2.evaluate(() => sessionStorage.setItem('frame-decode', 'pass'))
+      await p2.evaluate(() => window.__releaseFrame())
       await p2.waitForTimeout(1500)
       const back = await corner(p2)
       const backState = await saveState(p2)
       check(
         (await mediaId(p2)) === first && back.join() !== paper.join() && !backState.disabled && backState.label !== `Save: ${why}`,
-        `${fill}, Undo to the first photo, decoded again: its border drawn (${back.join(',')}) and Save offered ("${backState.label ?? 'Save'}"), not refused`,
+        `${fill}, released: its border drawn (${back.join(',')}) and Save offered ("${backState.label ?? 'Save'}"), not refused`,
       )
       check(second.errors.length === 0, `no page errors ${second.errors.join(' | ')}`)
       await ctx2.close()
+    }
+
+    // A photo replaced while its frame source decodes, and the Replace
+    // undone before that decode ends: the late decode is the replaced
+    // photo's, and changes nothing of the photo shown. Its Frosted border
+    // stays drawn, and is what Save presses.
+    {
+      const ctx = await newContext()
+      const { page, errors } = await open(ctx, stub)
+      await choosePhoto(page, 1600, 1200)
+      await frameNext(page, { width: 0.08, fill: 'frosted' }, 'pass')
+      await page.reload()
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.palette, null, { timeout: 30_000 })
+      await page.waitForTimeout(1500)
+      const shown = await mediaId(page)
+      const drawn = await corner(page)
+      // Another photo chosen, its frame source held back; then Undo.
+      await page.evaluate(() => {
+        sessionStorage.setItem('frame-decode', 'hold-once')
+        window.__releaseFrame = null
+      })
+      await choosePhoto(page, 1200, 1600)
+      await page.waitForFunction(() => typeof window.__releaseFrame === 'function', null, { timeout: 30_000 })
+      const decodes = await page.evaluate(() => window.__frameDecodes)
+      for (let i = 0; i < 3 && (await mediaId(page)) !== shown; i++) {
+        await page.keyboard.press('Control+z')
+        await page.waitForTimeout(300)
+      }
+      await page.waitForFunction((d) => window.__frameDecodes > d, decodes, { timeout: 30_000 })
+      await page.waitForTimeout(1500)
+      const back = await corner(page)
+      // The replaced photo's decode ends now.
+      await page.evaluate(() => window.__releaseFrame())
+      await page.waitForTimeout(1500)
+      const after = await corner(page)
+      check(
+        (await mediaId(page)) === shown && back.join() !== paper.join() && after.join() === back.join(),
+        `Frosted, a Replace undone while the replaced photo's source decodes: back on the first photo its border drawn (${back.join(',')}; ${drawn.join(',')} before), and after that decode ends still (${after.join(',')})`,
+      )
+      const download = page.waitForEvent('download', { timeout: 60_000 }).catch(() => null)
+      await page.locator(SAVE).click()
+      const file = await download
+      const printed = file
+        ? await page.evaluate(async (b64) => {
+            const img = new Image()
+            img.src = `data:image/jpeg;base64,${b64}`
+            await img.decode()
+            const c = document.createElement('canvas')
+            c.width = img.naturalWidth
+            c.height = img.naturalHeight
+            const g = c.getContext('2d')
+            g.drawImage(img, 0, 0)
+            return [...g.getImageData(2, 2, 1, 1).data]
+          }, readFileSync(await file.path()).toString('base64'))
+        : null
+      const near = printed !== null && printed.slice(0, 3).every((v, k) => Math.abs(v - after[k]) <= 12)
+      check(near, `and Save presses what the preview draws: the file's corner ${printed?.join(',') ?? 'none'} against the preview's ${after.join(',')}`)
+      check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+      await ctx.close()
     }
   }
 } finally {

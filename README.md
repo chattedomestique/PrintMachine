@@ -427,15 +427,21 @@ history entry that holds the photo takes it, so no Undo or Redo takes it
 away and has the photo decoded again), so the preview, the save and every
 reopen agree, and Save makes it first when a palette colour needs it, so a
 press never starts without it. A photo whose frame source will not decode
-is one state, kept with the photo until an attempt for it works (the photo
-chosen again, or decoded again when an Undo brings it back): while the print
-needs that source (a palette colour not yet stored, or Frosted) the frame
-stays Paper, the status card and Save's name say the photo could not be
-loaded (the words of a photo that is gone), and Save refuses it rather than
-press a frame that is quietly bare (`check-save` step 10, with the decode
-held back and failing, for a palette colour and for Frosted, and through a
-Replace and an Undo); Paper, or a colour already stored with the photo,
-saves as it shows.
+is one state, kept with the photo while it is shown: while the print needs
+that source (a palette colour not yet stored, or Frosted) the frame stays
+Paper, the status card and Save's name say the photo could not be loaded
+(the words of a photo that is gone), and Save refuses it rather than press
+a frame that is quietly bare; Paper, or a colour already stored with the
+photo, saves as it shows. Another photo shown lets the failure go, so a
+photo an Undo brings back reads as it does at first load (Paper, Save
+offered and waiting for it) while it is decoded again, and is refused again
+only if that fails. A decode that ends after its photo was replaced or
+undone changes nothing of the photo shown, so a late one never turns the
+shown photo's Frosted border to Paper under a Save that presses it
+(`check-save` step 10: the decode held back and failing, for a palette
+colour and for Frosted on a photo whose palette is stored; a Replace and an
+Undo, the photo brought back held while it decodes; a Replace undone while
+the replaced photo still decodes).
 Fed Border Studio's own recorded sample of its two block photos, 36
 photograph-like samples, 72 at the page's own sample sizes (half with a
 clear corner) and 81 flat colours on the hue boundaries, each keyed by

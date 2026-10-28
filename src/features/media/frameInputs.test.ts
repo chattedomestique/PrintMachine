@@ -14,7 +14,7 @@ import { areaAverage, type RgbaImage } from '../../engine/resample.ts'
 import type { FramePalette, PrintSettings } from '../../engine/types.ts'
 import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { FrameSourceError, frameSourceSize, frameSources, paletteSample, type FrameSourceDeps } from './frameSource.ts'
-import { afterAttempt, ensureFrameInputs, fillShows, frameFailed, framePalettes, frameState, needsFrost, needsPalette, previewFrameInputs, storedFrameInputs, wantsPalette, type FrameMakers } from './frameInputs.ts'
+import { attemptEnded, attemptsShown, ensureFrameInputs, fillShows, frameFailed, framePalettes, frameState, needsFrost, needsPalette, noAttempts, previewFrameInputs, storedFrameInputs, wantsPalette, type FrameMakers } from './frameInputs.ts'
 import { frostFields } from './frostField.ts'
 import { sheetAspect } from '../../engine/frame.ts'
 import { frostBlur, frostCover, frostField } from '../../engine/frost.ts'
@@ -354,24 +354,52 @@ describe('where the inputs are, and a photo they cannot be made from', () => {
     expect(frameState('none', false)).toBe('none')
   })
 
-  it('a failure stays with its photo until an attempt for that photo works: fails, Replace, Undo, decoded again', () => {
+  it('a failure stays with its photo while it is shown; brought back by an Undo it reads as at first load until its new attempt ends', () => {
     const a = doc({ width: 0.05, fill: 'frosted' })
     const b = { ...a, media: makeMedia({ id: 'q', width: 3000, height: 2000 }) }
+    const refused = (s: PrintSettings, at: ReturnType<typeof noAttempts>) => frameFailed(s, at.shown === s.media?.id ? at.failedId : null)
     // Photo p fails: Save refuses it.
-    let failed = afterAttempt(null, 'p', false)
-    expect(frameFailed(a, failed)).toBe(true)
-    // Replaced by q, whose source decodes: q prints; p's failure is kept.
-    failed = afterAttempt(failed, 'q', true)
-    expect(frameFailed(b, failed)).toBe(false)
-    // Undo to p: until its new attempt ends, still refused (and the frame
-    // Paper: the held source is q's); decoded again and working, it prints
-    // what the preview now draws.
-    expect(frameFailed(a, failed)).toBe(true)
-    failed = afterAttempt(failed, 'p', true)
-    expect(failed).toBe(null)
-    expect(frameFailed(a, failed)).toBe(false)
-    // A failure of another photo replaces it.
-    expect(afterAttempt('p', 'q', false)).toBe('q')
+    let at = attemptEnded(noAttempts('p'), 'p', false)
+    expect(refused(a, at)).toBe(true)
+    // An attempt for p made again while it is shown (the same held failure):
+    // still refused, no flicker.
+    expect(attemptEnded(at, 'p', false)).toEqual(at)
+    // Replaced by q, whose source decodes: q prints.
+    at = attemptEnded(attemptsShown(at, 'q'), 'q', true, makeFrameSource(30, 20, 1))
+    expect(refused(b, at)).toBe(false)
+    // Undo to p: while its new attempt runs it is not refused (Paper, Save
+    // offered and waiting, as at first load) ...
+    at = attemptsShown(at, 'p')
+    expect(refused(a, at)).toBe(false)
+    // ... and refused again only if that attempt fails; one that works prints.
+    expect(refused(a, attemptEnded(at, 'p', false))).toBe(true)
+    expect(refused(a, attemptEnded(at, 'p', true))).toBe(false)
+    // Shown again, the same photo keeps what it has; an Undo straight back
+    // from q, before q's attempt ended, finds p's failure let go too.
+    const failed = attemptEnded(at, 'p', false)
+    expect(attemptsShown(failed, 'p')).toBe(failed)
+    expect(refused(a, attemptsShown(attemptsShown(failed, 'q'), 'p'))).toBe(false)
+  })
+
+  it("a replaced photo's attempt that ends late changes nothing of the photo shown: neither its failure nor its source", () => {
+    const srcP = makeFrameSource(30, 20, 1)
+    const srcQ = makeFrameSource(30, 20, 9)
+    // p's decode held; q chosen, its decode failing: q refused.
+    let at = attemptEnded(attemptsShown(noAttempts('p'), 'q'), 'q', false)
+    expect(at.failedId).toBe('q')
+    // p's held decode fails now: q's failure is kept.
+    expect(attemptEnded(at, 'p', false)).toBe(at)
+    expect(attemptEnded(at, 'p', true, srcP)).toBe(at)
+    // q framed in Frosted and drawn; p chosen (its decode held); Undo to q,
+    // its source decoded again; then p's decode ends: q's source stays.
+    at = attemptEnded(noAttempts('q'), 'q', true, srcQ)
+    at = attemptEnded(attemptsShown(attemptsShown(at, 'p'), 'q'), 'q', true, srcQ)
+    const late = attemptEnded(at, 'p', true, srcP)
+    expect(late.source).toEqual({ id: 'q', src: srcQ })
+    // So the preview draws q's Frosted, the field Save presses, not Paper.
+    const q = { ...doc({ width: 0.05, fill: 'frosted', blur: 60 }), media: makeMedia({ id: 'q', width: 3000, height: 2000 }) }
+    const fields = frostFields()
+    expect(previewFrameInputs(q, late.source, false, fields).frost).toBe(fields.field('q', srcQ, sheetAspect(q), 60, FROST_FIELD_LONG))
   })
 
   it('a held-back source is waited for, and a failing one is the same failure every time it is asked, without another decode', async () => {

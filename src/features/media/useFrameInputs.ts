@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FrameInputs } from '../../engine/frame.ts'
-import type { RgbaImage } from '../../engine/resample.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { useSettings } from '../../state/settingsStore.ts'
-import { afterAttempt, frameFailed, needsFrost, pageFramePalettes, previewFrameInputs, wantsPalette } from './frameInputs.ts'
+import { attemptEnded, attemptsShown, frameFailed, needsFrost, noAttempts, pageFramePalettes, previewFrameInputs, wantsPalette } from './frameInputs.ts'
 import { pageFrameSources } from './frameSource.ts'
 import { pageFrostFields } from './frostField.ts'
 import type { MediaState } from './useMediaBitmap.ts'
@@ -24,9 +23,14 @@ const PAGE = { palettes: pageFramePalettes, sources: pageFrameSources, fields: p
  * draft's (160) while a control moves, each kept (frostField.ts); the
  * settled frame is the one Save presses.
  *
- * A source that would not decode is kept with its photo (`failedId`) until
- * an attempt for that photo works; while the print needs it, the frame is
- * Paper and `failed` is true (Save refuses).
+ * A source that would not decode is kept with its photo while it is shown,
+ * and let go when another is (`attemptsShown`): a photo brought back by an
+ * Undo reads as at first load until its new attempt ends. While the print
+ * needs it, the frame is Paper and `failed` is true (Save refuses). An
+ * attempt's result is applied only while its photo is the one shown
+ * (`attemptEnded`), so a replaced photo's late decode never takes the place
+ * of the shown photo's source or failure; the palette it makes is stored
+ * with its own photo all the same (`setPalette` keys it).
  */
 export function useFrameInputs(
   settings: PrintSettings,
@@ -40,10 +44,11 @@ export function useFrameInputs(
   const height = photo?.height ?? 0
   const wantPalette = wantsPalette(settings)
   const wantFrost = needsFrost(settings)
-  // The photo whose frame source would not decode, on its last attempt.
-  const [failedId, setFailedId] = useState<string | null>(null)
-  // The photo's frame source, for Frosted, once decoded.
-  const [source, setSource] = useState<{ id: string; src: RgbaImage } | null>(null)
+  // The photo shown, whether its last attempt failed, and its frame source
+  // for Frosted once decoded. Another photo shown lets a failure go (set
+  // while rendering, as React adjusts state to a prop that changed).
+  const [attempts, setAttempts] = useState(() => noAttempts(id))
+  if (attempts.shown !== id) setAttempts(attemptsShown(attempts, id))
 
   useEffect(() => {
     if (!wantPalette || media !== 'ready' || !id) return
@@ -51,26 +56,24 @@ export function useFrameInputs(
       (palette) => {
         // Null: the photo has no colour; its colour fills are Paper.
         if (palette) dispatch({ type: 'setPalette', mediaId: id, palette })
-        setFailedId((f) => afterAttempt(f, id, true))
+        setAttempts((a) => attemptEnded(a, id, true))
       },
-      () => setFailedId((f) => afterAttempt(f, id, false)),
+      () => setAttempts((a) => attemptEnded(a, id, false)),
     )
   }, [wantPalette, media, id, width, height, dispatch, makers])
 
   useEffect(() => {
     if (!wantFrost || media !== 'ready' || !id) return
     void makers.sources.load({ id, width, height }).then(
-      (src) => {
-        setSource({ id, src })
-        setFailedId((f) => afterAttempt(f, id, true))
-      },
-      () => setFailedId((f) => afterAttempt(f, id, false)),
+      (src) => setAttempts((a) => attemptEnded(a, id, true, src)),
+      () => setAttempts((a) => attemptEnded(a, id, false)),
     )
   }, [wantFrost, media, id, width, height, makers])
 
   // What a frame of `s` is drawn from: what the document holds, and
   // Frosted's field for its sheet and blur once the source is here.
+  const source = attempts.source
   const inputsFor = useCallback((s: PrintSettings, draft: boolean): FrameInputs => previewFrameInputs(s, source, draft, makers.fields), [source, makers])
 
-  return { inputsFor, failed: frameFailed(settings, failedId) }
+  return { inputsFor, failed: frameFailed(settings, attempts.shown === id ? attempts.failedId : null) }
 }

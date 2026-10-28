@@ -33,6 +33,9 @@ const PICK_THEN_TAP_MS = 1000
 /** The keys a plate answers to, as `aria-keyshortcuts` names them. */
 const PLATE_KEYS = 'ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ]'
 
+/** What the plate's keys do, said on the sheet wherever they are its keys. */
+const PLATE_KEYS_SAID = 'Arrow keys move the selected plate, plus and minus scale, brackets rotate.'
+
 /**
  * The print preview, plus the surface that manipulates a plate (the selected
  * one, or the one a touch lands on) or, with the Frame tool open, the photo
@@ -57,7 +60,9 @@ export default function Canvas({
   inputsFor: (s: PrintSettings, draft: boolean) => FrameInputs
   /** Point the sheet's gestures at the photo instead of the type (the Frame
    *  tool is open). Driven by the open tool, so what you are touching is
-   *  whatever panel you are in — no second selection model to keep in sync. */
+   *  whatever panel you are in — no second selection model to keep in sync.
+   *  Without a photo a touch still picks no type (the Frame tool's rule), and
+   *  the keys stay the selected plate's, as the sheet then says. */
   mediaMode?: boolean
   /** Hold the preview where it is (a save is pressing the print). */
   paused?: boolean
@@ -191,17 +196,18 @@ export default function Canvas({
    * primary editing interaction is a drag, there has to be a focusable,
    * arrow-adjustable equivalent — this is that.
    *
-   * With the Frame tool open the keys are the photo's, as its gestures are
-   * (photoKeys.ts: arrows move the view, +/- zoom, 0 resets; in Fit there is
-   * nothing to move, and they do nothing). Otherwise they are the selected
-   * plate's: arrows move, +/- size (5% of it, at least one step;
-   * sizeScale.ts), [/] rotate; Shift coarsens every step.
+   * With the Frame tool open on a photo the keys are the photo's, as its
+   * gestures are (photoKeys.ts: arrows move the view, +/- zoom, 0 resets; in
+   * Fit there is nothing to move, and they do nothing). Otherwise, and with
+   * no photo to move, they are the selected plate's: arrows move, +/- size
+   * (5% of it, at least one step; sizeScale.ts), [/] rotate; Shift coarsens
+   * every step.
    */
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (mediaMode) {
-        const m = settings.media
-        if (!m || fit) return
+      const m = settings.media
+      if (mediaMode && m) {
+        if (fit) return
         const change = photoKey(e.key, m, placeAspect)
         if (!change) return
         e.preventDefault()
@@ -243,12 +249,14 @@ export default function Canvas({
         role="application"
         aria-label={
           !mediaMode
-            ? 'Print preview. Tap a plate to pick it, drag to move it, pinch to scale and rotate, double-tap to centre. Arrow keys move the selected plate, plus and minus scale, brackets rotate.'
-            : fit
-              ? 'Print preview, the photo. Fit shows the whole photo: choose Crop to move or zoom it.'
-              : 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to reset it. Arrow keys move it, plus and minus zoom, 0 resets.'
+            ? `Print preview. Tap a plate to pick it, drag to move it, pinch to scale and rotate, double-tap to centre. ${PLATE_KEYS_SAID}`
+            : !settings.media
+              ? `Print preview. No photo yet: choose one in Frame, Photo. ${PLATE_KEYS_SAID}`
+              : fit
+                ? 'Print preview, the photo. Fit shows the whole photo: choose Crop to move or zoom it.'
+                : 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to reset it. Arrow keys move it, plus and minus zoom, 0 resets.'
         }
-        aria-keyshortcuts={!mediaMode ? PLATE_KEYS : fit ? undefined : PHOTO_KEYS}
+        aria-keyshortcuts={!mediaMode || !settings.media ? PLATE_KEYS : fit ? undefined : PHOTO_KEYS}
         tabIndex={0}
         onDoubleClick={onDoubleClick}
         onKeyDown={onKeyDown}

@@ -632,6 +632,23 @@ try {
         }
       }, sel)
     await page.locator('[data-tool="frame"]').click()
+    // No photo: the sheet is not the photo's. It says there is none, names
+    // the plate's keys, and an arrow moves the selected plate (PRINT MACHINE,
+    // at 0.5 across until something moves it).
+    {
+      const surface = page.locator('.drag-surface')
+      const keys = await surface.getAttribute('aria-keyshortcuts')
+      const name = (await surface.getAttribute('aria-label')) ?? ''
+      const x = async () => (await stored(page))?.layers?.[0]?.x ?? 0.5
+      const before = await x()
+      await surface.focus()
+      await page.keyboard.press('ArrowRight')
+      const after = await x()
+      check(
+        keys === 'ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ]' && /^Print preview\. No photo yet/.test(name) && !/move the photo|zoom/.test(name) && after > before,
+        `no photo, Frame open: the sheet says "${name}", names the plate's keys ("${keys}"), and ArrowRight moves the plate (${before} -> ${after})`,
+      )
+    }
     await tab('border')
     const border = '.controls__panel[data-sub="border"]'
     const dec = await said(`${border} [aria-label="Decrease Width"]`)

@@ -1918,7 +1918,9 @@ move the plate), one press 6% of its drawn size at 100%, whatever the zoom;
 + and − zoom by 1.15 within 100–400%; 0 puts it back at 100% and centred.
 A run of presses is one undo step, as a plate's keys are, and 0 a step of
 its own; in Fit they move nothing (`check:touch` presses them in the built
-app). The selected plate shows a crosshair on the
+app). With no photo there is nothing of the photo's to move: a touch still
+picks no type, and the keys stay the selected plate's, as the sheet's name
+says ("No photo yet", then the plate's keys). The selected plate shows a crosshair on the
 sheet — the one editing aid, and it never reaches a saved file.
 
 **Tap a plate to pick it** (Border Studio's tap-to-select). A touch that lands

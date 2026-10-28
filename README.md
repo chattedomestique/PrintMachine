@@ -517,16 +517,22 @@ document's rounds taken back to back, so the two documents at the two sizes
 are measured round by round in turn (15 rounds, one render a sample), a
 render's time is the mean of its three fastest samples (thirty in draft, ten
 a round), and a document and size with a row over its bound is measured
-again, up to twice, its samples pooled; it fails only if still over. Over 75
-runs on one machine, in three batches of 25, every run passed; five measured
-one document and size again, and each was within its bound at the second
-measurement (a photo at its own size, settled Crop: 1.12x unframed on 15
-rounds, 1.02x on 30). The verdicts were 0.85 to 1.08 against unframed (under
-1 in Fit, which draws the photo smaller) and 0.90 to 1.09 against the compose
-skipped. The compose run ten times over fails the gate in every run (a 12 MP
-photo in Fit then sits at the bound: its frame, a flat matte round a photo a
-third of the sheet, is about 1% of the render); twenty times over fails every
-row of both documents in every run.
+again, up to twice, its samples pooled; it fails only if still over. On the
+gate as it is now (Crop, Fit, Frosted kept and Frosted made again, both
+documents at both sizes: 16 rows), 8 runs on one machine all passed, two of
+them measuring one document and size again: against unframed, Crop 0.97 to
+1.04, Fit 0.91 to 1.04 (under 1 in Fit, which draws the photo smaller),
+Frosted 1.00 to 1.10; against the compose skipped, Crop 1.00 to 1.07, Fit
+0.96 to 1.06, Frosted 1.02 to 1.10 (bound 1.10 settled, 1.25 draft). Before
+Frosted, M2's gate (Crop and Fit only) passed 75 runs in three batches of
+25, its verdicts 0.85 to 1.08 and 0.90 to 1.09. With the preview's compose
+run ten times over, the gate fails (11 of its 16 rows: the four Frosted rows
+with the field kept and the two draft made-again ones, a photo at its own
+size's Crop and Fit at both sizes, the 12 MP photo's settled Crop; the 12 MP
+photo's Fit stays in, its frame a flat matte round a photo a third of the
+sheet, about 1% of the render, and so do its draft Crop, at 1.244, and the
+settled made-again rows, whose bound is the looser); twenty times over fails
+all 16.
 
 #### The photo is stored exactly as it came
 

@@ -606,7 +606,8 @@ async function newPage({ width, height, scheme = 'light', photo = PHOTOS[0], ini
 /**
  * Every tool, every sub-tab, every Over photo state, and Frame › Border with
  * Frosted chosen, in order, calling `visit(name)` in each. Leaves the second
- * ink on, the fill on Photo and the tools closed.
+ * ink on, the fill on Photo and the tools closed. Without a photo the states
+ * a photo makes (the fill row, a second ink) are not there to visit.
  */
 async function eachState(page, visit) {
   await closeTools(page)
@@ -621,6 +622,8 @@ async function eachState(page, visit) {
         const over = page.locator('.controls__panel[data-sub="over"]')
         for (const mode of ['off', 'second', 'backing']) {
           await settle(page, `ink-over, before ${mode}`)
+          // Without a photo a second ink has nothing to read: unavailable.
+          if (await over.locator(`input[type=radio][value="${mode}"]`).isDisabled()) continue
           await over.locator(`input[type=radio][value="${mode}"]`).check({ force: true })
           await visit(`${tool}-${tab}-${mode}`)
           if (mode === 'second') {
@@ -639,11 +642,11 @@ async function eachState(page, visit) {
           }
         }
         await settle(page, 'ink-over, before second')
-        await over.locator('input[type=radio][value="second"]').check({ force: true })
+        if (!(await over.locator('input[type=radio][value="second"]').isDisabled())) await over.locator('input[type=radio][value="second"]').check({ force: true })
         continue
       }
       await visit(`${tool}-${tab}`)
-      if (tool === 'frame' && tab === 'border') {
+      if (tool === 'frame' && tab === 'border' && (await page.locator('.controls__panel[data-sub="border"] .chiprow').count()) > 0) {
         // Frosted adds Blur to the strip: the sheet must not move for it,
         // with Blur the setting on screen.
         const panel = page.locator('.controls__panel[data-sub="border"]')
@@ -875,10 +878,22 @@ const shotName = (...parts) => parts.join('-').replace(/[^a-z0-9-]+/gi, '-') + '
 
 try {
   // ── 1. Every viewport, every photo, at 100% text ──
+  // Each photo as a first photo is placed (in its frame); the first of them
+  // with its frame taken away (Width to 0 by the keys, as every print saved
+  // before the frame opens); and bare paper, no photo at all.
+  const DOCS = [...PHOTOS.map((photo) => ({ photo })), { photo: PHOTOS[0], unframed: true }, { photo: null }]
   for (const [vw, vh] of VIEWPORTS) {
-    for (const [pw, ph] of PHOTOS) {
-      const where = `${vw}x${vh}, a ${pw}x${ph} photo`
-      const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [pw, ph] })
+    for (const doc of DOCS) {
+      const [pw, ph] = doc.photo ?? []
+      const where = `${vw}x${vh}, ${doc.photo ? `a ${pw}x${ph} photo${doc.unframed ? ', unframed' : ''}` : 'no photo'}`
+      const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: doc.photo })
+      if (doc.unframed) {
+        await openTab(page, 'frame', 'border')
+        await page.locator('.controls__panel[data-sub="border"] input[type=range]').focus()
+        await page.keyboard.press('Home')
+        await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.frame?.width === 0, null, { timeout: 5_000 })
+        await closeTools(page)
+      }
       const states = []
       let targets = 0
       await eachState(page, async (name) => {
@@ -904,7 +919,7 @@ try {
           check(travel.pxPerStep >= 1.5, `${where}: a Size step is at least 1.5 px of travel (${travel.pxPerStep.toFixed(2)})`)
         }
       })
-      if (pw === PHOTOS[0][0]) {
+      if (doc === DOCS[0]) {
         await eachDialog(page, async (name) => {
           await settle(page, `${where}, ${name}`)
           targets += (await checkTargets(page, `${where}, ${name}`)).measured

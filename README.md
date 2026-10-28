@@ -1808,7 +1808,9 @@ The panel is the same height in every tool and every tab, so **the sheet never
 changes size or place between them** (Border Studio fcd91ff). That is checked,
 not assumed: `npm run verify:geometry` opens every tool, sub-tab and Over-photo
 state, and Frame › Border with Frosted chosen (its Blur on the strip), at 320,
-375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
+375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo each in the
+frame a first photo gets, the 4:3 again with its frame taken away (Width to 0,
+as every print saved before the frame opens) and bare paper with no photo, and
 fails if the sheet moves by a pixel, if a panel overflows, or if the page
 scrolls sideways. The Frame tool's own states are swept again at every width,
 in light and dark, at 100% and 200% text: its fill row with Photo and with

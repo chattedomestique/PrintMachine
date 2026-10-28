@@ -8,7 +8,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { framePalette, hexToHsl, hslHex, hslToRgb, rgbToHex, rgbToHsl } from './palette.ts'
 import { mulberry32 } from './rng.ts'
-import { paletteSamples } from './__tests__/paletteSamples.ts'
+import { paletteSamples, sizedPaletteSamples } from './__tests__/paletteSamples.ts'
 import borderStudio from './__fixtures__/palettes-597ce7a.json'
 
 const refs = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../scripts/parity-borders/refs.json'), 'utf8')) as {
@@ -55,6 +55,25 @@ describe("the port: Border Studio's sample in, Border Studio's hex out", () => {
     // saturation 6), so that path is held too.
     const greyHeroes = borderStudio.samples.filter((s) => s.name.startsWith('grey-cast'))
     expect(greyHeroes.length).toBeGreaterThan(0)
+  })
+
+  // At the sizes the page's sample really takes (84 x 63, 84 x 47, 84 x 84,
+  // their portraits, an odd one; half with a transparent corner), where the
+  // median cut's boxes are odd: a split off by one changes colours here
+  // (11 of these 72), not on the 84 x 56 samples above.
+  it("at the page's own sample sizes, odd boxes and transparent corners: every colour is Border Studio's exactly", () => {
+    const samples = sizedPaletteSamples()
+    expect(samples.map((s) => s.name)).toEqual(borderStudio.sized.map((s) => s.name))
+    const differ = samples.filter((s, i) => JSON.stringify(framePalette(s.rgba)) !== JSON.stringify(borderStudio.sized[i].hex))
+    expect(differ.map((s) => s.name)).toEqual([])
+  })
+
+  // Flat colours at hue 60, 180 and 300, where HSL's sextants meet and its
+  // comparisons decide which formula a channel takes.
+  it('flat colours on the HSL sextant boundaries: every colour is Border Studio\'s exactly', () => {
+    expect(borderStudio.flats.length).toBeGreaterThan(50)
+    const differ = borderStudio.flats.filter((f) => JSON.stringify(framePalette(flat(f.rgb, 4))) !== JSON.stringify(f.hex))
+    expect(differ.map((f) => f.rgb.join())).toEqual([])
   })
 })
 

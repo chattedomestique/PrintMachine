@@ -63,9 +63,11 @@ const TYPED = [...Array.from({ length: 0x7f - 0x20 }, (_, k) => String.fromCodeP
  *  that loses one more fails: these print in the phone's own face (README
  *  "Fonts"). Tanklager Kompakt has no dollar sign. */
 const FALLS_BACK = ['$']
-/** Not typed on a phone's first keyboard, but likely: reported, not
+/** Typed from an iPhone's keyboard off its first two pages: `€ £ ¥` on the
+ *  `#+=` page, `¢ ₩ ₽ §` from a long press on `$`, `&` and `0`, and `© ™`:
+ *  reported (the ones the face lacks print in the phone's own face), not
  *  required. */
-const LIKELY = [...'\u20ac\u00a3\u00a9\u2122']
+const LIKELY = [...'\u20ac\u00a3\u00a5\u00a2\u20a9\u20bd\u00a7\u00a9\u2122']
 const JOINING = ['liga', 'clig', 'calt', 'dlig', 'rlig']
 
 const align4 = (n) => (n + 3) & ~3
@@ -330,7 +332,8 @@ if (face.problems.length) {
   failed = true
   for (const p of face.problems) console.error(`  FAIL ${p}`)
 } else {
-  console.log(`  every printable ASCII character and ${TYPED.slice(0x7f - 0x20).join(' ')} mapped, but for ${FALLS_BACK.join(' ')}; lowercase its own glyphs; no ${JOINING.join(' ')}: ok`)
+  const excused = FALLS_BACK.filter((ch) => (face.map.get(ch.codePointAt(0)) ?? 0) === 0)
+  console.log(`  every printable ASCII character and ${TYPED.slice(0x7f - 0x20).join(' ')} mapped${excused.length ? `, but for ${excused.join(' ')}` : ''}; lowercase its own glyphs; no ${JOINING.join(' ')}: ok`)
 }
 const fallback = [...FALLS_BACK, ...LIKELY].filter((ch) => (face.map.get(ch.codePointAt(0)) ?? 0) === 0)
 console.log(`  set in the phone's own face (not in this one): ${fallback.join(' ') || 'nothing typed'}`)

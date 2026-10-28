@@ -160,8 +160,8 @@ opens changed (each has a test that says so):
   is converted to a size the first time it opens, measured in the face that
   is there then; on a first launch where the face takes more than its two
   seconds (a slow network, before it is cached), a Poster plate's size is
-  measured in the phone's own face and kept, so it opens a little smaller
-  than it fits in Tanklager (27% in the measured case): tap Fit to fill it
+  measured in the phone's own face and kept, so it opens smaller than it
+  fits in Tanklager (27% in the measured case): tap Fit to fill it
   again.
 
 ### Offline, and why it is checked rather than inspected
@@ -436,9 +436,11 @@ press a frame that is quietly bare (`check-save` step 10, with the decode
 held back and failing, for a palette colour and for Frosted, and through a
 Replace and an Undo); Paper, or a colour already stored with the photo,
 saves as it shows.
-Fed Border Studio's own recorded sample of its two block photos, and 36
-photograph-like samples Border Studio's own `palette.js` keyed, the port
-gives Border Studio's hex exactly (`palette.test.ts`).
+Fed Border Studio's own recorded sample of its two block photos, 36
+photograph-like samples, 72 at the page's own sample sizes (half with a
+clear corner) and 81 flat colours on the hue boundaries, each keyed by
+Border Studio's own `palette.js`, the port gives Border Studio's hex exactly
+(`palette.test.ts`).
 
 Frosted is a border made of the photo itself (`engine/frost.ts`, Border
 Studio's `drawFrostedBg`), with Blur its one setting (10 to 240). The frame's
@@ -707,14 +709,16 @@ Type Foundry, SIL Open Font License 1.1; one WOFF of 18,908 bytes in
 iPhone does not have, so on the owner's phone the default plate was set in
 Helvetica Neue and on a desktop in Impact: the same print, two faces. A print
 is now set in the same face on every phone, online and off (the face is
-precached), with one exception a person can type: Tanklager has no dollar
-sign, so a `$` on a Poster plate is set in the next face of the stack, the
-phone's own (and so are characters a phone's first keyboard does not offer,
-such as € £ © ™). Every other printable ASCII character, and the curly
-quotes, dashes and ellipsis an iPhone types by default, are Tanklager's;
-`check-fonts` requires them, names `$` as the one exception, and fails a
-face that loses one more (its controls include the iPhone's apostrophe
-removed). Of Border Studio's 52 faces, nine can set the letters, digits and
+precached), but for a few characters a person can type, which Tanklager
+does not draw and which are set in the next face of the stack, the phone's
+own: the dollar sign `$` (on the iPhone keyboard's `123` page), `€ £ ¥` (its
+`#+=` page), the signs a long press offers on `$`, `&` and `0` (`¢ ₩ ₽ §`),
+and `© ™`. Every other printable ASCII character, and the curly quotes,
+dashes and ellipsis an iPhone types by default, are Tanklager's;
+`check-fonts` requires them, names `$` as the one ASCII character excused,
+prints every keyboard character the face lacks, and fails a face that loses
+one more (its controls include the iPhone's apostrophe removed). Of Border
+Studio's 52 faces, by the survey that chose this one, nine can set the letters, digits and
 punctuation this app prints with a lowercase of their own and no ligatures,
 and Tanklager is the one of the nine that is condensed and heavy, as the
 stack meant Impact to be; it is the only one that came across. The other
@@ -750,7 +754,8 @@ reads the WOFF itself (its tables inflated and checksummed; `cmap` formats 4
 and 12; `GSUB`'s features) and fails unless every printable ASCII
 character and the iPhone keyboard's ‘ ’ “ ” – — … are mapped (but for the
 one it names, `$`, which it prints as set in the phone's own face, with
-€ £ © ™), each lowercase letter maps to a glyph of its own, and no ligature
+the other keyboard characters the face lacks, `€ £ ¥ ¢ ₩ ₽ § © ™`), each
+lowercase letter maps to a glyph of its own, and no ligature
 feature (`liga clig calt dlig rlig`) is offered; four broken copies of the
 face (lowercase unmapped, the iPhone's apostrophe unmapped, lowercase set in
 the capitals, a `liga` added) must each fail it (`node

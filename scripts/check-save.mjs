@@ -8,7 +8,9 @@
  * in Chromium at phone size:
  *
  *  1. A 12 MP photo on 4:5, in the frame a first photo gets (2822x3528, its
- *     border 252 px), Save: within 100 ms of the tap Save reads Saving
+ *     border 252 px): with the Frame tool open (the ratio chosen with its
+ *     chips), Save's name states the framed size ("Save 2822×3528 JPEG
+ *     with a 252 px frame"); Save: within 100 ms of the tap Save reads Saving
  *     and the status card above the dock offers Cancel, the card counts the
  *     press in pixels and percent and says when it writes the file, the file
  *     is the size the More sheet and Save's name promised, and the in-flight
@@ -43,26 +45,32 @@
  *  8. The gesture hint across two saves: its card hides while each press
  *     runs and is back after, and its live region (every change of which a
  *     screen reader reads out) says the hint once, not again after each
- *     save; it changes once more when the tool changes.
+ *     save; it changes once more when the tool changes, to the photo's
+ *     gestures ("Drag to move the photo").
  *  9. A 40 MP photo (7728x5152) on Original, in the frame a first photo gets:
  *     More and Save's name promise 9016x6440 (every pixel of the photo, and a
- *     644 px border); within 100 ms of the tap Save reads Saving and the card
+ *     644 px border, which Save's name states); within 100 ms of the tap Save reads Saving and the card
  *     offers Cancel; the percent moves; Cancel then leaves no file and no
  *     in-flight mark; Save again writes a file that is 9016x6440, a baseline
  *     JPEG (SOF0) with every component sampled 1x1 (4:4:4), read from its
  *     own header; the in-flight mark is set while it presses and gone after.
  * 10. The frame's inputs (the stored document is given the frame each case
  *     starts from, its palette left out): with the photo's frame source held
- *     back, the border is Paper and no palette is stored; released, the palette is
- *     stored with the photo and the border drawn in its colour. Under
+ *     back, the border is Paper, no palette is stored, and in Frame › Border
+ *     the chosen fill's chip says it is preparing (a spinner, "Photo,
+ *     preparing", the row aria-busy; no other chip); released, the palette is
+ *     stored with the photo, the border drawn in its colour, nothing is
+ *     preparing, and no chip changed width. Under
  *     Frosted the palette is stored too, from the one decode. Under Paper,
  *     Save tapped while that decode is held decodes nothing and writes no
  *     file until it is released (the two decodes never run together), and
  *     so does Save tapped back on a photo by an Undo (its palette stored,
  *     needing nothing made) while the replaced photo's decode is held. With a frame
- *     source that will not decode, for a palette colour and for Frosted: the
- *     card and Save's name say the photo could not be loaded, Save cannot be
- *     tapped and no file appears, and the border stays Paper (Frosted on a
+ *     source that will not decode, for a palette colour and for Frosted: one
+ *     persistent note, the card (an alert), and Save's name and the More
+ *     sheet's first row, say the fill could not be made (its own words, not a
+ *     photo that could not be loaded), Save cannot be tapped and no file
+ *     appears, no chip says it is preparing, and the border stays Paper (Frosted on a
  *     photo whose palette is stored, so Frosted's own attempt is the one
  *     that reports it); another photo whose source decodes is drawn and
  *     offered, and an Undo back to the first, while it is decoded again,
@@ -284,7 +292,13 @@ try {
     const { page, errors } = await open(ctx)
     await choosePhoto(page, 4032, 3024)
     const size = (await captionOf(page)) ?? '?'
+    // Read with the Frame tool open, where the frame that grows the sheet is
+    // set; then closed again, as the rest of the step was measured.
+    await openTool(page, 'frame')
+    const frameOpen = (await page.locator('[data-tool="frame"][aria-pressed]').getAttribute('aria-pressed')) === 'true'
     const name = await page.locator(SAVE).getAttribute('aria-label')
+    await closeTools(page)
+    await page.waitForTimeout(400)
     await page.evaluate(() => (window.__labels.length = 0))
     const t0 = await page.evaluate((SAVE) => {
       const t = performance.now()
@@ -301,7 +315,10 @@ try {
     const first = labels.find((x) => x.b !== 'Save')
     const lines = [...new Set(labels.map((x) => x.l).filter((l) => l.startsWith('Pressing')))]
     const ms = first ? Math.round(first.t - t0) : Infinity
-    check(size === '2822×3528' && name === 'Save 2822×3528 JPEG', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
+    check(
+      frameOpen && size === '2822×3528' && name === 'Save 2822×3528 JPEG with a 252 px frame',
+      `before the tap, the Frame tool open (${frameOpen}): More says "Saves ${size}", Save is named "${name}"`,
+    )
     check(first?.b === 'Saving' && first?.c === 'Cancel' && ms < 100, `Save read "${first?.b}" and the card offered "${first?.c}" ${ms} ms after the tap (< 100 ms)`)
     check(
       lines.some((l) => new RegExp(`^Pressing ${size}, \\d+%$`).test(l)) && lines.some((l) => l.endsWith('writing the file')),
@@ -639,7 +656,7 @@ try {
     await page.waitForTimeout(300)
     const afterTool = await page.evaluate(() => window.__said.slice(1))
     check(
-      afterTool.length === 1 && /zoom the photo/.test(afterTool[0]),
+      afterTool.length === 1 && /^Drag to move the photo/.test(afterTool[0]),
       `and once when the tool changes: ${afterTool.map((t) => JSON.stringify(t)).join(' -> ')}`,
     )
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
@@ -654,7 +671,7 @@ try {
     await choosePhoto(page, 7728, 5152, 'original')
     const size = (await captionOf(page)) ?? '?'
     const name = await page.locator(SAVE).getAttribute('aria-label')
-    check(size === '9016×6440' && name === 'Save 9016×6440 JPEG', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
+    check(size === '9016×6440' && name === 'Save 9016×6440 JPEG with a 644 px frame', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
     const files = []
     page.on('download', (d) => files.push(d))
     // A Save, cancelled once its percent has moved.
@@ -750,6 +767,23 @@ try {
         return [...c.getContext('2d').getImageData(2, 2, 1, 1).data]
       })
     const stored = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.palette ?? null)
+    // Frame › Border's fill row as a screen reader and the eye meet it: its
+    // busy state, and each chip's name, whether it is chosen, whether a
+    // spinner stands where its colour goes, and that colour.
+    const fillRow = (page) =>
+      page.evaluate(() => {
+        const row = document.querySelector('.controls__panel[data-sub="border"] .chiprow')
+        return {
+          busy: row?.getAttribute('aria-busy') ?? null,
+          chips: [...(row?.querySelectorAll('.chip') ?? [])].map((c) => ({
+            name: c.getAttribute('aria-label') ?? '',
+            pressed: c.getAttribute('aria-pressed') === 'true',
+            spinner: !!c.querySelector('.spinner'),
+            width: c.getBoundingClientRect().width,
+            swatch: c.querySelector('.chiprow__swatch')?.style.getPropertyValue('--swatch') ?? null,
+          })),
+        }
+      })
     const mediaId = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.id ?? null)
 
     const ctx = await newContext()
@@ -773,16 +807,30 @@ try {
       held.join() === paper.join() && (await stored(page)) === null && heldSave !== 'true',
       `held back: the border is Paper (${held.join(',')} = ${paper.join(',')}), no palette stored, Save still offered (it makes the inputs itself)`,
     )
+    await openTool(page, 'frame', 'border')
+    const preparing = await fillRow(page)
+    check(
+      preparing.busy === 'true' && preparing.chips.filter((c) => c.spinner).map((c) => c.name).join() === 'Photo, preparing' &&
+        preparing.chips.filter((c) => c.name.includes('preparing')).length === 1,
+      `and Frame › Border says it quietly: the row aria-busy (${preparing.busy}), the chosen chip "${preparing.chips.find((c) => c.pressed)?.name}" with a spinner, no other`,
+    )
     await page.evaluate(() => window.__releaseFrame())
     await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1')).media?.palette, null, { timeout: 30_000 })
     await page.waitForTimeout(1500)
     const made = await corner(page)
     const palette = await stored(page)
     const decodes = await page.evaluate(() => window.__frameDecodes)
+    const ready = await fillRow(page)
     check(
       made.join() !== paper.join() && /^#[0-9a-f]{6}$/.test(palette?.photo ?? '') && Object.keys(palette).join() === 'photo,deep,muted,comp' && decodes === 1,
       `released: the palette stored with the photo (${Object.values(palette ?? {}).join(' ')}), the border drawn in it (${made.join(',')}), one decode (${decodes})`,
     )
+    const widths = (r) => r.chips.map((c) => c.width.toFixed(1)).join(' ')
+    check(
+      ready.busy === null && ready.chips.every((c) => !c.spinner && !c.name.includes('preparing')) && ready.chips.find((c) => c.pressed)?.swatch === palette?.photo,
+      `and nothing is preparing: the chosen chip "${ready.chips.find((c) => c.pressed)?.name}" shows its colour (${ready.chips.find((c) => c.pressed)?.swatch})`,
+    )
+    check(widths(ready) === widths(preparing), `and the row did not move as the colour landed: chips ${widths(preparing)} px, then ${widths(ready)}`)
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     await ctx.close()
 
@@ -910,17 +958,21 @@ try {
     // decoded again it reads as at first load (Paper, Save offered and
     // waiting, no card); decoded and working now, it is drawn and Save
     // offers it (what Save allows is what the preview draws).
-    const why = 'This photo could not be loaded. Choose it again.'
+    const why = 'The fill could not be made from this photo. Choose Paper, or choose the photo again.'
     const saveState = (page) =>
       page.evaluate(
-        ([SAVE, LINE, CANCEL]) => ({
+        ([SAVE, LINE, CANCEL, why]) => ({
           line: document.querySelector(LINE)?.textContent ?? null,
           role: document.querySelector(LINE)?.getAttribute('role') ?? null,
           action: document.querySelector(CANCEL)?.textContent ?? null,
           label: document.querySelector(SAVE)?.getAttribute('aria-label') ?? null,
           disabled: document.querySelector(SAVE)?.getAttribute('aria-disabled') === 'true',
+          // The More sheet's first row (in the DOM while it is closed).
+          more: document.querySelector('[data-export-size] .more__fact-word')?.textContent ?? null,
+          // How many things over the stage and in the dock say it: one note.
+          notes: [...document.querySelectorAll('.app__overlay *, .app__float *')].filter((e) => e.childElementCount === 0 && e.textContent === why).length,
         }),
-        [SAVE, LINE, CANCEL],
+        [SAVE, LINE, CANCEL, why],
       )
     for (const { fill, keep } of [
       { fill: 'photo', keep: false },
@@ -954,6 +1006,18 @@ try {
         state.line === why && state.role === 'alert' && state.action === 'Choose again' && state.label === `Save: ${why}` && state.disabled && !downloaded,
         `${what}, failing: the card says "${state.line}" (${state.role}, "${state.action}"), Save is "${state.label}", cannot be tapped, no file (${decodesAtLoad} decodes before)`,
       )
+      // With the Frame tool open on Border, where the fill is chosen: still
+      // one note (the card), the More sheet's row in the same words, and no
+      // chip saying it is preparing.
+      await openTool(p2, 'frame', 'border')
+      await p2.waitForTimeout(300)
+      const inFrame = await saveState(p2)
+      const row = await fillRow(p2)
+      check(
+        inFrame.notes === 1 && inFrame.more === why && row.busy === null && row.chips.every((c) => !c.spinner),
+        `${what}, failing, Frame › Border open: one note says it (${inFrame.notes}), the More sheet's row too ("${inFrame.more}"), no chip preparing`,
+      )
+      await closeTools(p2)
       check(
         failed.join() === paper.join() && JSON.stringify(await stored(p2)) === JSON.stringify(kept),
         `and the border stays Paper (${failed.join(',')}), ${keep ? 'the palette as it was' : 'nothing stored'}`,

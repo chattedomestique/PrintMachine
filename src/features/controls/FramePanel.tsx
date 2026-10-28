@@ -8,7 +8,7 @@ import { isReducedCopy } from '../../engine/media.ts'
 import type { FrameSettings, MediaLayer } from '../../engine/types.ts'
 import { effectiveMode, visibleAspect } from '../../engine/frame.ts'
 import { useSettings } from '../../state/settingsStore.ts'
-import type { MediaState } from '../media/useMediaBitmap.ts'
+import type { PhotoState } from '../media/frameInputs.ts'
 import type { PhotoImport } from '../media/usePhotoImport.ts'
 import { DockEmpty, DockPanel, Rule } from './Dock.tsx'
 import { ORIGINAL_WHOLE, fillChips, ratioChips } from './frameChoices.ts'
@@ -35,18 +35,24 @@ const MODE_SAID: Record<FrameSettings['mode'], string> = {
  * equivalents of pinching and dragging the photo, which the sheet's gestures
  * do while this tool is open), Photo (choose, replace or remove it, and
  * anything there is to say about it). Without a photo the tool opens on
- * Photo; Border and Place say there is none, with the action that changes
- * that; the ratio is the sheet's, so Crop works on bare paper too.
+ * Photo; Border shows Width and Corners unavailable, saying why, under the
+ * action that changes that (the fill row waits for a photo: its colours are
+ * the photo's), and Place says there is none; the ratio is the sheet's, so
+ * Crop works on bare paper too. While the chosen fill is being made from the
+ * photo its chip says so, quietly, and the border is Paper (`fillPreparing`).
+ * A fill that cannot be made is said by the status card, Save's refusal.
  */
 export default function FramePanel({
   sub,
   onSub,
   mediaState,
+  fillPreparing,
   photo,
 }: {
   sub: SubId<'frame'>
   onSub: (sub: SubId<'frame'>) => void
-  mediaState: MediaState
+  mediaState: PhotoState
+  fillPreparing: boolean
   photo: PhotoImport
 }) {
   const { settings, dispatch } = useSettings()
@@ -80,7 +86,7 @@ export default function FramePanel({
                 colour the frame is drawn in, from the photo's palette. */}
             <ChipRow
               label="Fill"
-              items={fillChips(media.palette, settings.paperId)}
+              items={fillChips(media.palette, settings.paperId, frame.fill, fillPreparing)}
               value={frame.fill}
               onChange={(fill) => dispatch({ type: 'patchFrame', patch: { fill } })}
             />
@@ -88,7 +94,18 @@ export default function FramePanel({
             <ParamStrip key="border" params={borderParams(frame, true, setFrame)} />
           </>
         ) : (
-          <DockEmpty action={chooseButton}>{NO_PHOTO}: the frame goes round a photo.</DockEmpty>
+          <>
+            {/* Width and Corners mean what they will with a photo, so they
+                are there to find, unavailable and saying why; the fill row's
+                colours are the photo's, so the action that brings one takes
+                its place. */}
+            <div className="controls__row">
+              <span className="controls__hint">{NO_PHOTO}</span>
+              {chooseButton}
+            </div>
+            <Rule />
+            <ParamStrip key="border-bare" params={borderParams(frame, false, setFrame)} />
+          </>
         ))}
 
       {sub === 'crop' && (
@@ -100,6 +117,9 @@ export default function FramePanel({
             items={ratioChips(media !== null)}
             value={settings.aspect}
             onChange={(aspect) => dispatch({ type: 'patch', patch: { aspect } })}
+            // Original, the photo's own shape, waits for a photo: the line
+            // under Crop | Fit says so.
+            whyId={media ? undefined : modeWhyId}
           />
           <Rule />
           {/* What the ratio does to the photo: trim it, or mat it whole

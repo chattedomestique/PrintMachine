@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { FrameInputs } from '../../engine/frame.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { useSettings } from '../../state/settingsStore.ts'
-import { attemptEnded, attemptsShown, frameFailed, needsFrost, noAttempts, pageFramePalettes, previewFrameInputs, wantsPalette } from './frameInputs.ts'
+import { attemptEnded, attemptsShown, fillPreparing, frameFailed, needsFrost, noAttempts, pageFramePalettes, paletteEnded, previewFrameInputs, wantsPalette } from './frameInputs.ts'
 import { pageFrameSources } from './frameSource.ts'
 import { pageFrostFields } from './frostField.ts'
 import type { MediaState } from './useMediaBitmap.ts'
@@ -11,8 +11,9 @@ import type { MediaState } from './useMediaBitmap.ts'
 const PAGE = { palettes: pageFramePalettes, sources: pageFrameSources, fields: pageFrostFields }
 
 /**
- * The preview's frame inputs for the current document, and whether a press
- * of it cannot be made.
+ * The preview's frame inputs for the current document, whether its fill is
+ * still being made (`preparing`: the Frame panel says so, quietly, while the
+ * border is Paper), and whether a press of it cannot be made (`failed`).
  *
  * Once a frame shows on a photo whose palette is not stored (whatever the
  * fill), or Frosted shows, the photo's frame source is decoded once its
@@ -38,7 +39,7 @@ export function useFrameInputs(
   settings: PrintSettings,
   media: MediaState,
   makers = PAGE,
-): { inputsFor: (s: PrintSettings, draft: boolean) => FrameInputs; failed: boolean } {
+): { inputsFor: (s: PrintSettings, draft: boolean) => FrameInputs; preparing: boolean; failed: boolean } {
   const { dispatch } = useSettings()
   const photo = settings.media
   const id = photo?.id ?? null
@@ -58,7 +59,7 @@ export function useFrameInputs(
       (palette) => {
         // Null: the photo has no colour; its colour fills are Paper.
         if (palette) dispatch({ type: 'setPalette', mediaId: id, palette })
-        setAttempts((a) => attemptEnded(a, id, true))
+        setAttempts((a) => paletteEnded(a, id))
       },
       () => setAttempts((a) => attemptEnded(a, id, false)),
     )
@@ -77,5 +78,11 @@ export function useFrameInputs(
   const source = attempts.source
   const inputsFor = useCallback((s: PrintSettings, draft: boolean): FrameInputs => previewFrameInputs(s, source, draft, makers.fields), [source, makers])
 
-  return { inputsFor, failed: frameFailed(settings, attempts.shown === id ? attempts.failedId : null) }
+  return {
+    inputsFor,
+    // A photo that could not be decoded at all makes no attempt: it is said
+    // as that, not as a fill being made.
+    preparing: media !== 'failed' && fillPreparing(settings, attempts),
+    failed: frameFailed(settings, attempts.shown === id ? attempts.failedId : null),
+  }
 }

@@ -55,10 +55,15 @@ export const FROSTED_ICON = 'blend'
  * frame is drawn as Paper until then, so the chip says what the sheet shows).
  * Frosted is a glyph: its field is made only once it is chosen, and it is
  * the photo itself, blurred, not a colour.
+ *
+ * `preparing`: the chosen fill is still being made from the photo (its
+ * palette, or Frosted's source: frameInputs.ts `fillPreparing`), so its chip
+ * is busy (a spinner in place of its dot or glyph) while the border is Paper.
  */
-export function fillChips(palette: FramePalette | undefined, paperId: string): ChipItem<FillKey>[] {
+export function fillChips(palette: FramePalette | undefined, paperId: string, chosen: FillKey, preparing: boolean): ChipItem<FillKey>[] {
   const stock = cssRgb(paperById(paperId).rgb)
-  return FILLS.map(({ id, label }) =>
-    id === 'frosted' ? { id, label, icon: FROSTED_ICON } : { id, label, swatch: id === 'paper' ? stock : (palette?.[id] ?? stock) },
-  )
+  return FILLS.map(({ id, label }) => {
+    const face = id === 'frosted' ? { icon: FROSTED_ICON } : { swatch: id === 'paper' ? stock : (palette?.[id] ?? stock) }
+    return { id, label, ...face, ...(preparing && id === chosen ? { busy: true } : {}) }
+  })
 }

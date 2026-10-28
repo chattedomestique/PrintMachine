@@ -63,16 +63,18 @@ export const needsFrost = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>)
 /**
  * What the page keeps of its attempts to make the frame's inputs from the
  * photo shown (`shown`): whether its last attempt failed (`failedId`, its
- * id, or null), and Frosted's source, once decoded, with the photo it is
- * of.
+ * id, or null), Frosted's source, once decoded, with the photo it is of,
+ * and the photo whose palette attempt has ended (`palette`: made, or found
+ * to have no colour, so not being made any more).
  */
 export interface FrameAttempts {
   shown: string | null
   failedId: string | null
   source: { id: string; src: RgbaImage } | null
+  palette: string | null
 }
 
-export const noAttempts = (shown: string | null): FrameAttempts => ({ shown, failedId: null, source: null })
+export const noAttempts = (shown: string | null): FrameAttempts => ({ shown, failedId: null, source: null, palette: null })
 
 /**
  * Another photo shown (a Replace, an Undo, a Redo): a failure is let go, so
@@ -98,6 +100,27 @@ export function attemptEnded(a: FrameAttempts, id: string, ok: boolean, src?: Rg
   return { ...a, failedId: null, source: src ? { id, src } : a.source }
 }
 
+/** The palette attempt for photo `id` worked: its palette is made (and
+ *  stored), or it has no colour to make one from. Applied only while `id`
+ *  is the photo shown, as `attemptEnded` is. */
+export const paletteEnded = (a: FrameAttempts, id: string): FrameAttempts =>
+  a.shown !== id ? a : { ...attemptEnded(a, id, true), palette: id }
+
+/**
+ * Whether the fill the frame shows is still being made from its photo: a
+ * palette colour whose palette attempt has not ended, or Frosted before its
+ * source is decoded. Meanwhile the border is Paper (D-16) and the Frame
+ * panel says, quietly, that the fill is being prepared. Not once the attempt
+ * has failed (that is said as a failure), nor for a photo the attempts are
+ * not about yet (the page adjusts them on its next render).
+ */
+export function fillPreparing(s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>, a: FrameAttempts): boolean {
+  const id = s.media?.id
+  if (!id || a.shown !== id || a.failedId === id) return false
+  if (needsFrost(s)) return a.source?.id !== id
+  return needsPalette(s) && a.palette !== id
+}
+
 /**
  * Whether a press of `s` cannot be made: its photo's frame source would not
  * decode (`failedId`), and the print needs something made from it (a
@@ -108,13 +131,34 @@ export function attemptEnded(a: FrameAttempts, id: string, ok: boolean, src?: Rg
 export const frameFailed = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>, failedId: string | null): boolean =>
   failedId !== null && s.media?.id === failedId && (needsPalette(s) || needsFrost(s))
 
+/** Said wherever a print cannot be made because its frame's fill cannot be
+ *  made from its photo (the photo is drawn; what the fill is made from would
+ *  not decode): the status card, Save's name, the More sheet, the save
+ *  question, this error. Paper needs nothing made, and a photo chosen again
+ *  is decoded again. */
+export const FILL_MISSING = 'The fill could not be made from this photo. Choose Paper, or choose the photo again.'
+
+/** A press whose frame's fill could not be made from its photo: refused,
+ *  never pressed with that frame quietly Paper. */
+export class FillMissingError extends Error {
+  constructor() {
+    super(FILL_MISSING)
+    this.name = 'FillMissingError'
+  }
+}
+
+/** The photo as Save and the panels see it: its decode's state, or
+ *  `fillFailed`, a photo that is drawn but whose frame's fill cannot be made
+ *  from it (`frameFailed`). */
+export type PhotoState = MediaState | 'fillFailed'
+
 /**
  * The photo's state as Save and the panels see it: a photo the frame's
- * inputs cannot be made from is `failed`, as one that cannot be decoded at
- * all is, and Save refuses it with the same words (export.ts PHOTO_MISSING)
- * rather than pressing a frame that is quietly Paper.
+ * inputs cannot be made from is `fillFailed`, and Save refuses it with its
+ * own words (FILL_MISSING) rather than pressing a frame that is quietly
+ * Paper, or saying a photo that is on screen could not be loaded.
  */
-export const frameState = (media: MediaState, failed: boolean): MediaState => (media === 'ready' && failed ? 'failed' : media)
+export const frameState = (media: MediaState, failed: boolean): PhotoState => (media === 'ready' && failed ? 'fillFailed' : media)
 
 /**
  * What the preview draws a frame of `s` from: what the document holds, and,

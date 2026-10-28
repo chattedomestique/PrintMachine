@@ -41,8 +41,12 @@ import {
  * still work, and say so, beyond the track's ends. The − / + are the
  * single-pointer alternative to dragging (WCAG 2.5.7) and the precise step;
  * they go aria-disabled (not removed) only at the ends of the setting's range.
+ * A setting that is unavailable keeps its row: the track is disabled (the
+ * style guide draws that), the − / + stay in the tab order aria-disabled, and
+ * all three are described by the words that say why (`describedBy`), so the
+ * reason is heard wherever the setting is reached.
  */
-export function Slider({ param }: { param: Param }) {
+export function Slider({ param, describedBy }: { param: Param; describedBy?: string }) {
   // The last tap on the track: when the finger touched (the event's own
   // timeStamp), and whether the native range then moved the thumb to it (it
   // does, for a tap anywhere on the track). The touch's time, not the time
@@ -71,6 +75,7 @@ export function Slider({ param }: { param: Param }) {
           data-sg-nudge="-1"
           aria-label={`Decrease ${param.label}`}
           aria-controls={id}
+          aria-describedby={describedBy}
           aria-disabled={off || !canNudge(param, -1) || undefined}
           onClick={() => step(-1)}
         >
@@ -87,6 +92,7 @@ export function Slider({ param }: { param: Param }) {
             value={thumbValue(param)}
             disabled={off}
             aria-label={param.label}
+            aria-describedby={describedBy}
             // The true value, also when the thumb is pinned at an end.
             aria-valuetext={off ? param.unavailable : param.format(param.value)}
             onChange={(e) => {
@@ -125,6 +131,7 @@ export function Slider({ param }: { param: Param }) {
           data-sg-nudge="1"
           aria-label={`Increase ${param.label}`}
           aria-controls={id}
+          aria-describedby={describedBy}
           aria-disabled={off || !canNudge(param, 1) || undefined}
           onClick={() => step(1)}
         >
@@ -343,13 +350,15 @@ function ParamPicker({
  * Border Studio has it. Permanently on screen: the setting's name (with the
  * up/down chevrons that say "there are more", when there are), its value, and
  * the slider. A `lead` (a colour button, say) goes at the start of the name's
- * line, so a second control costs no row.
+ * line, so a second control costs no row. An unavailable setting shows why in
+ * place of its value, and its slider is described by those words.
  */
 export function ParamStrip({ params, lead }: { params: readonly (Param | null | false | undefined)[]; lead?: ReactNode }) {
   const all = params.filter((p): p is Param => !!p)
   const [key, setKey] = useState(all[0]?.key)
   const [pickOpen, setPickOpen] = useState(false)
   const swipe = useRef<{ y: number; fired: boolean } | null>(null)
+  const whyId = useId()
 
   const cur = all.find((p) => p.key === key) ?? all[0]
   if (!cur) return null
@@ -390,12 +399,14 @@ export function ParamStrip({ params, lead }: { params: readonly (Param | null | 
           <span className="paramstrip__name">{cur.label}</span>
         )}
         {cur.unavailable ? (
-          <span className="controls__hint paramstrip__why">{cur.unavailable}</span>
+          <span className="controls__hint paramstrip__why" id={whyId}>
+            {cur.unavailable}
+          </span>
         ) : (
           <EditableValue param={cur} />
         )}
       </div>
-      <Slider param={cur} />
+      <Slider param={cur} describedBy={cur.unavailable ? whyId : undefined} />
 
       {pickOpen && (
         <ParamPicker params={all} currentKey={cur.key} onPick={setKey} onClose={() => setPickOpen(false)} />

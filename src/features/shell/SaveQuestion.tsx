@@ -1,9 +1,8 @@
 import { useId } from 'react'
 import { useModalDialog } from '../../ui/useModalDialog.ts'
 import { Icon } from '../../ui/ui.tsx'
-import { PHOTO_MISSING } from '../../engine/export.ts'
-import type { MediaState } from '../media/useMediaBitmap.ts'
-import type { SaveChoice } from './useSave.ts'
+import type { PhotoState } from '../media/frameInputs.ts'
+import { saveRefusal, type SaveChoice } from './useSave.ts'
 
 /**
  * A save that cannot go on unasked, put as the style guide's confirm dialog (a
@@ -25,7 +24,7 @@ export default function SaveQuestion({
   onDismiss,
 }: {
   question: { title: string; text: string; choices: SaveChoice[] } | null
-  mediaState: MediaState
+  mediaState: PhotoState
   canAnswer: boolean
   onAnswer: (height: number) => void
   onDismiss: () => void
@@ -33,7 +32,8 @@ export default function SaveQuestion({
   const ref = useModalDialog(question !== null, onDismiss)
   const titleId = useId()
   const textId = useId()
-  const waiting = question !== null && question.choices.length > 0 && (mediaState === 'loading' || mediaState === 'failed')
+  const refused = saveRefusal(mediaState)
+  const waiting = question !== null && question.choices.length > 0 && (mediaState === 'loading' || refused !== null)
 
   return (
     <dialog ref={ref} className="dialog card savequestion" data-size="sm" aria-labelledby={titleId} aria-describedby={textId}>
@@ -54,10 +54,10 @@ export default function SaveQuestion({
                 Loading the photo…
               </p>
             )}
-            {waiting && mediaState === 'failed' && (
+            {waiting && refused && (
               <p className="card__text savequestion__wait" role="alert">
                 <Icon name="circle-alert" />
-                {PHOTO_MISSING}
+                {refused}
               </p>
             )}
           </div>

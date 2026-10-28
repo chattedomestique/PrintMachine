@@ -436,18 +436,24 @@ copy, whose size moves with the zoom; it is stored with the photo
 history entry that holds the photo takes it, so no Undo or Redo takes it
 away and has the photo decoded again), so the preview, the save and every
 reopen agree, and Save makes it first when a palette colour needs it, so a
-press never starts without it. A photo whose frame source will not decode
-is one state, kept with the photo while it is shown: while the print needs
-that source (a palette colour not yet stored, or Frosted) the frame stays
-Paper, the status card and Save's name say the photo could not be loaded
-(the words of a photo that is gone), and Save refuses it rather than press
-a frame that is quietly bare; Paper, or a colour already stored with the
-photo, saves as it shows. Another photo shown lets the failure go, so a
+press never starts without it. While the chosen fill is still being made
+(a palette colour before its palette, Frosted before its source) the border
+is Paper and its chip in Frame › Border says so quietly: a spinner where its
+colour dot or glyph goes, "preparing" in its name, the row aria-busy. A
+photo whose frame source will not decode is one state, kept with the photo
+while it is shown: while the print needs that source (a palette colour not
+yet stored, or Frosted) the frame stays Paper, and one persistent note, the
+status card, says so in the fill's own words ("The fill could not be made
+from this photo. Choose Paper, or choose the photo again."), as Save's name,
+the More sheet and a save question do: Save refuses it rather than press a
+frame that is quietly bare, and never says that a photo on screen could not
+be loaded. Paper, or a colour already stored with the photo, saves as it
+shows. Another photo shown lets the failure go, so a
 photo an Undo brings back reads as it does at first load (Paper, Save
 offered and waiting for it) while it is decoded again, and is refused again
 only if that fails; a photo whose earlier decode is still kept is drawn from
 it meanwhile, and a failure of the new one lets that go too, so the frame is
-Paper whenever the card says the photo could not be loaded. A decode that ends after its photo was replaced or
+Paper whenever the card says the fill could not be made. A decode that ends after its photo was replaced or
 undone changes nothing of the photo shown, so a late one never turns the
 shown photo's Frosted border to Paper under a Save that presses it
 (`check-save` step 10: the decode held back and failing, for a palette
@@ -1003,7 +1009,9 @@ gives); then the megapixels and the frame's border, since a frame adds pixels
 the photo does not have ("10.0 MP, with a 252 px frame"), and past 100 MP
 that a phone may not finish it (said, never acted on: nothing is made
 smaller for it). Save's
-own name carries the size ("Save 2822×3528 JPEG"), the toast repeats size and
+own name carries the size and the frame, and the very-large note when there
+is one ("Save 2822×3528 JPEG with a 252 px frame"), so the size a frame makes
+is stated before the tap from every tool, the Frame tool's too; the toast repeats size and
 reason the moment a save starts, and the confirmation repeats the size. Save
 itself stays one word, so the app bar never wraps. Nothing falls back to a
 smaller file: a press that fails stops, with the reason and the numbers, and
@@ -1630,9 +1638,14 @@ sheet moving 26 px whenever it opened; a chip row is one options row. Crop or
 Fit is unavailable on Original ("Original keeps the whole photo": the sheet is
 the photo's shape and its border) and without a photo; Place's Zoom and
 Position are unavailable in Fit ("Fit shows the whole photo"). Without a photo
-Border and Place say there is none, with Choose photo; the ratio is the
-sheet's, so it can be chosen on bare paper (Original, the photo's own shape,
-needs a photo).
+Border keeps Width and Corners on its strip, unavailable ("No photo yet"),
+under that line and Choose photo, where the fill row goes once there is a
+photo to take its colours from; Place says there is none, with Choose photo.
+The ratio is the sheet's, so it can be chosen on bare paper (Original, the
+photo's own shape, needs a photo, and says so). Every reason is said with
+its control: an unavailable setting's slider and its − and + are described
+by the words that show where its value would, a chip that cannot be chosen
+by the line that says why, Crop | Fit by the line under it.
 
 The panel is the same height in every tool and every tab, so **the sheet never
 changes size or place between them** (Border Studio fcd91ff). That is checked,
@@ -1776,8 +1789,10 @@ re-render would start the drag from the previous plate's place and move it
 built app).
 
 The first photo brings a short gesture hint saying what the sheet's
-gestures do in the open tool (the photo with Frame open, the type otherwise).
-It goes for good with its ×, or with the first gesture that moves something:
+gestures do in the open tool (`features/shell/hint.ts`): with Frame open,
+"Drag to move the photo · pinch to zoom · double‑tap to reset" on Original
+and in Crop, and in Fit none ("Fit shows the whole photo · choose Crop to
+move or zoom it"); with any other tool, or none, the type's. It goes for good with its ×, or with the first gesture that moves something:
 by then it has been learned, and while it shows it covers the foot of the
 sheet.
 

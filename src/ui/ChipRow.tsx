@@ -11,7 +11,10 @@
  * as the dock's tabs have (the chosen chip, or the one the keys moved to),
  * the arrows, Home and End move focus along the row, and Enter and Space
  * press. A chip that takes focus, and the chosen chip when the choice
- * changes, is scrolled into view whole.
+ * changes, is scrolled into view whole. A chip that cannot be chosen is
+ * described by the caller's words for why (`whyId`); a chip whose choice is
+ * still being made shows the style guide's spinner where its dot or glyph
+ * goes, and the row is aria-busy meanwhile.
  *
  * App-agnostic: the caller supplies the choices and their words.
  */
@@ -32,12 +35,15 @@ export function ChipRow<T extends string>({
   items,
   value,
   onChange,
+  whyId,
 }: {
   /** The group's name: what the choice is ("Sheet ratio"). */
   label: string
   items: readonly ChipItem<T>[]
   value: T
   onChange: (v: T) => void
+  /** The id of the visible words that say why a chip cannot be chosen. */
+  whyId?: string
 }) {
   const rowRef = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(-1)
@@ -72,6 +78,7 @@ export function ChipRow<T extends string>({
       className="chips scroller chiprow"
       role="group"
       aria-label={label}
+      aria-busy={items.some((it) => it.busy) || undefined}
       ref={rowRef}
       onFocus={onFocus}
       onBlur={onBlur}
@@ -88,6 +95,7 @@ export function ChipRow<T extends string>({
             aria-pressed={f.pressed}
             aria-label={chipName(it, value)}
             aria-disabled={it.disabled || undefined}
+            aria-describedby={it.disabled ? whyId : undefined}
             tabIndex={i === stop ? 0 : -1}
             onFocus={() => setFocused(i)}
             onClick={() => {
@@ -95,8 +103,16 @@ export function ChipRow<T extends string>({
               if (v !== null) onChange(v)
             }}
           >
-            {it.swatch !== undefined && <span className="chiprow__swatch" style={{ '--swatch': it.swatch } as CSSProperties} aria-hidden="true" />}
-            {it.icon !== undefined && <Icon name={it.icon} />}
+            {it.busy ? (
+              <span className="spinner" aria-hidden="true">
+                <span className="spinner__ring" />
+              </span>
+            ) : (
+              <>
+                {it.swatch !== undefined && <span className="chiprow__swatch" style={{ '--swatch': it.swatch } as CSSProperties} aria-hidden="true" />}
+                {it.icon !== undefined && <Icon name={it.icon} />}
+              </>
+            )}
             {f.label}
             {f.flips && <Icon name="refresh-cw" className="chiprow__flip" />}
           </button>

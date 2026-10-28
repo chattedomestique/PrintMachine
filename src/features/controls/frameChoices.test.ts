@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { ASPECTS } from '../../engine/types.ts'
 import { CHIP_RATIOS, flipOf, type AspectKey } from '../../engine/aspect.ts'
 import { cssRgb, paperById, PAPERS } from '../../engine/inks.ts'
-import { chipFace, chipTap } from '../../ui/chips.ts'
+import { chipFace, chipName, chipTap } from '../../ui/chips.ts'
 import { ASPECT_KEYS } from '../../state/fields.ts'
 import { FILLS, FROSTED_ICON, fillChips, ratioChips } from './frameChoices.ts'
 
@@ -67,28 +67,37 @@ describe('the ratio chips', () => {
 
 describe('the fill chips', () => {
   it('Paper, Photo, Deep, Muted, Comp and Frosted, each named', () => {
-    expect(fillChips(PALETTE, 'natural').map((c) => [c.id, c.label])).toEqual(FILLS.map((f) => [f.id, f.label]))
+    expect(fillChips(PALETTE, 'natural', 'photo', false).map((c) => [c.id, c.label])).toEqual(FILLS.map((f) => [f.id, f.label]))
     expect(FILLS.map((f) => f.label)).toEqual(['Paper', 'Photo', 'Deep', 'Muted', 'Comp', 'Frosted'])
   })
 
   it('Paper is the stock, and follows it', () => {
-    for (const p of PAPERS) expect(fillChips(PALETTE, p.id)[0].swatch).toBe(cssRgb(p.rgb))
+    for (const p of PAPERS) expect(fillChips(PALETTE, p.id, 'photo', false)[0].swatch).toBe(cssRgb(p.rgb))
   })
 
   it('the photo\'s four colours are its palette\'s', () => {
-    const [, photo, deep, muted, comp] = fillChips(PALETTE, 'natural')
+    const [, photo, deep, muted, comp] = fillChips(PALETTE, 'natural', 'photo', false)
     expect([photo, deep, muted, comp].map((c) => c.swatch)).toEqual([PALETTE.photo, PALETTE.deep, PALETTE.muted, PALETTE.comp])
   })
 
   it('before the palette is made they show the stock, as the frame is drawn until then', () => {
     const stock = cssRgb(paperById('natural').rgb)
-    expect(fillChips(undefined, 'natural').slice(0, 5).map((c) => c.swatch)).toEqual([stock, stock, stock, stock, stock])
+    expect(fillChips(undefined, 'natural', 'photo', false).slice(0, 5).map((c) => c.swatch)).toEqual([stock, stock, stock, stock, stock])
   })
 
   it('Frosted is a glyph, not a colour; no fill is disabled and none flips', () => {
-    const chips = fillChips(PALETTE, 'natural')
+    const chips = fillChips(PALETTE, 'natural', 'photo', false)
     expect(chips[5]).toEqual({ id: 'frosted', label: 'Frosted', icon: FROSTED_ICON })
     expect(chips.every((c) => !c.disabled && !c.alt)).toBe(true)
     for (const c of chips) expect(chipTap(c, c.id)).toBeNull()
+  })
+
+  it('while the chosen fill is being made its chip alone is busy, and says so; once made, none is', () => {
+    for (const chosen of FILLS.map((f) => f.id)) {
+      const chips = fillChips(undefined, 'natural', chosen, true)
+      expect(chips.filter((c) => c.busy).map((c) => c.id)).toEqual([chosen])
+      expect(chipName(chips.find((c) => c.id === chosen)!, chosen)).toBe(`${FILLS.find((f) => f.id === chosen)!.label}, preparing`)
+      expect(fillChips(PALETTE, 'natural', chosen, false).some((c) => c.busy)).toBe(false)
+    }
   })
 })

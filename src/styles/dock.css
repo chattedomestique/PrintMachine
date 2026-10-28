@@ -375,3 +375,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* A chip whose choice is still being made: the style guide's spinner where
+   its dot or glyph goes, in the same room (1em, the dot's size), so the row
+   does not move when the colour lands. */
+.chiprow > .chip > .spinner { flex: none; font-size: inherit; --_size: 1em; }

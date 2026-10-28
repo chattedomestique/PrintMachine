@@ -2,7 +2,7 @@ import FramePanel from './FramePanel.tsx'
 import TypePanel from './TypePanel.tsx'
 import InkPanel from './InkPanel.tsx'
 import PressPanel from './PressPanel.tsx'
-import type { MediaState } from '../media/useMediaBitmap.ts'
+import type { PhotoState } from '../media/frameInputs.ts'
 import type { PhotoImport } from '../media/usePhotoImport.ts'
 import type { Subs, ToolId } from './tools.ts'
 
@@ -19,18 +19,21 @@ export default function Controls({
   subs,
   onSub,
   mediaState,
+  fillPreparing,
   photo,
 }: {
   tool: ToolId | null
   subs: Subs
   onSub: <T extends ToolId>(tool: T, sub: Subs[T]) => void
-  mediaState: MediaState
+  mediaState: PhotoState
+  /** The frame's fill is still being made from the photo (useFrameInputs). */
+  fillPreparing: boolean
   photo: PhotoImport
 }) {
   if (!tool) return null
   return (
     <div className="controls">
-      {tool === 'frame' && <FramePanel sub={subs.frame} onSub={(s) => onSub('frame', s)} mediaState={mediaState} photo={photo} />}
+      {tool === 'frame' && <FramePanel sub={subs.frame} onSub={(s) => onSub('frame', s)} mediaState={mediaState} fillPreparing={fillPreparing} photo={photo} />}
       {tool === 'type' && <TypePanel sub={subs.type} onSub={(s) => onSub('type', s)} />}
       {tool === 'ink' && <InkPanel sub={subs.ink} onSub={(s) => onSub('ink', s)} hasPhoto={mediaState !== 'none'} />}
       {tool === 'press' && <PressPanel sub={subs.press} onSub={(s) => onSub('press', s)} />}

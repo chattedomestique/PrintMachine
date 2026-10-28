@@ -36,6 +36,14 @@ describe('what a chip shows', () => {
     expect(chipName(own, 'own')).toBe('Original')
     expect(chipName(sq, 'sq')).toBe('1:1')
   })
+
+  it('a chip whose choice is still being made says so, chosen or not, before what a tap does', () => {
+    expect(chipName({ ...sq, busy: true }, 'sq')).toBe('1:1, preparing')
+    expect(chipName({ ...sq, busy: true }, 'own')).toBe('1:1, preparing')
+    expect(chipName({ ...nineSixteen, busy: true }, '16:9')).toBe('16:9, preparing, tap to flip')
+    // Busy is said, not a reason to refuse a tap.
+    expect(chipTap({ ...sq, busy: true }, 'own')).toBe('sq')
+  })
 })
 
 describe('what a tap chooses', () => {

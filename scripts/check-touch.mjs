@@ -43,6 +43,17 @@
  *     Right and Down move the view right and down (the photo's centre left
  *     and up); 0 resets it; one Undo takes back the 0 alone and one more the
  *     whole run (one step). In Fit the keys move nothing and none is named.
+ * 10. The Frame tool's states, said: with no photo, Frame › Border keeps
+ *     Width and Corners on its strip, unavailable (the track disabled, its
+ *     − and + aria-disabled and in the tab order), each described by "No
+ *     photo yet", beside Choose photo; Frame › Crop's ratio row is a group
+ *     named "Sheet ratio" whose Original chip is aria-disabled, described by
+ *     the line that says why, and a tap on it changes nothing. With a photo
+ *     the fill row is a group named "Fill" of six chips and Width is
+ *     available, described by nothing. On a 4:5 sheet in Fit the gesture
+ *     hint names no gesture and says why, a drag on the photo moves nothing
+ *     (and leaves the hint), and Place's Zoom says "Fit shows the whole
+ *     photo" as its description; back in Crop the hint names the photo's.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -226,7 +237,7 @@ try {
   await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
   await page.waitForSelector(HINT, { timeout: 30_000 })
   const photoHint = await page.locator(HINT).textContent()
-  check(/zoom the photo/.test(photoHint), `with Frame open it is about the photo ("${photoHint}")`)
+  check(/^Drag to move the photo · pinch to zoom/.test(photoHint), `with Frame open it is about the photo ("${photoHint}")`)
   // The photo is at 100% on its own sheet: a drag on it moves nothing, so it
   // teaches nothing either, and the hint stays.
   const box1 = await settledBox(page)
@@ -597,6 +608,113 @@ try {
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
   }
+  console.log("10. The Frame tool's states, said: reasons described, chips in named groups, the hint in Fit")
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const cdp = await ctx.newCDPSession(page)
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    const tab = (sub) => page.locator(`.controls__section[data-tool="frame"] [role=tab][data-tab="${sub}"]`).click()
+    // What a control is described by, in words (its aria-describedby's
+    // elements, read), and whether it is aria-disabled.
+    const said = (sel) =>
+      page.evaluate((sel) => {
+        const el = document.querySelector(sel)
+        if (!el) return null
+        const ids = (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+        return {
+          off: el.getAttribute('aria-disabled') === 'true' || el.disabled === true,
+          focusable: el.tabIndex >= 0 && !el.disabled,
+          why: ids.map((id) => document.getElementById(id)?.textContent?.trim() ?? `(no #${id})`).join(' '),
+        }
+      }, sel)
+    await page.locator('[data-tool="frame"]').click()
+    await tab('border')
+    const border = '.controls__panel[data-sub="border"]'
+    const dec = await said(`${border} [aria-label="Decrease Width"]`)
+    const track = await said(`${border} input[type=range]`)
+    const choose = await page.locator(`${border} button`, { hasText: 'Choose photo' }).count()
+    check(
+      dec?.off && dec.focusable && dec.why === 'No photo yet' && track?.off && track.why === 'No photo yet' && choose === 1,
+      `no photo, Frame › Border: Width is there, unavailable (− ${JSON.stringify(dec)}, track ${JSON.stringify(track)}), beside Choose photo (${choose})`,
+    )
+    await page.locator(`${border} .paramstrip__pick`).click()
+    await page.locator('dialog[open] [data-key="corners"]').click()
+    await page.waitForSelector('dialog[open]', { state: 'detached' })
+    const corners = await said(`${border} [aria-label="Increase Corners"]`)
+    check(corners?.off && corners.why === 'No photo yet', `and so is Corners (+ ${JSON.stringify(corners)})`)
+
+    await tab('crop')
+    const ratio = await page.evaluate(() => {
+      const row = document.querySelector('.controls__panel[data-sub="crop"] .chiprow')
+      return { role: row?.getAttribute('role'), name: row?.getAttribute('aria-label') }
+    })
+    const original = await said('.controls__panel[data-sub="crop"] [data-chip="original"]')
+    const before = (await stored(page)).aspect
+    // Tapped as a finger would: Playwright will not click an aria-disabled
+    // control unless forced; the app must ignore the tap itself.
+    await page.locator('.controls__panel[data-sub="crop"] [data-chip="original"]').click({ force: true })
+    const after = (await stored(page)).aspect
+    check(
+      ratio.role === 'group' && ratio.name === 'Sheet ratio' && original?.off && original.why === 'No photo yet' && after === before,
+      `Frame › Crop: the ratio row is a ${ratio.role} named "${ratio.name}"; Original is unavailable and says why ("${original?.why}"), and a tap on it changes nothing (${before} -> ${after})`,
+    )
+
+    // A photo: the fill row, and Width available.
+    const bytes = await page.evaluate(async () => {
+      const c = document.createElement('canvas')
+      c.width = 1200
+      c.height = 1500
+      const g = c.getContext('2d')
+      g.fillStyle = '#5a7fa8'
+      g.fillRect(0, 0, 1200, 1500)
+      const b = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9))
+      return [...new Uint8Array(await b.arrayBuffer())]
+    })
+    await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
+    await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media, KEY, { timeout: 30_000 })
+    await tab('border')
+    const fills = await page.evaluate(() => {
+      const row = document.querySelector('.controls__panel[data-sub="border"] .chiprow')
+      return { role: row?.getAttribute('role'), name: row?.getAttribute('aria-label'), chips: row?.querySelectorAll('.chip').length ?? 0 }
+    })
+    const width = await said(`${border} [aria-label="Decrease Width"]`)
+    check(
+      fills.role === 'group' && fills.name === 'Fill' && fills.chips === 6 && width && !width.off && width.why === '',
+      `with a photo, Frame › Border: the fill row is a ${fills.role} named "${fills.name}" of ${fills.chips} chips; Width available, described by nothing (${JSON.stringify(width)})`,
+    )
+
+    // Fit, on a 4:5 sheet: no gesture to teach, nothing moves.
+    await tab('crop')
+    await page.locator('.controls__panel[data-sub="crop"] [data-chip="4:5"]').click()
+    await page.locator('.controls__section[data-tool="frame"] input[type=radio][value="fit"]').check({ force: true })
+    const HINT_SAID = '.app__float > p.sr-only[role=status]'
+    await page.waitForFunction((H) => /^Fit shows/.test(document.querySelector(H)?.textContent ?? ''), HINT_SAID, { timeout: 5_000 }).catch(() => {})
+    const fitHint = await page.locator(HINT_SAID).textContent()
+    const box = await settledBox(page)
+    const mid = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    const still = JSON.stringify((await stored(page)).media)
+    await touch(cdp, mid, [{ x: mid.x + 40, y: mid.y + 30 }])
+    const moved = JSON.stringify((await stored(page)).media) !== still
+    check(
+      fitHint === 'Fit shows the whole photo · choose Crop to move or zoom it' && !moved && (await page.locator('.app__hint').count()) === 1,
+      `in Fit the hint names no gesture ("${fitHint}"), a drag moves nothing (${moved ? 'moved' : 'unchanged'}) and leaves it`,
+    )
+    await tab('place')
+    const zoom = await said('.controls__panel[data-sub="place"] [aria-label="Decrease Zoom"]')
+    check(zoom?.off && zoom.why === 'Fit shows the whole photo', `Frame › Place in Fit: Zoom unavailable, described by "${zoom?.why}"`)
+    await tab('crop')
+    await page.locator('.controls__section[data-tool="frame"] input[type=radio][value="crop"]').check({ force: true })
+    await page.waitForFunction((H) => /^Drag/.test(document.querySelector(H)?.textContent ?? ''), HINT_SAID, { timeout: 5_000 }).catch(() => {})
+    const cropHint = await page.locator(HINT_SAID).textContent()
+    check(/^Drag to move the photo · pinch to zoom/.test(cropHint), `back in Crop it names the photo's gestures ("${cropHint}")`)
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
+
 } finally {
   await browser.close()
   await new Promise((r) => server.httpServer.close(r))
@@ -606,4 +724,4 @@ if (failures.length) {
   console.error(`\n${failures.length} touch check(s) failed.`)
   process.exit(1)
 }
-console.log("\nTouch: a tap picks the plate under it, the drag it starts moves that plate, and the photo's keys move the photo.")
+console.log("\nTouch: a tap picks the plate under it, the drag it starts moves that plate, the photo's keys move the photo, and the Frame tool says why what is off is off.")

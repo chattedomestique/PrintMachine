@@ -143,6 +143,26 @@ So:
 > whatever their number. What bounds a save is the phone's memory (section
 > "Native resolution at any size", below).
 
+## Frame
+
+- [ ] With VoiceOver on and no photo, open Frame › Border: Width's − and +
+      are read as dimmed with "No photo yet" after them, and Choose photo
+      sits beside the same words; in Frame › Crop the ratio row is read as
+      a group, "Sheet ratio", and Original as dimmed, "No photo yet"; with a
+      photo the fill row is read as a group, "Fill"
+- [ ] Choose a large photo (24 MP or more) with Deep as the fill, Frame ›
+      Border open: until the colour is made the Deep chip turns a small
+      spinner where its dot goes (VoiceOver: "Deep, preparing") and the
+      border is the bare stock; then the dot and the border take the colour
+      together, and nothing else on screen moves
+- [ ] In the Frame tool, VoiceOver reads Save's name with the frame
+      ("Save 9016×6440 JPEG with a 644 px frame" for a 40 MP photo on
+      Original), so the size the frame makes is heard before the tap
+- [ ] The gesture hint with Frame open: "Drag to move the photo · pinch to
+      zoom · double‑tap to reset" on Original and in Crop; in Fit it names
+      no gesture ("Fit shows the whole photo · choose Crop to move or zoom
+      it"), and a drag or pinch on the photo moves nothing
+
 ## Save
 
 - [ ] More says the size before the tap ("Saves 2822×3528" for a 12 MP photo

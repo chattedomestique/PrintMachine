@@ -23,9 +23,8 @@ import { snapCopyRect, type DrawRect } from '../../engine/media.ts'
 import { throwIfAborted, type RenderProgress } from '../../engine/render.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { PhotoDecodeError, decodeOriginal, decodeResized } from '../media/decode.ts'
-import { ensureFrameInputs } from '../media/frameInputs.ts'
+import { FILL_MISSING, FillMissingError, ensureFrameInputs, type PhotoState } from '../media/frameInputs.ts'
 import type { FrameInputs } from '../../engine/frame.ts'
-import type { MediaState } from '../media/useMediaBitmap.ts'
 import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../../state/persist.ts'
 import { canShareFile, deliverFile, detachedCanvas, saveMessage } from './page.ts'
 
@@ -146,11 +145,21 @@ export function pressInProgress(state: SaveState): boolean {
   return state.kind === 'loadingPhoto' || state.kind === 'pressing'
 }
 
-/** Whether a tap may start a save: not while one runs, and not while the
- *  document's photo is still loading or failed to load (the Photo panel says
- *  why). */
-export function canStart(state: SaveState, media: MediaState): boolean {
-  return startsFrom(state) && media !== 'loading' && media !== 'failed'
+/**
+ * Why nothing can be pressed for the document's photo as it is, in the words
+ * every place that refuses says: its stored photo is gone or will not decode
+ * (PHOTO_MISSING), or the photo is drawn but its frame's fill cannot be made
+ * from it (FILL_MISSING). Null when nothing stands in the way.
+ */
+export function saveRefusal(media: PhotoState): string | null {
+  return media === 'failed' ? PHOTO_MISSING : media === 'fillFailed' ? FILL_MISSING : null
+}
+
+/** Whether a tap may start a save: not while one runs, not while the
+ *  document's photo is still loading, and not while it is refused
+ *  (saveRefusal; the status card says why). */
+export function canStart(state: SaveState, media: PhotoState): boolean {
+  return startsFrom(state) && media !== 'loading' && saveRefusal(media) === null
 }
 
 /**
@@ -168,7 +177,7 @@ export function canStart(state: SaveState, media: MediaState): boolean {
  */
 export function saveButton(
   state: SaveState,
-  media: MediaState,
+  media: PhotoState,
 ): { text: 'Save' | 'Saving' | 'Share'; busy: boolean; disabled: boolean; why?: string } {
   switch (state.kind) {
     case 'loadingPhoto':
@@ -180,23 +189,31 @@ export function saveButton(
     case 'idle':
     case 'error':
     case 'tooBig':
-    case 'interrupted':
+    case 'interrupted': {
       // The document's photo is still decoding: Save waits for it.
       if (media === 'loading') return { text: 'Save', busy: false, disabled: true }
-      // The document's photo is gone: no size is promised and nothing can be
-      // pressed until it is chosen again (never the type on bare paper).
-      if (media === 'failed') return { text: 'Save', busy: false, disabled: true, why: PHOTO_MISSING }
+      // The document's photo is gone, or its frame's fill cannot be made
+      // from it: no size is promised and nothing can be pressed until that
+      // changes (never the type on bare paper, never a frame quietly Paper).
+      const why = saveRefusal(media)
+      if (why) return { text: 'Save', busy: false, disabled: true, why }
       return { text: 'Save', busy: false, disabled: false }
+    }
   }
 }
 
 /**
  * Save's accessible name: its one word first (WCAG 2.5.3, the name starts
- * with the label you see), then what it would make or why it cannot.
+ * with the label you see), then what it would make or why it cannot. What it
+ * would make is said as the More sheet's first row says it: the size, and
+ * when the photo is framed the frame in pixels (a frame adds pixels the photo
+ * does not have), and past LARGE_PRINT_MP that a phone may not finish it, so
+ * the size a frame makes is stated before the tap, from every tool the frame
+ * is set in or seen from.
  *
- * @param size what Save makes now ("2419×3024"), from the caption.
+ * @param caption what Save makes now, from describePlan.
  */
-export function saveLabel(state: SaveState, media: MediaState, size: string): string {
+export function saveLabel(state: SaveState, media: PhotoState, caption: Pick<PlanWords, 'size' | 'frame' | 'large'>): string {
   const b = saveButton(state, media)
   if (b.why) return `${b.text}: ${b.why}`
   switch (state.kind) {
@@ -207,7 +224,8 @@ export function saveLabel(state: SaveState, media: MediaState, size: string): st
     case 'ready':
       return `Share ${dims(state.plan.width, state.plan.height)} (${fileSize(state.file.size)})`
     default:
-      return media === 'loading' ? 'Save: loading the photo' : `Save ${size} JPEG`
+      if (media === 'loading') return 'Save: loading the photo'
+      return `Save ${caption.size} JPEG${caption.frame ? ` ${caption.frame}` : ''}${caption.large ? `, ${caption.large}` : ''}`
   }
 }
 
@@ -236,12 +254,15 @@ export interface MoreCaption {
  * nothing is saved without the photo.
  */
 export function moreCaption(
-  media: MediaState,
+  media: PhotoState,
   caption: Pick<PlanWords, 'size' | 'reason' | 'megapixels' | 'frame' | 'large'>,
   photo: boolean,
 ): MoreCaption {
   if (media === 'failed') {
     return { size: null, word: PHOTO_MISSING, meta: 'Nothing is saved without it: never the type on bare paper.', alert: true }
+  }
+  if (media === 'fillFailed') {
+    return { size: null, word: FILL_MISSING, meta: 'Nothing is saved with its frame left Paper.', alert: true }
   }
   const why = caption.reason ?? (photo ? "the photo's own pixels, one for one" : 'no photo: type on bare paper')
   const size = [caption.megapixels, caption.frame, caption.large].filter((w) => w !== null).join(', ')
@@ -281,7 +302,7 @@ export interface SaveStatus {
  * The status card: the save flow's state when it has something to say beyond
  * the one word on Save. Null: no card.
  */
-export function saveStatus(state: SaveState, media: MediaState): SaveStatus | null {
+export function saveStatus(state: SaveState, media: PhotoState): SaveStatus | null {
   const why = saveButton(state, media).why
   if (why) return { text: why, alert: true, busy: false, action: 'choose' }
   switch (state.kind) {
@@ -514,13 +535,14 @@ export async function pressForSave(
     // photo's colours), which is over before the original is decoded, as
     // is any such decode still running for another photo or a frame no
     // longer shown, so the two never hold their pixels at once. A photo
-    // they cannot be made from is refused as a photo that cannot be
-    // loaded: never pressed with a frame quietly Paper.
+    // whose fill they cannot be made from is refused, in the page's words
+    // for it (FILL_MISSING): never pressed with a frame quietly Paper. A
+    // stored photo that is gone is said as that.
     let inputs: FrameInputs
     try {
       inputs = await deps.frameInputs(settings)
-    } catch {
-      throw new MissingPhotoError()
+    } catch (err) {
+      throw err instanceof MissingPhotoError ? err : new FillMissingError()
     }
     throwIfAborted(signal)
     let rect: DrawRect | undefined
@@ -588,7 +610,7 @@ async function keepAwake(): Promise<{ release(): Promise<void> } | null> {
  */
 export function useSave(
   settings: PrintSettings,
-  media: MediaState,
+  media: PhotoState,
   announce: (message: string | null, kind?: Announcement) => void,
 ) {
   const [state, dispatch] = useReducer(saveReducer, IDLE)

@@ -16,6 +16,7 @@ import { usePhotoImport } from '../media/usePhotoImport.ts'
 import MoreSheet from './MoreSheet.tsx'
 import SaveQuestion from './SaveQuestion.tsx'
 import StatusCard from './StatusCard.tsx'
+import { gestureHint } from './hint.ts'
 import {
   canStart,
   moreCaption,
@@ -23,6 +24,7 @@ import {
   saveButton,
   saveLabel,
   saveQuestion,
+  saveRefusal,
   saveStatus,
   useSave,
   type Announcement,
@@ -61,9 +63,8 @@ export default function AppShell() {
   // field), made from the photo once its preview copy has landed.
   const frameInputs = useFrameInputs(settings, decoded)
   // The photo, as Save and the panels see it: a photo the frame's fill cannot
-  // be made from (it needs the frame source, which would not decode) is a
-  // photo that could not be loaded, and is said the same way; its frame
-  // stays Paper.
+  // be made from (it needs the frame source, which would not decode) is
+  // refused with its own words (FILL_MISSING); its frame stays Paper.
   const mediaState = frameState(decoded, frameInputs.failed)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tool, setTool] = useState<ToolId | null>(null)
@@ -256,15 +257,8 @@ export default function AppShell() {
   // while the print is pressed; its words, for a screen reader, stay.
   const hintUp = settings.media !== null && !hintDismissed
   const showHint = hintUp && !pressing
-  // What the sheet's gestures do in the open tool: with Frame open they are
-  // the photo's, except in Fit, where the whole photo shows and there is
-  // nothing to move.
-  const hintText =
-    tool !== 'frame'
-      ? 'Tap type to pick it · drag to move · pinch to size and turn'
-      : effectiveMode(settings) === 'fit'
-        ? 'Fit shows the whole photo · choose Crop to move or zoom it'
-        : 'Pinch to zoom the photo · drag to move it · double‑tap to reset'
+  // What the sheet's gestures do in the open tool (hint.ts).
+  const hintText = gestureHint(tool, effectiveMode(settings))
 
   return (
     <div className="app" ref={appRef}>
@@ -305,7 +299,7 @@ export default function AppShell() {
             onClick={onSave}
             aria-busy={button.busy || undefined}
             aria-disabled={button.disabled || undefined}
-            aria-label={saveLabel(save.state, mediaState, caption.size)}
+            aria-label={saveLabel(save.state, mediaState, caption)}
           >
             <span className="btn__label">
               {/* Busy, the style guide's spinner takes the icon's place. */}
@@ -330,7 +324,7 @@ export default function AppShell() {
       <section className="app__overlay" aria-label="Tools" ref={overlayRef} inert={pressing || undefined}>
         <div className={`app__panel${tool ? ' app__panel--open' : ''}`}>
           <div className="app__panel-inner" inert={tool === null || undefined}>
-            <Controls tool={tool} subs={subs} onSub={onSub} mediaState={mediaState} photo={photo} />
+            <Controls tool={tool} subs={subs} onSub={onSub} mediaState={mediaState} fillPreparing={frameInputs.preparing} photo={photo} />
           </div>
         </div>
 
@@ -459,7 +453,7 @@ export default function AppShell() {
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
         caption={moreCaption(mediaState, caption, settings.media !== null)}
-        pngSize={mediaState === 'failed' ? null : pngMeta}
+        pngSize={saveRefusal(mediaState) ? null : pngMeta}
         swState={swState}
         canSavePng={canStart(save.state, mediaState)}
         onSavePng={() => startSave('png')}

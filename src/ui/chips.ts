@@ -27,8 +27,12 @@ export interface ChipItem<T extends string> extends ChipFace<T> {
   /** A glyph before the name, for a choice that is not one colour. */
   icon?: string
   /** Shown but not choosable (aria-disabled, so it can still be found with
-   *  the keys); the caller says why nearby. */
+   *  the keys); the caller says why nearby, and names those words to the row
+   *  (ChipRow's `whyId`), so they are said with the chip. */
   disabled?: boolean
+  /** What the choice shows is still being made (the colour a chip stands
+   *  for, say): a spinner in place of its dot or glyph, and said. */
+  busy?: boolean
 }
 
 /** What a chip shows for the chosen value: the way round that is chosen (its
@@ -41,11 +45,13 @@ export function chipFace<T extends string>(item: ChipItem<T>, value: T): ChipFac
   return { id: face.id, label: face.label, pressed, flips: pressed && item.alt !== undefined }
 }
 
-/** The name a screen reader hears: the label, and on the chosen chip that
- *  flips, what a tap does ("9:16, tap to flip"), since its cue is a glyph. */
+/** The name a screen reader hears: the label, that the choice is still
+ *  being made ("Deep, preparing", its spinner said), and on the chosen chip
+ *  that flips, what a tap does ("9:16, tap to flip"), since its cue is a
+ *  glyph. */
 export function chipName<T extends string>(item: ChipItem<T>, value: T): string {
   const f = chipFace(item, value)
-  return f.flips ? `${f.label}, tap to flip` : f.label
+  return `${f.label}${item.busy ? ', preparing' : ''}${f.flips ? ', tap to flip' : ''}`
 }
 
 /** The value a tap on `item` chooses, or null when it changes nothing (the

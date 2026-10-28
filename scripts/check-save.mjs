@@ -1011,7 +1011,11 @@ try {
           // The More sheet's first row (in the DOM while it is closed).
           more: document.querySelector('[data-export-size] .more__fact-word')?.textContent ?? null,
           // How many things over the stage and in the dock say it: one note.
-          notes: [...document.querySelectorAll('.app__overlay *, .app__float *')].filter((e) => e.childElementCount === 0 && e.textContent === why).length,
+          // An element that says it whole, none of whose descendants does
+          // (a note is a paragraph with an icon in it, so not a leaf).
+          notes: ((says) => says.filter((e) => !says.some((o) => o !== e && e.contains(o))).length)(
+            [...document.querySelectorAll('.app__overlay *, .app__float *')].filter((e) => e.textContent.trim() === why),
+          ),
         }),
         [SAVE, LINE, CANCEL, why],
       )

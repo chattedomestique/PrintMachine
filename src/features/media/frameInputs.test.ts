@@ -200,11 +200,41 @@ describe('the inputs a press needs', () => {
   it('Save takes the stored palette as it is, and makes one only when it is missing', async () => {
     const c = counting(PALETTE)
     expect(await ensureFrameInputs(doc({ width: 0.05 }, PALETTE), c.palettes)).toEqual({ palette: PALETTE })
-    expect(await ensureFrameInputs(doc({ width: 0.05, fill: 'paper' }), c.palettes)).toEqual({})
+    expect(await ensureFrameInputs(doc({ width: 0.05, fill: 'paper' }, PALETTE), c.palettes)).toEqual({ palette: PALETTE })
     expect(await ensureFrameInputs(doc({ width: 0 }), c.palettes)).toEqual({})
     expect(c.asked).toEqual([])
     expect(await ensureFrameInputs(doc({ width: 0.05, fill: 'muted' }), c.palettes)).toEqual({ palette: PALETTE })
     expect(c.asked).toEqual(['p'])
+  })
+
+  it("under Paper, Save waits for the palette the page is making (its decode ends before the original's begins), takes nothing from it, and a failure refuses nothing", async () => {
+    // A maker held back, as the page's is while the frame source decodes.
+    let settle: ((v: FramePalette | Error) => void) | null = null
+    const held: FrameMakers = {
+      palette: () => new Promise((resolve, reject) => (settle = (v) => (v instanceof Error ? reject(v) : resolve(v)))),
+      frost: async () => {
+        throw new Error('no field under Paper')
+      },
+    }
+    const paper = doc({ width: 0.05, fill: 'paper' })
+    let done = false
+    const saved = ensureFrameInputs(paper, held).then((got) => ((done = true), got))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(done).toBe(false)
+    settle!(PALETTE)
+    // Paper presses as it shows: the palette is the page's to store.
+    expect(await saved).toEqual({})
+    // The source fails: still waited for, and the Paper print is pressed.
+    done = false
+    const failing = ensureFrameInputs(paper, held).then((got) => ((done = true), got))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(done).toBe(false)
+    settle!(new FrameSourceError('no'))
+    expect(await failing).toEqual({})
+    // A palette colour waits for the same and fails with it.
+    const muted = ensureFrameInputs(doc({ width: 0.05, fill: 'muted' }), held)
+    settle!(new FrameSourceError('no'))
+    await expect(muted).rejects.toBeInstanceOf(FrameSourceError)
   })
 
   it("Frosted: Save makes its field at the settled size, for the sheet's shape and the blur; never a palette", async () => {
@@ -212,7 +242,9 @@ describe('the inputs a press needs', () => {
     const s = doc({ width: 0.05, fill: 'frosted', blur: 170 })
     const got = await ensureFrameInputs(s, c.palettes)
     expect(c.fields).toEqual([`p ${sheetAspect(s).toFixed(4)} 170 ${FROST_FIELD_LONG}`])
-    expect(c.asked).toEqual([])
+    // The palette the page is making is waited for (one decode), not taken.
+    expect(c.asked).toEqual(['p'])
+    expect(got.palette).toBeUndefined()
     expect(got.frost).toMatchObject({ w: 384, h: 480, aspect: sheetAspect(s), blur: 170 })
     expect(needsFrost(s)).toBe(true)
     expect(needsFrost({ ...s, frame: { ...s.frame, width: 0, corners: 0 } })).toBe(false)

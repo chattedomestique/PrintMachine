@@ -53,7 +53,9 @@
  *     document is given one): with the photo's frame source held back, the
  *     border is Paper and no palette is stored; released, the palette is
  *     stored with the photo and the border drawn in its colour. Under
- *     Frosted the palette is stored too, from the one decode. With a frame
+ *     Frosted the palette is stored too, from the one decode. Under Paper,
+ *     Save tapped while that decode is held decodes nothing and writes no
+ *     file until it is released (the two decodes never run together). With a frame
  *     source that will not decode, for a palette colour and for Frosted: the
  *     card and Save's name say the photo could not be loaded, Save cannot be
  *     tapped and no file appears, and the border stays Paper; another photo
@@ -676,8 +678,11 @@ try {
     // The frame's source is the photo decoded at 1024 px on its long side
     // (features/media/frameSource.ts): the one decode of that size. Held
     // back until released, or failing, by a stand-in for createImageBitmap.
+    // Every other decode is counted too (`__otherDecodes`: the preview's
+    // copies, and Save's original).
     const stub = `
       window.__frameDecodes = 0
+      window.__otherDecodes = 0
       const real = window.createImageBitmap
       window.createImageBitmap = function (src, ...rest) {
         const o = rest.length === 1 ? rest[0] : rest[4]
@@ -685,7 +690,7 @@ try {
           window.__frameDecodes++
           if (sessionStorage.getItem('frame-decode') === 'fail') return Promise.reject(new Error('injected: this decode fails'))
           if (sessionStorage.getItem('frame-decode') === 'hold') return new Promise((res, rej) => (window.__releaseFrame = () => real.call(window, src, ...rest).then(res, rej)))
-        }
+        } else window.__otherDecodes++
         return real.call(window, src, ...rest)
       }
     `
@@ -746,6 +751,43 @@ try {
     )
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     await ctx.close()
+
+    // Under Paper the page makes the palette too (the fill row shows the
+    // four colours), from a decode that starts as the preview copy lands,
+    // the moment Save can be tapped. Save waits for that decode to end
+    // before it decodes the original, so the photo's two decodes never run
+    // together; Paper takes nothing from it.
+    {
+      const ctx = await newContext()
+      const { page, errors } = await open(ctx, stub)
+      await choosePhoto(page, 1600, 1200)
+      await frameNext(page, { width: 0.08, fill: 'paper' }, 'hold')
+      await page.reload()
+      await page.waitForSelector('.sheet canvas')
+      await page.waitForFunction(() => typeof window.__releaseFrame === 'function', null, { timeout: 30_000 })
+      await page.waitForTimeout(1500)
+      let early = false
+      page.on('download', () => (early = true))
+      const before = await page.evaluate(() => window.__otherDecodes)
+      await page.locator(SAVE).click()
+      await page.waitForTimeout(2500)
+      const held = await page.evaluate(() => window.__otherDecodes)
+      check(
+        held === before && !early,
+        `Paper, the frame source held back: Save tapped, and while it is held the original is not decoded (${held - before} decodes) and no file is written`,
+      )
+      page.removeAllListeners('download')
+      const download = page.waitForEvent('download', { timeout: 60_000 }).catch(() => null)
+      await page.evaluate(() => window.__releaseFrame())
+      const file = await download
+      const after = await page.evaluate(() => window.__otherDecodes)
+      check(
+        file !== null && after > before && Object.keys((await stored(page)) ?? {}).join() === 'photo,deep,muted,comp',
+        `released: the original decoded (${after - before}) and the file written (${file?.suggestedFilename() ?? 'none'}), the palette stored`,
+      )
+      check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+      await ctx.close()
+    }
 
     // Frosted shows on a photo with no palette: the palette is made too (the
     // fill row shows all four colours before one is chosen), from the one

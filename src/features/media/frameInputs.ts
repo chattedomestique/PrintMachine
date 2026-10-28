@@ -143,19 +143,26 @@ export const PAGE_MAKERS: FrameMakers = {
 
 /**
  * The inputs a press of this document needs, made now if they are not held:
- * Save awaits this before it presses, so a press never starts without them.
- * The palette is made only when the document does not hold it, and not
- * stored here (the page's `useFrameInputs` stores it; it is the same
- * palette, from the same decode); Frosted's field at the save's size
- * (FROST_FIELD_LONG, the settled preview's too). Rejects when the photo
- * cannot be read for them.
+ * Save awaits this before it presses, so a press never starts without them,
+ * and before it decodes the original, so the frame source's decode is over
+ * first and the two never run together. The palette is asked for whenever
+ * the page is making it (`wantsPalette`, any framed fill: the same held
+ * promise, from the same decode), and awaited under every fill; only a print
+ * that shows a palette colour (`needsPalette`) takes it or fails without
+ * it, so a source that cannot be read refuses no Paper save. It is not
+ * stored here (the page's `useFrameInputs` stores it). Frosted's field at
+ * the save's size (FROST_FIELD_LONG, the settled preview's too). Rejects
+ * when the photo cannot be read for what the print needs.
  */
 export async function ensureFrameInputs(s: PrintSettings, makers: FrameMakers = PAGE_MAKERS): Promise<FrameInputs> {
   const inputs = storedFrameInputs(s)
   if (!s.media) return inputs
-  if (needsPalette(s)) {
-    const palette = await makers.palette(s.media)
-    if (palette) inputs.palette = palette
+  if (wantsPalette(s)) {
+    const made = makers.palette(s.media)
+    if (needsPalette(s)) {
+      const palette = await made
+      if (palette) inputs.palette = palette
+    } else await made.catch(() => null)
   }
   if (needsFrost(s)) inputs.frost = await makers.frost(s.media, sheetAspect(s), s.frame.blur, FROST_FIELD_LONG)
   return inputs

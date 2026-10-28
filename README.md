@@ -577,9 +577,11 @@ live where those are used:
 - **The frame's colours** come from a third decode, made once a photo when a
   frame first shows on it: the photo at 1024 px on its long side (or
   its own size, if smaller), read back and kept for that photo (2.8 MB for a
-  3:2 photo). It waits for the preview's copy to land, and Save makes it, when
-  it is missing, before it decodes the original, so it never runs beside
-  either.
+  3:2 photo). It waits for the preview's copy to land, and Save, under every
+  fill, waits for it (or makes it, when it is missing) before it decodes the
+  original, so it never runs beside either (check-save step 10 taps Save
+  under Paper with it held back: nothing is decoded and no file written until
+  it ends).
 - **Save** decodes the *original*, in full (4 bytes a pixel of the photo, about
   98 MB for 24 MP, 159 MB for 40 MP), and closes it the moment its last rows
   are in the print, so the print is drawn from the original's pixels, never

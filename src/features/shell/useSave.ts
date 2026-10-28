@@ -459,9 +459,11 @@ export type SaveResult = { kind: 'pressed'; pressed: PressedPrint } | { kind: 't
  * The press behind Save, with no UI in it: decode the photo, press, and, when
  * this device cannot, find the copy it can.
  *
- *  - The frame's inputs (the photo's palette) are made first when the
- *    document does not hold them, so the press never starts without them
- *    and their decode is over before the original's begins.
+ *  - The frame's inputs (the photo's palette, Frosted's field) are made
+ *    first when the document does not hold them, and under any fill the
+ *    page's palette decode is waited for (`ensureFrameInputs`), so the press
+ *    never starts without them and their decode is over before the
+ *    original's begins.
  *  - A print at the photo's own size decodes the ORIGINAL in full. If that
  *    fails, it is a question of size only when a smaller decode of the same
  *    file succeeds (the import already decoded it once): then the largest

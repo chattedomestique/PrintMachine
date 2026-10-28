@@ -39,7 +39,9 @@ export default defineConfig({
         id: base,
         name: 'Print Machine',
         short_name: 'Print',
-        description: 'Turn type into an authentic Risograph print, on your phone.',
+        // The one job (README). The name, short name, id, scope, start URL
+        // and icons do not change: an installed copy updates in place.
+        description: "Frame a photo and put risographic text on it, saved at the photo's own full resolution.",
         start_url: base,
         scope: base,
         display: 'standalone',

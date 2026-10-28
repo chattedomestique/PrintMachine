@@ -50,7 +50,7 @@ So:
 
 ## Edit
 
-- [ ] Open each tool (Type, Ink, Photo, Press) and each of its tabs: the sheet
+- [ ] Open each tool (Frame, Type, Ink, Press) and each of its tabs: the sheet
       stays exactly where it is and the same size; nothing in the dock scrolls
       at the standard text size; every control is comfortably tappable with a
       thumb (no near misses between neighbours)
@@ -59,8 +59,8 @@ So:
 - [ ] Tap targets, with a thumb: a setting's value (Size's "90%") opens the
       number pad and its name (Line height, with its chevrons) the list of
       settings, never the slider just under them; the [−] and [+] beside a
-      slider never catch the name or value above; the sheet's select and the
-      plate button open on any tap inside their frame
+      slider never catch the name or value above; a ratio or fill chip and
+      the plate button answer any tap inside their frame
 - [ ] Ink › Over photo: tap Off, Second ink and Backing in turn → the control
       stays exactly where it is while the rows under it change
 - [ ] Tap a plate on the sheet (RISO) → the plate button names it and its
@@ -163,6 +163,49 @@ So:
       zoom · double‑tap to reset" on Original and in Crop; in Fit it names
       no gesture ("Fit shows the whole photo · choose Crop to move or zoom
       it"), and a drag or pinch on the photo moves nothing
+- [ ] Frame › Crop's ratio chips: a second tap on the chosen chip turns it
+      on its side (4:5 to 5:4, 9:16 to 16:9), and the sheet follows; Original
+      and 1:1 do not turn
+- [ ] Your 40 MP portrait (5152x7728) on Original in its first frame: More
+      and Save say 6440×9016 (58.1 MP, with a 644 px frame) before the tap;
+      Save completes without a tab reload, and Photos shows 6440×9016. Write
+      down the time from the tap to "Share"
+- [ ] The same photo on 1:1 Fit (9016×9016, 81.3 MP) and on 16:9 Fit
+      (18414×10358, 190.7 MP; More adds "a very large print: a phone may not
+      finish it"): write down what the phone does. A file of the size said,
+      or the smaller-copy question ("This device couldn't press ..."), or,
+      after an eviction, the next launch's "The last save, ..., did not
+      finish." with Try again and Save smaller; never a smaller file nobody
+      chose
+- [ ] A 61 MP photo (9504x6336) on Original at the widest frame (16%:
+      13976×10808, 151.1 MP): an iPhone evicts a tab that holds too much
+      rather than throwing, so expect the stated size and, if the tab was
+      evicted, the next launch's question, not a silent failure
+- [ ] Whole-save time against the one estimate there is (about 0.4 s a sheet
+      megapixel, from the device spike's encoder): about 23 s for the 58 MP
+      Original above, 33 s for 1:1 Fit (81 MP), 76 s for 16:9 Fit (191 MP).
+      Write down each, with the device
+- [ ] Frosted at Blur 240 round a photo of a smooth sky, saved, opened in
+      Photos at 100%: does the border band into visible steps anywhere?
+- [ ] Corners at 100% (Round) on a native save: open the file in Photos at
+      100% beside the photo; inside the rounded corners the photo's pixels
+      are its own (as sharp, nothing shifted), and the corners are smooth
+- [ ] Choose a photo with Frame › Border showing: write down the time from
+      the choice to the border taking the photo's colour (the frame's colours
+      come from a third decode of the photo, made once)
+- [ ] With a hardware keyboard and Frame open on a zoomed photo: the arrows
+      move the view over it (Right shows more of its right side), + and −
+      zoom, 0 puts it back at 100% and centred; a run of presses is one
+      Undo, and 0 is one of its own
+- [ ] Poster is Tanklager with the network off (Offline, above), and Type ›
+      Face shows Bold unpressed and unavailable for it ("Poster is one
+      weight")
+- [ ] An installed copy (one added before this version) updates in place on
+      its next online launch; every print saved before still opens, with
+      and without a photo, unframed, and its Poster plates in Tanklager
+- [ ] Which home-screen icon is installed: Print Machine's "Print", or the
+      old Border Studio one? (The owner's question; nothing here changes
+      it)
 
 ## Save
 
@@ -341,10 +384,8 @@ holds"). What only a phone can settle:
       halftone image, R 0.49 to 0.52) and estimated a 40 MP save at about 16
       to 17 s from it (33 s x R, the 33 s an estimate for the reference
       machine from before its save was measured). That is about 0.4 s a sheet
-      megapixel; a frame adds pixels, so write down the framed saves too
-      against the same estimate: about 23 s for the
-      40 MP photo framed on Original (58 MP), 33 s on 1:1 Fit (81 MP), 76 s on
-      16:9 Fit (191 MP). The app promises no time.
+      megapixel; the framed saves are under "Frame". The app promises no
+      time.
 - [ ] **Backgrounding and the screen.** Start a 40 MP save and let the screen
       auto-lock (the Wake Lock should keep it on: iOS 16.4 and later); then
       switch to another app for 10 s and return: either it finished, or the

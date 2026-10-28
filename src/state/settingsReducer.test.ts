@@ -454,7 +454,7 @@ describe('the frame', () => {
     expect(applySettings(unframed, { type: 'setMedia', media: photo }).frame).toEqual({ ...framed.frame, width: FRAME_WIDTH_FIRST })
   })
 
-  it('the seed rewrites no plate beyond the second ink a first photo always gave (D-13: type belongs to the sheet)', () => {
+  it('the seed rewrites no plate beyond the second ink a first photo always gave (type belongs to the sheet)', () => {
     const l = makeLayer({ x: 0.3, y: 0.7, size: 0.12, rotation: 5 })
     const s = applySettings(doc([l]), { type: 'setMedia', media: photo })
     expect(s.layers).toEqual([{ ...l, contrastInkId: contrastPartner(l.inkId) }])

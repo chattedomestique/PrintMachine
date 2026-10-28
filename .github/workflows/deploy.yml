@@ -21,6 +21,12 @@ concurrency:
   cancel-in-progress: false # let an in-flight deploy finish
 
 jobs:
+  # Every step of this job is a gate, run in this order on the one PAGES=1
+  # build `npm run verify` makes, and each is meant to be REQUIRED: a pull
+  # request into main should not merge until `verify` is green. That takes
+  # branch protection on main with `verify` as a required check, a switch
+  # in the repository's settings that only its owner can flip; until it is
+  # on, nothing stops a direct push to main, and this job is advice.
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -43,6 +49,8 @@ jobs:
       # verified by reading the precache manifest and deciding it looked right,
       # which is inspection, not verification. This serves the build at the real
       # Pages sub-path, installs the worker, cuts the network and cold-launches.
+      # It also holds the precache to its budget (23 entries, 1.12 MiB), which
+      # a phone downloads whole before the app opens offline.
       # Runners ship Chrome, which playwright-core drives without downloading
       # a browser.
       - run: node scripts/verify-offline.mjs
@@ -137,7 +145,9 @@ jobs:
       - run: node scripts/parity-borders.mjs
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
-      # Time and resident memory of an export in desktop Chrome, 12 to 48 MP.
+      # Time and resident memory of an export in desktop Chrome, 12 to 81 MP,
+      # the framed 58 and 81 MP sheets among them, each save's time a sheet
+      # megapixel beside the device spike's estimate for a phone.
       # Informational: V8 frees what JavaScriptCore keeps, so measure-alloc
       # is the gate.
       - run: node scripts/measure-export.mjs

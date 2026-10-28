@@ -41,7 +41,7 @@ npm run sync:styleguide # re-vendor the style guide from ../styleguide
 ```sh
 npm run measure:fidelity  # Save keeps every pixel of the photo, up to 61 MP (fails under a gate)
 npm run measure:alloc     # what an export holds, up to 61 MP (fails over a gate; FULL=1 adds the 61 MP worst press)
-npm run measure:export    # export time and desktop memory (informational)
+npm run measure:export    # export time and desktop memory, beside the phone's estimate (informational)
 npm run build && npm run check:save   # the save flow in the built app, tapped
 npm run build && npm run check:touch  # tap-to-select on the sheet, touched
 npm run check:spike       # the device spike page still runs (see below)
@@ -182,7 +182,12 @@ It is checked against two deliberate breakages: a missing worker, and a worker
 that installs but precaches only the shell. The second is the failure the
 playbook records — installable, and blank offline.
 
-It prints the precache's size (entries and bytes), and it checks Poster's face
+It prints the precache's size, entries and bytes, and fails above its
+budget: 23 entries and 1.12 MiB (`PRECACHE_MAX_*`; it measured 19 entries
+and 1.098 MiB when the budget was set, with the frame and Poster's face in,
+against 18 entries before either; x 1.25 is 23 entries and 1.37 MiB, and the
+1.12 MiB the frame was planned to is the lower). A phone downloads all of it
+before the app opens offline. And it checks Poster's face
 offline the way a launch from the home screen uses it, never by asking
 `document.fonts.check`, which says yes when no such face is declared at all.
 First, online, it serves the face a second late (half the app's wait) and
@@ -1448,14 +1453,19 @@ to 17 s, the 33 s being this machine's estimate from before the save was
 measured here at 15.1 s. How long a save takes on a phone is a
 DEVICE-CHECKLIST item.
 
-A framed save costs what its sheet's megapixels cost: in one run of
-`measure:export` (a slower day of this machine than the table above), the
-40 MP photo framed on Original took 33.9 s for 58.1 MP, 584 ms a megapixel,
-and on 1:1 Fit 46.9 s for 81.3 MP, 577, against 23.4 s and 587 for the same
-photo unframed. On a phone the only whole-save figure is the device spike's
+A framed save costs what its sheet's megapixels cost: in the run of
+`measure:export` made with every CI step in order when the precache budget
+was set, the 40 MP photo framed on Original took 23.9 s for 58.1 MP, 412 ms
+a megapixel, and on 1:1 Fit 32.1 s for 81.3 MP, 395, against 16.5 s and 415
+for the same photo unframed (on a slower day of this machine, 33.9, 46.9 and
+23.4 s). On a phone the only whole-save figure is the device spike's
 estimate, about 16 s at 40 MP: about 0.4 s a sheet megapixel, so about 23 s
-for the framed 58 MP, 33 s at 81 MP and 76 s at 191 MP. These are estimates;
-the app promises no time.
+for the framed 58 MP, 33 s at 81 MP and 76 s at 191 MP. `measure:export`
+prints that estimate beside every case it times (`SPIKE_ESTIMATE`); on this
+desktop the whole save ran at 0.40 to 0.43 s a sheet megapixel under the
+default document on a photo, framed or not, 0.37 with no photo, and 0.53 to
+0.98 under the documents of three to five plates. These are estimates; the
+app promises no time.
 
 ### The same print at every size
 

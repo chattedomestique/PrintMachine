@@ -28,6 +28,10 @@
  * of its `O` (face-checks.mjs: a face whose lowercase is capitals fails).
  * And the cold tab's More sheet carries the build stamp, a commit and a day.
  *
+ * The precache has a budget, and it fails above it (PRECACHE_MAX_*): a
+ * phone downloads all of it before the app opens offline, so what it costs
+ * is stated, never discovered.
+ *
  * Run: npm run verify:offline   (builds with PAGES=1 first: this serves the
  * build only under the Pages sub-path, so a build for `/` would 404 every
  * asset and time out)
@@ -70,6 +74,13 @@ const FACE_PROBE = {
   chars: ['o', 'O'],
   text: 'RISO Print Machine 0123',
 }
+
+/** The precache's budget: what it measured when the budget was set (19
+ *  entries, 1,150,949 bytes, the frame and Poster's face in), x 1.25, or 27
+ *  entries and 1.12 MiB where that is lower: 23 entries and 1.12 MiB. A
+ *  change that needs more says so here, with its own measurement. */
+const PRECACHE_MAX_ENTRIES = 23
+const PRECACHE_MAX_BYTES = Math.floor(1.12 * 2 ** 20)
 
 let faceServedLate = false
 
@@ -209,6 +220,9 @@ try {
   const hashed = entries.filter((u) => /\/assets\/index-[A-Za-z0-9_-]+\.(js|css)$/.test(u))
   if (hashed.length < 2) fail(`precache is missing the hashed JS/CSS (found ${hashed.length})`)
   else console.log(`✓ precached ${entries.length} entries, ${(bytes / 2 ** 20).toFixed(3)} MiB (${bytes} B), including the hashed bundle`)
+  const budget = `at most ${PRECACHE_MAX_ENTRIES} entries and ${(PRECACHE_MAX_BYTES / 2 ** 20).toFixed(2)} MiB (${PRECACHE_MAX_BYTES} B)`
+  if (entries.length > PRECACHE_MAX_ENTRIES || bytes > PRECACHE_MAX_BYTES) fail(`the precache is over its budget: ${entries.length} entries, ${bytes} B, against ${budget}`)
+  else console.log(`✓ inside the precache's budget, ${budget}`)
   const face = entries.filter((u) => new RegExp(`/assets/${POSTER_FAMILY}-[A-Za-z0-9_-]+\\.woff$`).test(u))
   if (face.length !== 1) fail(`precache should hold Poster's face once (found ${face.length})`)
   else console.log(`✓ the face is precached (${face[0].slice(face[0].lastIndexOf('/') + 1)})`)

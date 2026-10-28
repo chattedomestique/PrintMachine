@@ -429,24 +429,61 @@ describe("the photo's palette", () => {
     const { past, future, bursting, joinable } = h
     h = historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })
     expect(h.present.media!.palette).toEqual(palette)
-    // The history, the burst and what may be joined are as they were.
-    expect(h.past).toBe(past)
-    expect(h.future).toBe(future)
+    // The steps, the burst and what may be joined are as they were: the
+    // entries that hold the photo take its palette, and nothing else moves.
+    const unkeyed = (e: PrintSettings) => (e.media ? { ...e, media: { ...e.media, palette: undefined } } : e)
+    expect(h.past.map(unkeyed)).toEqual(past.map(unkeyed))
+    expect(h.past[0]).toBe(past[0])
+    expect(h.past[1].media!.palette).toEqual(palette)
+    expect(h.future).toEqual(future)
     expect([h.bursting, h.joinable]).toEqual([bursting, joinable])
     // The drag goes on into the same step, and keeps the palette.
+    const keyedPast = h.past
     h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.09 }, coalesce: true })
-    expect(h.past).toBe(past)
+    expect(h.past).toBe(keyedPast)
     expect(h.present.media!.palette).toEqual(palette)
   })
 
-  it('arriving after its photo was replaced or removed, it changes nothing', () => {
+  it('arriving after its photo was replaced or removed, it keys the entries that hold that photo, and no other', () => {
     let h = initHistory(applySettings(defaultSettings(), { type: 'setMedia', media: photo }))
     h = historyReducer(h, { type: 'setMedia', media: makeMedia({ id: 'n', width: 3000, height: 4000 }) })
-    const replaced = h
-    expect(historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })).toBe(replaced)
     h = historyReducer(h, { type: 'setMedia', media: null })
-    const removed = h
-    expect(historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })).toBe(removed)
+    const before = h
+    h = historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })
+    // The present (no photo) and the entry of photo n are as they were.
+    expect(h.present).toBe(before.present)
+    expect(h.past[1]).toBe(before.past[1])
+    expect(h.past[1].media!.palette).toBeUndefined()
+    // Two Undos bring photo m back with its palette.
+    h = historyReducer(historyReducer(h, { type: 'undo' }), { type: 'undo' })
+    expect(h.present.media!.id).toBe('m')
+    expect(h.present.media!.palette).toEqual(palette)
+    // A palette for a photo no entry holds changes nothing.
+    expect(historyReducer(before, { type: 'setPalette', mediaId: 'x', palette })).toBe(before)
+  })
+
+  it('no Undo or Redo takes it away: entries made before it landed, and redo entries, hold it too', () => {
+    let h = initHistory(defaultSettings())
+    h = historyReducer(h, { type: 'setMedia', media: photo })
+    // Edits made while the palette is being made.
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.07 } })
+    h = historyReducer(h, { type: 'patch', patch: { aspect: '1:1' } })
+    // An Undo before it lands leaves a redo entry.
+    h = historyReducer(h, { type: 'undo' })
+    h = historyReducer(h, { type: 'setPalette', mediaId: 'm', palette })
+    for (const s of [...h.past, h.present, ...h.future]) {
+      if (s.media?.id === 'm') expect(s.media.palette).toEqual(palette)
+    }
+    // Back to the photo's arrival, and forward past the redo entry: kept at every step.
+    const seen: unknown[] = []
+    h = historyReducer(h, { type: 'undo' })
+    seen.push(h.present.media!.palette)
+    h = historyReducer(h, { type: 'redo' })
+    seen.push(h.present.media!.palette)
+    h = historyReducer(h, { type: 'redo' })
+    seen.push(h.present.media!.palette)
+    expect(h.present.aspect).toBe('1:1')
+    expect(seen).toEqual([palette, palette, palette])
   })
 })
 

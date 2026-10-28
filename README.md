@@ -409,8 +409,9 @@ made once a photo, the first time a frame shows one of its colours, from an
 84 px area-averaged sample of one fixed decode of the photo (1024 px on its
 long side, `features/media/frameSource.ts`), never from the preview's copy,
 whose size moves with the zoom; it is stored with the photo (`setPalette`,
-not an undo step, and the one thing that writes it), so the preview, the save
-and every reopen agree, and Save makes it first when it is missing, so a
+not an undo step, and the one thing that writes it; every history entry that
+holds the photo takes it, so no Undo or Redo takes it away and has the photo
+decoded again), so the preview, the save and every reopen agree, and Save makes it first when it is missing, so a
 press never starts without it. A photo whose frame source will not decode
 is one state, kept with the photo until another is chosen: while its fill
 needs that source (a palette colour not yet stored, or Frosted) the frame

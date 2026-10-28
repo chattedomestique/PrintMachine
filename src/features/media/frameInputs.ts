@@ -115,9 +115,9 @@ export function previewFrameInputs(
 
 /**
  * The palettes, one photo's at a time, from its frame source: asked again
- * for the same photo, the same answer without a second computation (a photo
- * whose palette an undo took away gets it back at once). Null for a photo
- * with no pixel opaque enough to have a colour: its colour fills are Paper.
+ * for the same photo, the same answer without a second computation (Save
+ * asks for the one the page is making). Null for a photo with no pixel
+ * opaque enough to have a colour: its colour fills are Paper.
  */
 export function framePalettes(sources: ReturnType<typeof frameSources> = pageFrameSources) {
   let held: { id: string; palette: Promise<FramePalette | null> } | null = null

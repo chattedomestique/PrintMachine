@@ -42,8 +42,8 @@ export type SettingsAction =
   /** The photo's placement. Never its palette: that is `setPalette`'s. */
   | { type: 'patchMedia'; patch: Partial<Omit<MediaLayer, 'palette'>>; coalesce?: boolean; join?: boolean }
   /** The photo's frame colours, computed from it: derived data, not an
-   *  edit, so it is never an undo step. For the photo `mediaId` only: a
-   *  palette that arrives after its photo was replaced is dropped. */
+   *  edit, so it is never an undo step. Written into every history entry
+   *  that holds the photo `mediaId`, and into no other. */
   | { type: 'setPalette'; mediaId: string; palette: FramePalette }
 
 export type HistoryAction =
@@ -298,11 +298,17 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
     case 'endBurst':
       return state.bursting ? { ...state, bursting: false } : state
 
-    // Derived from the photo, not chosen: the present takes it in place, and
-    // the history, the burst and what may be joined are left as they were.
+    // Derived from the photo, not chosen: every entry that holds that photo
+    // takes it in place (the past and the future too, so no Undo or Redo
+    // can take it away and have the photo decoded again), and the steps,
+    // the burst and what may be joined are left as they were.
     case 'setPalette': {
-      const present = applySettings(state.present, action)
-      return present === state.present ? state : { ...state, present }
+      const keyed = (s: PrintSettings) => applySettings(s, action)
+      const present = keyed(state.present)
+      const past = state.past.map(keyed)
+      const future = state.future.map(keyed)
+      const same = present === state.present && past.every((s, i) => s === state.past[i]) && future.every((s, i) => s === state.future[i])
+      return same ? state : { ...state, past, present, future }
     }
 
     default: {

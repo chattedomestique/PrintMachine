@@ -2037,6 +2037,19 @@ copied:
   0 resets) and **its build stamp**, in More's offline row.
 - **Tanklager Kompakt**, from its font library, as Poster's face ("Fonts").
 
+**One sampler for the palette.** The four colours are `palette.js`'s,
+exactly (fed the same 84 px sample, the port gives Border Studio's hex), but
+the sample is taken differently: Border Studio drew its working image down to
+84 px with the browser's own downscale, which depends on the browser and on
+the zoom the photo was decoded at; here it is an area average of one fixed
+1024 px decode of the photo ("The palette"), so the colours are the same on
+every device, at every zoom, in the preview and the save. The same photo can
+therefore key a different Photo colour than Border Studio gave it: on a
+smooth blue-to-tan photo Border Studio's Photo was a grey taupe (#ab988a)
+and this app's is a tan (#d8ac84), about 45 levels apart in red; Deep, Muted
+and Comp moved less (#231e1a / #271e17, #b3a79e / #bba795, #4c94c2 /
+#5293c4). Border Studio's own sample, fed to the port, gives its own hex.
+
 **One unit for Width.** Width is one fraction of the sheet's long side in
 every mode ("The frame"). In Crop and on Original that makes the first
 photo's border Border Studio's default (150 px of its 2100 px sheet, the
@@ -2163,6 +2176,23 @@ against its 400 of 1800).
   photo's tool points every gesture at the photo: a headline usually covers
   much of it, and framing a photo under its type would otherwise be a hunt for
   bare patches. The plate button picks plates in Type and Ink.
+- **With the Frame tool open, every gesture is the photo's, on every tab.**
+  Border Studio moves the photo only in Frame › Crop; in Frame › Border a drag
+  on it pans its inspect view. Here Border, Crop, Place and Photo all point the
+  sheet's gestures at the photo (this app's Photo tool's rule, kept by the
+  plan for the Frame tool): framing never needs a tab change, and with no
+  inspect view (cut, B25) a drag that moved nothing would be a dead touch. A
+  pinch zooms about the fingers, as Border Studio's crop pinch does.
+- **The photo zooms 100% to 400%.** Border Studio's crop reached 6x. The
+  verdict kept this app's 400% (B26): past it a phone shows a few hundred of
+  the photo's pixels across the sheet, and zooming deeper only enlarges a
+  smaller part of it; the saved print still holds every pixel shown.
+- **The frame's names and units.** Border Studio's "Border" read in pixels of
+  its 1800 px canvas (0 to 400 px); here it is Width, a percent of the
+  sheet's long side (0.0% to 16.0%), so it means the same at every export
+  size and in every mode ("One unit for Width"). Frosted's Blur reads as a
+  bare number: Border Studio's "60px" was pixels of its canvas, and here the
+  radius is the frost field's, scaled with it, not a pixel of the sheet.
 - **"New plate" starts from the defaults, with no offer to copy a plate.**
   Border Studio's Add opens a sheet ("Start from defaults", "Or copy the
   settings of …"). Not ported: the restyle added no features (this app never

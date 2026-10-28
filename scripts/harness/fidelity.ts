@@ -160,7 +160,7 @@ async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format
   const imported = (await importMedia(file)).layer
   const stored = await getMedia(imported.id)
   const byteForByte = !!stored && stored.size === file.size && (await sha256(stored)) === (await sha256(file))
-  // Zoomed (to crop) as the Photo tool would: centred, at `zoom` on the cover
+  // Zoomed (to crop) as Frame › Place would: centred, at `zoom` on the cover
   // fit.
   const layer = { ...imported, scale: zoom }
   const s = photoOnly(layer, aspect)

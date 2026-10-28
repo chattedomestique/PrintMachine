@@ -9,7 +9,7 @@ import { Tabs, type TabItem } from '../../ui/ui.tsx'
  * never changes size when you switch tools or tabs (Border Studio's
  * DockPanel). Its rows are centred in it, as Border Studio's are, so the
  * slider is not always in one place: under an options row it sits about 30 px
- * lower than in a panel that is a strip alone (Type › Place, Photo › Frame).
+ * lower than in a panel that is a strip alone (Type › Place, Frame › Place).
  * Ink › Over photo starts at the top instead, so its choice stays under the
  * finger that made it (dock.css).
  *

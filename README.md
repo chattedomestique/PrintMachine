@@ -1923,7 +1923,11 @@ A run of presses is one undo step, as a plate's keys are, and 0 a step of
 its own; in Fit they move nothing (`check:touch` presses them in the built
 app). With no photo there is nothing of the photo's to move: a touch still
 picks no type, and the keys stay the selected plate's, as the sheet's name
-says ("No photo yet", then the plate's keys). The selected plate shows a crosshair on the
+says ("No photo yet", then the plate's keys). With the keys on it, the sheet
+wears the style guide's ring in two tones, the focus colour on its outermost
+band and the theme's paper inside that: the band under them is the frame,
+whose colour is the photo's, and one of the two stands off any fill (3:1 at
+least, `check:touch` step 11 measures all six in both themes). The selected plate shows a crosshair on the
 sheet — the one editing aid, and it never reaches a saved file.
 
 **Tap a plate to pick it** (Border Studio's tap-to-select). A touch that lands

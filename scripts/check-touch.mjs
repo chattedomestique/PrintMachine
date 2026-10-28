@@ -876,6 +876,93 @@ try {
     await ctx.close()
   }
 
+  console.log("11. The sheet's keyboard ring stands off every fill, light and dark")
+  for (const scheme of ['light', 'dark']) {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: scheme, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    await page.locator('[data-tool="frame"]').click()
+    // A photo of a few colours, so its palette has a dark Deep and a pale Muted.
+    const bytes = await page.evaluate(async () => {
+      const c = document.createElement('canvas')
+      c.width = 1200
+      c.height = 1500
+      const g = c.getContext('2d')
+      const grad = g.createLinearGradient(0, 0, 1200, 1500)
+      grad.addColorStop(0, '#b4562a')
+      grad.addColorStop(0.5, '#d9b38c')
+      grad.addColorStop(1, '#2f5f8f')
+      g.fillStyle = grad
+      g.fillRect(0, 0, 1200, 1500)
+      const b = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9))
+      return [...new Uint8Array(await b.arrayBuffer())]
+    })
+    await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
+    await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media?.palette, KEY, { timeout: 30_000 })
+    await page.locator('.controls__section[data-tool="frame"] [role=tab][data-tab="border"]').click()
+    const lines = []
+    for (const fill of ['paper', 'photo', 'deep', 'muted', 'comp', 'frosted']) {
+      await page.locator(`.controls__panel[data-sub="border"] [data-chip="${fill}"]`).click()
+      await page.waitForFunction((f) => document.querySelector(`[data-chip="${f}"]`)?.getAttribute('aria-pressed') === 'true' && !document.querySelector('.chiprow[aria-busy="true"]'), fill, { timeout: 30_000 })
+      await page.waitForTimeout(1200)
+      // The sheet reached by Tab from the bar's Save, as a keyboard reaches it.
+      await page.locator('.app__save').focus()
+      for (let i = 0; i < 12 && !(await page.evaluate(() => document.activeElement?.classList.contains('drag-surface'))); i++) await page.keyboard.press('Tab')
+      const m = await page.evaluate(() => {
+        // Any CSS colour (the tokens are oklch) as sRGB bytes, through a canvas;
+        // a shadow's colour is its first part.
+        const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+        const rgb = (s) => {
+          const c = s?.match(/^((?:rgba?|oklch|oklab|lab|lch|color|hsla?|hwb)\([^)]*\)|[a-z]+)/)?.[1]
+          if (!c || c === 'none' || c === 'transparent') return null
+          probe.clearRect(0, 0, 1, 1)
+          probe.fillStyle = '#000'
+          probe.fillStyle = c
+          probe.fillRect(0, 0, 1, 1)
+          const d = probe.getImageData(0, 0, 1, 1).data
+          return d[3] === 0 ? null : [d[0], d[1], d[2]]
+        }
+        const lum = ([r, g, b]) => {
+          const f = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+        }
+        const ratio = (a, b) => (a && b ? (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05) : 0)
+        const surface = document.activeElement
+        if (!surface?.classList.contains('drag-surface')) return null
+        const cs = getComputedStyle(surface)
+        const ring = rgb(cs.outlineColor)
+        const halo = rgb(cs.boxShadow)
+        let stage = null
+        for (let e = surface.closest('.sheet')?.parentElement; e && !stage; e = e.parentElement) {
+          stage = rgb(getComputedStyle(e).backgroundColor)
+        }
+        stage ??= rgb(getComputedStyle(document.body).backgroundColor)
+        const canvas = surface.parentElement.querySelector('canvas')
+        const r = canvas.getBoundingClientRect()
+        const k = canvas.width / r.width
+        const px = canvas.getContext('2d').getImageData(Math.round(r.width / 2 * k), Math.round(10 * k), 1, 1).data
+        const fill = [px[0], px[1], px[2]]
+        return {
+          visible: surface.matches(':focus-visible'),
+          ring, halo, stage, fill,
+          ringStage: ratio(ring, stage), ringHalo: halo ? ratio(ring, halo) : 0, ringFill: ratio(ring, fill), haloFill: halo ? ratio(halo, fill) : 0,
+        }
+      })
+      const f2 = (v) => v.toFixed(2)
+      const ok = m && m.visible && m.ringStage >= 3 && (m.halo === null || m.ringHalo >= 3) && Math.max(m.ringFill, m.haloFill) >= 3
+      lines.push(ok)
+      check(
+        ok,
+        `${scheme}, fill ${fill}: ${m ? `ring ${m.ring} on the stage ${f2(m.ringStage)}:1, halo ${m.halo ?? 'none'} against the ring ${f2(m.ringHalo)}:1; against the frame (${m.fill}) the ring ${f2(m.ringFill)}:1, the halo ${f2(m.haloFill)}:1 (one of them >= 3:1)` : 'the sheet was not reached by Tab'}`,
+      )
+    }
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
+
 } finally {
   await browser.close()
   await new Promise((r) => server.httpServer.close(r))

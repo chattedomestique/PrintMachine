@@ -46,7 +46,7 @@ vi.mock('./composite.ts', async (importOriginal) => {
 
 import { FramedGroundRows, TiledGroundRows, maxWindow, outputSize, plateGeometry, printSheet, printSheetSteps, sampledNoise, type GroundRows, type ToneSource } from './render.ts'
 import { composeFrameRows, fillFor, layoutSheet, sheetAspect, type FrameInputs } from './frame.ts'
-import { frostField } from './frost.ts'
+import { frostField, frostSampler } from './frost.ts'
 import { FROST_FIELD_LONG } from './limits.ts'
 import { tileAt, tileGrid } from './tiles.ts'
 import type { PrintSettings, TextLayer } from './types.ts'
@@ -288,6 +288,15 @@ describe('framed documents, in bands, on forced small tiles: equal to the whole 
       expect(printed(JSON.parse(JSON.stringify(settings)), composed, tones, w, h, undefined, false), "the preview's ground").toEqual(whole)
       // The frame is really there: not the unframed print.
       expect(printed(JSON.parse(JSON.stringify(settings)), g, tones, w, h, undefined, false).rgba).not.toBe(whole.rgba)
+      // And Frosted is its field, not Paper (which every check above would
+      // pass): the sheet's top row, all border, is the field sampled there.
+      if (settings.frame.fill === 'frosted') {
+        const inputs = inputsOf(settings)
+        expect(fillFor(settings, inputs, w, h).flat, 'Frosted is a field, not a flat colour').toBeNull()
+        const want = new Uint8ClampedArray(w * 4)
+        frostSampler(inputs.frost!, w, h)(0, 0, w, want, 0)
+        expect(Buffer.from(composed.subarray(0, w * 4)).equals(Buffer.from(want)), 'the top row is the field').toBe(true)
+      }
     })
   }
 })

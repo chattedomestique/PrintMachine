@@ -29,6 +29,7 @@ import { tileGrid } from '../../src/engine/tiles.ts'
 import { JpegEncoder } from '../../src/engine/encode/jpeg.ts'
 import { PngEncoder } from '../../src/engine/encode/png.ts'
 import { savePrint, type ExportFormat } from '../../src/engine/export.ts'
+import { pressForSave } from '../../src/features/shell/useSave.ts'
 import { detachedCanvas } from '../../src/features/shell/page.ts'
 import { ensureFrameInputs, needsFrost, pageFramePalettes, previewFrameInputs, storedFrameInputs } from '../../src/features/media/frameInputs.ts'
 import { importMedia } from '../../src/features/media/importMedia.ts'
@@ -983,12 +984,18 @@ async function parityBorders(c: ParityCase): Promise<{ w: number; h: number; pm:
  * plate over it in Frosted. The preview's inputs as the page's preview makes
  * them (`previewFrameInputs`: the frame source decoded from the stored file,
  * the settled field), Save's as Save makes them (`ensureFrameInputs`); the
- * same field, kept. Then the preview's render, the export's and the file the
- * real `savePrint` writes (a PNG), at one height: the same bytes from all
- * three, or the preview is not the print.
+ * same field, kept. Then the file the app's own `pressForSave` writes (a
+ * PNG, with the page's makers: it makes the inputs, decodes the original and
+ * presses), at the photo's own size, which is `height` tall; and the
+ * preview's render and the export's at that height: the same bytes from all
+ * three, or the preview is not the print. (Below the photo's own size Save
+ * presses a smaller copy, decoded resized by the browser, which the
+ * preview's scaled photo matches only to a level.)
  */
 async function chain(height: number): Promise<{ preview: string; exported: string; file: string; same: boolean; sameField: boolean; w: number; h: number; palette: FramePalette | null }> {
-  const c = photoCanvas(1600, 1200)
+  // On Original with a frame of 0.1, a photo `height` wide and 3/4 of it
+  // tall: its own size is `height` tall.
+  const c = photoCanvas(height, Math.round(height * 0.75))
   const png = await new Promise<Blob>((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'))
   c.width = 0
   const { layer } = await importMedia(png)
@@ -1009,8 +1016,13 @@ async function chain(height: number): Promise<{ preview: string; exported: strin
     const inputs = await ensureFrameInputs(settings)
     const shown = previewFrameInputs(settings, { id: layer.id, src: await pageFrameSources.load(layer) }, false)
     if (!inputs.frost || !shown.frost) throw new Error('chain: no frost field made')
-    const photo = await decodeOriginal(layer.id)
-    const pressed = await savePrint(settings, photo, inputs, { format: 'png', maxHeight: height, makeCanvas: detachedCanvas })
+    // The file Save writes: the app's own `pressForSave` with the page's
+    // makers (it makes the inputs, decodes the original and presses), not
+    // a re-telling of its steps.
+    const saved = await pressForSave({ settings, format: 'png' })
+    if (saved.kind !== 'pressed') throw new Error(`chain: Save could not press it (${saved.why})`)
+    const pressed = saved.pressed
+    if (pressed.plan.limit === 'smaller' || pressed.plan.height !== height) throw new Error(`chain: Save pressed ${pressed.plan.limit} ${pressed.plan.height}, not the photo's own ${height}`)
     const file = await fileDigest(pressed.blob)
     const at = pressed.plan.height
     const media = await decodeOriginal(layer.id)

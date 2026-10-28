@@ -150,11 +150,12 @@ So:
       sits beside the same words; in Frame › Crop the ratio row is read as
       a group, "Sheet ratio", and Original as dimmed, "No photo yet"; with a
       photo the fill row is read as a group, "Fill"
-- [ ] Choose a large photo (24 MP or more) with Deep as the fill, Frame ›
-      Border open: until the colour is made the Deep chip turns a small
-      spinner where its dot goes (VoiceOver: "Deep, preparing") and the
-      border is the bare stock; then the dot and the border take the colour
-      together, and nothing else on screen moves
+- [ ] With no photo, choose a large one (24 MP or more) from Frame ›
+      Border's Choose photo: until its colours are made the chosen fill's
+      chip (Photo, a first photo's) shows a small spinner where its dot goes
+      (VoiceOver: "Photo, preparing") and the border is the bare stock; then
+      the dot and the border take the colour together, and nothing else on
+      screen moves
 - [ ] In the Frame tool, VoiceOver reads Save's name with the frame
       ("Save 9016×6440 JPEG with a 644 px frame" for a 40 MP photo on
       Original), so the size the frame makes is heard before the tap

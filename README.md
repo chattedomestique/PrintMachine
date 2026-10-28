@@ -1639,8 +1639,8 @@ Fit is unavailable on Original ("Original keeps the whole photo": the sheet is
 the photo's shape and its border) and without a photo; Place's Zoom and
 Position are unavailable in Fit ("Fit shows the whole photo"). Without a photo
 Border keeps Width and Corners on its strip, unavailable ("No photo yet"),
-under that line and Choose photo, where the fill row goes once there is a
-photo to take its colours from; Place says there is none, with Choose photo.
+under the same words and Choose photo, which stand where the fill row goes
+once there is a photo to take its colours from; Place says there is none, with Choose photo.
 The ratio is the sheet's, so it can be chosen on bare paper (Original, the
 photo's own shape, needs a photo, and says so). Every reason is said with
 its control: an unavailable setting's slider and its − and + are described

@@ -64,17 +64,17 @@ export const needsFrost = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>)
  * What the page keeps of its attempts to make the frame's inputs from the
  * photo shown (`shown`): whether its last attempt failed (`failedId`, its
  * id, or null), Frosted's source, once decoded, with the photo it is of,
- * and the photo whose palette attempt has ended (`palette`: made, or found
- * to have no colour, so not being made any more).
+ * and the photo whose palette attempt has ended (`paletteTried`: its palette
+ * made, or found to have no colour, so not being made any more).
  */
 export interface FrameAttempts {
   shown: string | null
   failedId: string | null
   source: { id: string; src: RgbaImage } | null
-  palette: string | null
+  paletteTried: string | null
 }
 
-export const noAttempts = (shown: string | null): FrameAttempts => ({ shown, failedId: null, source: null, palette: null })
+export const noAttempts = (shown: string | null): FrameAttempts => ({ shown, failedId: null, source: null, paletteTried: null })
 
 /**
  * Another photo shown (a Replace, an Undo, a Redo): a failure is let go, so
@@ -104,13 +104,14 @@ export function attemptEnded(a: FrameAttempts, id: string, ok: boolean, src?: Rg
  *  stored), or it has no colour to make one from. Applied only while `id`
  *  is the photo shown, as `attemptEnded` is. */
 export const paletteEnded = (a: FrameAttempts, id: string): FrameAttempts =>
-  a.shown !== id ? a : { ...attemptEnded(a, id, true), palette: id }
+  a.shown !== id ? a : { ...attemptEnded(a, id, true), paletteTried: id }
 
 /**
  * Whether the fill the frame shows is still being made from its photo: a
  * palette colour whose palette attempt has not ended, or Frosted before its
- * source is decoded. Meanwhile the border is Paper (D-16) and the Frame
- * panel says, quietly, that the fill is being prepared. Not once the attempt
+ * source is decoded. Meanwhile the border is Paper (the engine draws a fill
+ * whose input is absent as Paper) and the Frame panel says, quietly, that
+ * the fill is being prepared. Not once the attempt
  * has failed (that is said as a failure), nor for a photo the attempts are
  * not about yet (the page adjusts them on its next render).
  */
@@ -118,7 +119,7 @@ export function fillPreparing(s: Pick<PrintSettings, 'media' | 'frame' | 'aspect
   const id = s.media?.id
   if (!id || a.shown !== id || a.failedId === id) return false
   if (needsFrost(s)) return a.source?.id !== id
-  return needsPalette(s) && a.palette !== id
+  return needsPalette(s) && a.paletteTried !== id
 }
 
 /**

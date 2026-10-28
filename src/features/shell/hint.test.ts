@@ -12,7 +12,7 @@ describe('the gesture hint', () => {
     }
   })
 
-  it("leads with the photo's drag and pinch (the plan's words for them), and names no gesture in Fit", () => {
+  it("leads with the photo's drag and pinch, and names no gesture in Fit", () => {
     expect(PHOTO_GESTURES).toMatch(/^Drag to move the photo · pinch to zoom/)
     expect(FIT_GESTURES).not.toMatch(/drag|pinch|double/i)
   })

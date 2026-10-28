@@ -7,12 +7,12 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
+import { FRAME_WIDTH_FIRST, MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
 import { contrastPartner } from '../engine/inks.ts'
 import { type PrintSettings, type TextLayer } from '../engine/types.ts'
-import { sheetAspect } from '../engine/frame.ts'
+import { originalBorder, sheetAspect, visibleAspect } from '../engine/frame.ts'
 import { areaOf, clampPan } from '../engine/media.ts'
-import { defaultSettings, makeLayer, makeMedia } from './defaults.ts'
+import { defaultSettings, frameDefaults, makeLayer, makeMedia } from './defaults.ts'
 import {
   applySettings,
   hasSwitchPoint,
@@ -167,7 +167,11 @@ describe('the Original sheet: the photo\'s own shape', () => {
     let h = initHistory(before)
     h = historyReducer(h, { type: 'setMedia', media: landscape })
     expect(h.present.aspect).toBe('original')
-    expect(sheetAspect(h.present)).toBeCloseTo(4 / 3, 12)
+    // The photo's own shape inside the frame; the sheet is that and the
+    // border round it.
+    expect(visibleAspect(h.present)).toBeCloseTo(4 / 3, 12)
+    const b = originalBorder(4032, 3024, h.present.frame.width)
+    expect(sheetAspect(h.present)).toBeCloseTo((4032 + 2 * b) / (3024 + 2 * b), 12)
     h = historyReducer(h, { type: 'undo' })
     expect(h.present.aspect).toBe('1:1')
   })
@@ -181,7 +185,7 @@ describe('the Original sheet: the photo\'s own shape', () => {
     const original = applySettings(defaultSettings(), { type: 'setMedia', media: landscape })
     const swapped = applySettings(original, { type: 'setMedia', media: portrait })
     expect(swapped.aspect).toBe('original')
-    expect(sheetAspect(swapped)).toBeCloseTo(3 / 4, 12)
+    expect(visibleAspect(swapped)).toBeCloseTo(3 / 4, 12)
   })
 
   it('removing the photo from an Original sheet leaves 4:5; from a chosen sheet, that sheet', () => {
@@ -202,10 +206,10 @@ describe('the Original sheet: the photo\'s own shape', () => {
     // ...then the photo's own shape: less travel across, so it is pulled in.
     s = applySettings(s, { type: 'patch', patch: { aspect: 'original' } })
     expect(s.media!.x).toBeGreaterThan(onSquare)
-    expect(clampPan(s.media!, areaOf(sheetAspect(s), 1))).toEqual(s.media)
+    expect(clampPan(s.media!, areaOf(visibleAspect(s), 1))).toEqual(s.media)
     // Replaced by a portrait photo on the same Original sheet: clamped again.
     s = applySettings(s, { type: 'setMedia', media: { ...portrait, scale: 1.2, x: -5, y: 9 } })
-    expect(clampPan(s.media!, areaOf(sheetAspect(s), 1))).toEqual(s.media)
+    expect(clampPan(s.media!, areaOf(visibleAspect(s), 1))).toEqual(s.media)
   })
 })
 
@@ -405,16 +409,55 @@ describe('the frame', () => {
 
   it('a drag on a frame setting coalesces into one undo step, and a double tap joins it, as the press does', () => {
     let h = initHistory(applySettings(defaultSettings(), { type: 'setMedia', media: photo }))
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.03 } })
     h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.05 }, coalesce: true })
     h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.08 }, coalesce: true })
     h = historyReducer(h, { type: 'patchFrame', patch: { width: 0.12 }, coalesce: true })
-    expect(h.past).toHaveLength(1)
+    expect(h.past).toHaveLength(2)
     expect(h.present.frame.width).toBe(0.12)
     h = historyReducer(h, { type: 'endBurst' })
-    h = historyReducer(h, { type: 'patchFrame', patch: { width: 1 / 14 }, join: true })
-    expect(h.past).toHaveLength(1)
+    h = historyReducer(h, { type: 'patchFrame', patch: { width: FRAME_WIDTH_FIRST }, join: true })
+    expect(h.past).toHaveLength(2)
     h = historyReducer(h, { type: 'undo' })
+    expect(h.present.frame.width).toBe(0.03)
+  })
+
+  it('the first photo is framed: the border a first photo gets, the rest of the frame at the template', () => {
+    const s = applySettings(defaultSettings(), { type: 'setMedia', media: photo })
+    expect(defaultSettings().frame.width).toBe(0)
+    expect(s.frame).toEqual({ ...frameDefaults(), width: FRAME_WIDTH_FIRST })
+    expect(s.frame).toEqual({ width: 1 / 14, corners: 0, fill: 'photo', blur: 60, mode: 'crop' })
+    // Beside the Original sheet and the second ink, in the one step Undo
+    // takes back.
+    const start = defaultSettings()
+    let h = initHistory(start)
+    h = historyReducer(h, { type: 'setMedia', media: photo })
+    expect([h.present.aspect, h.present.frame.width, h.past.length]).toEqual(['original', FRAME_WIDTH_FIRST, 1])
+    h = historyReducer(h, { type: 'undo' })
+    expect(h.present).toBe(start)
     expect(h.present.frame.width).toBe(0)
+  })
+
+  it('a frame the document has is kept: a Replace keeps the whole print, and a first photo keeps a border already set', () => {
+    const framed = applySettings(applySettings(defaultSettings(), { type: 'setMedia', media: photo }), {
+      type: 'patchFrame',
+      patch: { width: 0.12, fill: 'deep', corners: 0.4 },
+    })
+    const replaced = applySettings(framed, { type: 'setMedia', media: makeMedia({ id: 'n', width: 3000, height: 4000 }) })
+    expect(replaced.frame).toEqual(framed.frame)
+    // Removed, then another photo chosen: the border it had is kept.
+    const bare = applySettings(framed, { type: 'setMedia', media: null })
+    expect(bare.frame).toEqual(framed.frame)
+    expect(applySettings(bare, { type: 'setMedia', media: photo }).frame).toEqual(framed.frame)
+    // A border taken away (0) before the photo comes back is seeded again.
+    const unframed = applySettings(bare, { type: 'patchFrame', patch: { width: 0 } })
+    expect(applySettings(unframed, { type: 'setMedia', media: photo }).frame).toEqual({ ...framed.frame, width: FRAME_WIDTH_FIRST })
+  })
+
+  it('the seed rewrites no plate beyond the second ink a first photo always gave (D-13: type belongs to the sheet)', () => {
+    const l = makeLayer({ x: 0.3, y: 0.7, size: 0.12, rotation: 5 })
+    const s = applySettings(doc([l]), { type: 'setMedia', media: photo })
+    expect(s.layers).toEqual([{ ...l, contrastInkId: contrastPartner(l.inkId) }])
   })
 })
 

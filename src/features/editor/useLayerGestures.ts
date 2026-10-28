@@ -47,11 +47,17 @@ export function useLayerGestures(
   {
     limits = TYPE_LIMITS,
     pick,
+    area,
   }: {
     /** Pinch and pan limits. Type and photos want very different ranges — a
      *  photo starts at cover and is zoomed in from it, not sized as a
      *  fraction of the sheet, and its pan is clamped by its caller. */
     limits?: GestureLimits
+    /** The box, inside the surface's, that the target's place is a fraction
+     *  of: the surface itself for a plate (a fraction of the sheet), the
+     *  visible rectangle inside the frame for the photo (gesture.ts
+     *  `visibleBox`). */
+    area?: (box: { width: number; height: number }) => { width: number; height: number }
     /**
      * Asked once at the first pointer of a gesture, with where it landed (in
      * the surface's pixels) and the surface's size: a target to move instead
@@ -117,11 +123,11 @@ export function useLayerGestures(
       const g = gesture.current
       const rect = surfaceRef.current?.getBoundingClientRect()
       if (!g || !rect) return
-      const step = stepGesture(g, [...pointers.current.values()], rect, limits)
+      const step = stepGesture(g, [...pointers.current.values()], area ? area(rect) : rect, limits)
       gesture.current = step.gesture
       if (step.patch) patch(step.patch, g.target.id)
     },
-    [localPoint, patch, surfaceRef, limits],
+    [localPoint, patch, surfaceRef, limits, area],
   )
 
   const release = useCallback(

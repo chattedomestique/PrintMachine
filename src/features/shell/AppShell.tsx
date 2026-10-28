@@ -162,11 +162,11 @@ export default function AppShell() {
   }, [])
 
   // Tapping the open tool closes the dock's panel: the sheet at full height.
-  // With no photo, the Photo tool opens where one is chosen.
+  // With no photo, the Frame tool opens where one is chosen.
   const toggleTool = useCallback(
     (id: ToolId) => {
       setTool((prev) => (prev === id ? null : id))
-      if (id === 'photo' && !settings.media) setSubs((s) => ({ ...s, photo: 'file' }))
+      if (id === 'frame' && !settings.media) setSubs((s) => ({ ...s, frame: 'photo' }))
     },
     [settings.media],
   )
@@ -256,11 +256,15 @@ export default function AppShell() {
   // while the print is pressed; its words, for a screen reader, stay.
   const hintUp = settings.media !== null && !hintDismissed
   const showHint = hintUp && !pressing
-  // What the sheet's gestures do in the open tool.
+  // What the sheet's gestures do in the open tool: with Frame open they are
+  // the photo's, except in Fit, where the whole photo shows and there is
+  // nothing to move.
   const hintText =
-    tool === 'photo'
-      ? 'Pinch to zoom the photo · drag to move it · double‑tap to fit'
-      : 'Tap type to pick it · drag to move · pinch to size and turn'
+    tool !== 'frame'
+      ? 'Tap type to pick it · drag to move · pinch to size and turn'
+      : effectiveMode(settings) === 'fit'
+        ? 'Fit shows the whole photo · choose Crop to move or zoom it'
+        : 'Pinch to zoom the photo · drag to move it · double‑tap to reset'
 
   return (
     <div className="app" ref={appRef}>
@@ -316,7 +320,7 @@ export default function AppShell() {
         <div className="app__canvas-wrap">
           {/* Paused while pressing, so a full-size press and a preview frame
               never hold their buffers at once. */}
-          <Canvas media={media} inputsFor={frameInputs.inputsFor} mediaMode={tool === 'photo'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
+          <Canvas media={media} inputsFor={frameInputs.inputsFor} mediaMode={tool === 'frame'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
         </div>
       </main>
 

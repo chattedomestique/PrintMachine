@@ -104,7 +104,8 @@
   --_select: 0 0 0 0 transparent;
 }
 /* Unavailable is the faint ink alone; a dashed frame was one more line. */
-:is(.app__overlay, .app__bar) :is(.btn, .chip):is(:disabled, [aria-disabled="true"]):not(dialog *) {
+:is(.app__overlay, .app__bar) :is(.btn, .chip):is(:disabled, [aria-disabled="true"]):not(dialog *),
+.app__overlay .segmented__opt:has(> input:disabled) > .segmented__label {
   border-color: transparent;
 }
 

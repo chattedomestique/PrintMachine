@@ -20,6 +20,15 @@ export interface ChipFace<T extends string> {
 export interface ChipItem<T extends string> extends ChipFace<T> {
   /** The same choice the other way round, when it has one. */
   alt?: ChipFace<T>
+  /** The choice's colour, shown as a dot before its name (data, as a
+   *  swatch's colour is): the name is always there too, so nobody has to
+   *  tell two colours apart by eye. */
+  swatch?: string
+  /** A glyph before the name, for a choice that is not one colour. */
+  icon?: string
+  /** Shown but not choosable (aria-disabled, so it can still be found with
+   *  the keys); the caller says why nearby. */
+  disabled?: boolean
 }
 
 /** What a chip shows for the chosen value: the way round that is chosen (its
@@ -40,8 +49,9 @@ export function chipName<T extends string>(item: ChipItem<T>, value: T): string 
 }
 
 /** The value a tap on `item` chooses, or null when it changes nothing (the
- *  chosen chip, with no other way round). */
+ *  chosen chip, with no other way round; a chip that cannot be chosen). */
 export function chipTap<T extends string>(item: ChipItem<T>, value: T): T | null {
+  if (item.disabled) return null
   const f = chipFace(item, value)
   if (!f.pressed) return item.id
   if (!f.flips) return null

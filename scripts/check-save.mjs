@@ -7,14 +7,15 @@
  * Serves dist/ (vite preview, at whatever base the build was made for) and,
  * in Chromium at phone size:
  *
- *  1. A 12 MP photo on 4:5, Save: within 100 ms of the tap Save reads Saving
+ *  1. A 12 MP photo on 4:5, in the frame a first photo gets (2822x3528, its
+ *     border 252 px), Save: within 100 ms of the tap Save reads Saving
  *     and the status card above the dock offers Cancel, the card counts the
  *     press in pixels and percent and says when it writes the file, the file
  *     is the size the More sheet and Save's name promised, and the in-flight
  *     mark is set while it presses and gone after.
  *  2. Canvases wider than 2000 px that read back blank (what an iOS canvas
- *     over its limit does; the 12 MP print's tiles are 2419 wide, its smaller
- *     copy's 1814): Save asks, in numbers, for a smaller copy before pressing
+ *     over its limit does; the 12 MP print's tiles are 2822 wide, its smaller
+ *     copy's 2117): Save asks, in numbers, for a smaller copy before pressing
  *     anything (focus on Save smaller), and Save smaller saves a file that
  *     size. Blank over 100 px wide: it says this device cannot save the
  *     print.
@@ -25,8 +26,8 @@
  *     choices aria-disabled, focus still on Try again, a tap on it starting
  *     nothing, "Loading the photo…"), then the smaller copy saves.
  *  4. The stored photo deleted: with every tool closed, the status card says
- *     so (an alert, with Choose again) and so does Save's name; the Photo
- *     tool's File tab says so; Save cannot be tapped, and no file appears;
+ *     so (an alert, with Choose again) and so does Save's name; the Frame
+ *     tool's Photo tab says so; Save cannot be tapped, and no file appears;
  *     the More sheet promises no size (its first row says why, the PNG row
  *     is unavailable and shows no size).
  *  5. Cancel tapped while the file is written (its writing held 1.5 s by the
@@ -43,15 +44,16 @@
  *     runs and is back after, and its live region (every change of which a
  *     screen reader reads out) says the hint once, not again after each
  *     save; it changes once more when the tool changes.
- *  9. A 40 MP photo (7728x5152) on Original: More and Save's name promise
- *     7728x5152; within 100 ms of the tap Save reads Saving and the card
+ *  9. A 40 MP photo (7728x5152) on Original, in the frame a first photo gets:
+ *     More and Save's name promise 9016x6440 (every pixel of the photo, and a
+ *     644 px border); within 100 ms of the tap Save reads Saving and the card
  *     offers Cancel; the percent moves; Cancel then leaves no file and no
- *     in-flight mark; Save again writes a file that is 7728x5152, a baseline
+ *     in-flight mark; Save again writes a file that is 9016x6440, a baseline
  *     JPEG (SOF0) with every component sampled 1x1 (4:4:4), read from its
  *     own header; the in-flight mark is set while it presses and gone after.
- * 10. The frame's inputs (no control makes a frame yet, so the stored
- *     document is given one): with the photo's frame source held back, the
- *     border is Paper and no palette is stored; released, the palette is
+ * 10. The frame's inputs (the stored document is given the frame each case
+ *     starts from, its palette left out): with the photo's frame source held
+ *     back, the border is Paper and no palette is stored; released, the palette is
  *     stored with the photo and the border drawn in its colour. Under
  *     Frosted the palette is stored too, from the one decode. Under Paper,
  *     Save tapped while that decode is held decodes nothing and writes no
@@ -136,7 +138,7 @@ async function open(ctx, stub) {
   return { page, errors }
 }
 
-/** What Save makes now ("2419×3024"), from the More sheet. */
+/** What Save makes now ("2822×3528"), from the More sheet. */
 const captionOf = (page) => page.evaluate((C) => document.querySelector(C)?.getAttribute('data-export-size') ?? null, CAPTION)
 
 /** Open a tool (a no-op when it is open) and one of its sub-tabs. */
@@ -148,6 +150,29 @@ async function openTool(page, tool, sub) {
 async function closeTools(page) {
   const open = page.locator('[data-tool][aria-pressed="true"]')
   if (await open.count()) await open.first().click()
+}
+
+/**
+ * The sheet set to `aspect` with the Frame tool's ratio chips, as a person
+ * taps them: a chip not chosen chooses its first way round; a landscape
+ * twin is its portrait chip's second tap. Nothing is tapped when the sheet
+ * is already `aspect` (a second tap on the chosen chip would flip it).
+ */
+async function setAspect(page, aspect) {
+  const now = await page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.aspect ?? '4:5')
+  if (now === aspect) return
+  await openTool(page, 'frame', 'crop')
+  const twin = aspect.includes(':') ? aspect.split(':').reverse().join(':') : aspect
+  const chips = page.locator('.controls__section[data-tool="frame"] .chiprow')
+  const own = chips.locator(`[data-chip="${aspect}"]`)
+  if (await own.count()) await own.click()
+  else {
+    // The twin's chip, chosen first if it is not, then tapped to flip.
+    const other = chips.locator(`[data-chip="${twin}"]`)
+    if ((await other.getAttribute('aria-pressed')) !== 'true') await other.click()
+    await chips.locator(`[data-chip="${twin}"]`).click()
+  }
+  await page.waitForFunction((a) => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.aspect === a, aspect, { timeout: 5_000 })
 }
 
 /** A w x h JPEG made in the page, chosen through the real file input, the
@@ -170,11 +195,10 @@ async function choosePhoto(page, w, h, aspect = '4:5') {
     },
     [w, h],
   )
-  await openTool(page, 'photo')
+  await openTool(page, 'frame')
   await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.media, null, { timeout: 30_000 })
-  await openTool(page, 'photo', 'sheet')
-  await page.locator('.controls__section[data-tool="photo"] select').selectOption(aspect)
+  await setAspect(page, aspect)
   await closeTools(page)
   await page.waitForFunction(
     (SAVE) => document.querySelector(SAVE)?.textContent === 'Save' && !document.querySelector(SAVE)?.hasAttribute('aria-disabled'),
@@ -277,22 +301,22 @@ try {
     const first = labels.find((x) => x.b !== 'Save')
     const lines = [...new Set(labels.map((x) => x.l).filter((l) => l.startsWith('Pressing')))]
     const ms = first ? Math.round(first.t - t0) : Infinity
-    check(size === '2419×3024' && name === 'Save 2419×3024 JPEG', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
+    check(size === '2822×3528' && name === 'Save 2822×3528 JPEG', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
     check(first?.b === 'Saving' && first?.c === 'Cancel' && ms < 100, `Save read "${first?.b}" and the card offered "${first?.c}" ${ms} ms after the tap (< 100 ms)`)
     check(
       lines.some((l) => new RegExp(`^Pressing ${size}, \\d+%$`).test(l)) && lines.some((l) => l.endsWith('writing the file')),
       `the line counted the press: ${lines.join(' / ')}`,
     )
     check(file === pixels(size), `the file is ${file}, the caption's ${size}`)
-    check(mark === JSON.stringify({ height: 3024, format: 'jpeg' }) && (await page.evaluate((F) => localStorage.getItem(F), FLAG)) === null, `in flight ${mark}, gone after`)
+    check(mark === JSON.stringify({ height: 3528, format: 'jpeg' }) && (await page.evaluate((F) => localStorage.getItem(F), FLAG)) === null, `in flight ${mark}, gone after`)
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     await ctx.close()
   }
 
-  console.log('\n2. A device whose canvases come back blank wider than 2000 px')
+  console.log('\n2. A device whose canvases come back blank wider than 2500 px')
   {
     const ctx = await newContext()
-    const { page, errors } = await open(ctx, blankWider(2000))
+    const { page, errors } = await open(ctx, blankWider(2500))
     await choosePhoto(page, 4032, 3024)
     const files = []
     page.on('download', (d) => files.push(d))
@@ -301,7 +325,7 @@ try {
     const q = await question(page)
     const pressed = await page.evaluate(() => window.__labels.some((x) => x.l.includes('%') || x.l.endsWith('writing the file')))
     check(
-      q.text === "This device couldn't press 2419×3024 (a canvas came back blank). Save a smaller 1814×2268 copy instead?",
+      q.text === "This device couldn't press 2822×3528 (a canvas came back blank). Save a smaller 2117×2646 copy instead?",
       `asked: "${q.text}"`,
     )
     check(q.buttons.join('|') === 'Cancel|Save smaller' && q.focus === 'Save smaller', `choices: ${q.buttons.join(', ')}; focus on "${q.focus}"`)
@@ -310,7 +334,7 @@ try {
     const file = await saved(download)
     await page.waitForTimeout(300)
     const toast = await page.locator('.app__toast').allTextContents()
-    check(file === '1814x2268' && toast.includes('Downloaded 1814×2268, a smaller copy'), `Save smaller: a ${file} file, "${toast.join('')}"`)
+    check(file === '2117x2646' && toast.includes('Downloaded 2117×2646, a smaller copy'), `Save smaller: a ${file} file, "${toast.join('')}"`)
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
     await ctx.close()
 
@@ -321,7 +345,7 @@ try {
     await waitForQuestion(p2)
     const none = await question(p2)
     check(
-      none.text === "This device couldn't press 2419×3024 (a canvas came back blank), nor a copy smaller than it: it cannot save this print." &&
+      none.text === "This device couldn't press 2822×3528 (a canvas came back blank), nor a copy smaller than it: it cannot save this print." &&
         none.buttons.join('|') === 'OK',
       `blank wider than 100 px: "${none.text}" [${none.buttons.join(', ')}]`,
     )
@@ -339,9 +363,9 @@ try {
     const { page: next, errors } = await open(ctx)
     await waitForQuestion(next)
     const q = await question(next)
-    check(q.text === 'The last save, 2419×3024, did not finish.', `the next launch: "${q.text}"`)
+    check(q.text === 'The last save, 2822×3528, did not finish.', `the next launch: "${q.text}"`)
     check(
-      q.buttons.join('|') === 'Cancel|Try again|Save smaller (1814×2268)' && q.focus === 'Try again',
+      q.buttons.join('|') === 'Cancel|Try again|Save smaller (2117×2646)' && q.focus === 'Try again',
       `choices: ${q.buttons.join(', ')}; focus on "${q.focus}"`,
     )
     check((await next.evaluate((F) => localStorage.getItem(F), FLAG)) === null, 'reading the mark cleared it')
@@ -373,12 +397,12 @@ try {
       note: document.querySelector(`${Q} .savequestion__wait`)?.textContent ?? null,
     }), QUESTION)
     check(
-      early.disabled.join('|') === 'Try again|Save smaller (1814×2268)' && early.note === 'Loading the photo…',
+      early.disabled.join('|') === 'Try again|Save smaller (2117×2646)' && early.note === 'Loading the photo…',
       `asked before the photo is back: disabled ${early.disabled.join(', ') || 'none'}; note "${early.note ?? ''}"`,
     )
     // The first save has focus even while it waits (aria-disabled, as Save
     // is), and a tap on it then does nothing.
-    const smaller = fourth.getByRole('button', { name: 'Save smaller (1814×2268)' })
+    const smaller = fourth.getByRole('button', { name: 'Save smaller (2117×2646)' })
     const waitFocus = await fourth.evaluate(() => document.activeElement?.textContent ?? null)
     await fourth.getByRole('button', { name: 'Try again' }).click({ force: true })
     await fourth.waitForTimeout(100)
@@ -389,7 +413,7 @@ try {
     )
     await fourth.waitForFunction((Q) => !document.querySelector(`${Q} [aria-disabled="true"]`), QUESTION, { timeout: 30_000 })
     const [download] = await Promise.all([fourth.waitForEvent('download', { timeout: 120_000 }), smaller.click()])
-    check((await saved(download)) === '1814x2268', 'killed again and answered Save smaller once the photo was back: a 1814x2268 file')
+    check((await saved(download)) === '2117x2646', 'killed again and answered Save smaller once the photo was back: a 2117x2646 file')
     check(errors.length + later.length === 0, `no page errors ${[...errors, ...later].join(' | ')}`)
     await ctx.close()
   }
@@ -431,7 +455,7 @@ try {
       !closed.panelOpen && closed.line === why && closed.role === 'alert' && closed.action === 'Choose again' && closed.label === `Save: ${why}`,
       `tools closed, the status card: "${closed.line}" (${closed.role}, "${closed.action}"); Save's name: "${closed.label}"`,
     )
-    await openTool(page, 'photo', 'file')
+    await openTool(page, 'frame', 'photo')
     await page.waitForTimeout(300)
     const alerts = await page.getByRole('alert').allTextContents()
     let downloaded = false
@@ -439,7 +463,7 @@ try {
     const disabled = (await page.locator(SAVE).getAttribute('aria-disabled')) === 'true'
     await page.locator(SAVE).click({ force: true })
     await page.waitForTimeout(2000)
-    check(alerts.filter((a) => a === why).length === 2, `the card and the Photo tool's File tab: "${alerts.join(' | ')}"`)
+    check(alerts.filter((a) => a === why).length === 2, `the card and the Frame tool's Photo tab: "${alerts.join(' | ')}"`)
     check(disabled && !downloaded, 'Save cannot be tapped, and no file appears (never the type on bare paper)')
     // More promises no size either: its first row says why, and the PNG row
     // (unavailable) has no size to show.
@@ -504,8 +528,7 @@ try {
     const { page, errors } = await open(ctx)
     const ratio = () => page.evaluate(() => getComputedStyle(document.querySelector('.sheet')).getPropertyValue('--sheet-ratio').trim())
     // An edit to undo: the sheet from 4:5 to 1:1.
-    await openTool(page, 'photo', 'sheet')
-    await page.locator('.controls__section[data-tool="photo"] select').selectOption('1:1')
+    await setAspect(page, '1:1')
     await closeTools(page)
     await page.waitForTimeout(600)
     const caption = `Saves ${await captionOf(page)}`
@@ -611,8 +634,8 @@ try {
       afterSaves.length === 1 && /Tap type to pick it/.test(afterSaves[0]),
       `its live region says the type's gestures once and not again over two saves: ${afterSaves.map((t) => JSON.stringify(t)).join(' -> ')}`,
     )
-    // Opening the Photo tool changes what the gestures move: said once more.
-    await openTool(page, 'photo')
+    // Opening the Frame tool changes what the gestures move: said once more.
+    await openTool(page, 'frame')
     await page.waitForTimeout(300)
     const afterTool = await page.evaluate(() => window.__said.slice(1))
     check(
@@ -631,7 +654,7 @@ try {
     await choosePhoto(page, 7728, 5152, 'original')
     const size = (await captionOf(page)) ?? '?'
     const name = await page.locator(SAVE).getAttribute('aria-label')
-    check(size === '7728×5152' && name === 'Save 7728×5152 JPEG', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
+    check(size === '9016×6440' && name === 'Save 9016×6440 JPEG', `before the tap: More says "Saves ${size}", Save is named "${name}"`)
     const files = []
     page.on('download', (d) => files.push(d))
     // A Save, cancelled once its percent has moved.
@@ -668,11 +691,11 @@ try {
     const secs = ((Date.now() - t1) / 1000).toFixed(1)
     await page.waitForTimeout(300)
     check(
-      frame.marker === 'SOF0' && frame.size === '7728x5152' && frame.sampling === '11 11 11',
+      frame.marker === 'SOF0' && frame.size === '9016x6440' && frame.sampling === '11 11 11',
       `Save again: the file is ${frame.marker} ${frame.size}, sampling ${frame.sampling} (4:4:4 is 11 11 11), ${(frame.bytes / 1e6).toFixed(1)} MB, ${secs} s from the tap`,
     )
     check(
-      mark === JSON.stringify({ height: 5152, format: 'jpeg' }) && (await page.evaluate((F) => localStorage.getItem(F), FLAG)) === null,
+      mark === JSON.stringify({ height: 6440, format: 'jpeg' }) && (await page.evaluate((F) => localStorage.getItem(F), FLAG)) === null,
       `in flight ${mark}, gone after`,
     )
     check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
@@ -704,8 +727,8 @@ try {
         return real.call(window, src, ...rest)
       }
     `
-    // A document given a frame before the app reads it (no control makes
-    // one yet), its palette left out (or kept, `keep`), on the next load.
+    // A document given the frame a case starts from before the app reads
+    // it, its palette left out (or kept, `keep`), on the next load.
     const frameNext = (page, frame, decode, keep = false) =>
       page.addInitScript(
         ([frame, decode, keep]) => {

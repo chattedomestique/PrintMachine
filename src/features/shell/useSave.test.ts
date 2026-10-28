@@ -8,10 +8,11 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CanvasLimitError, MissingPhotoError, PHOTO_MISSING, planPrint } from '../../engine/export.ts'
+import { CanvasLimitError, MissingPhotoError, PHOTO_MISSING, describePlan, planPrint } from '../../engine/export.ts'
+import { FRAME_WIDTH_FIRST } from '../../engine/limits.ts'
 import { planExport } from '../../engine/exportPlan.ts'
 import type { PrintSettings } from '../../engine/types.ts'
-import { defaultSettings, makeMedia } from '../../state/defaults.ts'
+import { defaultSettings, frameDefaults, makeMedia } from '../../state/defaults.ts'
 import { PhotoDecodeError } from '../media/decode.ts'
 import {
   IDLE,
@@ -162,8 +163,8 @@ describe('the save flow', () => {
     expect(saveStatus(ready, 'failed')?.text).toBe('3024×3780 is ready (6.2 MB). Tap Share to save it.')
     // The More sheet promises no size either: its first row says why, and
     // the PNG row has no size to show.
-    const native = { size: '3024×4032', reason: null }
-    const zoomed = { size: '2400×1800', reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
+    const native = { size: '3024×4032', megapixels: '12.2 MP', frame: null, large: null, reason: null }
+    const zoomed = { size: '2400×1800', megapixels: '4.3 MP', frame: null, large: null, reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
     for (const c of [native, zoomed]) {
       expect(moreCaption('failed', c, true)).toStrictEqual({
         size: null,
@@ -174,25 +175,45 @@ describe('the save flow', () => {
     }
   })
 
-  it('the More sheet\'s first row: the size a save makes, and why when it is not the photo\'s own pixels', () => {
-    const native = { size: '3024×4032', reason: null }
-    const zoomed = { size: '2400×1800', reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
+  it('the More sheet\'s first row: the size a save makes, why when it is not the photo\'s own pixels, its megapixels and the frame', () => {
+    const native = { size: '3024×4032', megapixels: '12.2 MP', frame: null, large: null, reason: null }
+    const zoomed = { size: '2400×1800', megapixels: '4.3 MP', frame: null, large: null, reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
     expect(moreCaption('ready', native, true)).toStrictEqual({
       size: '3024×4032',
       word: 'Saves 3024×4032',
-      meta: "The photo's own pixels, one for one.",
+      meta: "The photo's own pixels, one for one. 12.2 MP.",
       alert: false,
     })
-    expect(moreCaption('ready', zoomed, true)).toStrictEqual({ size: '2400×1800', word: 'Saves 2400×1800', meta: zoomed.reason, alert: false })
+    expect(moreCaption('ready', zoomed, true)).toStrictEqual({
+      size: '2400×1800',
+      word: 'Saves 2400×1800',
+      meta: 'Photo is 1600×1200 at 300% zoom: upscaled 4.5x. 4.3 MP.',
+      alert: false,
+    })
     // While the photo decodes the plan is already known (the layer's own
     // dimensions): the size stands.
     expect(moreCaption('loading', native, true).size).toBe('3024×4032')
-    expect(moreCaption('none', { size: '2880×3600', reason: null }, false)).toStrictEqual({
+    expect(moreCaption('none', { size: '2880×3600', megapixels: '10.4 MP', frame: null, large: null, reason: null }, false)).toStrictEqual({
       size: '2880×3600',
       word: 'Saves 2880×3600',
-      meta: 'No photo: type on bare paper.',
+      meta: 'No photo: type on bare paper. 10.4 MP.',
       alert: false,
     })
+  })
+
+  it('framed, the row says the border the frame adds, and past 100 MP that a phone may not finish it, from the real caption', () => {
+    const photo40 = makeMedia({ id: 'p', width: 7728, height: 5152 })
+    const framed = { ...defaultSettings(), aspect: 'original' as const, media: photo40, frame: { ...frameDefaults(), width: FRAME_WIDTH_FIRST } }
+    expect(moreCaption('ready', describePlan(planPrint(framed), framed), true)).toStrictEqual({
+      size: '9016×6440',
+      word: 'Saves 9016×6440',
+      meta: "The photo's own pixels, one for one. 58.1 MP, with a 644 px frame.",
+      alert: false,
+    })
+    const portrait = { ...framed, aspect: '16:9' as const, media: makeMedia({ id: 'q', width: 5152, height: 7728 }), frame: { ...framed.frame, mode: 'fit' as const } }
+    const big = moreCaption('ready', describePlan(planPrint(portrait), portrait), true)
+    expect(big.word).toBe('Saves 18414×10358')
+    expect(big.meta).toBe("The photo's own pixels, one for one. 190.7 MP, with a 1315 px frame, a very large print: a phone may not finish it.")
   })
 
   it('the card: an error is an alert with a dismiss; progress is busy, with Cancel', () => {

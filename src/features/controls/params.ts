@@ -275,15 +275,21 @@ export function borderParams(frame: FrameSettings, photo: boolean, set: SetPatch
  *  sheet the photo fills it exactly, so there is nowhere to move it to. */
 export const NO_TRAVEL = 'Zoom in to move the photo'
 
+/** Said in place of Zoom and Position in Fit: the whole photo shows inside
+ *  the frame, so there is nothing to zoom into or move. */
+export const FIT_WHOLE = 'Fit shows the whole photo'
+
 /**
  * Where the photo sits: Zoom (in only, 100% to 400%), and its place as a
  * FRACTION OF THE TRAVEL it has (0% shows its left or top edge, 100% its right
  * or bottom), so the slider always spans exactly the positions that keep the
  * visible rectangle covered. Where there is no travel the position is
  * unavailable, and says why. `aspect` is the shape of what the photo covers:
- * the visible rectangle inside the frame (frame.ts `visibleAspect`).
+ * the visible rectangle inside the frame (frame.ts `visibleAspect`). In Fit
+ * (`fit`) none of the three is read, and each says why; the values are kept
+ * for Crop.
  */
-export function photoPlacementParams(media: MediaLayer, aspect: number, set: SetPatch<MediaLayer>): Param[] {
+export function photoPlacementParams(media: MediaLayer, aspect: number, set: SetPatch<MediaLayer>, fit = false): Param[] {
   const zoom = rangeOf(MEDIA_FIELDS, 'scale')
   const area = areaOf(aspect, 1)
   const position = (axis: 'x' | 'y', label: string): Param => {
@@ -307,7 +313,7 @@ export function photoPlacementParams(media: MediaLayer, aspect: number, set: Set
       format: percent,
       value: f,
       onChange: (v, how) => set({ [axis]: fromPanFraction(media, area, axis, v) } as Partial<MediaLayer>, how),
-      unavailable: travel ? undefined : NO_TRAVEL,
+      unavailable: fit ? FIT_WHOLE : travel ? undefined : NO_TRAVEL,
     }
   }
   return [
@@ -323,6 +329,7 @@ export function photoPlacementParams(media: MediaLayer, aspect: number, set: Set
       format: percent,
       value: media.scale,
       onChange: (scale, how) => set({ scale }, how),
+      unavailable: fit ? FIT_WHOLE : undefined,
     },
     position('x', 'Position X'),
     position('y', 'Position Y'),

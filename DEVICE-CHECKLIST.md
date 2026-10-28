@@ -74,16 +74,19 @@ So:
       zeroes its turn; a double tap on a plate that is not selected only picks
       it (RISO keeps its −4° and its place)
 - [ ] The first photo brings a hint over the dock; it names the photo's
-      gestures while Photo is open and the type's otherwise, and it goes for
+      gestures while Frame is open and the type's otherwise, and it goes for
       good with its × or with the first drag on the sheet; with VoiceOver on,
       it is read when it appears and when the tool changes, not again after
       a save
-- [ ] Photo tool open: drag and pinch the photo — it zooms 100–400% and stops
-      at its edges, never showing bare paper round it; switch the sheet shape
-      in Photo › Sheet and it still covers the sheet
-- [ ] The first photo opens on Sheet: Original, the photo's own shape — a
-      landscape photo gives a landscape sheet that fits the screen without
-      distortion; Remove the photo → the sheet is 4:5 again
+- [ ] Frame tool open: drag and pinch the photo — it zooms 100–400%, stays
+      under the finger and stops at its edges, never showing the border's
+      colour inside the frame; switch the ratio in Frame › Crop and it still
+      fills the frame's inside; on a ratio with Fit chosen a drag moves
+      nothing and the hint says why
+- [ ] The first photo opens on Original, the photo's own shape, in a frame
+      (Width 7.1%, the Photo fill) — a landscape photo gives a landscape sheet
+      that fits the screen without distortion; Remove the photo → the sheet is
+      4:5 again
 - [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac)
 - [ ] Type a long string → tap Fit → it sits on the sheet, and the next pinch
       or slider touch starts from that size (no jump)
@@ -130,7 +133,7 @@ So:
 - [ ] A transparent PNG: paper shows through where it is transparent
 - [ ] Remove the photo → Undo: it comes back (not bare paper, no alert)
 - [ ] A print saved by an older build (its photo cut to 2048 px) shows the
-      "saved at reduced size" note in Photo › File
+      "saved at reduced size" note in Frame › Photo
 
 > The photo is stored and decoded whole, at any size: nothing here should ever
 > show a photo cut down on import, and nothing caps a saved print: it is
@@ -140,17 +143,18 @@ So:
 
 ## Save
 
-- [ ] More says the size before the tap ("Saves 2419×3024" for a 12 MP photo
-      on 4:5), and why when it is not the photo's own pixels; VoiceOver reads
-      Save as "Save 2419×3024 JPEG"
+- [ ] More says the size before the tap ("Saves 2822×3528" for a 12 MP photo
+      on 4:5 in the frame a first photo gets, "with a 252 px frame"), and why
+      when it is not the photo's own pixels; VoiceOver reads Save as "Save
+      2822×3528 JPEG"
 - [ ] Tap Save → within a moment Save reads "Saving", a toast repeats the size,
-      and a card above the dock reads "Pressing 3024×3780: loading the photo",
+      and a card above the dock reads "Pressing 2822×3528: loading the photo",
       then (with a second ink) "...: reading the photo", then "Pressing
-      3024×3780, 0%" and on in percent, then "...: writing the file", with
+      2822×3528, 0%" and on in percent, then "...: writing the file", with
       Cancel; the preview holds still and nothing else answers a tap
 - [ ] Cancel mid-press → back to Save, no error, nothing saved
 - [ ] A press that takes more than a second → Save reads "Share" and the card
-      "3024×3780 is ready (… MB)" → tap Share → the native share sheet appears
+      "2822×3528 is ready (… MB)" → tap Share → the native share sheet appears
       → Save Image → the file **is** in Photos, at the size More said (check it
       in Photos' info panel)
 - [ ] Expect that second tap on every save: no press at a photo's own
@@ -171,12 +175,12 @@ So:
       is 1600×1200 at 300% zoom: upscaled 4.5x"), Save: while it presses, the
       card's Cancel is on screen and stops the press; when Save reads Share,
       no card covers it and one tap on it opens the share sheet. Again with
-      the Photo tool open
+      the Frame tool open
 - [ ] A confirmation appears after saving, with the pixel size
 - [ ] Cancel the share sheet → no error toast
 - [ ] Swipe the app away (or let iOS evict it) while it reads "Pressing …" →
-      reopen it → a dialog reads "The last save, 2419×3024, did not finish."
-      with Try again, Save smaller (1814×2268) and Cancel; Try again completes;
+      reopen it → a dialog reads "The last save, 2822×3528, did not finish."
+      with Try again, Save smaller (2117×2646) and Cancel; Try again completes;
       a launch after that one says nothing
 - [ ] If Save ever says "This device couldn't press W×H (reason). Save a
       smaller W'×H' copy instead?" (a canvas came back blank, memory ran out
@@ -212,8 +216,9 @@ So:
 Saving at full resolution (none of these can be automated):
 
 - [ ] 12 MP photo, default document, Save: completes without a tab reload; the
-      saved file's pixel size equals what More said; Photos shows 2419×3024
-      (or whatever More said)
+      saved file's pixel size equals what More said; Photos shows 4704×3696
+      for a 4032×3024 photo on Original in its first frame (or whatever More
+      said)
 - [ ] Two Saves in a row: both complete, both files are the size More said
 - [ ] Save in Low Power Mode: completes (slower is fine)
 - [ ] Time from the tap to the share sheet, written down with the device and
@@ -269,7 +274,8 @@ holds"). What only a phone can settle:
       below.
 - [ ] **Save a 40 MP JPEG.** Import a 7728x5152 photo (and an 8064x6048 48 MP
       camera-app JPEG, and a 9504x6336 one if one exists) from the camera roll;
-      Save on Original: the file is 7728x5152 (or the photo's own size). No tab
+      Save on Original: the file is 9016x6440, every pixel of the photo in the
+      frame a first photo gets (7728x5152 with Width at 0). No tab
       reload; note the device, the time from the tap to "Share", and whether
       the full decode (`createImageBitmap`, 159 to 241 MB) is what fails when
       something does. WebKit makes the decode's buffer at full size and, if it
@@ -278,7 +284,7 @@ holds"). What only a phone can settle:
       fails, "This device couldn't press ... (...)" must appear with a smaller
       copy, never a reload.
 - [ ] **Peak memory.** Safari Web Inspector (Timelines > Memory) during a 40 MP
-      save on Original: the peak stays under about 350 MB; during a 61 MP save
+      save on Original with Width at 0: the peak stays under about 350 MB; during a 61 MP save
       under about 450 MB; the worst legal press (grain at screen 36,
       misregistration 30) at 61 MP under about 540 MB. `measure-alloc` holds
       what it counts (the typed arrays, the canvases, the decoded photo and
@@ -286,8 +292,8 @@ holds"). What only a phone can settle:
       ±16 levels of noise; a grainier photo's file is larger) under those:
       339, 425 and 518 MB
       measured. Write down the phone's own peak beside them; what the
-      browser holds besides is what only a phone shows. Framed (once the
-      frame can be set), the same count is 379 MB for the 40 MP photo framed
+      browser holds besides is what only a phone shows. Framed, the same
+      count is 379 MB for the 40 MP photo framed
       on Original (9016x6440, 58 MP), 414 MB on 1:1 Fit (81 MP), 619 MB for
       61 MP at the widest frame (151 MP), 614 MB for a 40 MP portrait on 16:9
       Fit (191 MP) and 1239 MB at its widest (571 MP), most of it the file:
@@ -312,8 +318,8 @@ holds"). What only a phone can settle:
       halftone image, R 0.49 to 0.52) and estimated a 40 MP save at about 16
       to 17 s from it (33 s x R, the 33 s an estimate for the reference
       machine from before its save was measured). That is about 0.4 s a sheet
-      megapixel; a frame adds pixels, so once the frame can be set write down
-      the framed saves too against the same estimate: about 23 s for the
+      megapixel; a frame adds pixels, so write down the framed saves too
+      against the same estimate: about 23 s for the
       40 MP photo framed on Original (58 MP), 33 s on 1:1 Fit (81 MP), 76 s on
       16:9 Fit (191 MP). The app promises no time.
 - [ ] **Backgrounding and the screen.** Start a 40 MP save and let the screen

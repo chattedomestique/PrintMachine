@@ -14,6 +14,7 @@ import {
   printFile,
   savePrint,
   type ExportFormat,
+  type PlanWords,
   type PressedPrint,
 } from '../../engine/export.ts'
 import type { ExportPlan } from '../../engine/exportPlan.ts'
@@ -226,18 +227,28 @@ export interface MoreCaption {
 
 /**
  * The More sheet's first row, from the caption (describePlan) and the
- * document's photo. While the photo cannot be loaded no size is promised, as
- * Save's name and the status card promise none: the row says why, the same
- * sentence, and nothing is saved without the photo.
+ * document's photo: the size a save makes, why when it is not the photo's own
+ * pixels, and its megapixels with the frame's border in pixels (a frame adds
+ * pixels the photo does not have, so how many is said before the tap), and
+ * past LARGE_PRINT_MP that a phone may not finish it (said, never acted on).
+ * While the photo cannot be loaded no size is promised, as Save's name and
+ * the status card promise none: the row says why, the same sentence, and
+ * nothing is saved without the photo.
  */
-export function moreCaption(media: MediaState, caption: { size: string; reason: string | null }, photo: boolean): MoreCaption {
+export function moreCaption(
+  media: MediaState,
+  caption: Pick<PlanWords, 'size' | 'reason' | 'megapixels' | 'frame' | 'large'>,
+  photo: boolean,
+): MoreCaption {
   if (media === 'failed') {
     return { size: null, word: PHOTO_MISSING, meta: 'Nothing is saved without it: never the type on bare paper.', alert: true }
   }
+  const why = caption.reason ?? (photo ? "the photo's own pixels, one for one" : 'no photo: type on bare paper')
+  const size = [caption.megapixels, caption.frame, caption.large].filter((w) => w !== null).join(', ')
   return {
     size: caption.size,
     word: `Saves ${caption.size}`,
-    meta: caption.reason ?? (photo ? "The photo's own pixels, one for one." : 'No photo: type on bare paper.'),
+    meta: `${why.charAt(0).toUpperCase()}${why.slice(1)}. ${size.charAt(0).toUpperCase()}${size.slice(1)}.`,
     alert: false,
   }
 }

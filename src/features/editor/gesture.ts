@@ -135,3 +135,17 @@ export function stepGesture(
 
   return { gesture, patch }
 }
+
+/**
+ * The box a drag on the photo is measured against: the visible rectangle
+ * inside the frame, as it is on screen in a `box` the size of the sheet.
+ * The photo's place is a fraction of that rectangle (media.ts `MediaPlacement`),
+ * so measured against it a finger that crosses the photo moves the photo with
+ * it, pixel for pixel; measured against the whole sheet, the photo would lag
+ * the finger by the frame. `width` is the border as a fraction of the sheet's
+ * long side (frame.ts `borderPx`); 0 is the sheet itself.
+ */
+export function visibleBox(box: { width: number; height: number }, width: number): { width: number; height: number } {
+  const border = width * Math.max(box.width, box.height)
+  return { width: Math.max(1, box.width - 2 * border), height: Math.max(1, box.height - 2 * border) }
+}

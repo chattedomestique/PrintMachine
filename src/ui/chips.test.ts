@@ -53,6 +53,12 @@ describe('what a tap chooses', () => {
     expect(chipTap(own, 'own')).toBeNull()
     expect(chipTap(sq, 'sq')).toBeNull()
   })
+
+  it('a chip that cannot be chosen: nothing, from any value', () => {
+    const off: ChipItem<R> = { ...fourFive, disabled: true }
+    expect(chipTap(off, 'own')).toBeNull()
+    expect(chipTap(off, '4:5')).toBeNull()
+  })
 })
 
 describe('the keys move focus along the row', () => {
@@ -123,5 +129,19 @@ describe('the row as rendered', () => {
     expect(on).toContain('aria-pressed="true"')
     expect(on).toContain('aria-label="Original"')
     expect(on).not.toContain('ic--refresh-cw')
+  })
+
+  it('a colour as data (--swatch) and a glyph before the name; a chip that cannot be chosen is aria-disabled, still in the row', () => {
+    type F = 'paper' | 'frost' | 'gone'
+    const items: readonly ChipItem<F>[] = [
+      { id: 'paper', label: 'Paper', swatch: 'rgb(240, 236, 226)' },
+      { id: 'frost', label: 'Frosted', icon: 'blend' },
+      { id: 'gone', label: 'Gone', disabled: true },
+    ]
+    const s = renderToStaticMarkup(createElement(ChipRow<F>, { label: 'Fill', items, value: 'paper', onChange: () => undefined }))
+    expect(chip(s, 'paper')).toMatch(/<span class="chiprow__swatch" style="--swatch:rgb\(240, 236, 226\)" aria-hidden="true"><\/span>Paper/)
+    expect(chip(s, 'frost')).toMatch(/<span class="ic ic--blend" aria-hidden="true"><\/span>Frosted/)
+    expect(chip(s, 'gone')).toContain('aria-disabled="true"')
+    for (const id of ['paper', 'frost']) expect(chip(s, id)).not.toContain('aria-disabled')
   })
 })

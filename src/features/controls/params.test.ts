@@ -15,6 +15,7 @@ import {
   MINUS,
   NO_PHOTO,
   NO_TRAVEL,
+  FIT_WHOLE,
   borderParams,
   cornersWords,
   degrees,
@@ -137,6 +138,15 @@ describe('the photo\'s position is a fraction of the travel it has', () => {
     expect([x.unavailable, y.unavailable]).toEqual([NO_TRAVEL, NO_TRAVEL])
     const [, xz, yz] = photoPlacementParams({ ...media, scale: 1.5 }, 4032 / 3024, noop)
     expect([xz.unavailable, yz.unavailable]).toEqual([undefined, undefined])
+  })
+
+  it('in Fit the whole photo shows: Zoom and both positions say so, the values kept for Crop', () => {
+    const media = { ...makeMedia({ id: 'p', width: 4032, height: 3024 }), scale: 1.5, x: 0.4 }
+    const fit = photoPlacementParams(media, 4 / 5, noop, true)
+    expect(fit.map((p) => p.unavailable)).toEqual([FIT_WHOLE, FIT_WHOLE, FIT_WHOLE])
+    const crop = photoPlacementParams(media, 4 / 5, noop, false)
+    expect(fit.map((p) => p.value)).toEqual(crop.map((p) => p.value))
+    expect(crop.map((p) => p.unavailable)).toEqual([undefined, undefined, undefined])
   })
 })
 

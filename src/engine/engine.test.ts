@@ -56,7 +56,7 @@ import { REFERENCE_HEIGHT, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from './limits.
 import { blurInPlace } from './blur.ts'
 import { roughenInPlace, type RoughOptions } from './rough.ts'
 import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'
-import { sheetAspect } from './frame.ts'
+import { sheetAspect, visibleAspect } from './frame.ts'
 
 const W = 24
 const H = 24
@@ -935,7 +935,7 @@ describe('photo placement', () => {
     expect(fromPanFraction(fit, areaOf(SHEET.w, SHEET.h), 'y', 0)).toBe(0.5)
   })
 
-  it('random aspect switches, pans, zooms and replaced photos never leave the stored photo uncovering the sheet', () => {
+  it('random aspect switches, pans, zooms and replaced photos never leave the stored photo uncovering the sheet inside its frame', () => {
     // Through the reducer, because that is what writes the stored placement:
     // pan to the side on one sheet shape, switch to another (Original among
     // them, whose shape is the photo's), or replace the photo with one of
@@ -962,10 +962,12 @@ describe('photo placement', () => {
         }
         if (s.aspect === 'original') original++
         const m = s.media!
-        const a = sheetAspect(s)
+        // What the photo covers: the visible rectangle inside the frame the
+        // first photo was given (the whole sheet when unframed).
+        const a = visibleAspect(s)
         // A fixed point of the clamp, in the units the reducer works in...
         expect(clampPan(m, areaOf(a, 1))).toEqual(m)
-        // ...and covering a real sheet in pixels.
+        // ...and covering a real visible rectangle in pixels.
         const W = a * 1000
         const H = 1000
         expect(m.scale).toBeGreaterThanOrEqual(1)

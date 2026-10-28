@@ -17,12 +17,13 @@
  *  3. A drag that starts on no plate moves the selected plate, as always.
  *  4. A tap just beside a small caption still picks it (the hit slop), and a
  *     tap inside one plate picks that plate, not a neighbour within the slop.
- *  5. With the Photo tool open, a drag that starts on a plate neither picks
+ *  5. With the Frame tool open, a drag that starts on a plate neither picks
  *     it nor moves it (the gestures are the photo's there).
  *  6. The gesture hint, after the first photo: it says what the sheet's
- *     gestures do in the open tool (the photo with Photo open, the type
+ *     gestures do in the open tool (the photo with Frame open, the type
  *     otherwise); a tap leaves it, and so does a drag on a photo that cannot
- *     move; the first drag that moves something dismisses it for good.
+ *     move (at 100% on its own sheet, inside the frame a first photo gets);
+ *     the first drag that moves something dismisses it for good.
  *  7. A double tap on Type › Size's track (two touches 100 ms apart, where
  *     each alone would move the thumb) ends at the default, 40%, and one Undo
  *     goes back to where it was; a mouse's double-click the same. Then on a
@@ -196,8 +197,8 @@ try {
   await touch(cdp, at(print.x + 20 / box.width, print.y - 0.04))
   check((await selected(page, 'PRINT')) === 'PRINT', 'a tap on PRINT MACHINE picks PRINT MACHINE')
 
-  console.log('5. With the Photo tool open, a drag on a plate neither picks nor moves it')
-  await page.locator('[data-tool="photo"]').click()
+  console.log('5. With the Frame tool open, a drag on a plate neither picks nor moves it')
+  await page.locator('[data-tool="frame"]').click()
   await touch(cdp, at(riso.x, riso.y), [at(riso.x + 0.1, riso.y)])
   await page.locator('[data-tool="type"]').click()
   check((await selected(page)) === 'PRINT', 'the selection stayed on PRINT MACHINE')
@@ -206,7 +207,7 @@ try {
 
   console.log('6. The gesture hint teaches what the sheet does, until a drag shows it is learned')
   const HINT = '.app__hint-text'
-  await page.locator('[data-tool="photo"]').click()
+  await page.locator('[data-tool="frame"]').click()
   const bytes = await page.evaluate(async () => {
     const c = document.createElement('canvas')
     c.width = 1200
@@ -220,7 +221,7 @@ try {
   await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
   await page.waitForSelector(HINT, { timeout: 30_000 })
   const photoHint = await page.locator(HINT).textContent()
-  check(/zoom the photo/.test(photoHint), `with Photo open it is about the photo ("${photoHint}")`)
+  check(/zoom the photo/.test(photoHint), `with Frame open it is about the photo ("${photoHint}")`)
   // The photo is at 100% on its own sheet: a drag on it moves nothing, so it
   // teaches nothing either, and the hint stays.
   const box1 = await settledBox(page)

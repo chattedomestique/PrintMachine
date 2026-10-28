@@ -3,10 +3,10 @@ import { useSettings } from '../../state/settingsStore.ts'
 import { canvasMeasure } from '../../state/persist.ts'
 import { useRenderer } from './useRenderer.ts'
 import { useLayerGestures } from './useLayerGestures.ts'
-import type { GestureLimits, GesturePatch, GestureTarget, Pt } from './gesture.ts'
+import { visibleBox, type GestureLimits, type GesturePatch, type GestureTarget, type Pt } from './gesture.ts'
 import { stepSize } from '../controls/sizeScale.ts'
 import { type MediaLayer, type PrintSettings, type TextLayer } from '../../engine/types.ts'
-import { sheetAspect, visibleAspect } from '../../engine/frame.ts'
+import { effectiveMode, sheetAspect, visibleAspect } from '../../engine/frame.ts'
 import { areaOf, clampPan } from '../../engine/media.ts'
 import { hitLayer, layoutIn, type FontMeasure } from '../../engine/text.ts'
 import type { FrameInputs } from '../../engine/frame.ts'
@@ -31,7 +31,8 @@ const PICK_THEN_TAP_MS = 1000
 
 /**
  * The print preview, plus the surface that manipulates a plate (the selected
- * one, or the one a touch lands on) or, with the Photo tool open, the photo.
+ * one, or the one a touch lands on) or, with the Frame tool open, the photo
+ * (in Crop and on Original; in Fit the whole photo shows, and nothing moves).
  *
  * Input lives on a dedicated transparent sibling with `touch-action: none`,
  * not on the canvas itself — that avoids the whole genre of "the canvas is
@@ -50,9 +51,9 @@ export default function Canvas({
    *  frame is a draft (features/media `useFrameInputs`); a fill whose input
    *  is not there yet draws as Paper. */
   inputsFor: (s: PrintSettings, draft: boolean) => FrameInputs
-  /** Point the sheet's gestures at the photo instead of the type. Driven by
-   *  the open tab, so what you are touching is whatever panel you are in — no
-   *  second selection model to keep in sync. */
+  /** Point the sheet's gestures at the photo instead of the type (the Frame
+   *  tool is open). Driven by the open tool, so what you are touching is
+   *  whatever panel you are in — no second selection model to keep in sync. */
   mediaMode?: boolean
   /** Hold the preview where it is (a save is pressing the print). */
   paused?: boolean
@@ -115,14 +116,20 @@ export default function Canvas({
   const mediaTarget = settings.media
   const aspect = sheetAspect(settings)
   // The pan is a fraction of the visible rectangle inside the frame (the
-  // whole sheet unframed), so that is what it is clamped to.
+  // whole sheet unframed), so that is what it is clamped to, and what a drag
+  // is measured against.
   const placeAspect = visibleAspect(settings)
+  const frameWidth = settings.media ? settings.frame.width : 0
+  const placeBox = useCallback((box: { width: number; height: number }) => visibleBox(box, frameWidth), [frameWidth])
+  // In Fit the whole photo shows: there is nothing to zoom into or move, so
+  // the gestures move nothing (the hint says why).
+  const fit = effectiveMode(settings) === 'fit'
   const photoTarget = useMemo<GestureTarget | null>(
     () =>
-      mediaMode && mediaTarget
+      mediaMode && mediaTarget && !fit
         ? { id: mediaTarget.id, x: mediaTarget.x, y: mediaTarget.y, size: mediaTarget.scale, rotation: 0 }
         : null,
-    [mediaMode, mediaTarget],
+    [mediaMode, mediaTarget, fit],
   )
 
   const patchMedia = useCallback(
@@ -153,26 +160,27 @@ export default function Canvas({
   )
 
   const typeGestures = useLayerGestures(surfaceRef, mediaMode ? null : layer, patch, { pick })
-  const photoGestures = useLayerGestures(surfaceRef, photoTarget, patchMedia, { limits: MEDIA_LIMITS })
+  const photoGestures = useLayerGestures(surfaceRef, photoTarget, patchMedia, { limits: MEDIA_LIMITS, area: placeBox })
   const gestures = mediaMode ? photoGestures : typeGestures
 
   /**
-   * Double-tap: fit the photo again (Photo open), or centre the selected plate
-   * and zero its turn. Not when the first tap of the two picked a plate: a tap
-   * on a plate picks it and does nothing else (Border Studio's), and a second
-   * tap, often only because the first seemed not to take, must not throw away
-   * where the plate was and how it was turned.
+   * Double-tap: the photo back to 100% and centred (Frame open; not in Fit,
+   * where it is not placed), or centre the selected plate and zero its turn.
+   * Not when the first tap of the two picked a plate: a tap on a plate picks
+   * it and does nothing else (Border Studio's), and a second tap, often only
+   * because the first seemed not to take, must not throw away where the plate
+   * was and how it was turned.
    */
   const onDoubleClick = useCallback(() => {
     if (mediaMode) {
-      if (settings.media) dispatch({ type: 'patchMedia', patch: { x: 0.5, y: 0.5, scale: 1 } })
+      if (settings.media && !fit) dispatch({ type: 'patchMedia', patch: { x: 0.5, y: 0.5, scale: 1 } })
       return
     }
     const [first] = touches.current
     if (touches.current.length === 2 && first.picked && performance.now() - first.at < PICK_THEN_TAP_MS) return
     if (!layer) return
     dispatch({ type: 'patchLayer', id: layer.id, patch: { x: 0.5, y: 0.5, rotation: 0 } })
-  }, [dispatch, layer, mediaMode, settings.media])
+  }, [dispatch, layer, mediaMode, settings.media, fit])
 
   /**
    * A keyboard path to every value the gestures write (playbook §10.1). If the
@@ -218,9 +226,11 @@ export default function Canvas({
         className="drag-surface"
         role="application"
         aria-label={
-          mediaMode
-            ? 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to fit it again. Arrow keys move the selected plate.'
-            : 'Print preview. Tap a plate to pick it, drag to move it, pinch to scale and rotate, double-tap to centre. Arrow keys move the selected plate, plus and minus scale, brackets rotate.'
+          !mediaMode
+            ? 'Print preview. Tap a plate to pick it, drag to move it, pinch to scale and rotate, double-tap to centre. Arrow keys move the selected plate, plus and minus scale, brackets rotate.'
+            : fit
+              ? 'Print preview, the photo. Fit shows the whole photo: choose Crop to move or zoom it. Arrow keys move the selected plate.'
+              : 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to reset it. Arrow keys move the selected plate.'
         }
         tabIndex={0}
         onDoubleClick={onDoubleClick}

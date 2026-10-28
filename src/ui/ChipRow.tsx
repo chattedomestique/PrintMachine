@@ -2,7 +2,8 @@
  * One choice of several, as the style guide's chips on one scrolling line
  * (Border Studio's ratio row): each chip a button, the chosen one pressed
  * (aria-pressed), and a chosen chip that has another way round carries the
- * flip cue, a tap on it turning it over (chips.ts holds every rule).
+ * flip cue, a tap on it turning it over (chips.ts holds every rule). A chip
+ * may show its choice's colour as a dot, or a glyph, before its name.
  *
  * Buttons, not the style guide's radio chips: a tap on a checked radio fires
  * nothing, and that tap is the flip. The style guide's chip script is not
@@ -15,7 +16,7 @@
  * App-agnostic: the caller supplies the choices and their words.
  */
 
-import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from 'react'
 import { chipFace, chipKeyTarget, chipName, chipTabStop, chipTap, revealDelta, type ChipItem } from './chips.ts'
 import { Icon } from './ui.tsx'
 
@@ -86,6 +87,7 @@ export function ChipRow<T extends string>({
             data-chip={f.id}
             aria-pressed={f.pressed}
             aria-label={chipName(it, value)}
+            aria-disabled={it.disabled || undefined}
             tabIndex={i === stop ? 0 : -1}
             onFocus={() => setFocused(i)}
             onClick={() => {
@@ -93,6 +95,8 @@ export function ChipRow<T extends string>({
               if (v !== null) onChange(v)
             }}
           >
+            {it.swatch !== undefined && <span className="chiprow__swatch" style={{ '--swatch': it.swatch } as CSSProperties} aria-hidden="true" />}
+            {it.icon !== undefined && <Icon name={it.icon} />}
             {f.label}
             {f.flips && <Icon name="refresh-cw" className="chiprow__flip" />}
           </button>

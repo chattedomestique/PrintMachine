@@ -3,7 +3,7 @@ import { visibleAspect } from '../engine/frame.ts'
 import { makeLayer } from './defaults.ts'
 import { contrastPartner } from '../engine/inks.ts'
 import { areaOf, clampPan } from '../engine/media.ts'
-import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
+import { FRAME_WIDTH_FIRST, MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
 
 /**
  * The document reducer plus an undo/redo history around it.
@@ -223,10 +223,18 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       // centred the photo then fills it exactly, so the untouched path neither
       // crops nor resamples a pixel. Choosing 4:5 or 1:1 is a crop the person
       // makes, not one the app makes for them. Undo brings the old sheet back.
+      //
+      // And the photo is framed (Border Studio's first impression: a border
+      // keyed to the photo): a frame with no border is given the first
+      // photo's (FRAME_WIDTH_FIRST); its fill, corners and mode are already
+      // the template's. A frame the document already has is kept. The sheet
+      // grows by the border, never the photo shrinks: on Original the photo
+      // still lands at its own pixels.
       return withCover({
         ...state,
         aspect: 'original',
         media,
+        frame: state.frame.width > 0 ? state.frame : { ...state.frame, width: FRAME_WIDTH_FIRST },
         layers: state.layers.map((l) =>
           l.contrastInkId || l.backing ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },
         ),

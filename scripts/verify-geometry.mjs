@@ -8,9 +8,11 @@
  * rectangle across every tool and tab", and no such file exists in it. This
  * is that file. In Chromium, at 320x640, 375x812, 393x852 and 430x932, with a
  * photo chosen through the real file input (a 4:3, a 3:2 and a 1:3 photo, each
- * on its own Original sheet, the shape a first photo opens on), it opens every
- * tool and every sub-tab, and every state of Ink > Over photo (Off, Second
- * ink, Keep this ink, Backing), and checks:
+ * on its own Original sheet in the frame a first photo gets, the shape and
+ * the frame a first photo opens on), it opens every tool (Frame, Type, Ink,
+ * Press) and every sub-tab, Frame › Border with Frosted chosen (its Blur in
+ * the strip) as well as without, and every state of Ink > Over photo (Off,
+ * Second ink, Keep this ink, Backing), and checks:
  *
  *  - the sheet: its rectangle is the same, to a pixel, in every one of those
  *    states at one viewport. The photo never changes size or place between
@@ -117,6 +119,9 @@ const VIEWPORTS = [
   [393, 852],
   [430, 932],
 ].filter(([w]) => ONLY_WIDTH === null || w === ONLY_WIDTH)
+
+/** The dock's tools, in its order (src/features/controls/tools.ts). */
+const TOOL_IDS = ['frame', 'type', 'ink', 'press']
 
 /** Photos chosen through the file input: a camera's 4:3, a 3:2 and a 1:3. */
 const PHOTOS = [
@@ -479,7 +484,7 @@ async function newPage({ width, height, scheme = 'light', photo = PHOTOS[0], ini
   await page.goto(APP)
   await page.waitForSelector('.sheet canvas')
   if (photo) {
-    await openTool(page, 'photo')
+    await openTool(page, 'frame')
     await choosePhoto(page, ...photo)
     // The hint covers the foot of the sheet until it is dismissed.
     await page.locator('.app__hint .btn').click()
@@ -488,13 +493,14 @@ async function newPage({ width, height, scheme = 'light', photo = PHOTOS[0], ini
 }
 
 /**
- * Every tool, every sub-tab, every Over photo state, in order, calling
- * `visit(name)` in each. Leaves the second ink on and the tools closed.
+ * Every tool, every sub-tab, every Over photo state, and Frame › Border with
+ * Frosted chosen, in order, calling `visit(name)` in each. Leaves the second
+ * ink on, the fill on Photo and the tools closed.
  */
 async function eachState(page, visit) {
   await closeTools(page)
   await visit('closed')
-  for (const tool of ['type', 'ink', 'photo', 'press']) {
+  for (const tool of TOOL_IDS) {
     await openTool(page, tool)
     const tabs = await page.locator(`.controls__section[data-tool="${tool}"] [role=tab]`).evaluateAll((els) => els.map((e) => e.dataset.tab))
     for (const tab of tabs) {
@@ -526,6 +532,21 @@ async function eachState(page, visit) {
         continue
       }
       await visit(`${tool}-${tab}`)
+      if (tool === 'frame' && tab === 'border') {
+        // Frosted adds Blur to the strip: the sheet must not move for it,
+        // with Blur the setting on screen.
+        const panel = page.locator('.controls__panel[data-sub="border"]')
+        const fills = panel.locator('.chiprow')
+        await fills.locator('[data-chip="frosted"]').click()
+        await page.waitForFunction(() => document.querySelector('.chiprow [data-chip="frosted"]')?.getAttribute('aria-pressed') === 'true')
+        await panel.locator('.paramstrip__pick').click()
+        await page.locator('dialog[open] [data-key="blur"]').click()
+        await page.waitForSelector('dialog[open]', { state: 'detached' })
+        await page.waitForFunction(() => document.querySelector('.controls__panel[data-sub="border"] .paramstrip__pick')?.textContent?.includes('Blur'))
+        await visit(`${tool}-${tab}-frosted`)
+        await fills.locator('[data-chip="photo"]').click()
+        await page.waitForFunction(() => document.querySelector('.chiprow [data-chip="photo"]')?.getAttribute('aria-pressed') === 'true')
+      }
     }
   }
   await closeTools(page)
@@ -748,7 +769,7 @@ try {
 
   // ── 4. The save states on a small phone at 200% text ──
   for (const [vw, vh] of SAVE_VIEWPORTS) {
-    for (const tool of [null, 'photo']) await checkSaveStates(vw, vh, tool)
+    for (const tool of [null, 'frame']) await checkSaveStates(vw, vh, tool)
   }
 
   // ── 5. The review screenshots ──
@@ -785,7 +806,7 @@ try {
       await closeTools(page)
       await settle(page, `screenshot 390 ${scheme} wire closed`)
       await page.screenshot({ path: join(SHOTS, shotName(390, scheme, 'wire', 'closed')) })
-      for (const tool of ['type', 'ink', 'photo', 'press']) {
+      for (const tool of TOOL_IDS) {
         await openTool(page, tool)
         await settle(page, `screenshot 390 ${scheme} wire ${tool}`)
         await page.waitForTimeout(250)
@@ -927,7 +948,7 @@ function probeSaveCard(sel) {
  * sheet zoomed to 300% (the longest reason a real document gives: "photo is
  * 1600×1200 at 300% zoom: upscaled 4.5x", in the toast as the press starts),
  * the file's writing held 3 s as a phone's can take, with the dock closed and
- * with the Photo tool open (where it is right after a photo is chosen).
+ * with the Frame tool open (where it is right after a photo is chosen).
  * Pressing, with that toast shown: Cancel answers a tap. Ready: Share in the
  * bar answers a tap, and so does the card's ×. The stored photo gone: Choose
  * again answers a tap. In each, the cards stay between the bar and the dock.
@@ -961,7 +982,7 @@ async function checkSaveStates(vw, vh, tool) {
         : decode(src, ...rest)
   `
   const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [1600, 1200], init: slowEncoder })
-  // Zoomed to 300% (what the Photo tool's Zoom stores), read back from
+  // Zoomed to 300% (what Frame › Place's Zoom stores), read back from
   // storage as a reload does. Set as the reloaded page starts, before the
   // app reads it: the page being left writes its own document on `pagehide`.
   await page.addInitScript(() => {

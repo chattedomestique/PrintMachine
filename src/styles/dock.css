@@ -297,17 +297,6 @@
   border: var(--bw-thin) solid var(--ink-faint);
 }
 
-/* A native select in a row: never under 16px (iOS zooms below that). The
-   style guide draws its frame on the wrapper and sets the <select> a
-   border's width inside it each way, so a tap on the frame's edge opened
-   nothing: 40px of target in a 44px control. The select fills the frame
-   (its own border is transparent, so nothing drawn moves). */
-.controls__select { flex: 0 0 auto; min-inline-size: 9rem; }
-.controls__select-field {
-  min-block-size: var(--_h);
-  margin-block: calc(-1 * var(--_bw));
-}
-
 /* Stocks on one scrolling line in the dock: a second row of chips would cost
    the sheet ~90px. The chip cut at the edge says "more"; the padding keeps
    the rings and the chosen chip's second ring unclipped. */
@@ -328,14 +317,29 @@
    sides, so more of the choices fit across a phone (spread out when they all
    do, scrolling when they do not), and the chosen chip is its fill and its
    flip cue: the style guide's check in front would make it the widest chip
-   by far, and in the tray chosen is the fill (editor.css). */
+   by far, and in the tray chosen is the fill (editor.css). The row is one
+   options row tall (the scroller's padding trimmed to what centres a chip in
+   it, which still holds the focus ring), so a panel with a chip row, a
+   hairline and a parameter strip is the height of every other panel. */
 .chiprow {
   justify-content: space-between;
   gap: var(--chrome-1);
+  padding-block: calc((var(--ed-row-h) - var(--ctl-sm)) / 2);
 }
 .chiprow > .chip { --_px: var(--chrome-3); }
 .chiprow > .chip::before { display: none; }
 .chiprow__flip { --ic-size: 0.9em; margin-inline-start: var(--chrome-1); }
+/* A choice's colour, a dot before its name (the fill row): the colour is
+   data (--swatch); its own edge, so a colour as pale as the tray, or as the
+   chosen chip's fill, still has one (1.4.11). */
+.chiprow__swatch {
+  flex: none;
+  inline-size: 1em;
+  block-size: 1em;
+  border-radius: var(--radius-pill);
+  background: var(--swatch);
+  border: var(--bw-thin) solid var(--ink-faint);
+}
 
 /* In the dock the swatch cell is one 44px chip and its name, close under it:
    the style guide's roomier cell would make the Paper panel taller than every

@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { Icon, Segmented, SwatchSet } from '../../ui/ui.tsx'
+import { Icon, Segmented, SwatchSet, Switch } from '../../ui/ui.tsx'
 import { ParamStrip } from '../../ui/Slider.tsx'
 import type { ChangeHow } from '../../ui/param.ts'
 import { cssRgb, PAPERS } from '../../engine/inks.ts'
@@ -47,11 +47,13 @@ function newSeed(current: number): number {
  * plate. Screen (dots or grain, and one size for both), Press (how much ink,
  * how far each pass lands from the last, how ragged the letters, how blotchy
  * the ink; and Re-roll, another pull of the same settings), Paper (the stock
- * every ink multiplies onto).
+ * every ink multiplies onto, and whether it lies over the photo and its
+ * frame).
  */
 export default function PressPanel({ sub, onSub }: { sub: SubId<'press'>; onSub: (sub: SubId<'press'>) => void }) {
   const { settings, dispatch } = useSettings()
   const rerollHint = useId()
+  const veilHint = useId()
   const press = settings.press
   const set = (p: Partial<PressProfile>, how: ChangeHow) => dispatch({ type: 'patchPress', patch: p, coalesce: !how.discrete, join: how.joins })
 
@@ -92,12 +94,29 @@ export default function PressPanel({ sub, onSub }: { sub: SubId<'press'>; onSub:
       )}
 
       {sub === 'paper' && (
-        <SwatchSet
-          legend="Paper stock"
-          items={STOCKS}
-          value={settings.paperId}
-          onPick={(it) => dispatch({ type: 'patch', patch: { paperId: it.id } })}
-        />
+        <>
+          <SwatchSet
+            legend="Paper stock"
+            items={STOCKS}
+            value={settings.paperId}
+            onPick={(it) => dispatch({ type: 'patch', patch: { paperId: it.id } })}
+          />
+          <Rule />
+          {/* On, the photo and its frame take the stock's tint and tooth, so
+              they and the type read as one printed sheet. Off, the ink lands
+              straight on the photograph's own colour. Beside the stock,
+              because it is the stock it lays over them. */}
+          <Switch
+            label="Paper over the photo and frame"
+            checked={settings.paperVeil}
+            describedBy={veilHint}
+            onChange={(paperVeil) => dispatch({ type: 'patch', patch: { paperVeil } })}
+          />
+          <p className="sr-only" id={veilHint}>
+            On, the photo and its frame take the paper's tint and grain, so they and the type read as one printed
+            sheet. Off, the ink lands on the photograph's own colour.
+          </p>
+        </>
       )}
     </DockPanel>
   )

@@ -217,11 +217,12 @@ falls out of the compositor already reading paper as `rgb × shade`, and it is
 why type genuinely overprints a photo rather than sitting on top of it: pink
 over a white highlight goes bright, pink over a dark area goes deep.
 
-"Paper over the photo" is a switch. On, the photo takes on the stock's tint
-and grain the way printing on toned paper actually does, so the photo and the
-type read as one printed sheet; off, the ink lands straight on the photograph's
-own colour. With no photo the switch is inert and the arithmetic collapses back
-to exactly what the app draws on bare paper.
+"Paper over the photo and frame" is a switch, in Press › Paper beside the
+stock it lays over them. On, the photo and its frame take on the stock's tint
+and grain the way printing on toned paper actually does, so the photo, the
+frame and the type read as one printed sheet; off, the ink lands straight on
+the photograph's own colour. With no photo the switch is inert and the
+arithmetic collapses back to exactly what the app draws on bare paper.
 
 The photo is never printed itself — no separation, no screen, no second press.
 Halftoning the photograph is a different job ("riso a photo"); here it is the
@@ -330,8 +331,10 @@ and no sensible size to export it at.
 
 #### The Original sheet: the photo's own shape
 
-The Sheet choice leads with **Original** — the photo's own shape, upright —
-before 1:1, 4:5, 3:4 and 2:3, and the first photo opens on it. With the zoom
+The ratio chips (Frame › Crop) lead with **Original** — the photo's own
+shape, upright — before 1:1, 4:5, 3:4, 9:16 and 2:3 (a second tap on the
+chosen chip turns it on its side: 5:4, 4:3, 16:9, 3:2), and the first photo
+opens on it. With the zoom
 at 100% and no pan the photo then fills the sheet exactly, so the untouched
 path neither crops nor resamples a pixel: a crop is something the person
 chooses, not something the app does for them. Replacing the photo keeps the
@@ -648,11 +651,11 @@ live where those are used:
 
 Photos saved by an older build are the 2048 px copies it made; the originals
 are gone. Such a photo (no `native` flag, a long edge of exactly 2048) carries
-a note in the Photo tool's File tab: "This photo was saved at reduced size by an older
+a note in Frame › Photo: "This photo was saved at reduced size by an older
 version. Choose it again for full resolution."
 
 **A photo cannot silently drop out of a print.** If the stored image is missing
-or cannot be decoded, the Photo tool's File tab says so ("This photo could not
+or cannot be decoded, Frame › Photo says so ("This photo could not
 be loaded. Choose it again.") for as long as it is true, and so does Save,
 whichever tool is open: Save cannot be pressed, its name carries the sentence,
 and the status card above the dock shows the same sentence as an alert, with
@@ -952,7 +955,11 @@ so an Original sheet of any photo's proportions sizes the same way.
 
 Save presses the print at the size the planner gives (`engine/exportPlan.ts`),
 never at the preview's: the smallest sheet on which the photo lands pixel for
-pixel, whatever the photo's size. A 12 MP landscape photo on 4:5 saves at
+pixel, whatever the photo's size. A frame adds its border round the photo,
+never takes a pixel from it: in the frame a first photo gets (Width 7.1%), a
+12 MP landscape photo on 4:5 saves at 2822×3528 (a 252 px border) and a 40 MP
+one on Original at 9016×6440 (644 px), every pixel of the photo inside.
+Unframed (Width 0), a 12 MP landscape photo on 4:5 saves at
 2419×3024, the same photo upright at 3024×3780, a 24 MP iPhone capture on 4:5
 at its own 3427×4284 and on its own Original sheet at 5712×4284; a 40 MP
 photo (7728×5152) at 7728×5152 on Original, 4122×5152 on 4:5 and 5152×5152 on
@@ -989,10 +996,14 @@ A floor, a smaller copy and the JPEG's edge are sized by the height, the
 width following from the shape, as the preview is.
 
 It says so **before** the tap. The More sheet's first row reads "Saves
-2419×3024", and when the print is not the photo's own pixels, why, in numbers:
-"photo is 1600×1200: upscaled 1.5x", or, zoomed in, "photo is 1600×1200 at
-300% zoom: upscaled 4.5x" (the longest reason a real document gives). Save's
-own name carries the size ("Save 2419×3024 JPEG"), the toast repeats size and
+2822×3528", and under it, when the print is not the photo's own pixels, why,
+in numbers: "photo is 1600×1200: upscaled 1.5x", or, zoomed in, "photo is
+1600×1200 at 300% zoom: upscaled 4.5x" (the longest reason a real document
+gives); then the megapixels and the frame's border, since a frame adds pixels
+the photo does not have ("10.0 MP, with a 252 px frame"), and past 100 MP
+that a phone may not finish it (said, never acted on: nothing is made
+smaller for it). Save's
+own name carries the size ("Save 2822×3528 JPEG"), the toast repeats size and
 reason the moment a save starts, and the confirmation repeats the size. Save
 itself stays one word, so the app bar never wraps. Nothing falls back to a
 smaller file: a press that fails stops, with the reason and the numbers, and
@@ -1058,8 +1069,8 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   that cannot be decoded whole while a smaller decode of it can (the import
   already read it, so that is this device's memory) — is one error,
   `CanvasLimitError`, with the plan in it. Save then asks, in numbers and with
-  the reason: "This device couldn't press 2419×3024 (a canvas came back blank).
-  Save a smaller 1814×2268 copy instead?" (a reason in the browser's own words
+  the reason: "This device couldn't press 2822×3528 (a canvas came back blank).
+  Save a smaller 2117×2646 copy instead?" (a reason in the browser's own words
   — "Out of memory" — is shown as it came, so a fault that is not about size
   cannot hide behind the offer). The copy offered is the largest that proves
   itself here, its canvases first and then its photo decoded at its size,
@@ -1071,13 +1082,13 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   ("The photo could not be decoded to save: ..."), never an offer. Nothing is
   pressed until the person picks Save smaller; the copy's photo is decoded
   straight to the copy's size, once, and drawn at its own pixels; and the
-  confirmation names what was saved ("Saved 1814×2268, a smaller copy").
+  confirmation names what was saved ("Saved 2117×2646, a smaller copy").
 - **A save that did not finish.** iOS evicts a tab that holds too much without
   a word, and the app restarts as if nothing happened. Save marks itself in
   `localStorage` before it decodes the photo (the height and the format) and
   clears the mark when it ends either way, so a launch that finds the mark
-  says so: "The last save, 2419×3024, did not finish.", with **Try again**,
-  **Save smaller (1814×2268)** and Cancel. It does not claim the device ran out
+  says so: "The last save, 2822×3528, did not finish.", with **Try again**,
+  **Save smaller (2117×2646)** and Cancel. It does not claim the device ran out
   of memory: a mark only says the save did not end.
 
 ### Every pixel of the photo, measured
@@ -1153,10 +1164,11 @@ and two documents of small type correlate with themselves at twice the height
 0.95.
 
 `scripts/check-save.mjs` taps the same flow in the built app: a 12 MP photo on
-4:5 (Save reads Saving and the card offers Cancel within 100 ms, the card
+4:5 in the frame a first photo gets, the ratio chosen with the Frame tool's
+chips (Save reads Saving and the card offers Cancel within 100 ms, the card
 counts the press in percent and says when it writes the file, the file is the
 size the More sheet and Save's name promised), a device whose canvases come
-back blank wider than 2000 px (the smaller-copy question before anything is
+back blank wider than 2500 px (the smaller-copy question before anything is
 pressed, then that file), a tab closed mid-press (the notice at the next
 launch, its choices waiting, and saying so, until the photo is back), a stored
 photo deleted (the card and Save say so, and no file), a Cancel tapped while
@@ -1164,9 +1176,9 @@ the file is written (no file, with a share sheet or without), Ctrl+Z pressed
 during a press (the document stays as it was, and the file is that print),
 where focus is while it presses, the gesture hint across two saves (its
 card hides, its words are not read out again), and a 40 MP photo on Original
-(More and Save promise 7728×5152; the percent moves; Cancel leaves no file;
-Save again writes a 7728x5152 baseline JPEG sampled 4:4:4, read from its
-header).
+in its first frame (More and Save promise 9016×6440; the percent moves;
+Cancel leaves no file; Save again writes a 9016x6440 baseline JPEG sampled
+4:4:4, read from its header).
 
 #### Test seams
 
@@ -1418,8 +1430,9 @@ synthetic photo): a 40 MP save on Original takes 15.1 s, 379 ms a megapixel
 worst legal document 17.3 s (539: 473 and 65); the 61 MP worst press on
 Original 37.0 s. The encoder's share depends on the picture: 62 to 71 ms a
 megapixel on these prints, 112 on the device spike's noisy halftone. In the
-built app (`check-save`), a 40 MP photo on Original is saved 15.0 s after
-the tap. On a phone only the encoder has been measured: the device spike ran
+built app (`check-save`), a 40 MP photo on Original in the frame a first
+photo gets (9016×6440, 58 MP) is saved 23 to 29 s after the tap (22.6 and
+28.5 s in two runs). On a phone only the encoder has been measured: the device spike ran
 it at 62, 65 and 62 ms a megapixel on its halftone test image on an iPhone
 (iOS 18.7, the Claude app's in-app WebKit view), R 0.49, 0.52 and 0.49 of
 the reference machine's 126; its estimate of a 40 MP save, 33 s x R, is 16
@@ -1587,24 +1600,45 @@ looks wrong is caught.
 
 ### The dock
 
-Four tools — **Type, Ink, Photo, Press** — are a toolbar of toggle buttons,
+Four tools — **Frame, Type, Ink, Press** — are a toolbar of toggle buttons,
 not tabs: tapping the open tool closes its panel for a full-height sheet, and a
-tab cannot be "none open". Each tool's panel is two bands of fixed height: a
+tab cannot be "none open". Frame leads because the job is to frame a photo,
+then set type on it; it holds what Border Studio's Frame and Fill tools did
+and what this app's Photo tool did, and with no photo yet it opens on Photo.
+Each tool's panel is two bands of fixed height: a
 head row (the plate button, on Type and Ink, then the sub-tabs) and a content
 area of one options row, a hairline and one parameter strip (141 px). A feature
 that does not fit is a sub-tab, never another row:
 
 | Tool | Sub-tabs |
 |---|---|
+| Frame | Border (the fill: Paper, Photo, Deep, Muted, Comp, Frosted; Width, Corners, and Blur under Frosted) · Crop (the ratio chips, a second tap flipping the chosen one; Crop or Fit) · Place (zoom, position) · Photo (choose, replace, remove) |
 | Type | Text (the words) · Face (typeface, Bold) · Size (Fit, Size) · Space (alignment; line height, tracking) · Place (rotation, position) |
 | Ink | Ink (the plate's ink, from the 77 in a dialog) · Over photo (Off, Second ink, Backing; the second ink and its Switch point, or the backing's ink) |
-| Photo | Sheet (Original, 1:1, 4:5, 3:4, 2:3; paper over the photo) · Frame (zoom, position) · File (choose, replace, remove) |
-| Press | Screen (halftone or grain; screen size) · Press (Re-roll; ink, misregistration, Edge, Wear) · Paper (the stock) |
+| Press | Screen (halftone or grain; screen size) · Press (Re-roll; ink, misregistration, Edge, Wear) · Paper (the stock; paper over the photo and frame) |
+
+The fill and the ratio are rows of the style guide's chips on one scrolling
+line, each a button, the chosen one pressed (`ui/ChipRow.tsx`): one tab stop,
+the arrows move along the row and Enter or Space chooses, so the print is not
+remade at every arrow. A fill chip shows the colour the frame is drawn in (a
+dot before its name, so no colour has to be told apart by eye; Frosted, the
+photo blurred, is a glyph), and while the photo's palette is still being made
+it shows the stock, as the frame does. The fill row is chips, not Border
+Studio's swatch circles with their names under them: a swatch cell is 70 px
+tall, and with a hairline and the strip the Border panel would be 167 px, the
+sheet moving 26 px whenever it opened; a chip row is one options row. Crop or
+Fit is unavailable on Original ("Original keeps the whole photo": the sheet is
+the photo's shape and its border) and without a photo; Place's Zoom and
+Position are unavailable in Fit ("Fit shows the whole photo"). Without a photo
+Border and Place say there is none, with Choose photo; the ratio is the
+sheet's, so it can be chosen on bare paper (Original, the photo's own shape,
+needs a photo).
 
 The panel is the same height in every tool and every tab, so **the sheet never
 changes size or place between them** (Border Studio fcd91ff). That is checked,
 not assumed: `npm run verify:geometry` opens every tool, sub-tab and Over-photo
-state at 320, 375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
+state, and Frame › Border with Frosted chosen (its Blur on the strip), at 320,
+375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
 fails if the sheet moves by a pixel, if a panel overflows, or if the page
 scrolls sideways. Each state is measured at rest, once its transitions and
 animations have run out and its scrollers have stopped, never after a fixed
@@ -1643,8 +1677,8 @@ is a file, and it checks more:
   layout steps full → compact → tight as it narrows (tight only when the
   title needs a second line).
 - **The save states at 200% text** on a 320×640 and a 375×667 phone, with the
-  dock closed and with the Photo tool open: a 5712×4284 photo on its own sheet
-  (so the toast carries the longest reason the planner gives), pressing with
+  dock closed and with the Frame tool open: a 1600×1200 photo on its own sheet
+  zoomed to 300% (so the toast carries the longest reason the planner gives), pressing with
   that toast up (the press held at "loading the photo", its decode of the
   original waiting until the state is measured), ready, and the photo that
   could not be loaded. Cancel, Share,
@@ -1697,8 +1731,11 @@ readers; the why is here, in this README.
 
 The sheet's surface takes `touch-action: none`, so its gestures are never the
 browser's: drag to move, two-finger pinch to scale and rotate, double-tap to
-centre. With the Photo tool open the same gestures pan and zoom the photo
-instead (100–400%, never off the sheet), and double-tap fits it again. A finger
+centre. With the Frame tool open the same gestures pan and zoom the photo
+instead (100–400%, never off the sheet), and double-tap puts it back at 100%
+and centred; a drag is measured against the visible rectangle inside the frame,
+so the photo stays under the finger whatever the border. In Fit the whole
+photo shows and nothing moves (the hint says so). A finger
 lifting mid-pinch re-seeds the gesture from the remaining one, so the layer
 keeps panning instead of jumping. Every gesture writes the same fields the
 parameter strips write, so each has a tap equivalent (Size, Rotation and
@@ -1731,7 +1768,7 @@ re-render would start the drag from the previous plate's place and move it
 built app).
 
 The first photo brings a short gesture hint saying what the sheet's
-gestures do in the open tool (the photo with Photo open, the type otherwise).
+gestures do in the open tool (the photo with Frame open, the type otherwise).
 It goes for good with its ×, or with the first gesture that moves something:
 by then it has been learned, and while it shows it covers the foot of the
 sheet.
@@ -1779,7 +1816,8 @@ same value modal, action sheets, toast and app bar. What differs, and why:
 
 - **No upload screen.** Border Studio starts on a photo picker; a print here
   exists without a photo (type on paper), so the app opens on the editor and
-  the photo is chosen in Photo › File.
+  the photo is chosen in Frame › Photo (where the Frame tool opens while there
+  is none).
 - **Pinch scales and turns the type; there is no inspect zoom.** Border Studio
   pinches the view outside Crop. Here a pinch on the sheet is the type's size
   and rotation (rotation is a feature; Border Studio has none), and a zoomed
@@ -1794,9 +1832,16 @@ same value modal, action sheets, toast and app bar. What differs, and why:
   screen to the offline row) and the lossless PNG.
 - **The style guide's `default` palette, not `sand`** (below, under the
   playbook's deviations).
-- **A native select for the sheet's shape** (five choices; Border Studio's
-  crop ratios are chips), and the typefaces as a segmented control with Bold
-  as its own B toggle (Border Studio lists fonts).
+- **The typefaces as a segmented control** with Bold as its own B toggle
+  (Border Studio lists fonts).
+- **The ratio is the sheet's, in Crop and in Fit.** Border Studio's chips
+  came across with their flip, but in Crop its ratio was the photo's, with the
+  border outside it, so its 9:16 saved a 5:8 file; here a 9:16 sheet is a
+  9:16 file. Its Free is Original, which keeps the whole photo, so Crop or Fit
+  has nothing to do there and says so.
+- **The fill is one row of chips in Frame › Border**, not a Fill tool of
+  four sub-tabs: Paper, Photo, Deep, Muted, Comp, Frosted, each chip a dot of
+  its colour and its name, so the panel keeps the dock's one height.
 - **Tap-to-select picks with a slop** (12 px, the nearest plate, a touch
   inside a box beating one beside it) and a drag starts after 4 px, so a tap
   picks without moving; Border Studio hit-tests the exact box and moves on any
@@ -1810,7 +1855,7 @@ same value modal, action sheets, toast and app bar. What differs, and why:
 - **Targets own 44 px everywhere.** Border Studio's parameter name and value
   own 40 px of height on the 36 px line over the slider; here their hit areas
   grow upward. Its hex field owns 40 of its 44 px the way the style guide's
-  select does; here the sheet's select fills its frame.
+  select does; there is no such field here.
 - **The app bar's compact layout is reachable.** Border Studio's Save hit area
   hangs past its bar and SG.fit skips compact for tight at every narrow width;
   here the bar has room for it.
@@ -1832,9 +1877,9 @@ same value modal, action sheets, toast and app bar. What differs, and why:
   centres the selected plate and zeroes its turn; Border Studio has no such
   gesture (its double tap resets the inspect view), and this app's type is
   placed and turned on the sheet, so a way back to the centre belongs there.
-  With Photo open, a double tap fits the photo again, as Border Studio's does
-  in Crop.
-- **With the Photo tool open, a touch on type does not pick it.** Border
+  With Frame open, a double tap puts the photo back at 100% and centred, as
+  Border Studio's does in Crop (in Fit there is nothing to put back).
+- **With the Frame tool open, a touch on type does not pick it.** Border
   Studio hit-tests text in every tool, Crop included, so a drag that starts on
   a line of text moves the text even while framing the photo. Here the
   photo's tool points every gesture at the photo: a headline usually covers
@@ -1896,10 +1941,11 @@ height, tracking, rotation, alignment with per-line justify), each in a real
 Riso ink with an optional second ink or backing over the photo; the press
 (halftone or grain, screen size, ink, misregistration, Edge, Wear, Re-roll,
 stock); an imported photo as the printing ground (stored exactly as imported,
-shown as shot, on its own Original sheet or a 1:1, 4:5, 3:4 or 2:3 crop,
-zoomed and panned within the sheet, paper over it or not); undo/redo,
+shown as shot, on its own Original sheet or a 1:1, 4:5, 3:4, 9:16 or 2:3
+sheet or its landscape twin, cropped or fitted, zoomed and panned within its
+frame, paper over it or not); the frame round it; undo/redo,
 persistence that opens every older save, and save via the share sheet. Four
-tools — Type, Ink, Photo, Press — on the vendored style guide, in Border
+tools — Frame, Type, Ink, Press — on the vendored style guide, in Border
 Studio's dock: one geometry for every tool and tab, every numeric setting a
 strip with a tap equivalent, a plate picked by tapping it on the sheet, and
 gates that check it in CI (`check-css`, `verify:geometry`, `check:touch`).

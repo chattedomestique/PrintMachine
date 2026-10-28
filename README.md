@@ -1689,8 +1689,10 @@ copies the core CSS, the icon masks, the Archivo font and fifteen elements
 select, input, dialog, menu, spinner, chip) into `src/vendor/styleguide/`,
 and the layout-only scripts (core's `SG.fit`, the segmented control's fit, the
 toolbar's paging, and the scrubber script only because the toolbar calls its
-`SG.afterParse`) into `public/sg/`. `VERSION.md` records the commit
-(`e38263e`). The copies are never edited here: `npm run sync:styleguide`
+`SG.afterParse`) into `public/sg/`. The app loads every element but the
+select, which nothing draws since the ratio chips replaced the sheet's one
+select; it stays in the vendored set, which is the style guide's as synced.
+`VERSION.md` records the commit (`e38263e`). The copies are never edited here: `npm run sync:styleguide`
 re-vendors them from a sibling checkout, and `npm run verify:geometry` then
 proves the dock still holds still. The style guide's scripts that own state
 (tabs, slider, dialog, menu, chip) are not loaded: React owns that state, so
@@ -2218,9 +2220,9 @@ files, from 707 in 24 (`npm test`); 17,059 lines of source in 86 files under
 (`git ls-files 'src/*.ts' 'src/*.tsx' | grep -v -e '\.test\.' -e
 '^src/vendor/' | xargs cat | wc -l`); 13,603 lines of tests, from 9,380
 (`git ls-files 'src/*.test.ts' 'src/*.test.tsx' | xargs cat | wc -l`); the
-precache 19 entries and 1.098 MiB, from 18 entries (`verify:offline`); the
+precache 19 entries and 1.094 MiB, from 18 entries (`verify:offline`); the
 JavaScript 353.9 kB (119.6 kB gzipped), from 324.6 kB (107.5), and the CSS
-211.7 kB, from 203.6 (`npm run build`). Five settings were added (Width,
+207.2 kB, from 203.6 (`npm run build`). Five settings were added (Width,
 Corners, the fill, Blur, Crop or Fit) and one control replaced (the sheet's
 select, by the ratio chips).
 

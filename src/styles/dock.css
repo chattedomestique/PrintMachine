@@ -1,7 +1,7 @@
 /* ── The dock's panels, on the style guide ───────────────────────────────────
    Ported from Border Studio's Controls.css (PR #1, 597ce7a). The controls are
    the style guide's elements — .btn, .tabs, .segmented, .slider, .switch,
-   .swatch-set, .select, .input, .card / .dialog — so this file holds no
+   .swatch-set, .chip, .input, .card / .dialog — so this file holds no
    button, toggle or slider styling of its own (how they look in the tray,
    without frames, is editor.css). It lays those elements out for a short
    panel under the sheet, and draws the few things the style guide has no

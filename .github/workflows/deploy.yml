@@ -21,12 +21,13 @@ concurrency:
   cancel-in-progress: false # let an in-flight deploy finish
 
 jobs:
-  # Every step of this job is a gate, run in this order on the one PAGES=1
-  # build `npm run verify` makes, and each is meant to be REQUIRED: a pull
-  # request into main should not merge until `verify` is green. That takes
-  # branch protection on main with `verify` as a required check, a switch
-  # in the repository's settings that only its owner can flip; until it is
-  # on, nothing stops a direct push to main, and this job is advice.
+  # The steps of this job are gates, run in this order on the one PAGES=1
+  # build `npm run verify` makes (measure-export, informational, and the
+  # upload aside), and the job is meant to be REQUIRED: a pull request into
+  # main should not merge until `verify` is green. That takes branch
+  # protection on main with `verify` as a required check, a switch in the
+  # repository's settings that only its owner can flip; until it is on,
+  # nothing stops a direct push to main, and this job is advice.
   verify:
     runs-on: ubuntu-latest
     steps:

@@ -1559,7 +1559,8 @@ typed arrays an output pixel; case 5 is recorded, not gated); cases 6-10 in
 megabytes, the typed arrays and the whole, at the ceilings the band engine
 was designed to or at what they measured x 1.25 where that is lower (case 7:
 144); cases 11-16 as above; the same-width pairs at 1.15 times. Case 8
-(81 s in node) and the framed 13 to 16 (209, 272, 807 and 93 s) run with
+(78 to 81 s in node) and the framed 13 to 16 (115 to 209, 151 to 272, 451 to
+807 and 50 to 93 s, on a fast day of this machine and a slow one) run with
 `FULL=1`; CI runs the rest, four processes at a time (2 min 55 s here, the
 framed 11 and 12 and the framed pair among them, when the precache budget
 was set; 4 min 51 s with them on a slower day, 3 min 39 s without them that
@@ -1579,8 +1580,8 @@ worst legal document 17.3 s (539: 473 and 65); the 61 MP worst press on
 Original 37.0 s. The encoder's share depends on the picture: 62 to 71 ms a
 megapixel on these prints, 112 on the device spike's noisy halftone. In the
 built app (`check-save`), a 40 MP photo on Original in the frame a first
-photo gets (9016×6440, 58 MP) is saved 23 to 29 s after the tap (22.6, 24.8
-and 28.5 s in three runs). On a phone only the encoder has been measured: the device spike ran
+photo gets (9016×6440, 58 MP) is saved 21 to 29 s after the tap (21.1, 22.6,
+24.8 and 28.5 s in four runs). On a phone only the encoder has been measured: the device spike ran
 it at 62, 65 and 62 ms a megapixel on its halftone test image on an iPhone
 (iOS 18.7, the Claude app's in-app WebKit view), R 0.49, 0.52 and 0.49 of
 the reference machine's 126; its estimate of a 40 MP save, 33 s x R, is 16

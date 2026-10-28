@@ -405,20 +405,25 @@ The palette is Border Studio's (`engine/palette.ts`, its `palette.js` at
 597ce7a trimmed to the four colours the fill shows: the median cut, the most
 photogenic cluster as the hero, the undertone for a grey hero's hue; Photo,
 Deep, Muted and Comp, always all four even when two are the same hex). It is
-made once a photo, the first time a frame shows one of its colours, from an
-84 px area-averaged sample of one fixed decode of the photo (1024 px on its
-long side, `features/media/frameSource.ts`), never from the preview's copy,
-whose size moves with the zoom; it is stored with the photo (`setPalette`,
-not an undo step, and the one thing that writes it; every history entry that
-holds the photo takes it, so no Undo or Redo takes it away and has the photo
-decoded again), so the preview, the save and every reopen agree, and Save makes it first when it is missing, so a
+made once a photo, the first time a frame shows on it, whatever the fill (so
+the fill's four swatches have their colours before one is chosen, as Border
+Studio's do; under Frosted it comes from the decode Frosted needs anyway),
+from an 84 px area-averaged sample of one fixed decode of the photo (1024 px
+on its long side, `features/media/frameSource.ts`), never from the preview's
+copy, whose size moves with the zoom; it is stored with the photo
+(`setPalette`, not an undo step, and the one thing that writes it; every
+history entry that holds the photo takes it, so no Undo or Redo takes it
+away and has the photo decoded again), so the preview, the save and every
+reopen agree, and Save makes it first when a palette colour needs it, so a
 press never starts without it. A photo whose frame source will not decode
-is one state, kept with the photo until another is chosen: while its fill
+is one state, kept with the photo until an attempt for it works (the photo
+chosen again, or decoded again when an Undo brings it back): while the print
 needs that source (a palette colour not yet stored, or Frosted) the frame
 stays Paper, the status card and Save's name say the photo could not be
 loaded (the words of a photo that is gone), and Save refuses it rather than
 press a frame that is quietly bare (`check-save` step 10, with the decode
-held back and failing); Paper, or a colour already stored with the photo,
+held back and failing, for a palette colour and for Frosted, and through a
+Replace and an Undo); Paper, or a colour already stored with the photo,
 saves as it shows.
 Fed Border Studio's own recorded sample of its two block photos, and 36
 photograph-like samples Border Studio's own `palette.js` keyed, the port
@@ -534,7 +539,7 @@ live where those are used:
   the same rectangle, so the preview places the photo exactly where the print
   does.
 - **The frame's colours** come from a third decode, made once a photo when a
-  frame first shows one of them: the photo at 1024 px on its long side (or
+  frame first shows on it: the photo at 1024 px on its long side (or
   its own size, if smaller), read back and kept for that photo (2.8 MB for a
   3:2 photo). It waits for the preview's copy to land, and Save makes it, when
   it is missing, before it decodes the original, so it never runs beside

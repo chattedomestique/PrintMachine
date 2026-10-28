@@ -14,7 +14,7 @@ import { areaAverage, type RgbaImage } from '../../engine/resample.ts'
 import type { FramePalette, PrintSettings } from '../../engine/types.ts'
 import { defaultSettings, makeMedia } from '../../state/defaults.ts'
 import { FrameSourceError, frameSourceSize, frameSources, paletteSample, type FrameSourceDeps } from './frameSource.ts'
-import { ensureFrameInputs, fillShows, frameInputState, framePalettes, frameState, needsFrost, needsPalette, previewFrameInputs, storedFrameInputs, type FrameMakers } from './frameInputs.ts'
+import { afterAttempt, ensureFrameInputs, fillShows, frameFailed, framePalettes, frameState, needsFrost, needsPalette, previewFrameInputs, storedFrameInputs, wantsPalette, type FrameMakers } from './frameInputs.ts'
 import { frostFields } from './frostField.ts'
 import { sheetAspect } from '../../engine/frame.ts'
 import { frostField } from '../../engine/frost.ts'
@@ -268,39 +268,57 @@ describe('where the inputs are, and a photo they cannot be made from', () => {
     return { ...s, aspect: '4:5', media: makeMedia({ id: 'p', width: 3000, height: 2000, ...(palette ? { palette } : {}) }), frame: { ...s.frame, ...frame } }
   }
 
-  it('nothing to make with nothing of the frame showing; preparing while held back; ready once there', () => {
-    expect(frameInputState(doc({ width: 0 }), null, null)).toBe('none')
-    // A palette colour: held back (the source not decoded yet), then
-    // stored with the photo.
-    expect(frameInputState(doc({ width: 0.05, fill: 'photo' }), null, null)).toBe('preparing')
-    expect(frameInputState(doc({ width: 0.05, fill: 'photo' }, PALETTE), null, null)).toBe('ready')
-    // A photo with no colour: made, and Paper.
-    expect(frameInputState(doc({ width: 0.05, fill: 'photo' }), 'colourless', null)).toBe('ready')
-    // Frosted: held back until this photo's source is here.
-    expect(frameInputState(doc({ width: 0.05, fill: 'frosted' }), null, null)).toBe('preparing')
-    expect(frameInputState(doc({ width: 0.05, fill: 'frosted' }), null, 'another')).toBe('preparing')
-    expect(frameInputState(doc({ width: 0.05, fill: 'frosted' }), null, 'p')).toBe('ready')
-    expect(frameInputState(doc({ width: 0.05, fill: 'paper' }), null, null)).toBe('ready')
+  it('the page makes the palette for a framed photo whatever the fill; the print needs it only for a palette colour', () => {
+    for (const fill of ['photo', 'deep', 'muted', 'comp', 'paper', 'frosted'] as const) {
+      expect(wantsPalette(doc({ width: 0.05, fill }))).toBe(true)
+      expect(wantsPalette(doc({ width: 0.05, fill }, PALETTE))).toBe(false)
+      expect(wantsPalette(doc({ width: 0, fill }))).toBe(false)
+      expect(needsPalette(doc({ width: 0.05, fill }))).toBe(fill !== 'paper' && fill !== 'frosted')
+    }
+    expect(wantsPalette({ ...doc({ width: 0.05 }), media: null })).toBe(false)
   })
 
-  it('a failed decode is one state while the fill needs it, and Save sees the photo as one that cannot be loaded', () => {
-    // Kept with the photo, whatever else is held: a palette colour not
-    // stored, and Frosted, need the source that would not decode.
+  it('a failed decode is one state while the print needs the source, and Save sees the photo as one that cannot be loaded', () => {
+    // Kept with the photo: a palette colour not stored, and Frosted, need
+    // the source that would not decode.
     for (const fill of ['photo', 'deep', 'muted', 'comp', 'frosted'] as const) {
-      expect(frameInputState(doc({ width: 0.05, fill }), 'failed', null)).toBe('failed')
-      expect(frameInputState(doc({ width: 0.05, fill }), 'failed', 'p')).toBe('failed')
+      expect(frameFailed(doc({ width: 0.05, fill }), 'p')).toBe(true)
+      // Another photo's failure is not this one's.
+      expect(frameFailed(doc({ width: 0.05, fill }), 'q')).toBe(false)
+      expect(frameFailed(doc({ width: 0.05, fill }), null)).toBe(false)
     }
-    expect(frameInputState(doc({ width: 0.05, fill: 'frosted' }, PALETTE), 'failed', 'p')).toBe('failed')
+    expect(frameFailed(doc({ width: 0.05, fill: 'frosted' }, PALETTE), 'p')).toBe(true)
     // A fill that needs nothing made prints what the preview shows: Paper,
-    // or a palette colour already stored with the photo.
-    expect(frameInputState(doc({ width: 0.05, fill: 'paper' }), 'failed', null)).toBe('ready')
-    expect(frameInputState(doc({ width: 0.05, fill: 'muted' }, PALETTE), 'failed', null)).toBe('ready')
+    // or a palette colour already stored with the photo (a palette made for
+    // the fill row under Paper that failed refuses nothing).
+    expect(frameFailed(doc({ width: 0.05, fill: 'paper' }), 'p')).toBe(false)
+    expect(frameFailed(doc({ width: 0.05, fill: 'muted' }, PALETTE), 'p')).toBe(false)
     // No frame showing: nothing to make, nothing to refuse.
-    expect(frameInputState(doc({ width: 0, fill: 'photo' }), 'failed', null)).toBe('none')
-    expect(frameState('ready', 'failed')).toBe('failed')
-    expect(frameState('ready', 'preparing')).toBe('ready')
-    expect(frameState('loading', 'failed')).toBe('loading')
-    expect(frameState('none', 'none')).toBe('none')
+    expect(frameFailed(doc({ width: 0, fill: 'photo' }), 'p')).toBe(false)
+    expect(frameState('ready', true)).toBe('failed')
+    expect(frameState('ready', false)).toBe('ready')
+    expect(frameState('loading', true)).toBe('loading')
+    expect(frameState('none', false)).toBe('none')
+  })
+
+  it('a failure stays with its photo until an attempt for that photo works: fails, Replace, Undo, decoded again', () => {
+    const a = doc({ width: 0.05, fill: 'frosted' })
+    const b = { ...a, media: makeMedia({ id: 'q', width: 3000, height: 2000 }) }
+    // Photo p fails: Save refuses it.
+    let failed = afterAttempt(null, 'p', false)
+    expect(frameFailed(a, failed)).toBe(true)
+    // Replaced by q, whose source decodes: q prints; p's failure is kept.
+    failed = afterAttempt(failed, 'q', true)
+    expect(frameFailed(b, failed)).toBe(false)
+    // Undo to p: until its new attempt ends, still refused (and the frame
+    // Paper: the held source is q's); decoded again and working, it prints
+    // what the preview now draws.
+    expect(frameFailed(a, failed)).toBe(true)
+    failed = afterAttempt(failed, 'p', true)
+    expect(failed).toBe(null)
+    expect(frameFailed(a, failed)).toBe(false)
+    // A failure of another photo replaces it.
+    expect(afterAttempt('p', 'q', false)).toBe('q')
   })
 
   it('a held-back source is waited for, and a failing one is the same failure every time it is asked, without another decode', async () => {

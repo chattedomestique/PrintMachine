@@ -64,7 +64,7 @@ export default function AppShell() {
   // be made from (it needs the frame source, which would not decode) is a
   // photo that could not be loaded, and is said the same way; its frame
   // stays Paper.
-  const mediaState = frameState(decoded, frameInputs.state)
+  const mediaState = frameState(decoded, frameInputs.failed)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tool, setTool] = useState<ToolId | null>(null)
   const [subs, setSubs] = useState<Subs>(FIRST_SUBS)

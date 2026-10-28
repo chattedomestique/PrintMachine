@@ -44,47 +44,40 @@ const PALETTE_FILLS: ReadonlySet<FillKey> = new Set<FillKey>(['photo', 'deep', '
 export const fillShows = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>): boolean =>
   s.media !== null && (s.frame.width > 0 || s.frame.corners > 0 || effectiveMode(s) === 'fit')
 
-/** Whether the frame shows a palette colour its photo does not hold yet. */
+/** Whether the page should make the photo's palette: the frame shows, and
+ *  the photo does not hold one yet, whatever the fill. The fill row shows
+ *  all four colours before one is chosen (Border Studio keys its swatches
+ *  on every photo), and under Frosted the source it is made from is decoded
+ *  anyway. */
+export const wantsPalette = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>): boolean => fillShows(s) && !s.media?.palette
+
+/** Whether the print needs the palette made: the frame shows a palette
+ *  colour its photo does not hold yet. */
 export const needsPalette = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>): boolean =>
-  fillShows(s) && PALETTE_FILLS.has(s.frame.fill) && !s.media?.palette
+  wantsPalette(s) && PALETTE_FILLS.has(s.frame.fill)
 
 /** Whether the frame shows Frosted, which is made from the photo's frame
  *  source every time the sheet's shape or the blur changes. */
 export const needsFrost = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>): boolean => fillShows(s) && s.frame.fill === 'frosted'
 
 /**
- * Where the frame's inputs are:
- *  - `none`       nothing to make (no photo, or nothing of the frame shows);
- *  - `preparing`  being made from the photo: the fill draws as Paper;
- *  - `ready`      the fill has what it needs (or needs nothing made: Paper,
- *                 or a palette colour whose palette is stored);
- *  - `failed`     the fill needs the photo's frame source, and it would not
- *                 decode.
+ * The photo whose frame source would not decode, after an attempt to make
+ * something from photo `id` ends: a failure is kept with that photo; a
+ * later attempt for it that works (the photo chosen again, or decoded again
+ * after an Undo brought it back) clears it, so what Save allows is what the
+ * preview draws.
  */
-export type FrameInputState = 'none' | 'preparing' | 'ready' | 'failed'
+export const afterAttempt = (failedId: string | null, id: string, ok: boolean): string | null => (ok ? (failedId === id ? null : failedId) : id)
 
 /**
- * Where a document's frame inputs are, from what the page has of them: the
- * last attempt's outcome for its photo (`colourless`: made, and the photo
- * has no colour, so its colour fills are Paper; `failed`: its frame source
- * would not decode), and which photo's frame source is held. A failure is
- * kept with its photo until another is chosen, and counts while the fill
- * needs something made from it: a fill that needs nothing (Paper, or a
- * palette colour already stored) prints what the preview shows.
+ * Whether a press of `s` cannot be made: its photo's frame source would not
+ * decode (`failedId`), and the print needs something made from it (a
+ * palette colour not stored, or Frosted). A fill that needs nothing made
+ * (Paper, or a palette colour already stored) prints what the preview
+ * shows.
  */
-export function frameInputState(
-  s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>,
-  outcome: 'colourless' | 'failed' | null,
-  sourceId: string | null,
-): FrameInputState {
-  if (!fillShows(s)) return 'none'
-  const palette = needsPalette(s)
-  const frost = needsFrost(s)
-  if (!palette && !frost) return 'ready'
-  if (outcome === 'failed') return 'failed'
-  const waiting = (palette && outcome !== 'colourless') || (frost && sourceId !== s.media?.id)
-  return waiting ? 'preparing' : 'ready'
-}
+export const frameFailed = (s: Pick<PrintSettings, 'media' | 'frame' | 'aspect'>, failedId: string | null): boolean =>
+  failedId !== null && s.media?.id === failedId && (needsPalette(s) || needsFrost(s))
 
 /**
  * The photo's state as Save and the panels see it: a photo the frame's
@@ -92,7 +85,7 @@ export function frameInputState(
  * all is, and Save refuses it with the same words (export.ts PHOTO_MISSING)
  * rather than pressing a frame that is quietly Paper.
  */
-export const frameState = (media: MediaState, inputs: FrameInputState): MediaState => (media === 'ready' && inputs === 'failed' ? 'failed' : media)
+export const frameState = (media: MediaState, failed: boolean): MediaState => (media === 'ready' && failed ? 'failed' : media)
 
 /**
  * What the preview draws a frame of `s` from: what the document holds, and,

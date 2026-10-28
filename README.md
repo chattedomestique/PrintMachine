@@ -538,8 +538,11 @@ its field made for a new sheet shape inside the render (each frame of a
 Width drag there: the cover and the field, through the same `frostFields`;
 the timed render steps through six widths a few hundred-thousandths apart,
 each its own shape on the same canvas, so the render cache stays and every
-step misses the kept covers and fields), against the same render with its
-field kept: the making's own share, held to what it measured x 1.25, 1.82x
+step misses the kept covers and fields; the rig counts what each step
+makes, and a step that makes no cover or no field stops the gate with an
+error (as does a Blur step that makes no field), so a page that keeps more
+of them cannot turn the row into a timing of kept renders), against the
+same render with its field kept: the making's own share, held to what it measured x 1.25, 1.82x
 settled and 4.03x draft (set from 8 runs at 1.31 to 1.45 and 2.68 to 3.22;
 1.47 settled in a ninth). The cover and the field are 34 to 66 ms over the
 settled frame and 17 to 19 ms over the draft one: the reshaped render's time

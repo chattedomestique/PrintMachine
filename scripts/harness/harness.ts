@@ -38,7 +38,7 @@ import { PAGE_SOURCE_DEPS, frameSourceSize, frameSources, pageFrameSources } fro
 import { frostFields } from '../../src/features/media/frostField.ts'
 import { type FramePalette, type FrameSettings, type PrintSettings } from '../../src/engine/types.ts'
 import { effectiveMode, sheetAspect, type FrameInputs } from '../../src/engine/frame.ts'
-import { frostField } from '../../src/engine/frost.ts'
+import { frostBlur, frostCover, frostField } from '../../src/engine/frost.ts'
 import { FROST_DRAFT_LONG, FROST_FIELD_LONG } from '../../src/engine/limits.ts'
 import type { RgbaImage } from '../../src/engine/resample.ts'
 import { decodeOriginal, previewArea, workingSize } from '../../src/features/media/decode.ts'
@@ -1074,7 +1074,10 @@ const COST_FRAMES: Record<string, Partial<FrameSettings> | null> = {
  *  sheet shape, before it comes back to the first: more than the covers
  *  (3) and fields (5) kept (frostField.ts), so every step makes both. The
  *  sheet's shape moves in steps (the border is whole pixels of the photo),
- *  so a canvas holds only a few (7 to 9 here). */
+ *  so a canvas holds only a few (7 to 9 here). That every step does is
+ *  counted, not assumed: a step that makes no cover or no field throws
+ *  (`frameCost`), so a page that keeps more fails the gate rather than
+ *  timing renders it kept. */
 const RESHAPE_STEPS = 6
 
 const costRigs = new Map<
@@ -1089,6 +1092,8 @@ const costRigs = new Map<
     inputs: FrameInputs
     fieldLong: number
     fields: ReturnType<typeof frostFields>
+    /** How many covers and fields `fields` has made, counted. */
+    made: { covers: number; fields: number }
     blur: number
     /** Original's Width drag: the widths it steps through (each its own
      *  sheet shape, the same canvas), and the step it is at. */
@@ -1138,7 +1143,12 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
     const media = await createImageBitmap(c)
     c.width = 0
     const fieldLong = draft ? FROST_DRAFT_LONG : FROST_FIELD_LONG
-    const fields = frostFields()
+    // The page's kept fields and covers, their making counted.
+    const count = { covers: 0, fields: 0 }
+    const fields = frostFields(undefined, {
+      cover: (src, a, long) => (count.covers++, frostCover(src, a, long)),
+      blur: (cover, blur) => (count.fields++, frostBlur(cover, blur)),
+    })
     const inputs = storedFrameInputs(settings)
     if (needsFrost(settings)) inputs.frost = fields.field(m.id, frameSourceOf(m), aspect, settings.frame.blur, fieldLong)
     const height = (draft ? draftSize(aspect) : previewSize(aspect)).h
@@ -1158,7 +1168,7 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
       }
       if (widths.length < RESHAPE_STEPS) throw new Error(`frame-cost: ${key} has ${widths.length} widths of its own shape on one canvas`)
     }
-    rig = { settings, media, height, out: context(false), scratch: context(true), cache: { current: null }, inputs, fieldLong, fields, blur: 10, widths, step: 0 }
+    rig = { settings, media, height, out: context(false), scratch: context(true), cache: { current: null }, inputs, fieldLong, fields, made: count, blur: 10, widths, step: 0 }
     costRigs.set(key, rig)
     renderPrint(rig.out, rig.scratch, settings, rig.cache, null, rig.height, media, rig.inputs)
   }
@@ -1167,6 +1177,7 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
   if (bare) seam.__PM_TEST__ = { skipFrameCompose: true }
   try {
     const r = rig
+    const was = { ...r.made }
     const t0 = performance.now()
     if (remake === 'reshape') {
       // The next width of a drag on Original: a sheet shape whose cover and
@@ -1185,6 +1196,15 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
     }
     renderPrint(r.out, r.scratch, r.settings, r.cache, null, r.height, r.media, r.inputs)
     const ms = performance.now() - t0
+    // A step that made less than it is there to time would time a kept
+    // render and pass: fail loudly instead.
+    const covers = r.made.covers - was.covers
+    const madeFields = r.made.fields - was.fields
+    if (remake === 'reshape' && (covers !== 1 || madeFields !== 1))
+      throw new Error(
+        `frame-cost: ${key}: a step of the Width drag on Original made ${covers} covers and ${madeFields} fields, not one of each (the page keeps more covers or fields than the ${RESHAPE_STEPS} shapes the drag steps through: RESHAPE_STEPS, harness.ts)`,
+      )
+    if (remake === true && madeFields !== 1) throw new Error(`frame-cost: ${key}: a step of the Blur drag made ${madeFields} fields, not one`)
     return { ms, w: r.out.canvas.width, h: r.out.canvas.height }
   } finally {
     seam.__PM_TEST__ = before

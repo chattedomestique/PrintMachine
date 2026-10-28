@@ -86,16 +86,22 @@ export type ScreenMethod = 'halftone' | 'grain'
 export interface FontChoice {
   readonly id: string
   readonly name: string
-  /** A CSS font-family stack. System fonts only — an external font in an
-   *  offline-first app is a contradiction (playbook §3.6). */
+  /** A CSS font-family stack. Poster leads with the one bundled face,
+   *  Tanklager Kompakt (src/styles/fonts.css, precached, so it is there
+   *  offline); the others are system stacks. The rest of a stack is what a
+   *  face that will not load falls back to. */
   readonly stack: string
+  /** Whether the face has a bold. Tanklager is one weight: a Poster plate's
+   *  Bold is kept in the document but sets nothing (`layerFont`), so no
+   *  browser fakes one, and the press is the same on every engine. */
+  readonly bold: boolean
 }
 
 export const FONTS: readonly FontChoice[] = [
-  { id: 'grotesk', name: 'Grotesk', stack: `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` },
-  { id: 'serif', name: 'Serif', stack: `ui-serif, 'New York', Georgia, 'Times New Roman', serif` },
-  { id: 'mono', name: 'Mono', stack: `ui-monospace, SFMono-Regular, Menlo, 'Courier New', monospace` },
-  { id: 'poster', name: 'Poster', stack: `Impact, Haettenschweiler, 'Arial Narrow Bold', 'Helvetica Neue', sans-serif` },
+  { id: 'grotesk', name: 'Grotesk', stack: `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`, bold: true },
+  { id: 'serif', name: 'Serif', stack: `ui-serif, 'New York', Georgia, 'Times New Roman', serif`, bold: true },
+  { id: 'mono', name: 'Mono', stack: `ui-monospace, SFMono-Regular, Menlo, 'Courier New', monospace`, bold: true },
+  { id: 'poster', name: 'Poster', stack: `Tanklager, Impact, Haettenschweiler, 'Arial Narrow Bold', 'Helvetica Neue', sans-serif`, bold: false },
 ]
 
 export function fontById(id: string): FontChoice {

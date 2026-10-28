@@ -217,8 +217,13 @@ export interface RenderCache extends SheetNoise {
   tone: Map<string, { key: string; field: ToneField; fontSize: number }>
 }
 
-function cacheKey(s: PrintSettings, w: number, h: number): string {
-  return [w, h, s.seed, s.paperId].join('|')
+/** What the cache's fields are made from: the size, the seed, the paper,
+ *  and the face generation (features/media/faces.ts), which moves when a face
+ *  lands after the preview rasterised type without it, so a late face never
+ *  leaves rasters made in the fallback. Nothing of the frame is here: a
+ *  frame edit never rasterises the plates again. */
+function cacheKey(s: PrintSettings, w: number, h: number, faces: number): string {
+  return [w, h, s.seed, s.paperId, faces].join('|')
 }
 
 /** Everything about a layer that changes its rasterised glyphs (and so its
@@ -240,10 +245,10 @@ function toneKey(l: TextLayer): string {
   ].join('')
 }
 
-function buildCache(s: PrintSettings, w: number, h: number): RenderCache {
+function buildCache(s: PrintSettings, w: number, h: number, faces: number): RenderCache {
   const r = noiseRecipe(s, h)
   return {
-    key: cacheKey(s, w, h),
+    key: cacheKey(s, w, h, faces),
     w,
     h,
     paper: paperField(w, h, r.paper),
@@ -298,10 +303,12 @@ export function ensureCache(
   s: PrintSettings,
   w: number,
   h: number,
+  /** The face generation the rasters are made in (`PreviewOptions.faces`). */
+  faces = 0,
 ): RenderCache {
-  const key = cacheKey(s, w, h)
+  const key = cacheKey(s, w, h, faces)
   if (cache && cache.key === key && cache.w === w && cache.h === h) return cache
-  return buildCache(s, w, h)
+  return buildCache(s, w, h, faces)
 }
 
 /**
@@ -1697,11 +1704,18 @@ export function renderPrint(
   /** What the frame's fill is made from (frame.ts `FrameInputs`); a fill
    *  whose input is absent draws as Paper. */
   inputs: FrameInputs,
+  opts: PreviewOptions = {},
+): void {
+  drain(previewSteps(ctx, scratch, s, cacheRef, overlay, height, media, inputs, opts))
+}
+
+export interface PreviewOptions {
   /** Called once the photo has been copied into the ground, when nothing
    *  further reads `media`. */
-  onGround?: () => void,
-): void {
-  drain(previewSteps(ctx, scratch, s, cacheRef, overlay, height, media, inputs, onGround))
+  onGround?: () => void
+  /** The face generation (features/media/faces.ts `faceGeneration`): the
+   *  cached glyph rasters are made again when it moves. */
+  faces?: number
 }
 
 export interface AsyncRenderOptions extends ExportPressOptions {
@@ -1858,13 +1872,13 @@ function* previewSteps(
   height: number,
   media: CanvasImageSource | null,
   inputs: FrameInputs,
-  onGround: (() => void) | undefined,
+  { onGround, faces = 0 }: PreviewOptions,
 ): Generator<RenderProgress, void> {
   const { w, h } = outputSize(sheetAspect(s), height)
   sizeCanvas(ctx, w, h)
   sizeCanvas(scratch, w, h)
 
-  const cache = ensureCache(cacheRef.current, s, w, h)
+  const cache = ensureCache(cacheRef.current, s, w, h, faces)
   cacheRef.current = cache
 
   // The photo is laid down first — before any type is rasterised — because the

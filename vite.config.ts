@@ -40,7 +40,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // woff: Poster's bundled face (src/styles/fonts.css); woff2: the
+        // style guide's Archivo. Both precached, so the print and the chrome
+        // are set in their own faces offline.
+        globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2}'],
         // Base-aware — this is the one that breaks offline only on Pages (§3.5).
         navigateFallback: `${base}index.html`,
         cleanupOutdatedCaches: true,

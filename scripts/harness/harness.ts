@@ -12,12 +12,17 @@
  * Text depends on the fonts installed, so a hash of a text-bearing render only
  * means something compared against another run ON THE SAME MACHINE. That is how
  * `run.mjs` and `compare.mjs` are used: record the parent, record the commit,
- * compare. Only the text-free document's hashes are committed.
+ * compare. Only the text-free document's hashes are committed. Poster is the
+ * app's bundled face, loaded here from the app's own stylesheet before the
+ * page says it is ready (`H.faces`; run.mjs refuses a page without it), so
+ * Poster is set as the app sets it; the other faces are the machine's.
  *
  * The photo is generated in the page (a luminance ramp with a zone plate in it),
  * so there are no binary fixtures and the same pixels come back every run.
  */
 
+import '../../src/styles/fonts.css'
+import { loadFaces } from '../../src/features/media/faces.ts'
 import { draftSize, groundRect, isNativeRect, outputSize, plateGeometry, plateHalo, previewSize, renderPrint, renderPrintAsync, type AsyncRenderOptions, type RenderCache } from '../../src/engine/render.ts'
 import { cssFont, layerFont, lineRects, planGlyphs } from '../../src/engine/text.ts'
 import { tileGrid } from '../../src/engine/tiles.ts'
@@ -1133,8 +1138,13 @@ declare global {
       frameCost: typeof frameCost
       chain: typeof chain
       normalized: boolean
+      /** Whether Poster's face loaded before the page said it was ready. */
+      faces: Awaited<ReturnType<typeof loadFaces>>
     }
   }
 }
 
-window.H = { docs: Object.keys(DOCS), render, seam, fontCap, fileParity, retry, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, parityBorders, frameCost, chain, normalized: !!normalizeSettings }
+// As main.tsx: nothing is measured or drawn before the face is in.
+void loadFaces().then((faces) => {
+  window.H = { docs: Object.keys(DOCS), render, seam, fontCap, fileParity, retry, scaleCorrelation, save, prepare, press, encodeCheck, pngCheck, parityBorders, frameCost, chain, normalized: !!normalizeSettings, faces }
+})

@@ -68,9 +68,11 @@ export type FontMeasure = (font: FontSpec, text: string) => number
  *  and anything that measures, so the two can never set different fonts. */
 export const cssFont = (f: FontSpec): string => `${f.weight} ${f.px}px ${f.stack}`
 
-/** The face a layer is set in, at a pixel size: Bold is weight 700, else 400. */
+/** The face a layer is set in, at a pixel size: Bold is weight 700, else 400;
+ *  a face of one weight (Poster) is 400 whatever the layer's Bold says. */
 export function layerFont(layer: TextLayer, px: number): FontSpec {
-  return { stack: fontById(layer.fontId).stack, weight: layer.bold ? 700 : 400, px }
+  const face = fontById(layer.fontId)
+  return { stack: face.stack, weight: layer.bold && face.bold ? 700 : 400, px }
 }
 
 const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t'

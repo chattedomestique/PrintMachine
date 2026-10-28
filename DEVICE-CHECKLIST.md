@@ -32,6 +32,9 @@ So:
       is the app saying it has finished precaching and will open offline (the
       first time it happens, a toast says "Ready to open offline" too)
 - [ ] *Now* airplane mode → launch from the home screen → it fully boots and is usable
+- [ ] Still in airplane mode: the default plates (PRINT MACHINE, RISO) are set
+      in Tanklager, narrow and heavy, not in Helvetica; type a line in lower
+      case on a Poster plate → it prints in lower case
 - [ ] Redeploy a visible change → relaunch online once → the new version appears
 
 > `npm run verify:offline` proves the build itself: it serves `dist/` at the
@@ -93,6 +96,9 @@ So:
       preview takes a moment to redraw after the first tap; change the
       typeface, then double-tap ON the thumb (the first tap may nudge it and
       back) → 40%, and one Undo takes back only the reset (the typeface stays)
+- [ ] Type › Face on a Poster plate: the B is unpressed, cannot be pressed,
+      and "Poster is one weight" is under Bold; on Grotesk it presses again
+      and the type gets heavier
 - [ ] Drag a press slider → the preview keeps up, and the grain does **not**
       visibly re-randomise
 - [ ] One slider drag is one undo step; adding a plate is its own step; a

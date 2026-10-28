@@ -31,7 +31,7 @@ npm run dev        # http://localhost:5173
 ```
 
 ```sh
-npm run verify          # the gate: lint + typecheck + check-css + test + build
+npm run verify          # the gate: lint + typecheck + check-css + check-fonts + test + build
 npm run verify:offline  # proves the build boots with no network (a PAGES=1 build)
 npm run verify:geometry # the dock holds still; 44px targets; 200% text; the app bar
 PAGES=1 npm run build   # production build for the GitHub Pages sub-path
@@ -90,8 +90,10 @@ src/
              Switch, SwatchSet, ActionSheet, the Slider and its parameter
              strip), app-agnostic: nothing in it knows what a print is.
   features/  app-aware composition — the only layer that knows what the app is.
-  styles/    the app's own CSS over the style guide: index.css (app facts),
-             editor.css (the planes), dock.css (the panels), shell.css.
+  styles/    the app's own CSS over the style guide: fonts.css (Poster's
+             face), index.css (app facts), editor.css (the planes), dock.css
+             (the panels), shell.css.
+  assets/    the one bundled typeface, Tanklager.woff (see "Fonts").
   vendor/    the style guide, vendored (never edited here; see "Design system").
 ```
 
@@ -146,6 +148,14 @@ opens changed (each has a test that says so):
   word numbers the text no longer has, never printed and becomes nothing). A
   plate takes a backing or a second ink, so a plate that had both keeps the
   backing and stops switching ink over the photo.
+- **A Poster plate is set in Tanklager Kompakt**, the face the app now
+  bundles, where it was set in whatever the machine's system stack found:
+  Impact on a desktop that has it, Helvetica Neue on an iPhone, which has no
+  Impact. It is the one change of look in a stored print, on purpose (see
+  "Fonts"). Nothing is rewritten: the plate keeps its face, its size and its
+  Bold. Tanklager is condensed, so a line sized with Fit in Helvetica Neue
+  spans less of the sheet than it did; tap Fit again to fill it. Bold on a
+  Poster plate is kept and sets nothing (Poster is one weight).
 
 ### Offline, and why it is checked rather than inspected
 
@@ -163,6 +173,17 @@ localhost test that skips it.
 It is checked against two deliberate breakages: a missing worker, and a worker
 that installs but precaches only the shell. The second is the failure the
 playbook records — installable, and blank offline.
+
+It prints the precache's size (entries and bytes), and it checks Poster's face
+offline the way a launch from the home screen uses it, never by asking
+`document.fonts.check`, which says yes when no such face is declared at all:
+in the cold offline tab the app must have loaded the face before it mounted,
+and `document.fonts.load` must answer with the face, loaded; a line set in
+Poster's stack must measure differently from the same line in the stack
+without the face (equal when the face never loaded), and the same as it
+measured online; and the face's `o` must rise at most 0.9 of its `O` (see
+"Fonts"). Built with the face left out of the precache, it fails each of
+them.
 
 **On iOS the build being correct is not sufficient.** A home-screen PWA has to
 be launched once *while online* before it will ever open offline; going straight
@@ -634,8 +655,58 @@ widest line lands on 92% of the width to within a pixel at every render height.
 
 The weight decision that matters over a photo is regular or bold — heavier
 strokes survive the screen, the tear and the bleed — so it is a **Bold** switch
-(700 or 400). The faces are Poster, Grotesk, Serif and Mono; all four are system
-stacks, so nothing loads and everything works offline.
+(700 or 400), off and unavailable on Poster, which is one weight ("Poster is
+one weight", under it). The faces are Poster, Grotesk, Serif and Mono.
+
+### Fonts
+
+**Poster is one bundled face, Tanklager Kompakt** (Ariel Martín Pérez, Tunera
+Type Foundry, SIL Open Font License 1.1; one WOFF of 18,908 bytes in
+`src/assets/fonts/`, from Border Studio's library, its notice and licence in
+`public/licences.txt`). Poster's system stack led with Impact, which an
+iPhone does not have, so on the owner's phone the default plate was set in
+Helvetica Neue and on a desktop in Impact: the same print, two faces. A print
+is now set in the same face on every phone, online and off (the face is
+precached). Of Border Studio's 52 faces, nine can set what this app prints
+(A-Z, a-z, 0-9 and punctuation, a lowercase of their own, no ligatures), and
+Tanklager is the one of the nine that is condensed and heavy, as the stack
+meant Impact to be; it is the only one that came across. The other three
+faces stay system stacks. Railroad Gothic, Border Studio's heavier wood type,
+draws capitals only (its lowercase glyphs are capitals), so it is the
+owner's one-file alternative, not the default.
+
+It is one weight, so **Bold sets nothing on a Poster plate**, and the switch
+says so: a bold made by the browser from the regular smears the glyphs
+differently in each engine, so the press would differ between Chromium and an
+iPhone. The stored Bold is kept, so a plate moved to another face keeps its
+choice. A stored print's Poster plates keep their sizes; a line sized with
+Fit in the old face may want Fit again (see "Saved prints keep opening").
+
+**The face is in before anything measures.** The layout's advances, Fit, a tap
+on a plate and the normaliser's one Fit conversion all measure text
+synchronously, and a canvas measures and draws in a fallback while a face is
+still loading. So `main.tsx` waits for the face (`features/media/faces.ts`)
+before the document is read or the sheet drawn, for two seconds at most: a
+face that fails or is slow never leaves a blank app, the app goes on in the
+rest of Poster's stack, and if the face lands later the preview's glyph
+rasters, keyed by a face generation (`render.ts` `ensureCache`), are set
+again in it. `font-display: block`, weight 400 only, so nothing asks a browser
+to fake a bold.
+
+**The face is checked, not trusted.** `check-fonts` (in `npm run verify`)
+reads the WOFF itself (its tables inflated and checksummed; `cmap` formats 4
+and 12; `GSUB`'s features) and fails unless A-Z, a-z, 0-9 and
+`. , : ; ! ? ' " ( ) - / & @ #` are mapped, each lowercase letter maps to a
+glyph of its own, and no ligature feature (`liga clig calt dlig rlig`) is
+offered; three broken copies of the face (lowercase unmapped, lowercase set
+in the capitals, a `liga` added) must each fail it (`node
+scripts/check-fonts.mjs --controls dir/` writes them out, and `node
+scripts/check-fonts.mjs dir/liga.woff` checks one, or any other face). Its
+lowercase rule is a pre-check only: Railroad Gothic passes it, its separate
+lowercase glyphs being capitals. The real test is the ink: `verify-offline` measures `o`
+against `O` in the browser (Tanklager: 0.68; a lowercase that is capitals:
+1.00; fails over 0.9), with its verdict tested on measured heights it is
+handed (`faces.test.ts`), since node cannot read the face's CFF outlines.
 
 ### Tracking and line height
 
@@ -1267,8 +1338,9 @@ correlate with the render at the height (`npm run harness -- --out s.json
 every height a print is saved at, the default print and type at 40% correlate
 at 0.97 or better, and type at 20% at 0.95 or better. At 20% the halftone
 lattice is under 4 px at 1800, so how closely the two heights agree depends on
-the glyphs and therefore on the machine's fonts: 0.9706 on one machine, 0.9644
-on the CI runner. Before the scale fixes the same document read 0.77. Below the
+the glyphs: 0.9712 in Tanklager, Poster's bundled face (before it was bundled,
+Poster fell back to each machine's fonts and read 0.9706 on one machine and
+0.9644 on the CI runner). Before the scale fixes the same document read 0.77. Below the
 reference height the preview is a lower-fidelity picture: a halftone for small
 type is finer than a 900 px raster can draw, and a speck or a fibre stops at
 one pixel.
@@ -1832,7 +1904,14 @@ nothing else does. These went, and saved prints that used them still open
 ## Licences and provenance
 
 Print Machine's own code is written for it. One part is translated from
-another project, and says so:
+another project, and says so, and one typeface is bundled:
+
+- **Tanklager Kompakt** (`src/assets/fonts/Tanklager.woff`), by Ariel Martín
+  Pérez, Tunera Type Foundry (http://www.tunera.xyz/), under the SIL Open Font
+  License 1.1, unmodified (copied from Border Studio's library, where it is
+  credited the same way). The site ships the notice the font carries and the
+  licence's full text in `public/licences.txt`, as the OFL asks of software
+  that bundles a font.
 
 - **The JPEG encoder's forward DCT** (`src/engine/encode/jpeg.ts`, and its
   copy in `scripts/device-spike/spike.html`) is `jpeg_fdct_float` from the

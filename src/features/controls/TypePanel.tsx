@@ -2,7 +2,7 @@ import { useId } from 'react'
 import { Icon, Segmented } from '../../ui/ui.tsx'
 import { ParamStrip } from '../../ui/Slider.tsx'
 import type { ChangeHow } from '../../ui/param.ts'
-import { FONTS, type TextAlign, type TextLayer } from '../../engine/types.ts'
+import { FONTS, fontById, type TextAlign, type TextLayer } from '../../engine/types.ts'
 import { sheetAspect } from '../../engine/frame.ts'
 import { fitSize } from '../../engine/text.ts'
 import { canvasMeasure } from '../../state/persist.ts'
@@ -36,8 +36,13 @@ export default function TypePanel({ sub, onSub }: { sub: SubId<'type'>; onSub: (
   const { settings, dispatch, selectedLayer } = useSettings()
   const textHint = useId()
   const fitHint = useId()
+  const weightHint = useId()
   const layer = selectedLayer ?? settings.layers[0]
   if (!layer) return null
+  // Poster is one weight: its Bold sets nothing, so the switch says so rather
+  // than sit pressed over a face that does not change (the stored choice is
+  // kept for a move to another face).
+  const face = fontById(layer.fontId)
 
   /** A slider's change: a drag coalesces into one undo step. */
   const set = (p: Partial<TextLayer>, how: ChangeHow) =>
@@ -91,16 +96,25 @@ export default function TypePanel({ sub, onSub }: { sub: SubId<'type'>; onSub: (
               a row of its own: beside four face names it does not fit a
               320px phone, and a row that wraps leaves it alone on a line. */}
           <div className="controls__row">
-            <span className="controls__label" aria-hidden="true">
-              Bold
-            </span>
+            <div>
+              <span className="controls__label" aria-hidden="true">
+                Bold
+              </span>
+              {!face.bold && (
+                <p className="controls__hint" id={weightHint}>
+                  {face.name} is one weight
+                </p>
+              )}
+            </div>
             <button
               type="button"
               className="btn controls__letter"
               data-shape="circle"
               data-size="sm"
-              aria-pressed={layer.bold}
+              aria-pressed={face.bold && layer.bold}
               aria-label="Bold"
+              aria-describedby={face.bold ? undefined : weightHint}
+              disabled={!face.bold}
               onClick={() => patch({ bold: !layer.bold })}
             >
               B

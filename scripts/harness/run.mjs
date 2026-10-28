@@ -124,6 +124,10 @@ async function openPage() {
   await page.waitForFunction(() => window.H !== undefined, null, { timeout: 30_000 }).catch(() => {
     throw new Error(`harness did not load: ${errors.join(' | ') || 'no error reported'}`)
   })
+  // Poster set in a fallback would be a different print, and an A/B would
+  // call it a change (harness.ts header).
+  const faces = await page.evaluate(() => window.H.faces)
+  if (faces !== 'loaded') throw new Error(`harness: Poster's face did not load (${faces})`)
   return { page, errors }
 }
 

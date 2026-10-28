@@ -1097,7 +1097,7 @@ describe('whichever decode of the photo is drawn, it fills the rectangle its tru
       const out = fakeContext()
       const scratch = fakeContext()
       let grounded = 0
-      renderPrint(out.ctx, scratch.ctx, s, { current: null }, null, height, bitmap, {}, () => grounded++)
+      renderPrint(out.ctx, scratch.ctx, s, { current: null }, null, height, bitmap, {}, { onGround: () => grounded++ })
       expect(grounded).toBe(1)
       expect(scratch.drawn).toHaveLength(1)
       const [source, dx, dy, dw, dh] = scratch.drawn[0] as [CanvasImageSource, number, number, number, number]

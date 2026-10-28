@@ -12,6 +12,16 @@
  * sub-path is precisely where `navigateFallback` and the precache URLs go
  * wrong, and it survives every localhost test that skips it.
  *
+ * Then it proves the bundled face is there offline, not vacuously:
+ * `document.fonts.check('40px Tanklager')` is true when no such face is
+ * declared at all, so it is not used. In the cold offline tab the app must
+ * have loaded the face itself before it mounted (main.tsx waits for it), and
+ * `document.fonts.load` must answer with the face, loaded; a string set
+ * in Poster's stack must measure differently from the same string in the
+ * stack without the face (equal when the face never loaded); the advance must
+ * be the one the online tab measured; and the face's `o` must rise at most 0.9
+ * of its `O` (face-checks.mjs: a face whose lowercase is capitals fails).
+ *
  * Run: npm run verify:offline   (builds with PAGES=1 first: this serves the
  * build only under the Pages sub-path, so a build for `/` would 404 every
  * asset and time out)
@@ -23,6 +33,7 @@ import { join, extname, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright-core'
+import { FACE_WAIT_MS, LOWERCASE_MAX, POSTER_FALLBACK, POSTER_FAMILY, faceSetsStack, lowercaseVerdict, measureFaces } from './face-checks.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist')
 const BASE = '/PrintMachine/'
@@ -39,9 +50,19 @@ const TYPES = {
   '.webmanifest': 'application/manifest+json',
   '.json': 'application/json',
   '.ico': 'image/x-icon',
-  // The style guide's Archivo. Chromium loads a font served as
-  // application/octet-stream anyway; a test server should still be honest.
+  // The style guide's Archivo, and Poster's Tanklager. Chromium loads a font
+  // served as application/octet-stream anyway; a test server should still be
+  // honest.
   '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+}
+
+/** What step 5 measures: Poster's stack, the same without its face, and the
+ *  face alone (for its ink), each at 40 px. */
+const FACE_PROBE = {
+  fonts: [`40px ${POSTER_FAMILY}, ${POSTER_FALLBACK}`, `40px ${POSTER_FALLBACK}`, `40px ${POSTER_FAMILY}`],
+  chars: ['o', 'O'],
+  text: 'RISO Print Machine 0123',
 }
 
 /** Serve dist/ under the Pages sub-path, and nothing outside it. */
@@ -123,15 +144,25 @@ try {
   else console.log(`✓ service worker active and controlling (scope ${sw.scope})`)
 
   // 2. The precache must hold the real hashed assets, not just the shell.
-  const entries = await page.evaluate(async () => {
-    const names = await caches.keys()
+  const { entries, bytes } = await page.evaluate(async () => {
     const all = []
-    for (const n of names) all.push(...(await (await caches.open(n)).keys()).map((r) => r.url))
-    return all
+    let size = 0
+    for (const n of await caches.keys()) {
+      const cache = await caches.open(n)
+      for (const req of await cache.keys()) {
+        all.push(req.url)
+        size += (await (await cache.match(req)).arrayBuffer()).byteLength
+      }
+    }
+    return { entries: all, bytes: size }
   })
   const hashed = entries.filter((u) => /\/assets\/index-[A-Za-z0-9_-]+\.(js|css)$/.test(u))
   if (hashed.length < 2) fail(`precache is missing the hashed JS/CSS (found ${hashed.length})`)
-  else console.log(`✓ precached ${entries.length} entries including the hashed bundle`)
+  else console.log(`✓ precached ${entries.length} entries, ${(bytes / 2 ** 20).toFixed(3)} MiB (${bytes} B), including the hashed bundle`)
+  const face = entries.filter((u) => new RegExp(`/assets/${POSTER_FAMILY}-[A-Za-z0-9_-]+\\.woff$`).test(u))
+  if (face.length !== 1) fail(`precache should hold Poster's face once (found ${face.length})`)
+  else console.log(`✓ the face is precached (${face[0].slice(face[0].lastIndexOf('/') + 1)})`)
+  const online = (await page.evaluate(measureFaces, FACE_PROBE))[0]
 
   // 3. The app has to say it is ready, or the readiness signal is a lie. The
   // contract is a DOM attribute, not a look: `data-offline-state` on whatever
@@ -166,10 +197,46 @@ try {
   // failed navigation throws, which would bury the diagnostics above under a
   // stack trace and make a clear failure look like a crash.
   if (loaded) {
-    // Booting means the app rendered, not merely that a document arrived.
-    const booted = await cold.evaluate(() => !!document.querySelector('.sheet canvas'))
+    // Booting means the app rendered, not merely that a document arrived. The
+    // app mounts once Poster's face is in (main.tsx, two seconds at most), so
+    // the sheet is waited for, that long and a little more, never longer.
+    const booted = await cold
+      .waitForSelector('.sheet canvas', { state: 'attached', timeout: FACE_WAIT_MS + 3000 })
+      .then(() => true)
+      .catch(() => false)
     if (!booted) fail('offline cold launch produced a document but the app did not render')
     else console.log('✓ cold launch with no network boots and renders')
+  }
+
+  // 5. The face, offline, really there (see the header).
+  if (loaded) {
+    // First what the app itself did: it mounts only after its own wait for
+    // the face, so by now the declared FontFace is loaded, before this check
+    // asks for anything.
+    const declaredFaces = (family) => [...document.fonts].filter((f) => f.family.replace(/["']/g, '') === family).map((f) => f.status)
+    const byApp = await cold.evaluate(declaredFaces, POSTER_FAMILY)
+    const loadedFaces = await cold.evaluate(async (family) => {
+      const faces = await document.fonts.load(`40px ${family}`).catch(() => [])
+      return faces.map((f) => ({ family: f.family, status: f.status }))
+    }, POSTER_FAMILY)
+    const declared = await cold.evaluate(declaredFaces, POSTER_FAMILY)
+    const faceIn = loadedFaces.length > 0 && loadedFaces.every((f) => f.status === 'loaded') && declared.length === 1 && declared[0] === 'loaded'
+    if (byApp.length !== 1 || byApp[0] !== 'loaded') fail(`the app did not load the face before it mounted: ${JSON.stringify(byApp)}`)
+    else if (loadedFaces.length === 0) fail(`document.fonts.load('40px ${POSTER_FAMILY}') answered with no face: none is declared`)
+    else if (!faceIn) fail(`the face did not load offline: ${JSON.stringify({ loadedFaces, declared })}`)
+    else console.log(`✓ the face loads with no network, and the app had it before it mounted (FontFace ${POSTER_FAMILY}: ${declared[0]})`)
+    const [stack, fallback, alone] = await cold.evaluate(measureFaces, FACE_PROBE)
+    if (!faceSetsStack(stack.advance, fallback.advance)) {
+      fail(`Poster's stack measures as its fallback (${stack.advance} against ${fallback.advance}): the face is not what sets it`)
+    } else console.log(`✓ the face sets Poster: "${FACE_PROBE.text}" is ${stack.advance.toFixed(2)} px wide, ${fallback.advance.toFixed(2)} without it`)
+    if (stack.advance !== online.advance) fail(`the face measures differently offline (${stack.advance}) and online (${online.advance})`)
+    else console.log('✓ and the same width it measured online')
+    // A face that never loaded is measured in whatever the page falls back
+    // to, whose lowercase says nothing about the face's.
+    const lower = lowercaseVerdict((ch) => alone.ascents[ch])
+    if (!faceIn) fail("the face's lowercase is not measured: the face is not loaded")
+    else if (!lower.ok) fail(`the face's lowercase is not its own: o rises ${lower.ratio.toFixed(3)} of O (at most ${LOWERCASE_MAX})`)
+    else console.log(`✓ the face draws a lowercase: o rises ${lower.ratio.toFixed(3)} of O (at most ${LOWERCASE_MAX})`)
   }
 
   if (coldErrors.length) fail(`offline launch logged errors: ${coldErrors.slice(0, 3).join(' | ')}`)

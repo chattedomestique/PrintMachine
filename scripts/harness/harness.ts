@@ -1058,7 +1058,18 @@ const COST_FRAMES: Record<string, Partial<FrameSettings> | null> = {
 
 const costRigs = new Map<
   string,
-  { settings: PrintSettings; media: ImageBitmap; height: number; out: CanvasRenderingContext2D; scratch: CanvasRenderingContext2D; cache: { current: RenderCache | null }; inputs: FrameInputs; fieldLong: number }
+  {
+    settings: PrintSettings
+    media: ImageBitmap
+    height: number
+    out: CanvasRenderingContext2D
+    scratch: CanvasRenderingContext2D
+    cache: { current: RenderCache | null }
+    inputs: FrameInputs
+    fieldLong: number
+    fields: ReturnType<typeof frostFields>
+    blur: number
+  }
 >()
 
 /**
@@ -1073,8 +1084,9 @@ const costRigs = new Map<
  * compose skipped (the preview's test seam, README "Test seams"): the photo
  * drawn into the same rectangle, so the two differ by the frame's own work
  * alone. `remake` (Frosted) makes the field again inside the timed render,
- * at a blur one off the last, as a Blur change (or a Width change on
- * Original, which changes the sheet's shape) does.
+ * at a blur it has not been made at lately, through the page's own kept
+ * fields and covers (frostField.ts), the cover made once untimed: what each
+ * frame of a Blur drag costs (the three box passes and the grade).
  */
 async function frameCost(doc: string, frame: string, draft: boolean, bare = false, remake = false): Promise<{ ms: number; w: number; h: number }> {
   const key = `${doc}|${frame}|${draft}`
@@ -1095,7 +1107,10 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
     const media = await createImageBitmap(c)
     c.width = 0
     const fieldLong = draft ? FROST_DRAFT_LONG : FROST_FIELD_LONG
-    rig = { settings, media, height: (draft ? draftSize(aspect) : previewSize(aspect)).h, out: context(false), scratch: context(true), cache: { current: null }, inputs: inputsOf(settings, fieldLong), fieldLong }
+    const fields = frostFields()
+    const inputs = storedFrameInputs(settings)
+    if (needsFrost(settings)) inputs.frost = fields.field(m.id, frameSourceOf(m), aspect, settings.frame.blur, fieldLong)
+    rig = { settings, media, height: (draft ? draftSize(aspect) : previewSize(aspect)).h, out: context(false), scratch: context(true), cache: { current: null }, inputs, fieldLong, fields, blur: 10 }
     costRigs.set(key, rig)
     renderPrint(rig.out, rig.scratch, settings, rig.cache, null, rig.height, media, rig.inputs)
   }
@@ -1106,10 +1121,12 @@ async function frameCost(doc: string, frame: string, draft: boolean, bare = fals
     const r = rig
     const t0 = performance.now()
     if (remake) {
-      // A blur one off the last: a field that is not kept, made now.
-      const blur = r.settings.frame.blur === 60 ? 61 : 60
+      // The next blur of a drag over the whole range: a field that is not
+      // kept, made now from the kept cover.
+      r.blur = r.blur >= 240 ? 10 : r.blur + 1
+      const blur = r.blur === r.settings.frame.blur ? r.blur + 1 : r.blur
       r.settings = { ...r.settings, frame: { ...r.settings.frame, blur } }
-      r.inputs = { ...r.inputs, frost: frostField(frameSourceOf(r.settings.media!), sheetAspect(r.settings), r.fieldLong, blur) }
+      r.inputs = { ...r.inputs, frost: r.fields.field(r.settings.media!.id, frameSourceOf(r.settings.media!), sheetAspect(r.settings), blur, r.fieldLong) }
     }
     renderPrint(r.out, r.scratch, r.settings, r.cache, null, r.height, r.media, r.inputs)
     const ms = performance.now() - t0

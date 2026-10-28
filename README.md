@@ -443,11 +443,22 @@ sample the same field; it stays in float, and each sheet pixel samples it
 bilinearly (with Border Studio's 2% overscan) and is rounded to a byte once.
 Rounding the field to bytes first would leave a stair as wide as a field
 pixel (19 sheet pixels at 58 MP); here the only step is the one-level step
-rounding must make. The field is made by the page from the photo's frame
-source and kept (a few, by photo, sheet shape and blur:
+rounding must make. A photo with transparent pixels is blurred with its
+alpha (each colour multiplied by it, and divided by the blurred alpha
+after), so a transparent area takes the colour of the photo round it, never
+black (Border Studio's canvas frosts it black); where no opaque pixel
+reaches, it takes the photo's mean colour, and a photo with nothing opaque
+frosts to Paper, as its colour fills are. The field is made by the page from
+the photo's frame source and kept (a few, by photo, sheet shape and blur:
 `features/media/frostField.ts`), never in the render cache, and a field made
 for another shape or blur is not used (the border is Paper until the right
-one is there). Save makes it at 480 before it presses.
+one is there). The photo cover-filled into the field's grid, before the
+blur (the area average of the 1024 px source, most of a field's cost), is
+kept too, by photo, sheet shape and field size, so a frame of a Blur drag
+runs only the three passes and the grade: about 2 ms over a draft frame
+with its field kept (it was 11 to 17 ms when each field was made whole). A
+Width drag on Original changes the sheet's shape, so each of its frames
+makes a cover as well. Save makes the field at 480 before it presses.
 
 The preview composes the frame into its ground in place, and the export
 composes it a band of rows at a time into a band buffer of its own
@@ -479,11 +490,17 @@ photo from its working copy, in Crop and in Fit, and in Frosted with its field
 kept, settled and draft) against the same print unframed, what a person waits
 for, and against the same framed render with the fill and the corners left
 out (a test seam), the frame's own work: at most 1.10x settled and 1.25x
-draft, each. Frosted with its field made again inside the render (a Blur
-change; a Width change on Original, which changes the sheet's shape) is
-timed too, against the print unframed, and held to what it measured x 1.25:
-1.78x settled, 3.73x draft (it measured 1.26 to 1.42 and 2.03 to 2.98; most
-of it is the area average of the 1024 px source). A shared machine's
+draft, each. Frosted with its field made again inside the render, from
+the kept cover, through the page's own `frostFields` (each frame of a Blur
+drag), is timed too, against the print unframed, and held to what it
+measured x 1.25: 1.58x settled, 1.60x draft (it measured 1.12 to 1.26 and
+1.21 to 1.28 over 8 runs; the passes and the grade are 8 to 27 ms over the
+settled frame and 1.6 to 2.0 ms over the draft one). The draft bound fails a
+Blur drag that makes the cover again each frame (2.67x and 3.32x measured);
+the settled one does not see that (1.36x and 1.44x), nor the passes run
+twice (1.27x to 1.36x settled, 1.43x to 1.50x draft): the made-again work is
+a fifth of a settled render now, so a bound that saw its doubling would sit
+within a few percent of a clean run's spread. A shared machine's
 interference only ever adds time and comes in spells that can outlast a
 document's rounds taken back to back, so the two documents at the two sizes
 are measured round by round in turn (15 rounds, one render a sample), a

@@ -387,13 +387,14 @@ try {
     //    with, which would otherwise let a costly frame through.
     // The numbers this gives are in the README ("The frame is ground").
     const FRAME_COST = { settled: 1.1, draft: 1.25 }
-    // Frosted with its field made again inside the render (what a Blur
-    // change, or a Width change on Original, costs), against the same
-    // document unframed: no bound of the plan's own, so what it measured
-    // when the field went in, x 1.25 (1.26 to 1.42 settled, 2.03 to 2.98
-    // draft, over 7 runs: the 480 and 160 px fields are made from a 1024 px
-    // source, most of it the area average).
-    const REMAKE_COST = { settled: 1.78, draft: 3.73 }
+    // Frosted with its field made again inside the render from the kept
+    // cover (each frame of a Blur drag: the passes and the grade), against
+    // the same document unframed: no bound of the plan's own, so what it
+    // measured x 1.25 (1.12 to 1.26 settled, 1.21 to 1.28 draft, over 8
+    // runs). The draft bound fails a drag that makes the cover again each
+    // frame (2.67x, 3.32x); README "The frame is ground" says what the
+    // settled one cannot see.
+    const REMAKE_COST = { settled: 1.58, draft: 1.6 }
     const MEASUREMENTS = 3
     const DRAFT_SAMPLES = 10
     const rounds = Math.max(5, opts.runs ?? 15)

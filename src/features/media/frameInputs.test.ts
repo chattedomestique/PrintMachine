@@ -17,7 +17,7 @@ import { FrameSourceError, frameSourceSize, frameSources, paletteSample, type Fr
 import { afterAttempt, ensureFrameInputs, fillShows, frameFailed, framePalettes, frameState, needsFrost, needsPalette, previewFrameInputs, storedFrameInputs, wantsPalette, type FrameMakers } from './frameInputs.ts'
 import { frostFields } from './frostField.ts'
 import { sheetAspect } from '../../engine/frame.ts'
-import { frostField } from '../../engine/frost.ts'
+import { frostBlur, frostCover, frostField } from '../../engine/frost.ts'
 import { FROST_DRAFT_LONG, FROST_FIELD_LONG } from '../../engine/limits.ts'
 import { makeFrameSource } from '../../engine/__tests__/fields.ts'
 // @ts-expect-error: a plain .mjs module, the generator the parity gate uses
@@ -258,6 +258,27 @@ describe("Frosted's fields, kept", () => {
     const c = fields.field('q', src, 1.25, 60, 480)
     expect(fields.field('q', src, 1.25, 60, 480)).toBe(c)
     expect(fields.field('p', src, 1.5, 61, 480)).not.toBe(b)
+  })
+})
+
+describe("Frosted's covers, kept", () => {
+  it('a Blur change makes no new cover (only the passes and the grade run); a new shape or size, or another photo, does', () => {
+    const src = makeFrameSource(80, 60, 2)
+    const made: string[] = []
+    const fields = frostFields(5, {
+      cover: (s, aspect, long) => (made.push(`${aspect} ${long}`), frostCover(s, aspect, long)),
+      blur: frostBlur,
+    })
+    for (let blur = 60; blur < 70; blur++) fields.field('p', src, 1.25, blur, 160)
+    expect(made).toEqual(['1.25 160'])
+    // The field from the kept cover is the field made whole.
+    expect([...fields.field('p', src, 1.25, 66, 160).r]).toEqual([...frostField(src, 1.25, 160, 66).r])
+    fields.field('p', src, 1.25, 66, 480)
+    fields.field('p', src, 1.5, 66, 480)
+    expect(made).toEqual(['1.25 160', '1.25 480', '1.5 480'])
+    fields.field('q', src, 1.5, 70, 480)
+    fields.field('p', src, 1.5, 71, 480)
+    expect(made.slice(3)).toEqual(['1.5 480', '1.5 480'])
   })
 })
 

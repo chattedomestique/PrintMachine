@@ -44,6 +44,30 @@ export interface FrostField {
   aspect: number
   /** The blur it was made at (10..240). */
   blur: number
+  /** The photo has no opaque pixel: no colour to frost, so the border is
+   *  Paper, as its colour fills are. */
+  clear: boolean
+}
+
+/** The photo cover-filled into a field, before the blur: what a Blur change
+ *  does not change, so it is kept and only the passes and the grade run
+ *  again. R, G and B as floats 0..255; for a photo with transparent pixels
+ *  multiplied by `a` (the alpha, 0..1), so a transparent pixel adds no
+ *  colour to its neighbours as the passes spread it. */
+export interface FrostCover {
+  w: number
+  h: number
+  r: Float32Array
+  g: Float32Array
+  b: Float32Array
+  /** The alpha plane, or null when every pixel of the photo is opaque. */
+  a: Float32Array | null
+  /** The photo's mean colour (alpha-weighted), what a transparent area no
+   *  opaque pixel reaches takes. */
+  mean: [number, number, number]
+  /** Nothing under the field is opaque. */
+  clear: boolean
+  aspect: number
 }
 
 /** Border Studio's field: 240 px on its long side, at its preview scale. */
@@ -64,13 +88,12 @@ export const frostRadius = (blur: number, fieldLong: number): number =>
   Math.max(2, Math.round((3 + ((blur - 10) * 9) / 110) * (fieldLong / BORDER_STUDIO_FIELD)))
 
 /**
- * The field of `src` (the frame's source: the photo at its fixed decode) for
- * a sheet of `aspect`, `fieldLong` on its long side, at `blur`: the photo
- * cover-filled into it (centred, area-averaged), blurred (three box passes,
- * windows shrunk at the edges), then graded (brightness, then saturation
- * about luma), held to 0..255. Float throughout: nothing is rounded here.
+ * The photo `src` (the frame's source: the photo at its fixed decode)
+ * cover-filled into the field of a sheet of `aspect`, `fieldLong` on its
+ * long side: centred, area-averaged. A photo with transparent pixels is kept
+ * multiplied by its alpha (see `FrostCover`).
  */
-export function frostField(src: RgbaImage, aspect: number, fieldLong: number, blur: number): FrostField {
+export function frostCover(src: RgbaImage, aspect: number, fieldLong: number): FrostCover {
   const { w, h } = frostFieldSize(aspect, fieldLong)
   const cover = Math.max(w / src.w, h / src.h)
   const bw = w / cover
@@ -80,14 +103,69 @@ export function frostField(src: RgbaImage, aspect: number, fieldLong: number, bl
   const r = new Float32Array(n)
   const g = new Float32Array(n)
   const b = new Float32Array(n)
-  for (let i = 0; i < n; i++) {
-    r[i] = avg[i * 4]
-    g[i] = avg[i * 4 + 1]
-    b[i] = avg[i * 4 + 2]
+  let opaque = true
+  for (let i = 3; i < src.rgba.length && opaque; i += 4) opaque = src.rgba[i] === 255
+  if (opaque) {
+    for (let i = 0; i < n; i++) {
+      r[i] = avg[i * 4]
+      g[i] = avg[i * 4 + 1]
+      b[i] = avg[i * 4 + 2]
+    }
+    return { w, h, r, g, b, a: null, mean: [0, 0, 0], clear: false, aspect }
   }
+  const a = new Float32Array(n)
+  let sr = 0
+  let sg = 0
+  let sb = 0
+  let sa = 0
+  for (let i = 0; i < n; i++) {
+    const al = avg[i * 4 + 3] / 255
+    a[i] = al
+    r[i] = avg[i * 4] * al
+    g[i] = avg[i * 4 + 1] * al
+    b[i] = avg[i * 4 + 2] * al
+    sr += r[i]
+    sg += g[i]
+    sb += b[i]
+    sa += al
+  }
+  return { w, h, r, g, b, a, mean: sa > 0 ? [sr / sa, sg / sa, sb / sa] : [0, 0, 0], clear: sa === 0, aspect }
+}
+
+/** How much of the photo's mean colour a blurred alpha is mixed with: where
+ *  the photo reaches (alpha well above this) its own colour, untouched to
+ *  within 0.03 of a level; where no opaque pixel reaches (alpha 0), the
+ *  mean; smoothly between. */
+const MEAN_WEIGHT = 1e-4
+
+/**
+ * The field of a kept cover at `blur`: blurred (three box passes, windows
+ * shrunk at the edges), a transparent area taking the colour of the photo
+ * round it (divided by the blurred alpha), then graded (brightness, then
+ * saturation about luma), held to 0..255. Float throughout: nothing is
+ * rounded here. The cover is not changed.
+ */
+export function frostBlur(cover: FrostCover, blur: number): FrostField {
+  const { w, h, aspect } = cover
+  const fieldLong = Math.max(w, h)
+  const r = cover.r.slice()
+  const g = cover.g.slice()
+  const b = cover.b.slice()
+  const n = w * h
   const radius = frostRadius(blur, fieldLong)
   const scratch = new Float32Array(n)
   for (const plane of [r, g, b]) boxBlurPlane(plane, scratch, w, h, radius, 'shrink')
+  if (cover.a) {
+    const a = cover.a.slice()
+    boxBlurPlane(a, scratch, w, h, radius, 'shrink')
+    const [mr, mg, mb] = cover.mean
+    for (let i = 0; i < n; i++) {
+      const al = Math.max(0, a[i]) + MEAN_WEIGHT
+      r[i] = (r[i] + mr * MEAN_WEIGHT) / al
+      g[i] = (g[i] + mg * MEAN_WEIGHT) / al
+      b[i] = (b[i] + mb * MEAN_WEIGHT) / al
+    }
+  }
   const bright = 1 + FROST_GRADE.brightness / 100
   const sat = Math.max(0, 1 + FROST_GRADE.saturation / 100)
   for (let i = 0; i < n; i++) {
@@ -99,8 +177,14 @@ export function frostField(src: RgbaImage, aspect: number, fieldLong: number, bl
     g[i] = Math.min(255, Math.max(0, luma + (gv - luma) * sat))
     b[i] = Math.min(255, Math.max(0, luma + (bv - luma) * sat))
   }
-  return { w, h, r, g, b, aspect, blur }
+  return { w, h, r, g, b, aspect, blur, clear: cover.clear }
 }
+
+/**
+ * The field of `src` for a sheet of `aspect`, `fieldLong` on its long side,
+ * at `blur`: `frostBlur` of `frostCover`.
+ */
+export const frostField = (src: RgbaImage, aspect: number, fieldLong: number, blur: number): FrostField => frostBlur(frostCover(src, aspect, fieldLong), blur)
 
 /** Where a sheet pixel's centre falls on the field along one axis: the
  *  field stretched over the sheet and 2% of its long side past each edge

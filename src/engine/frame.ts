@@ -330,14 +330,15 @@ export interface FrameInputs {
  * the choice, never a colour, so a new photo re-keys the frame by itself. A
  * fill whose input is not there (yet) is Paper, the bare stock, never a
  * wrong colour; the page renders again once it arrives. A field made for
- * another sheet shape or another blur is not there.
+ * another sheet shape or another blur is not there; one of a photo with no
+ * opaque pixel is Paper.
  */
 export function fillFor(s: Pick<PrintSettings, 'frame' | 'aspect' | 'media'>, inputs: FrameInputs, w: number, h: number): FrameFill {
   const fill = s.frame.fill
   if (fill === 'paper') return fillRgba(null)
   if (fill === 'frosted') {
     const field = inputs.frost
-    const fits = field !== undefined && field.blur === s.frame.blur && field.aspect === sheetAspect(s)
+    const fits = field !== undefined && field.blur === s.frame.blur && field.aspect === sheetAspect(s) && !field.clear
     return fillRgba(fits ? frostSampler(field, w, h) : null)
   }
   return fillRgba(inputs.palette?.[fill] ?? null)

@@ -6,8 +6,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { blurInPlace, boxBlurPlane } from './blur.ts'
-import { composeFrameRows, fillRgba, layoutSheet, sheetAspect } from './frame.ts'
-import { frostField, frostFieldSize, frostRadius, frostSampler, type FrostField } from './frost.ts'
+import { composeFrameRows, fillFor, fillRgba, layoutSheet, sheetAspect } from './frame.ts'
+import { frostBlur, frostCover, frostField, frostFieldSize, frostRadius, frostSampler, type FrostField } from './frost.ts'
 import { FROST_DRAFT_LONG, FROST_FIELD_LONG } from './limits.ts'
 import { mulberry32 } from './rng.ts'
 import { outputSize } from './render.ts'
@@ -63,26 +63,63 @@ describe('the field', () => {
     expect([a.w, a.h, a.aspect, a.blur]).toEqual([480, 343, 1.4, 60])
   })
 
-  it("its size comes from the sheet's shape and the long side alone: the same at every sheet size, Original or fixed", () => {
+  it("its size comes from the sheet's shape and the long side alone, Original or fixed, rounded as Border Studio rounds", () => {
+    // No rendered size reaches it (the signature takes none), so the
+    // preview, the draft and the save sample one field for one shape: what
+    // is left to test is the rounding.
     const original = { ...defaultSettings(), aspect: 'original', media: makeMedia({ id: 'p', width: 7728, height: 5152 }) } as PrintSettings
     original.frame = { ...original.frame, width: 1 / 14 }
     const portrait = { ...original, aspect: '4:5' } as PrintSettings
-    for (const s of [original, portrait]) {
-      const a = sheetAspect(s)
-      const size = frostFieldSize(a, FROST_FIELD_LONG)
-      // The sheets the preview, the draft and the save draw: different
-      // sizes, one shape, so one field.
-      for (const height of [280, 1000, 1800, 6440]) {
-        const { w, h } = outputSize(a, height)
-        expect(Math.abs(w / h - a)).toBeLessThan(0.01)
-        expect(frostFieldSize(sheetAspect(s), FROST_FIELD_LONG)).toEqual(size)
-      }
-      expect(frostField(src, a, FROST_FIELD_LONG, 60)).toMatchObject(size)
-    }
     // 9016x6440 (the default frame on a 40 MP photo): 480 x 343.
     expect(frostFieldSize(sheetAspect(original), FROST_FIELD_LONG)).toEqual({ w: 480, h: 343 })
     expect(frostFieldSize(sheetAspect(portrait), FROST_FIELD_LONG)).toEqual({ w: 384, h: 480 })
     expect(frostFieldSize(sheetAspect(portrait), FROST_DRAFT_LONG)).toEqual({ w: 128, h: 160 })
+    // At least 4 on the short side, as Border Studio's.
+    expect(frostFieldSize(200, FROST_DRAFT_LONG)).toEqual({ w: 160, h: 4 })
+    for (const s of [original, portrait]) expect(frostField(src, sheetAspect(s), FROST_FIELD_LONG, 60)).toMatchObject(frostFieldSize(sheetAspect(s), FROST_FIELD_LONG))
+  })
+
+  it('a Blur change keeps the cover: the field from a kept cover is the field made whole, and the cover is not changed', () => {
+    for (const source of [src, flat(300, 200, [200, 120, 60])]) {
+      const cover = frostCover(source, 1.4, FROST_FIELD_LONG)
+      const before = cover.r.slice()
+      for (const blur of [10, 61, 240]) {
+        const kept = frostBlur(cover, blur)
+        const whole = frostField(source, 1.4, FROST_FIELD_LONG, blur)
+        for (const k of ['r', 'g', 'b'] as const) expect(Buffer.from(kept[k].buffer).equals(Buffer.from(whole[k].buffer))).toBe(true)
+      }
+      expect(Buffer.from(cover.r.buffer).equals(Buffer.from(before.buffer))).toBe(true)
+    }
+  })
+
+  it("a photo's transparent pixels frost to the colour of the photo round them, never black; a photo with nothing opaque is Paper", () => {
+    // One light colour, its left quarter fully transparent (a cut-out PNG).
+    const w = 400
+    const h = 300
+    const rgba = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) rgba.set([220, 200, 180, i % w < w / 4 ? 0 : 255], i * 4)
+    const want = grade([220, 200, 180])
+    for (const blur of [10, 60, 240]) {
+      const f = frostField({ w, h, rgba }, w / h, FROST_FIELD_LONG, blur)
+      // Every texel, the transparent quarter's too: the photo's colour,
+      // graded (black would be 0).
+      for (const i of [0, f.w * 60, f.w * 171 + 50, f.w * 171 + 120, f.w * f.h - 1]) {
+        expect(Math.abs(f.r[i] - want[0])).toBeLessThan(0.05)
+        expect(Math.abs(f.g[i] - want[1])).toBeLessThan(0.05)
+        expect(Math.abs(f.b[i] - want[2])).toBeLessThan(0.05)
+      }
+      expect(f.clear).toBe(false)
+    }
+    // The test source's clear corner takes the photo's colours round it.
+    const corner = frostField(makeFrameSource(512, 341, 4), 1.4, FROST_FIELD_LONG, 10)
+    expect(Math.min(corner.r[0], corner.g[0], corner.b[0])).toBeGreaterThan(60)
+    // Nothing opaque: no colour to frost.
+    const clear = frostField({ w, h, rgba: new Uint8ClampedArray(w * h * 4) }, w / h, FROST_FIELD_LONG, 60)
+    expect(clear.clear).toBe(true)
+    const s = { ...defaultSettings(), aspect: '4:5', media: makeMedia({ id: 'p', width: 400, height: 300 }) } as PrintSettings
+    s.frame = { ...s.frame, width: 0.05, fill: 'frosted', blur: 60 }
+    const field = frostField({ w, h, rgba: new Uint8ClampedArray(w * h * 4) }, sheetAspect(s), FROST_FIELD_LONG, 60)
+    expect(fillFor(s, { frost: field }, 400, 500).flat).toEqual(fillFor({ ...s, frame: { ...s.frame, fill: 'paper' } }, {}, 400, 500).flat)
   })
 
   it("the blur's radius scales with the field: Border Studio's 7 and 22 on its 240 px field, x 2 at 480, x 2/3 at the draft's 160", () => {
@@ -240,7 +277,7 @@ describe('the sampler', () => {
         b[y * w + x] = 60 + 0.53 * y
       }
     }
-    return { w, h, r, g, b, aspect: w / h, blur: 60 }
+    return { w, h, r, g, b, aspect: w / h, blur: 60, clear: false }
   }
 
   it('on a linear field every pixel is the exact value rounded once: no stair from rounding the field first', () => {

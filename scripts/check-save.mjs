@@ -63,8 +63,9 @@
  *     preparing, and no chip changed width. Under
  *     Frosted the palette is stored too, from the one decode. Under Paper,
  *     Save tapped while that decode is held decodes nothing and writes no
- *     file until it is released (the two decodes never run together), and
- *     so does Save tapped back on a photo by an Undo (its palette stored,
+ *     file until it is released (the two decodes never run together), a
+ *     Cancel tapped while it waits ends the save at once (nothing follows the
+ *     release), and so does Save tapped back on a photo by an Undo (its palette stored,
  *     needing nothing made) while the replaced photo's decode is held. With a frame
  *     source that will not decode, for a palette colour and for Frosted: one
  *     persistent note, the card (an alert), and Save's name and the More
@@ -866,6 +867,46 @@ try {
       check(
         file !== null && after > before && Object.keys((await stored(page)) ?? {}).join() === 'photo,deep,muted,comp',
         `released: the original decoded (${after - before}) and the file written (${file?.suggestedFilename() ?? 'none'}), the palette stored`,
+      )
+      check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
+      await ctx.close()
+    }
+
+    // Cancel while Save waits for that decode: the save ends then (the card
+    // goes, Save is Save), and when the decode ends nothing follows it: no
+    // original decoded, no file.
+    {
+      const ctx = await newContext()
+      const { page, errors } = await open(ctx, stub)
+      await choosePhoto(page, 1600, 1200)
+      await frameNext(page, { width: 0.08, fill: 'paper' }, 'hold')
+      await page.reload()
+      await page.waitForSelector('.sheet canvas')
+      await page.waitForFunction(() => typeof window.__releaseFrame === 'function', null, { timeout: 30_000 })
+      await page.waitForTimeout(1500)
+      let files = 0
+      page.on('download', () => files++)
+      const before = await page.evaluate(() => window.__otherDecodes)
+      await page.locator(SAVE).click()
+      await page.waitForSelector(CANCEL, { timeout: 5_000 })
+      const during = await page.locator(SAVE).textContent()
+      const ms = await page.evaluate(
+        ([SAVE, CANCEL]) =>
+          new Promise((done) => {
+            const t0 = performance.now()
+            document.querySelector(CANCEL).click()
+            const look = () => (document.querySelector(SAVE)?.textContent === 'Save' && !document.querySelector('.app__status') ? done(Math.round(performance.now() - t0)) : requestAnimationFrame(look))
+            look()
+            setTimeout(() => done(-1), 5_000)
+          }),
+        [SAVE, CANCEL],
+      )
+      await page.evaluate(() => window.__releaseFrame())
+      await page.waitForTimeout(3000)
+      const after = await page.evaluate(() => window.__otherDecodes)
+      check(
+        during === 'Saving' && ms >= 0 && ms < 100 && after === before && files === 0,
+        `Paper, the frame source held back: Cancel tapped while Save waits for it ends the save in ${ms} ms (< 100), and once it is released nothing follows (${after - before} decodes of the original, ${files} files)`,
       )
       check(errors.length === 0, `no page errors ${errors.join(' | ')}`)
       await ctx.close()

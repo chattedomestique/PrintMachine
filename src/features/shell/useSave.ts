@@ -538,10 +538,14 @@ export async function pressForSave(
     // whose fill they cannot be made from is refused, in the page's words
     // for it (FILL_MISSING): never pressed with a frame quietly Paper. A
     // stored photo that is gone is said as that.
+    // A Cancel while they are waited for (their decodes may be another
+    // photo's, and slow) ends the save at once: the decodes run on, nothing
+    // is decoded or pressed after them.
     let inputs: FrameInputs
     try {
-      inputs = await deps.frameInputs(settings)
+      inputs = await untilAborted(deps.frameInputs(settings), signal)
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
       throw err instanceof MissingPhotoError ? err : new FillMissingError()
     }
     throwIfAborted(signal)
@@ -588,6 +592,25 @@ export async function pressForSave(
   } finally {
     photo?.close()
   }
+}
+
+/**
+ * `work`, or the save's AbortError as soon as `signal` aborts, whichever comes
+ * first. The work is not stopped (a decode cannot be), only no longer waited
+ * for; what it settles with later is dropped, never an unhandled rejection.
+ */
+export function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work
+  work.catch(() => {})
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new DOMException('The save was cancelled.', 'AbortError'))
+    if (signal.aborted) return abort()
+    signal.addEventListener('abort', abort, { once: true })
+    work.then(
+      (v) => (signal.removeEventListener('abort', abort), resolve(v)),
+      (e) => (signal.removeEventListener('abort', abort), reject(e)),
+    )
+  })
 }
 
 /** Ask the screen to stay on while the print is pressed (a screen that sleeps

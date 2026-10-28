@@ -463,6 +463,33 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     expect([gone.log.full, gone.log.pressed]).toEqual([[], []])
   })
 
+  it('a Cancel while the frame\'s inputs are waited for ends the save then, and nothing is decoded or pressed after them', async () => {
+    // The inputs held (a frame-source decode still running, any photo's).
+    let release!: (v: { palette?: undefined }) => void
+    const held = new Promise<{ palette?: undefined }>((r) => (release = r))
+    const { d, log } = deps({ frameInputs: () => held })
+    const controller = new AbortController()
+    const saving = pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: controller.signal }, d)
+    let settled = false
+    saving.catch(() => {}).finally(() => (settled = true))
+    await new Promise((r) => setTimeout(r, 5))
+    expect(settled).toBe(false)
+    controller.abort()
+    await expect(saving).rejects.toMatchObject({ name: 'AbortError' })
+    // The decodes end later: nothing follows them.
+    release({})
+    await new Promise((r) => setTimeout(r, 5))
+    expect([log.full, log.resized, log.pressed]).toEqual([[], [], []])
+    // A Cancel before the wait begins is taken too; a failure is still the
+    // fill's words, and a wait that ends first is the save's as before.
+    const early = new AbortController()
+    early.abort()
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: early.signal }, deps({ frameInputs: () => held }).d)).rejects.toMatchObject({ name: 'AbortError' })
+    const failing = deps({ frameInputs: async () => Promise.reject(new Error('no')) })
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: new AbortController().signal }, failing.d)).rejects.toBeInstanceOf(FillMissingError)
+    expect((await pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: new AbortController().signal }, deps().d)).kind).toBe('pressed')
+  })
+
   it('a smaller copy decodes the photo straight to its integer rectangle and presses it there, 1:1', async () => {
     const { d, log } = deps()
     const s = doc(4032, 3024)

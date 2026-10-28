@@ -22,7 +22,7 @@
  *    pre-check only: a face can draw a separate lowercase glyph that is a
  *    capital (Railroad Gothic does), so the real test is in the browser,
  *    where the ink of `o` is measured against `O` (verify-offline.mjs,
- *    `lowercaseVerdict` in faces-check.mjs);
+ *    `lowercaseVerdict` in face-checks.mjs);
  *  - GSUB offers none of liga, clig, calt, dlig, rlig.
  *
  * Then it builds three broken copies of the same face in memory (its

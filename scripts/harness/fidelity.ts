@@ -13,7 +13,7 @@
 
 import { MissingPhotoError, describePlan, planPrint, savePrint, type ExportFormat } from '../../src/engine/export.ts'
 import { cornerCoverage, layoutSheet } from '../../src/engine/frame.ts'
-import { frostSampler, type FrostField } from '../../src/engine/frost.ts'
+import type { FrostField } from '../../src/engine/frost.ts'
 import { groundRect } from '../../src/engine/render.ts'
 import type { FrameSettings, PrintSettings } from '../../src/engine/types.ts'
 import { decodeOriginal, decodeOriented, decodeResized } from '../../src/features/media/decode.ts'
@@ -303,9 +303,10 @@ const hexRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
  * `copyRect`, `decodeResized`) and drawn 1:1. Every pixel of the file is
  * checked against what it must be:
  *  - outside the photo's rectangle (`shown`): the fill's colour exactly (the
- *    paper veil is off); Frosted's, the field sampled at that pixel, its
- *    field made as Save makes it (`ensureFrameInputs`: the photo's frame
- *    source decoded from the stored file, the field at the save's size);
+ *    paper veil is off); Frosted's, the field sampled at that pixel exactly
+ *    and rounded once (`exactFrost`, not the engine's sampler), its field
+ *    made as Save makes it (`ensureFrameInputs`: the photo's frame source
+ *    decoded from the stored file, the field at the save's size);
  *  - inside it, away from the corners: the photo Save drew (the original, or
  *    the smaller copy), at its own pixels, every byte;
  *  - in the corners' patches: the photo over the fill at the corner's exact
@@ -351,8 +352,11 @@ async function framed(w: number, h: number, aspect: PrintSettings['aspect'], fra
   rc.canvas.width = 0
   const drawn = rect ?? layout.photo!
   const aligned = drawn.dw === rw && drawn.dh === rh && Number.isInteger(drawn.dx) && Number.isInteger(drawn.dy)
-  // The fill at a pixel: the colour, or Frosted's field sampled there.
-  const frost = inputs.frost ? frostSampler(inputs.frost, plan.width, plan.height) : null
+  // The fill at a pixel: the colour, or Frosted's field sampled there,
+  // exactly (in float64, by code of its own, not the engine's sampler) and
+  // rounded once: a sampler that rounds before it has mixed, or a field
+  // rounded to bytes before it is stretched, is off by a level somewhere.
+  const frost = inputs.frost ? exactFrost(inputs.frost, plan.width, plan.height) : null
   const flat = frost ? null : hexRgb(FRAME_PALETTE[s.frame.fill as keyof typeof FRAME_PALETTE])
   const fillRow = new Uint8ClampedArray(plan.width * 4)
   let fillY = -1
@@ -418,8 +422,10 @@ async function framed(w: number, h: number, aspect: PrintSettings['aspect'], fra
       }
     }
   }
-  // Frosted's banding, along the middle row through the left border.
-  const banding = inputs.frost && same ? bandingOf(out.data, W, plan.height, layout.shown.x0, inputs.frost) : null
+  // Frosted's banding, along the middle row through the left border; and
+  // how much of the field Save pressed sits on a whole level (a field kept
+  // in float has next to none; one rounded to bytes, all of it).
+  const banding = inputs.frost && same ? { ...bandingOf(out.data, W, plan.height, layout.shown.x0, inputs.frost), whole: wholeShare(inputs.frost) } : null
   let jpeg: (ReturnType<typeof frameOf> & { bytes: number; ms: number }) | null = null
   if (opts.jpeg) {
     const again = await decode()
@@ -451,6 +457,47 @@ async function framed(w: number, h: number, aspect: PrintSettings['aspect'], fra
     banding,
     jpeg,
   }
+}
+
+/**
+ * Frosted's field as a W x H sheet's fill, sampled exactly: each pixel's
+ * centre on the field (the field stretched over the sheet and 2% of its long
+ * side past each edge, a texel's centre at i + 0.5, held inside), bilinear
+ * in float64 from the field's float values (across each field row, then
+ * down), rounded once. Written from the definition, apart from the engine's
+ * `frostSampler`, which mixes down first, so the two agree only if neither
+ * rounds early.
+ */
+function exactFrost(field: FrostField, W: number, H: number): (y: number, x0: number, x1: number, out: Uint8ClampedArray, o: number) => void {
+  const pad = Math.round(0.02 * Math.max(W, H))
+  const at = (v: number, n: number, f: number) => Math.min(f - 1, Math.max(0, ((v + 0.5 + pad) / (n + 2 * pad)) * f - 0.5))
+  const planes = [field.r, field.g, field.b]
+  return (y, x0, x1, out, o) => {
+    const fy = at(y, H, field.h)
+    const j0 = Math.floor(fy)
+    const j1 = Math.min(field.h - 1, j0 + 1)
+    const s = fy - j0
+    for (let x = x0, q = o; x < x1; x++, q += 4) {
+      const fx = at(x, W, field.w)
+      const i0 = Math.floor(fx)
+      const i1 = Math.min(field.w - 1, i0 + 1)
+      const t = fx - i0
+      for (let c = 0; c < 3; c++) {
+        const p = planes[c]
+        const top = p[j0 * field.w + i0] + (p[j0 * field.w + i1] - p[j0 * field.w + i0]) * t
+        const bottom = p[j1 * field.w + i0] + (p[j1 * field.w + i1] - p[j1 * field.w + i0]) * t
+        out[q + c] = top + (bottom - top) * s
+      }
+      out[q + 3] = 255
+    }
+  }
+}
+
+/** The share of a field's values that sit on a whole level. */
+function wholeShare(field: FrostField): number {
+  let whole = 0
+  for (const p of [field.r, field.g, field.b]) for (const v of p) if (v === Math.round(v)) whole++
+  return whole / (3 * field.w * field.h)
 }
 
 /**

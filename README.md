@@ -1036,13 +1036,21 @@ saved as Save's JPEG is a 9016x6440 SOF0 sampled 4:4:4. Frosted at its
 heaviest blur (240) on a 40 MP photo that fades over a smooth colour gradient
 (case 16; a grey zone plate frosts to one flat grey, where nothing could
 show): its field made from the stored file as Save makes it (about half a
-second), every one of the frame's 18.2 million pixels is that field sampled
-there; along the middle row of the left border, no run of one value is longer
-than the field's own there, sampled exactly and rounded once, plus one (167,
-644 and 177 px in red, green and blue, against 167, 644 and 177: green runs
-the whole border because the gradient runs down, not across); and it presses
-in 1.01x to 1.07x the time of the same print in the photo's colour (held to
-1.25x). A JPEG
+second) is float (4 in a million of its values on a whole level, held under
+1%: a field rounded to bytes before it is stretched, the stair this guards
+against, has all of them there and fails); every one of the frame's 18.2
+million pixels is that field sampled exactly, in float64 by the harness's
+own code rather than the engine's sampler, and rounded once (a sampler that
+rounds before it has finished mixing is off by a level at 2.2 million of
+them, and fails); along the middle row of the left border the longest run
+of one value is printed against the field's own (167, 644 and 177 px in
+red, green and blue, against the same: green runs the whole border because
+the gradient runs down, not across), but at this size the field moves under
+a level across the 644 px border, so that run cannot tell a rounded field
+from a float one, and the two checks before it are the gate; and it presses
+in at most 1.25x the time of the same photo in a palette colour, pressed just
+before it (one sample each, so a few percent of drift is in the ratio:
+interleaved and repeated, the two measured 1.00x). A JPEG
 whose EXIF says to rotate it saves upright, a PNG's
 transparent hole prints as paper (never black), a document whose stored photo
 is gone is refused rather than printed on bare paper, and the default print

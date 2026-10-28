@@ -10,7 +10,8 @@ import { CHIP_RATIOS, flipOf, type AspectKey } from '../../engine/aspect.ts'
 import { cssRgb, paperById, PAPERS } from '../../engine/inks.ts'
 import { chipFace, chipName, chipTap } from '../../ui/chips.ts'
 import { ASPECT_KEYS } from '../../state/fields.ts'
-import { FILLS, FROSTED_ICON, fillChips, ratioChips } from './frameChoices.ts'
+import { FILL_LABELS, FROSTED_ICON, fillChips, ratioChips } from './frameChoices.ts'
+import { FILLS } from '../../state/fields.ts'
 
 const PALETTE = { photo: '#3a6ea5', deep: '#141d26', muted: '#a8b4c0', comp: '#a5713a' }
 
@@ -67,8 +68,10 @@ describe('the ratio chips', () => {
 
 describe('the fill chips', () => {
   it('Paper, Photo, Deep, Muted, Comp and Frosted, each named', () => {
-    expect(fillChips(PALETTE, 'natural', 'photo', false).map((c) => [c.id, c.label])).toEqual(FILLS.map((f) => [f.id, f.label]))
-    expect(FILLS.map((f) => f.label)).toEqual(['Paper', 'Photo', 'Deep', 'Muted', 'Comp', 'Frosted'])
+    // The row is the schema's fills, every one, in its order: a fill the
+    // stored document can hold always has a chip.
+    expect(fillChips(PALETTE, 'natural', 'photo', false).map((c) => c.id)).toEqual([...FILLS])
+    expect(fillChips(PALETTE, 'natural', 'photo', false).map((c) => c.label)).toEqual(['Paper', 'Photo', 'Deep', 'Muted', 'Comp', 'Frosted'])
   })
 
   it('Paper is the stock, and follows it', () => {
@@ -93,10 +96,10 @@ describe('the fill chips', () => {
   })
 
   it('while the chosen fill is being made its chip alone is busy, and says so; once made, none is', () => {
-    for (const chosen of FILLS.map((f) => f.id)) {
+    for (const chosen of FILLS) {
       const chips = fillChips(undefined, 'natural', chosen, true)
       expect(chips.filter((c) => c.busy).map((c) => c.id)).toEqual([chosen])
-      expect(chipName(chips.find((c) => c.id === chosen)!, chosen)).toBe(`${FILLS.find((f) => f.id === chosen)!.label}, preparing`)
+      expect(chipName(chips.find((c) => c.id === chosen)!, chosen)).toBe(`${FILL_LABELS[chosen]}, preparing`)
       expect(fillChips(PALETTE, 'natural', chosen, false).some((c) => c.busy)).toBe(false)
     }
   })

@@ -7,6 +7,7 @@ import { PHOTO_MISSING } from '../../engine/export.ts'
 import { isReducedCopy } from '../../engine/media.ts'
 import type { FrameSettings, MediaLayer } from '../../engine/types.ts'
 import { effectiveMode, visibleAspect } from '../../engine/frame.ts'
+import { FRAME_MODES } from '../../state/fields.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import type { PhotoState } from '../media/frameInputs.ts'
 import type { PhotoImport } from '../media/usePhotoImport.ts'
@@ -15,10 +16,10 @@ import { ORIGINAL_WHOLE, fillChips, ratioChips } from './frameChoices.ts'
 import { NO_PHOTO, borderParams, photoPlacementParams } from './params.ts'
 import { SUBS, type SubId } from './tools.ts'
 
-const MODES: readonly SegmentedOption<FrameSettings['mode']>[] = [
-  { id: 'crop', label: 'Crop' },
-  { id: 'fit', label: 'Fit' },
-]
+/** Crop and Fit by name, in the schema's order (state/fields.ts
+ *  `FRAME_MODES`), read rather than typed again. */
+const MODE_LABELS: Record<FrameSettings['mode'], string> = { crop: 'Crop', fit: 'Fit' }
+const MODES: readonly SegmentedOption<FrameSettings['mode']>[] = FRAME_MODES.map((id) => ({ id, label: MODE_LABELS[id] }))
 
 /** What Crop and Fit do to the photo, for a screen reader (on screen the
  *  sheet shows it, as in Border Studio). */

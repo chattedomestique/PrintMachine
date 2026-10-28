@@ -7,6 +7,7 @@
 import { CHIP_RATIOS, flipOf, type AspectKey } from '../../engine/aspect.ts'
 import { cssRgb, paperById } from '../../engine/inks.ts'
 import type { FillKey, FramePalette } from '../../engine/types.ts'
+import { FILLS } from '../../state/fields.ts'
 import type { ChipItem } from '../../ui/chips.ts'
 
 /** Said under Crop | Fit on an Original sheet: the sheet is the photo's own
@@ -34,16 +35,19 @@ export function ratioChips(hasPhoto: boolean): ChipItem<AspectKey>[] {
   })
 }
 
-/** The fills, in the order the row shows them: the stock, the photo's colour
- *  at three weights, the colour that stands off it, and the photo frosted. */
-export const FILLS: readonly { id: FillKey; label: string }[] = [
-  { id: 'paper', label: 'Paper' },
-  { id: 'photo', label: 'Photo' },
-  { id: 'deep', label: 'Deep' },
-  { id: 'muted', label: 'Muted' },
-  { id: 'comp', label: 'Comp' },
-  { id: 'frosted', label: 'Frosted' },
-]
+/** Each fill's name on its chip. The row shows the schema's fills
+ *  (state/fields.ts `FILLS`), in its order: the stock, the photo's colour at
+ *  three weights, the colour that stands off it, and the photo frosted; keyed
+ *  by FillKey, so a fill the schema gains without a name here is a type
+ *  error, not a missing chip. */
+export const FILL_LABELS: Record<FillKey, string> = {
+  paper: 'Paper',
+  photo: 'Photo',
+  deep: 'Deep',
+  muted: 'Muted',
+  comp: 'Comp',
+  frosted: 'Frosted',
+}
 
 /** Frosted's glyph: it is the photo blurred, not one colour. */
 export const FROSTED_ICON = 'blend'
@@ -62,7 +66,8 @@ export const FROSTED_ICON = 'blend'
  */
 export function fillChips(palette: FramePalette | undefined, paperId: string, chosen: FillKey, preparing: boolean): ChipItem<FillKey>[] {
   const stock = cssRgb(paperById(paperId).rgb)
-  return FILLS.map(({ id, label }) => {
+  return FILLS.map((id) => {
+    const label = FILL_LABELS[id]
     const face = id === 'frosted' ? { icon: FROSTED_ICON } : { swatch: id === 'paper' ? stock : (palette?.[id] ?? stock) }
     return { id, label, ...face, ...(preparing && id === chosen ? { busy: true } : {}) }
   })

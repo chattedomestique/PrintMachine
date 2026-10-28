@@ -285,7 +285,8 @@ export function ActionSheet({
   title?: string
   label?: string
   /** Facts to read before the rows (not rows themselves: a menu holds only
-   *  what can be chosen). */
+   *  what can be chosen). On a short screen at a large text size they
+   *  scroll, and the rows and Cancel stay on screen. */
   info?: ReactNode
   children: ReactNode
   listRef?: RefObject<HTMLDivElement | null>
@@ -326,7 +327,7 @@ export function ActionSheet({
           {title}
         </p>
       )}
-      {info}
+      {info && <div className="actsheet__info">{info}</div>}
       <div className="actsheet__list" role="menu" aria-label={label ?? title} ref={setList} onKeyDown={onKeyDown}>
         {children}
         <button type="button" className="menu__item" role="menuitem" data-variant="cancel" onClick={onClose}>

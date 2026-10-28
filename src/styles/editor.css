@@ -269,6 +269,17 @@ dialog.dialog.actsheet {
 @media (max-width: 30rem) {
   dialog.dialog.actsheet { border-inline-width: 0; }
 }
+/* A sheet with facts before its rows (More): the facts give way first, and
+   scroll inside themselves, so the actions and Cancel are on screen however
+   long the facts run at 200% text on a short phone. A sheet of rows alone
+   (a picker) scrolls as a whole, as before. */
+.actsheet__info {
+  flex: 0 1 auto;
+  min-block-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.actsheet__info + .actsheet__list { flex: 0 0 auto; }
 .actsheet__title {
   /* the sheet's name, for orientation: what these rows change */
   padding-block: var(--chrome-4) var(--chrome-2);

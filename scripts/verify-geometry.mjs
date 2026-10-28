@@ -1291,6 +1291,29 @@ async function checkSaveStates(vw, vh, tool) {
   if (tool) await openTool(page, tool)
   else await closeTools(page)
   await settle(page, `${where}, before Save`)
+  // More, on a short phone at 200% text: its actions and Cancel on screen as
+  // it opens, without scrolling (its facts may scroll inside themselves).
+  if (!tool) {
+    await page.locator('.app__bar [aria-label="More"]').click()
+    await page.waitForSelector('dialog[open] .actsheet__list')
+    await settle(page, `${where}, More`)
+    const more = await page.evaluate(() => {
+      const d = document.querySelector('dialog[open]')
+      const inView = (el) => {
+        const r = el?.getBoundingClientRect()
+        return !!r && r.top >= -0.5 && r.bottom <= innerHeight + 0.5
+      }
+      const items = [...d.querySelectorAll('.actsheet__list .menu__item')]
+      return { scrolled: d.scrollTop, all: items.length, shown: items.filter(inView).map((i) => i.textContent.trim().slice(0, 24)), facts: d.querySelector('.actsheet__info')?.scrollHeight > d.querySelector('.actsheet__info')?.clientHeight }
+    })
+    check(
+      more.all >= 2 && more.shown.length === more.all && more.scrolled === 0,
+      `${where}, More: its actions on screen as it opens: ${JSON.stringify(more)}`,
+    )
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('dialog[open]', { state: 'detached' }).catch(() => undefined)
+    await settle(page, `${where}, More closed`)
+  }
   await page.evaluate(() => {
     window.__holdOriginal()
     // A clock on the toast: from when it shows (no toast is up before Save).

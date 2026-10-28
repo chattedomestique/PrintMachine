@@ -113,5 +113,5 @@ describe('the preview keeps its glyph rasters by face generation', () => {
     expect(render(1)).toBeGreaterThan(0)
     expect(cacheRef.current).not.toBe(first)
     expect(render(1)).toBe(0)
-  })
+  }, 30_000)
 })

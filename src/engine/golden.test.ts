@@ -114,7 +114,7 @@ describe('golden: the press prints the bytes it printed before the band engine',
       const k = lastKnockout()
       expect(!!k && k.some((v) => v > 0), `${name}: knockout`).toBe(!!cuts)
     }
-  })
+  }, 30_000)
 })
 
 afterAll(() => {

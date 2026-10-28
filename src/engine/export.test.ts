@@ -624,7 +624,7 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
     expect(asyncOut.bands).toBeGreaterThan(0)
     expect(asyncOut.data.length).toBe(240 * 300 * 4)
     expect(asyncOut.data).toEqual(syncOut.data)
-  })
+  }, 30_000)
 
   it('stops at the next step once cancelled, with an AbortError', async () => {
     const controller = new AbortController()

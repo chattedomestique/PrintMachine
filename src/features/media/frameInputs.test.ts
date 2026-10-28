@@ -368,22 +368,26 @@ describe('the inputs a press needs', () => {
 
 describe("Frosted's fields, kept", () => {
   it('one per sheet shape, blur and size, made once, the most recent kept, another photo\'s let go', () => {
+    // The fields' long side matters to the keys, not to what is checked, so
+    // they are made at 240 (a quarter of the 480 a settled field costs, which
+    // took this test to within 2x of its time limit on a loaded machine).
+    const LONG = 240
     const src = makeFrameSource(80, 60, 2)
     const fields = frostFields(3)
-    const a = fields.field('p', src, 1.25, 60, 480)
-    expect(fields.field('p', src, 1.25, 60, 480)).toBe(a)
+    const a = fields.field('p', src, 1.25, 60, LONG)
+    expect(fields.field('p', src, 1.25, 60, LONG)).toBe(a)
     const b = fields.field('p', src, 1.25, 61, 160)
     expect(b).not.toBe(a)
     expect(b).toMatchObject({ w: 160, h: 128, blur: 61 })
-    fields.field('p', src, 1.5, 60, 480)
-    fields.field('p', src, 1.5, 61, 480)
+    fields.field('p', src, 1.5, 60, LONG)
+    fields.field('p', src, 1.5, 61, LONG)
     // Four made, three kept: the first (least recently used) went.
-    expect(fields.field('p', src, 1.25, 60, 480)).not.toBe(a)
+    expect(fields.field('p', src, 1.25, 60, LONG)).not.toBe(a)
     // Another photo's: everything of the first photo goes.
-    const c = fields.field('q', src, 1.25, 60, 480)
-    expect(fields.field('q', src, 1.25, 60, 480)).toBe(c)
-    expect(fields.field('p', src, 1.5, 61, 480)).not.toBe(b)
-  })
+    const c = fields.field('q', src, 1.25, 60, LONG)
+    expect(fields.field('q', src, 1.25, 60, LONG)).toBe(c)
+    expect(fields.field('p', src, 1.5, 61, LONG)).not.toBe(b)
+  }, 20_000)
 })
 
 describe("Frosted's covers, kept", () => {

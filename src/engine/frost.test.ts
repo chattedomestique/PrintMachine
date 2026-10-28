@@ -92,7 +92,7 @@ describe('the field', () => {
     }
   })
 
-  it("a photo's transparent pixels: the frost is the photo blurred over the bare stock, its colour where it reaches (never black), Paper where it does not; nothing opaque is Paper", () => {
+  it("a photo's transparent pixels: the frost is the photo blurred over the bare stock, its colour where it reaches (never black), Paper where it does not; a photo of clear pixels only is Paper", () => {
     // One light colour, its left quarter fully transparent (a cut-out PNG).
     const w = 400
     const h = 300
@@ -129,7 +129,7 @@ describe('the field', () => {
     frostSampler(hf, 600, 450)(200, 0, 600, row, 0)
     expect(row[300 * 4 + 3]).toBe(128)
     expect(Math.abs(row[300 * 4] - want[0])).toBeLessThanOrEqual(1)
-    // Nothing opaque: no colour to frost.
+    // Every pixel clear: no colour to frost.
     const clear = frostField({ w, h, rgba: new Uint8ClampedArray(w * h * 4) }, w / h, FROST_FIELD_LONG, 60)
     expect(clear.clear).toBe(true)
     const s = { ...defaultSettings(), aspect: '4:5', media: makeMedia({ id: 'p', width: 400, height: 300 }) } as PrintSettings

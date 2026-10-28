@@ -390,7 +390,10 @@ the same path carries the knockout under the second ink (the photo's alpha goes
 down there) and a transparent PNG's own transparency, and there is a test that
 uncovered ground is bit-for-bit the paper the app draws with no photo at all.
 (Unframed. Inside a frame a transparent pixel of the photo shows the frame's
-fill, which is bare paper only when the fill is Paper.)
+fill: the bare stock under Paper, the colour under a palette colour, and
+under Frosted the frost, which over a cut-out's clear parts is partly the
+bare stock where it thins and wholly the stock where the blur of its opaque
+pixels does not reach.)
 
 #### The frame is ground, composed a band at a time
 
@@ -470,8 +473,11 @@ canvas frosts it black), thinning into the stock as smoothly as the blur
 spreads them, with no step the same photo flattened on Paper would not have
 (`frost.test.ts`: a cut-out from dark blue to light yellow, its steepest
 texel step within 3 levels of the flattened photo's at Blur 10, 60 and 240;
-a mean colour where no opaque pixel reached made a 66-level seam); a photo
-with nothing opaque frosts to Paper, as its colour fills are. The field is made by the page from
+a mean colour where no opaque pixel reached made a 66-level seam). A photo
+whose every pixel is clear has no colour to frost and frosts to Paper. One
+whose pixels are all faint (each under alpha 125 of 255) frosts to their
+colour at their strength over Paper, though its colour fills are Paper (the
+palette skips such pixels). The field is made by the page from
 the photo's frame source and kept (a few, by photo, sheet shape and blur:
 `features/media/frostField.ts`), never in the render cache, and a field made
 for another shape or blur is not used (the border is Paper until the right

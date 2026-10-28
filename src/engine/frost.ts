@@ -44,8 +44,9 @@ export interface FrostField {
   aspect: number
   /** The blur it was made at (10..240). */
   blur: number
-  /** The photo has no opaque pixel: no colour to frost, so the border is
-   *  Paper, as its colour fills are. */
+  /** Every pixel of the photo under the field is clear (alpha 0): no colour
+   *  to frost, so the border is Paper. A photo of faint pixels is not
+   *  clear: it frosts to their colour at their strength. */
   clear: boolean
   /** For a photo with transparent pixels, the blurred alpha (0..1), and R,
    *  G and B are multiplied by it: the frost is the photo blurred over the
@@ -67,7 +68,7 @@ export interface FrostCover {
   b: Float32Array
   /** The alpha plane, or null when every pixel of the photo is opaque. */
   a: Float32Array | null
-  /** Nothing under the field is opaque. */
+  /** Every pixel under the field is clear (its alpha sums to 0). */
   clear: boolean
   aspect: number
 }

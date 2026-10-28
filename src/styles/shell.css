@@ -346,6 +346,9 @@
 /* Nothing can be saved (the photo cannot be loaded): the status card's
    alert, in the same words and ink. */
 .more__fact[data-alert] :is(.ic, .more__fact-word) { color: var(--bad-ink); }
+/* The build stamp: a commit and a day, in the style guide's mono face, as
+   Border Studio set it. */
+.more__build { font-family: var(--font-mono); }
 
 /* ── Save questions (a print too big, a save that did not finish) ── */
 .savequestion .card__text { margin: 0; }

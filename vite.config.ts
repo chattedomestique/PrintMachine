@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { execSync } from 'node:child_process'
 
 // One source of truth for the base path (playbook §3.5). GitHub Pages serves
 // this repo from /PrintMachine/, dev serves from /. Every base-aware thing
@@ -14,8 +15,21 @@ const base = process.env.PAGES ? '/PrintMachine/' : '/'
 // them together with data-palette.
 const THEME_COLOR = '#F5F5F5'
 
+// The build stamp (Border Studio's, vite.config.js): the commit and the day
+// this build was made, shown in the More sheet's offline row, so which
+// version is running is never a guess. An installed app updates itself in
+// place, with nothing else to say it did.
+let sha = 'dev'
+try {
+  sha = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+} catch {
+  // Not a git checkout: the stamp says 'dev'.
+}
+const BUILD_ID = `${sha} · ${new Date().toISOString().slice(0, 10)}`
+
 export default defineConfig({
   base,
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   plugins: [
     react(),
     VitePWA({

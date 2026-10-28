@@ -14,8 +14,8 @@ const OFFLINE_WORDS: Record<SWState, { icon: string; word: string; meta: string 
  * parameter picker, so everything that opens on top looks it). First two
  * facts — what Save makes, in pixels and, when it is not the photo's own, why
  * (or, while the photo cannot be loaded, that nothing can be saved); and
- * whether the app will open with no network — then the one rarer action: the
- * lossless PNG.
+ * whether the app will open with no network, and which build it is — then
+ * the one rarer action: the lossless PNG.
  */
 export default function MoreSheet({
   open,
@@ -54,6 +54,12 @@ export default function MoreSheet({
             <Icon name={offline.icon} />
             <p className="more__fact-word">{offline.word}</p>
             <p className="more__fact-meta">{offline.meta}</p>
+            {/* Which build this is (Border Studio's stamp): what is kept for
+                offline is this build, and an installed app updates itself
+                with nothing else to say it did. */}
+            <p className="more__fact-meta more__build" data-build={__BUILD_ID__}>
+              Build {__BUILD_ID__}
+            </p>
           </div>
         </div>
       }

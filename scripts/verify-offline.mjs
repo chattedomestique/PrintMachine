@@ -26,6 +26,7 @@
  * stack without the face (equal when the face never loaded); the advance must
  * be the one the online tab measured; and the face's `o` must rise at most 0.9
  * of its `O` (face-checks.mjs: a face whose lowercase is capitals fails).
+ * And the cold tab's More sheet carries the build stamp, a commit and a day.
  *
  * Run: npm run verify:offline   (builds with PAGES=1 first: this serves the
  * build only under the Pages sub-path, so a build for `/` would 404 every
@@ -255,6 +256,12 @@ try {
       .catch(() => false)
     if (!booted) fail('offline cold launch produced a document but the app did not render')
     else console.log('✓ cold launch with no network boots and renders')
+    // The More sheet's offline row says which build this is (vite.config.ts
+    // `define`): the copy kept for offline carries its stamp, a commit and a
+    // day ('dev' outside a git checkout).
+    const stamp = await cold.evaluate(() => document.querySelector('[data-build]')?.getAttribute('data-build') ?? null)
+    if (!stamp || !/^([0-9a-f]{7,40}|dev) · \d{4}-\d{2}-\d{2}$/.test(stamp)) fail(`the offline copy has no build stamp ("${stamp}")`)
+    else console.log(`✓ the offline copy says which build it is: ${stamp}`)
   }
 
   // 5. The face, offline, really there (see the header).

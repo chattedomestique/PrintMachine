@@ -203,7 +203,10 @@ from "Add to Home Screen" into airplane mode fails regardless. The More sheet
 says when precaching has finished ("Works offline", with an icon, never a
 colour alone), and the status region says it once when it happens, so that
 state is visible before you are somewhere without signal rather than
-discovered there. It is only as honest as the manifest, though — a truncated
+discovered there. Under it is the build stamp (Border Studio's: the commit and
+the day it was built, `vite.config.ts`), because an installed copy updates
+itself in place with nothing else to say which version is running;
+`verify:offline` checks the cold offline tab carries it. It is only as honest as the manifest, though — a truncated
 one would still say it is ready, which is what the CI check is for.
 
 ### The photo is the paper
@@ -1782,12 +1785,13 @@ same value modal, action sheets, toast and app bar. What differs, and why:
   and rotation (rotation is a feature; Border Studio has none), and a zoomed
   view would show a 1000 px preview the saved file does not have.
 - **No snapping, grid or guides; no eye-dropper; no presets; no "New photo"
-  seed modes; no canvas view modes in More; no build stamp.** The grid
+  seed modes; no canvas view modes in More.** The grid
   informed but never acted (cut with the thirds guides); inks are Riso's
   table, not a colour picked off the photo; presets and seeds were never
   this app's, and the restyle added no features (what the app keeps, and
   why, is under "Removed on purpose"). More holds what Save makes, the
-  offline state and the lossless PNG.
+  offline state with the build stamp (Border Studio's, moved from its upload
+  screen to the offline row) and the lossless PNG.
 - **The style guide's `default` palette, not `sand`** (below, under the
   playbook's deviations).
 - **A native select for the sheet's shape** (five choices; Border Studio's

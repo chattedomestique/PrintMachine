@@ -1902,8 +1902,9 @@ readers; the why is here, in this README.
 The sheet's surface takes `touch-action: none`, so its gestures are never the
 browser's: drag to move, two-finger pinch to scale and rotate, double-tap to
 centre. With the Frame tool open the same gestures pan and zoom the photo
-instead (100–400%, never off the sheet), and double-tap puts it back at 100%
-and centred; a drag is measured against the visible rectangle inside the frame,
+instead (100–400%, never off the sheet), a pinch zooming about the fingers,
+so what is under them stays under them (Border Studio's crop pinch), and
+double-tap puts it back at 100% and centred; a drag is measured against the visible rectangle inside the frame,
 so the photo stays under the finger whatever the border. In Fit the whole
 photo shows and nothing moves (the hint says so). A finger
 lifting mid-pinch re-seeds the gesture from the remaining one, so the layer
@@ -1915,7 +1916,9 @@ as Border Studio's are (`features/editor/photoKeys.ts`): the arrows move the
 view over the photo, so Right shows more of its right side (it raises
 Position X, the photo moving left: the opposite of a plate's arrows, which
 move the plate), one press 6% of its drawn size at 100%, whatever the zoom;
-+ and − zoom by 1.15 within 100–400%; 0 puts it back at 100% and centred.
++ and − zoom by 1.15 within 100–400% about the middle of the frame (what is
+there stays there, as Border Studio's keys leave the view's centre); 0 puts
+it back at 100% and centred.
 A run of presses is one undo step, as a plate's keys are, and 0 a step of
 its own; in Fit they move nothing (`check:touch` presses them in the built
 app). With no photo there is nothing of the photo's to move: a touch still

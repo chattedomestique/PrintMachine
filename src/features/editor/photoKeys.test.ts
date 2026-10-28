@@ -70,6 +70,22 @@ describe('the zoom keys and 0', () => {
     expect(photoKey('+', { ...photo, scale: 3.9 }, ASPECT)!.patch.scale).toBe(4)
   })
 
+  it('zooms about the middle of the frame: the point of the photo there stays there (Border Studio\'s keys)', () => {
+    const area = areaOf(ASPECT, 1)
+    // Panned to the left: the view's middle is left of the photo's centre.
+    const panned = { ...photo, x: 0.8, y: 0.4 }
+    const r0 = coverRect(panned, area, panned)
+    const u = (0.5 * area.w - r0.dx) / r0.dw
+    const v = (0.5 * area.h - r0.dy) / r0.dh
+    let m = panned
+    for (const key of ['+', '+', '-', '+']) {
+      m = { ...m, ...photoKey(key, m, ASPECT)!.patch }
+      const r = coverRect(m, area, m)
+      expect(r.dx + u * r.dw).toBeCloseTo(0.5 * area.w, 9)
+      expect(r.dy + v * r.dh).toBeCloseTo(0.5 * area.h, 9)
+    }
+  })
+
   it('zooming out pulls the pan back inside the travel the new zoom has', () => {
     const edge = { ...photo, x: clampPan({ ...photo, x: -9 }, AREA).x }
     const out = { ...edge, ...photoKey('-', edge, ASPECT)!.patch }

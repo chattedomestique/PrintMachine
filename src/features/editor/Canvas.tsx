@@ -17,8 +17,10 @@ import './Canvas.css'
  *  fills the sheet and nothing below it is allowed — it would leave bare
  *  paper. Pan: not limited to the sheet the way type is; how far the photo may
  *  travel depends on the zoom and the sheet's shape, and clampPan decides that
- *  below, so the gesture is left free to reach every edge. */
-const MEDIA_LIMITS: GestureLimits = { size: [1, 4], position: [-Infinity, Infinity] }
+ *  below, so the gesture is left free to reach every edge. A pinch zooms about
+ *  the fingers, as Border Studio's crop pinch does: what is under them stays
+ *  under them. */
+const MEDIA_LIMITS: GestureLimits = { size: [1, 4], position: [-Infinity, Infinity], anchored: true }
 
 /** How far outside a plate's line boxes a touch still picks it, in CSS
  *  pixels: a caption at a few percent of the sheet is a line a few pixels

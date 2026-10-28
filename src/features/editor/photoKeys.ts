@@ -10,7 +10,9 @@
  *    One press moves the photo by 0.06 of its drawn size at 100% (Border
  *    Studio's 0.06 / zoom of the photo, at the current zoom), whatever the
  *    zoom, so a press is the same distance on screen at every zoom.
- *  - Plus (or =) and minus (or _) zoom by 1.15 within 100% to 400%.
+ *  - Plus (or =) and minus (or _) zoom by 1.15 within 100% to 400%, about
+ *    the middle of the frame (Border Studio's keys leave the view's centre
+ *    where it is): what is in the middle stays there.
  *  - 0 puts it back at 100% and centred.
  *
  * Everything lands through `clampPan` on the visible rectangle, so no key
@@ -61,6 +63,12 @@ export function photoKey(key: string, media: MediaSize & MediaPlacement, aspect:
     return { scale: c.scale, x: c.x, y: c.y }
   }
   const at = { scale: media.scale, x: media.x, y: media.y }
+  // A zoom about the middle of the visible rectangle (0.5, 0.5): the photo's
+  // centre moves away from it, or towards it, by the zoom's ratio.
+  const zoomTo = (scale: number): MediaPlacement => {
+    const k = scale / Math.max(1e-9, media.scale)
+    return placed({ scale, x: 0.5 - (0.5 - media.x) * k, y: 0.5 - (0.5 - media.y) * k })
+  }
   switch (key) {
     case 'ArrowRight':
       return { patch: placed({ ...at, x: media.x - dx }), coalesce: true }
@@ -72,10 +80,10 @@ export function photoKey(key: string, media: MediaSize & MediaPlacement, aspect:
       return { patch: placed({ ...at, y: media.y + dy }), coalesce: true }
     case '+':
     case '=':
-      return { patch: placed({ ...at, scale: Math.min(ZOOM_MAX, media.scale * PHOTO_KEY_ZOOM) }), coalesce: true }
+      return { patch: zoomTo(Math.min(ZOOM_MAX, media.scale * PHOTO_KEY_ZOOM)), coalesce: true }
     case '-':
     case '_':
-      return { patch: placed({ ...at, scale: Math.max(ZOOM_MIN, media.scale / PHOTO_KEY_ZOOM) }), coalesce: true }
+      return { patch: zoomTo(Math.max(ZOOM_MIN, media.scale / PHOTO_KEY_ZOOM)), coalesce: true }
     case '0':
       return { patch: { scale: 1, x: 0.5, y: 0.5 }, coalesce: false }
     default:

@@ -4,6 +4,7 @@ import {
   beginGesture,
   stepGesture,
   type Gesture,
+  type GestureBox,
   type GestureLimits,
   type GesturePatch,
   type GestureTarget,
@@ -57,7 +58,7 @@ export function useLayerGestures(
      *  of: the surface itself for a plate (a fraction of the sheet), the
      *  visible rectangle inside the frame for the photo (gesture.ts
      *  `visibleBox`). */
-    area?: (box: { width: number; height: number }) => { width: number; height: number }
+    area?: (box: { width: number; height: number }) => GestureBox
     /**
      * Asked once at the first pointer of a gesture, with where it landed (in
      * the surface's pixels) and the surface's size: a target to move instead

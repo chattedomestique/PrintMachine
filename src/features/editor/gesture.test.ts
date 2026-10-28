@@ -110,8 +110,8 @@ describe('a drag on the photo, inside its frame', () => {
   const LIMITS_PHOTO: GestureLimits = { size: [1, 4], position: [-Infinity, Infinity] }
 
   it('is measured against the visible rectangle, not the sheet', () => {
-    expect(visibleBox(BOX, 0.1)).toEqual({ width: 300, height: 400 })
-    expect(visibleBox(BOX, 0)).toEqual(BOX)
+    expect(visibleBox(BOX, 0.1)).toEqual({ width: 300, height: 400, left: 50, top: 50 })
+    expect(visibleBox(BOX, 0)).toEqual({ ...BOX, left: 0, top: 0 })
   })
 
   it('moves the photo with the finger, pixel for pixel, on the sheet as it is laid out', () => {
@@ -125,5 +125,34 @@ describe('a drag on the photo, inside its frame', () => {
     // Against the whole sheet it would have lagged the finger by the frame.
     const lagged = stepGesture(g, [{ x: 230, y: 230 }], BOX, LIMITS_PHOTO).patch!
     expect(layoutSheet(doc(lagged.x!, lagged.y!), BOX.width, BOX.height).photo!.dx - before.dx).toBeCloseTo(22.5, 9)
+  })
+
+  it('a pinch zooms about the fingers: the point of the photo under them when it began stays under them (Border Studio\'s crop pinch)', () => {
+    const LIMITS_ANCHORED: GestureLimits = { ...LIMITS_PHOTO, anchored: true }
+    const start = { x: 0.62, y: 0.41 }
+    const target = { id: 'p', ...start, size: 1.5, rotation: 0 }
+    const box = visibleBox(BOX, frame.width)
+    const before = layoutSheet({ aspect: '4:5' as const, media: { ...media, scale: 1.5, ...start }, frame }, BOX.width, BOX.height).photo!
+    // Two fingers either side of a detail away from the centre, spreading
+    // and moving together.
+    const [a, b] = [{ x: 110, y: 160 }, { x: 150, y: 190 }]
+    const p0 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    const u = (p0.x - before.dx) / before.dw
+    const v = (p0.y - before.dy) / before.dh
+    const g = beginGesture(target, [a, b], false)
+    for (const [spread, dx, dy] of [[1.3, 0, 0], [2, 12, -7], [0.8, -5, 4]]) {
+      const pts = [a, b].map((p) => ({ x: p0.x + (p.x - p0.x) * spread + dx, y: p0.y + (p.y - p0.y) * spread + dy }))
+      const step = stepGesture(g, pts, box, LIMITS_ANCHORED).patch!
+      const m = { ...media, scale: step.size!, x: step.x!, y: step.y! }
+      const r = layoutSheet({ aspect: '4:5' as const, media: m, frame }, BOX.width, BOX.height).photo!
+      expect(r.dx + u * r.dw).toBeCloseTo(p0.x + dx, 6)
+      expect(r.dy + v * r.dh).toBeCloseTo(p0.y + dy, 6)
+    }
+    // Unanchored (a plate's pinch), the same spread zooms about the centre
+    // and the detail runs from the fingers.
+    const pts = [a, b].map((p) => ({ x: p0.x + (p.x - p0.x) * 2, y: p0.y + (p.y - p0.y) * 2 }))
+    const free = stepGesture(g, pts, box, LIMITS_PHOTO).patch!
+    const rf = layoutSheet({ aspect: '4:5' as const, media: { ...media, scale: free.size!, x: free.x!, y: free.y! }, frame }, BOX.width, BOX.height).photo!
+    expect(Math.abs(rf.dx + u * rf.dw - p0.x)).toBeGreaterThan(20)
   })
 })

@@ -135,6 +135,38 @@ async function touch(cdp, from, path = []) {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 }
 
+/** Two fingers, through the browser's touch input: down `from` px apart
+ *  across `at`, then in steps apart by `to` px with their centre moved by
+ *  `shift`, then up. */
+async function pinch(cdp, at, from, to, shift = { x: 0, y: 0 }) {
+  const points = (spread, k) => [
+    { x: at.x + shift.x * k - spread / 2, y: at.y + shift.y * k, id: 1, radiusX: 4, radiusY: 4, force: 1 },
+    { x: at.x + shift.x * k + spread / 2, y: at.y + shift.y * k, id: 2, radiusX: 4, radiusY: 4, force: 1 },
+  ]
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(from, 0) })
+  for (let k = 1; k <= 12; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(from + ((to - from) * k) / 12, k / 12) })
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+}
+
+/** Where a point of the photo is on screen, for a stored placement on a
+ *  sheet `box` with a frame `width` of its long side: the photo's centre is
+ *  `x`, `y` of the visible rectangle, drawn at `scale` times its cover fit
+ *  (media.ts coverRect). `u`, `v` are fractions of the photo. */
+function onScreen(box, width, m, u, v) {
+  const b = width * Math.max(box.width, box.height)
+  const vis = { x: box.x + b, y: box.y + b, w: box.width - 2 * b, h: box.height - 2 * b }
+  const cover = Math.max(vis.w / m.width, vis.h / m.height) * m.scale
+  const dw = m.width * cover
+  const dh = m.height * cover
+  return { x: vis.x + m.x * vis.w - dw / 2 + u * dw, y: vis.y + m.y * vis.h - dh / 2 + v * dh }
+}
+/** The fraction of the photo at a point on screen (onScreen's inverse). */
+function ofPhoto(box, width, m, pt) {
+  const o = onScreen(box, width, m, 0, 0)
+  const one = onScreen(box, width, m, 1, 1)
+  return { u: (pt.x - o.x) / (one.x - o.x), v: (pt.y - o.y) / (one.y - o.y) }
+}
+
 try {
   const ctx = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -244,7 +276,11 @@ try {
   const mid = { x: box1.x + box1.width / 2, y: box1.y + box1.height / 2 }
   // The placement only: the photo's palette lands in the stored document on
   // its own time (a loaded machine has it land between the two reads).
-  const placed = async () => JSON.stringify((({ x, y, scale }) => ({ x, y, scale }))((await stored(page)).media))
+  const placed = async () => {
+    const m = (await stored(page)).media
+    return m ? JSON.stringify({ x: m.x, y: m.y, scale: m.scale }) : 'none'
+  }
+  await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media, KEY, { timeout: 30_000 })
   const still = await placed()
   await touch(cdp, mid, [{ x: mid.x + 40, y: mid.y }])
   await page.waitForTimeout(300)
@@ -595,6 +631,54 @@ try {
     await undo.click()
     const before = (await stored(page)).media
     check(JSON.stringify(before) === JSON.stringify(start), `and one more takes back the whole run (one step): ${before.scale}, ${before.x}, ${before.y}`)
+    // + and − zoom about the middle of the frame: what is there stays there
+    // (Border Studio's keys leave the view's centre where it is).
+    {
+      await surface.focus()
+      for (const key of ['+', 'ArrowRight', 'ArrowRight', 'ArrowDown']) await page.keyboard.press(key)
+      const box9 = await settledBox(page)
+      const centre = { x: box9.x + box9.width / 2, y: box9.y + box9.height / 2 }
+      const doc9 = await stored(page)
+      const off = doc9.media
+      const held = ofPhoto(box9, doc9.frame.width, off, centre)
+      await page.keyboard.press('+')
+      const zoomed = (await stored(page)).media
+      const moved = onScreen(box9, doc9.frame.width, zoomed, held.u, held.v)
+      const drift = Math.hypot(moved.x - centre.x, moved.y - centre.y)
+      await page.keyboard.press('-')
+      const back = (await stored(page)).media
+      check(
+        zoomed.scale > off.scale && off.x !== 0.5 && drift < 1 && Math.abs(back.x - off.x) < 1e-9 && Math.abs(back.y - off.y) < 1e-9,
+        `panned off the middle (${off.x.toFixed(4)}, ${off.y.toFixed(4)}), + zooms about the middle of the frame (the point there moves ${drift.toFixed(2)} px) and − takes it back (${back.x.toFixed(4)}, ${back.y.toFixed(4)})`,
+      )
+      await page.keyboard.press('0')
+      await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media?.scale === 1, KEY, { timeout: 5_000 })
+    }
+
+    // A pinch on a detail away from the centre zooms about the fingers: the
+    // point of the photo under them stays under them (Border Studio's crop
+    // pinch), as it spreads and as the fingers move.
+    {
+      const cdp = await ctx.newCDPSession(page)
+      const box = await settledBox(page)
+      const doc = await stored(page)
+      const at = { x: box.x + box.width * 0.3, y: box.y + box.height * 0.35 }
+      const shift = { x: 15, y: -10 }
+      const was = ofPhoto(box, doc.frame.width, doc.media, at)
+      await pinch(cdp, at, 60, 120, shift)
+      await page.waitForTimeout(300)
+      await surface.focus()
+      const now = (await stored(page)).media
+      const lands = onScreen(box, doc.frame.width, now, was.u, was.v)
+      const off = Math.hypot(lands.x - (at.x + shift.x), lands.y - (at.y + shift.y))
+      check(
+        now.scale > 1.5 && off < 3,
+        `a pinch spreading 60 -> 120 px on a point at 30%, 35% of the sheet zooms to ${now.scale.toFixed(3)} and that point of the photo stays under the fingers (${off.toFixed(1)} px off)`,
+      )
+      await page.keyboard.press('0')
+      await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media?.scale === 1, KEY, { timeout: 5_000 })
+    }
+
     // Fit: the whole photo shows; the keys move nothing, and none is named.
     await page.locator('.controls__section[data-tool="frame"] [role=tab][data-tab="crop"]').click()
     await page.locator('.chiprow [data-chip="4:5"]').click()
@@ -606,7 +690,7 @@ try {
     const fitKeys = await surface.getAttribute('aria-keyshortcuts')
     check(
       JSON.stringify(fitAfter) === JSON.stringify(fitDoc) && fitKeys === null,
-      `in Fit the keys move nothing (${JSON.stringify(fitAfter) === JSON.stringify(fitDoc) ? 'unchanged' : 'moved'}) and none is named (${fitKeys})`,
+      `in Fit the keys move nothing (${JSON.stringify(fitAfter) === JSON.stringify(fitDoc) ? 'unchanged' : `moved: ${Object.keys(fitAfter).filter((k) => JSON.stringify(fitAfter[k]) !== JSON.stringify(fitDoc[k])).map((k) => `${k} ${JSON.stringify(fitDoc[k])} -> ${JSON.stringify(fitAfter[k])}`).join(', ')}`}) and none is named (${fitKeys})`,
     )
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
@@ -754,11 +838,22 @@ try {
           const a = document.activeElement
           return a === document.body || !a ? 'body' : `${a.tagName.toLowerCase()} "${a.textContent?.trim() ?? ''}"${a.dataset?.chip ? ` [${a.dataset.chip}]` : ''}`
         })
+      // The app's file input answers its click with a file at once, as a
+      // chooser would (a native chooser opened from a key press is not
+      // dependably reported to the driver): the keys' path is the app's own,
+      // Enter on the button, its click, the input's click, the file read.
+      await page.evaluate((b64) => {
+        const input = document.querySelector('input[type=file]')
+        input.click = () => {
+          const dt = new DataTransfer()
+          dt.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'again.jpg', { type: 'image/jpeg' }))
+          input.files = dt.files
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+      }, Buffer.from(bytes).toString('base64'))
       const pickWith = async (button) => {
         await button.focus()
-        const chooser = page.waitForEvent('filechooser', { timeout: 5_000 })
         await page.keyboard.press('Enter')
-        await (await chooser).setFiles({ name: 'again.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
         await page.waitForTimeout(1500)
       }
       const photoTab = '.controls__panel[data-sub="photo"]'

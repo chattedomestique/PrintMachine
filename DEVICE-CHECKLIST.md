@@ -132,7 +132,11 @@ So:
 - [ ] Save it: completes without a tab reload (Save decodes the original,
       about 98 MB, until its last rows are in the print) and the file shows
       the photo, upright
-- [ ] A transparent PNG: paper shows through where it is transparent
+- [ ] A transparent PNG, chosen as a first photo: its holes show the
+      frame's fill, as the frame round it does (the Photo colour a first
+      photo's frame gets, so a hole may not stand out at all); choose Paper
+      in Frame › Border and they show the stock, never black; under Frosted
+      the frost, thinning to the stock
 - [ ] Remove the photo → Undo: it comes back (not bare paper, no alert)
 - [ ] A print saved by an older build (its photo cut to 2048 px) shows the
       "saved at reduced size" note in Frame › Photo
@@ -212,7 +216,7 @@ So:
 - [ ] More says the size before the tap ("Saves 2822×3528" for a 12 MP photo
       on 4:5 in the frame a first photo gets, "with a 252 px frame"), and why
       when it is not the photo's own pixels; VoiceOver reads Save as "Save
-      2822×3528 JPEG"
+      2822×3528 JPEG with a 252 px frame"
 - [ ] Tap Save → within a moment Save reads "Saving", a toast repeats the size,
       and a card above the dock reads "Pressing 2822×3528: loading the photo",
       then (with a second ink) "...: reading the photo", then "Pressing

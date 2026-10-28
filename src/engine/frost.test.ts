@@ -92,7 +92,7 @@ describe('the field', () => {
     }
   })
 
-  it("a photo's transparent pixels frost to the colour of the photo round them, never black; a photo with nothing opaque is Paper", () => {
+  it("a photo's transparent pixels: the frost is the photo blurred over the bare stock, its colour where it reaches (never black), Paper where it does not; nothing opaque is Paper", () => {
     // One light colour, its left quarter fully transparent (a cut-out PNG).
     const w = 400
     const h = 300
@@ -101,18 +101,34 @@ describe('the field', () => {
     const want = grade([220, 200, 180])
     for (const blur of [10, 60, 240]) {
       const f = frostField({ w, h, rgba }, w / h, FROST_FIELD_LONG, blur)
-      // Every texel, the transparent quarter's too: the photo's colour,
-      // graded (black would be 0).
-      for (const i of [0, f.w * 60, f.w * 171 + 50, f.w * 171 + 120, f.w * f.h - 1]) {
-        expect(Math.abs(f.r[i] - want[0])).toBeLessThan(0.05)
-        expect(Math.abs(f.g[i] - want[1])).toBeLessThan(0.05)
-        expect(Math.abs(f.b[i] - want[2])).toBeLessThan(0.05)
+      expect(f.a).not.toBeNull()
+      // Wherever the photo reaches, its colour, graded (R, G and B are kept
+      // multiplied by the alpha): black would be 0.
+      let off = 0
+      for (let i = 0; i < f.w * f.h; i++) {
+        const a = f.a![i]
+        if (a < 1e-3) continue
+        off = Math.max(off, Math.abs(f.r[i] / a - want[0]), Math.abs(f.g[i] / a - want[1]), Math.abs(f.b[i] / a - want[2]))
       }
+      expect(off).toBeLessThan(0.05)
+      // The opaque side is the photo whole; at Blur 10 the far left is out
+      // of its reach: Paper.
+      expect(f.a![f.w * 171 + f.w - 1]).toBeCloseTo(1, 5)
+      if (blur === 10) expect(f.a![f.w * 171]).toBe(0)
       expect(f.clear).toBe(false)
     }
-    // The test source's clear corner takes the photo's colours round it.
-    const corner = frostField(makeFrameSource(512, 341, 4), 1.4, FROST_FIELD_LONG, 10)
-    expect(Math.min(corner.r[0], corner.g[0], corner.b[0])).toBeGreaterThan(60)
+    // Half transparent everywhere: the colour at half strength over Paper.
+    const half = new Uint8ClampedArray(w * h * 4)
+    for (let i = 0; i < w * h; i++) half.set([220, 200, 180, 128], i * 4)
+    const hf = frostField({ w, h, rgba: half }, w / h, FROST_FIELD_LONG, 60)
+    expect(hf.a![1000]).toBeCloseTo(128 / 255, 5)
+    expect(hf.r[1000] / hf.a![1000]).toBeCloseTo(want[0], 2)
+    // Sampled over a sheet: a colour over Paper, its alpha the field's, its
+    // colour times its alpha the field's.
+    const row = new Uint8ClampedArray(600 * 4)
+    frostSampler(hf, 600, 450)(200, 0, 600, row, 0)
+    expect(row[300 * 4 + 3]).toBe(128)
+    expect(Math.abs(row[300 * 4] - want[0])).toBeLessThanOrEqual(1)
     // Nothing opaque: no colour to frost.
     const clear = frostField({ w, h, rgba: new Uint8ClampedArray(w * h * 4) }, w / h, FROST_FIELD_LONG, 60)
     expect(clear.clear).toBe(true)
@@ -120,6 +136,50 @@ describe('the field', () => {
     s.frame = { ...s.frame, width: 0.05, fill: 'frosted', blur: 60 }
     const field = frostField({ w, h, rgba: new Uint8ClampedArray(w * h * 4) }, sheetAspect(s), FROST_FIELD_LONG, 60)
     expect(fillFor(s, { frost: field }, 400, 500).flat).toEqual(fillFor({ ...s, frame: { ...s.frame, fill: 'paper' } }, {}, 400, 500).flat)
+    // An opaque photo has no alpha plane: its field is as it always was.
+    expect(frostField(flat(40, 30, [10, 20, 30]), 4 / 3, FROST_FIELD_LONG, 60).a).toBeNull()
+  })
+
+  it("a cut-out whose colour varies frosts into the stock with no seam: no step between neighbouring texels the same photo flattened on Paper does not have, give or take a few levels", () => {
+    // The left quarter clear; then dark blue at the hole's edge to light
+    // yellow at the right. A step where the colour round the hole met a
+    // colour of its own (the photo's mean) was 66 levels at Blur 10.
+    const w = 400
+    const h = 300
+    const PAPER = [245, 242, 233]
+    const photo = (cut: boolean) => {
+      const rgba = new Uint8ClampedArray(w * h * 4)
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const t = Math.max(0, (x - w / 4) / ((w * 3) / 4))
+          const hole = x < w / 4
+          const c = hole && !cut ? PAPER : [30 + 210 * t, 40 + 190 * t, 120 + 30 * t]
+          rgba.set([...c, hole && cut ? 0 : 255], (y * w + x) * 4)
+        }
+      }
+      return { w, h, rgba }
+    }
+    // The print: the field over Paper (an opaque field is itself).
+    const steepest = (f: FrostField) => {
+      const y = Math.floor(f.h / 2)
+      const at = (x: number) => {
+        const i = y * f.w + x
+        const a = f.a ? f.a[i] : 1
+        return [f.r[i] + PAPER[0] * (1 - a), f.g[i] + PAPER[1] * (1 - a), f.b[i] + PAPER[2] * (1 - a)]
+      }
+      let most = 0
+      for (let x = 1; x < f.w; x++) {
+        const p = at(x)
+        const q = at(x - 1)
+        most = Math.max(most, ...p.map((v, k) => Math.abs(v - q[k])))
+      }
+      return most
+    }
+    for (const blur of [10, 60, 240]) {
+      const cut = steepest(frostField(photo(true), w / h, FROST_FIELD_LONG, blur))
+      const flattened = steepest(frostField(photo(false), w / h, FROST_FIELD_LONG, blur))
+      expect(cut).toBeLessThan(flattened + 3)
+    }
   })
 
   it("the blur's radius scales with the field: Border Studio's 7 and 22 on its 240 px field, x 2 at 480, x 2/3 at the draft's 160", () => {
@@ -277,7 +337,7 @@ describe('the sampler', () => {
         b[y * w + x] = 60 + 0.53 * y
       }
     }
-    return { w, h, r, g, b, aspect: w / h, blur: 60, clear: false }
+    return { w, h, r, g, b, aspect: w / h, blur: 60, clear: false, a: null }
   }
 
   it('on a linear field every pixel is the exact value rounded once: no stair from rounding the field first', () => {

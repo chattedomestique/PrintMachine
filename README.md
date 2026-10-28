@@ -462,12 +462,16 @@ sample the same field; it stays in float, and each sheet pixel samples it
 bilinearly (with Border Studio's 2% overscan) and is rounded to a byte once.
 Rounding the field to bytes first would leave a stair as wide as a field
 pixel (19 sheet pixels at 58 MP); here the only step is the one-level step
-rounding must make. A photo with transparent pixels is blurred with its
-alpha (each colour multiplied by it, and divided by the blurred alpha
-after), so a transparent area takes the colour of the photo round it, never
-black (Border Studio's canvas frosts it black); where no opaque pixel
-reaches, it takes the photo's mean colour, and a photo with nothing opaque
-frosts to Paper, as its colour fills are. The field is made by the page from
+rounding must make. A photo with transparent pixels is frosted as it would
+print on the bare stock: blurred with its alpha (each colour multiplied by
+it) and the blurred alpha kept, so the field is a colour over Paper, the
+photo's own colour where its pixels reach, never black (Border Studio's
+canvas frosts it black), thinning into the stock as smoothly as the blur
+spreads them, with no step the same photo flattened on Paper would not have
+(`frost.test.ts`: a cut-out from dark blue to light yellow, its steepest
+texel step within 3 levels of the flattened photo's at Blur 10, 60 and 240;
+a mean colour where no opaque pixel reached made a 66-level seam); a photo
+with nothing opaque frosts to Paper, as its colour fills are. The field is made by the page from
 the photo's frame source and kept (a few, by photo, sheet shape and blur:
 `features/media/frostField.ts`), never in the render cache, and a field made
 for another shape or blur is not used (the border is Paper until the right

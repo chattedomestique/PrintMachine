@@ -47,6 +47,11 @@ export interface FrostField {
   /** The photo has no opaque pixel: no colour to frost, so the border is
    *  Paper, as its colour fills are. */
   clear: boolean
+  /** For a photo with transparent pixels, the blurred alpha (0..1), and R,
+   *  G and B are multiplied by it: the frost is the photo blurred over the
+   *  bare stock, sampled as a colour over Paper (alpha 0), so it fades
+   *  into the stock as smoothly as the blur. Null for an opaque photo. */
+  a: Float32Array | null
 }
 
 /** The photo cover-filled into a field, before the blur: what a Blur change
@@ -62,9 +67,6 @@ export interface FrostCover {
   b: Float32Array
   /** The alpha plane, or null when every pixel of the photo is opaque. */
   a: Float32Array | null
-  /** The photo's mean colour (alpha-weighted), what a transparent area no
-   *  opaque pixel reaches takes. */
-  mean: [number, number, number]
   /** Nothing under the field is opaque. */
   clear: boolean
   aspect: number
@@ -111,12 +113,9 @@ export function frostCover(src: RgbaImage, aspect: number, fieldLong: number): F
       g[i] = avg[i * 4 + 1]
       b[i] = avg[i * 4 + 2]
     }
-    return { w, h, r, g, b, a: null, mean: [0, 0, 0], clear: false, aspect }
+    return { w, h, r, g, b, a: null, clear: false, aspect }
   }
   const a = new Float32Array(n)
-  let sr = 0
-  let sg = 0
-  let sb = 0
   let sa = 0
   for (let i = 0; i < n; i++) {
     const al = avg[i * 4 + 3] / 255
@@ -124,26 +123,24 @@ export function frostCover(src: RgbaImage, aspect: number, fieldLong: number): F
     r[i] = avg[i * 4] * al
     g[i] = avg[i * 4 + 1] * al
     b[i] = avg[i * 4 + 2] * al
-    sr += r[i]
-    sg += g[i]
-    sb += b[i]
     sa += al
   }
-  return { w, h, r, g, b, a, mean: sa > 0 ? [sr / sa, sg / sa, sb / sa] : [0, 0, 0], clear: sa === 0, aspect }
+  return { w, h, r, g, b, a, clear: sa === 0, aspect }
 }
-
-/** How much of the photo's mean colour a blurred alpha is mixed with: where
- *  the photo reaches (alpha well above this) its own colour, untouched to
- *  within 0.03 of a level; where no opaque pixel reaches (alpha 0), the
- *  mean; smoothly between. */
-const MEAN_WEIGHT = 1e-4
 
 /**
  * The field of a kept cover at `blur`: blurred (three box passes, windows
- * shrunk at the edges), a transparent area taking the colour of the photo
- * round it (divided by the blurred alpha), then graded (brightness, then
- * saturation about luma), held to 0..255. Float throughout: nothing is
- * rounded here. The cover is not changed.
+ * shrunk at the edges), then graded (brightness, then saturation about
+ * luma), held to 0..255. Float throughout: nothing is rounded here. The
+ * cover is not changed.
+ *
+ * A photo with transparent pixels has its alpha blurred with its colour and
+ * kept (`FrostField.a`), its colour left multiplied by it: the frost is the
+ * photo blurred over the bare stock, so where the photo's pixels thin out
+ * the frost thins into Paper as smoothly as the blur spreads them, with no
+ * step anywhere. The grade is linear, so it is the same on the multiplied
+ * colour; held to 0..255 x alpha, it is the opaque colour's grade held to
+ * 0..255, times alpha.
  */
 export function frostBlur(cover: FrostCover, blur: number): FrostField {
   const { w, h, aspect } = cover
@@ -155,29 +152,25 @@ export function frostBlur(cover: FrostCover, blur: number): FrostField {
   const radius = frostRadius(blur, fieldLong)
   const scratch = new Float32Array(n)
   for (const plane of [r, g, b]) boxBlurPlane(plane, scratch, w, h, radius, 'shrink')
+  let a: Float32Array | null = null
   if (cover.a) {
-    const a = cover.a.slice()
+    a = cover.a.slice()
     boxBlurPlane(a, scratch, w, h, radius, 'shrink')
-    const [mr, mg, mb] = cover.mean
-    for (let i = 0; i < n; i++) {
-      const al = Math.max(0, a[i]) + MEAN_WEIGHT
-      r[i] = (r[i] + mr * MEAN_WEIGHT) / al
-      g[i] = (g[i] + mg * MEAN_WEIGHT) / al
-      b[i] = (b[i] + mb * MEAN_WEIGHT) / al
-    }
+    for (let i = 0; i < n; i++) a[i] = Math.min(1, Math.max(0, a[i]))
   }
   const bright = 1 + FROST_GRADE.brightness / 100
   const sat = Math.max(0, 1 + FROST_GRADE.saturation / 100)
   for (let i = 0; i < n; i++) {
+    const top = a ? 255 * a[i] : 255
     const rv = r[i] * bright
     const gv = g[i] * bright
     const bv = b[i] * bright
     const luma = 0.2126 * rv + 0.7152 * gv + 0.0722 * bv
-    r[i] = Math.min(255, Math.max(0, luma + (rv - luma) * sat))
-    g[i] = Math.min(255, Math.max(0, luma + (gv - luma) * sat))
-    b[i] = Math.min(255, Math.max(0, luma + (bv - luma) * sat))
+    r[i] = Math.min(top, Math.max(0, luma + (rv - luma) * sat))
+    g[i] = Math.min(top, Math.max(0, luma + (gv - luma) * sat))
+    b[i] = Math.min(top, Math.max(0, luma + (bv - luma) * sat))
   }
-  return { w, h, r, g, b, aspect, blur, clear: cover.clear }
+  return { w, h, r, g, b, a, aspect, blur, clear: cover.clear }
 }
 
 /**
@@ -205,8 +198,12 @@ function axis(sheet: number, pad: number, field: number): { i0: Int32Array; i1: 
 /**
  * The field as a w x h sheet's fill: each pixel the field sampled
  * bilinearly at its centre, in float, rounded to a byte once (as the byte
- * store rounds), opaque. A pure function of the pixel's position, so a sheet
- * sampled in bands of any height is the same bytes as sampled whole.
+ * store rounds), opaque. A field with an alpha plane (a photo with
+ * transparent pixels) is sampled as it was blurred, multiplied by its
+ * alpha, and comes out a colour over Paper: its alpha rounded to a byte and
+ * the colour divided by that, so colour x alpha is the field's. A pure
+ * function of the pixel's position, so a sheet sampled in bands of any
+ * height is the same bytes as sampled whole.
  *
  * A row is sampled down the field first (its two field rows mixed, for the
  * field columns the row reaches, once a row however many runs of it are
@@ -231,6 +228,7 @@ class FrostRows {
   private readonly mr: Float64Array
   private readonly mg: Float64Array
   private readonly mb: Float64Array
+  private readonly ma: Float64Array | null
   // The field columns mixed down for row (mark - 1).
   private readonly mixed: Int32Array
 
@@ -251,11 +249,13 @@ class FrostRows {
     this.mr = new Float64Array(field.w)
     this.mg = new Float64Array(field.w)
     this.mb = new Float64Array(field.w)
+    this.ma = field.a ? new Float64Array(field.w) : null
     this.mixed = new Int32Array(field.w)
   }
 
   sample(y: number, x0: number, x1: number, out: Uint8ClampedArray, o: number): void {
     if (x1 <= x0) return
+    if (this.ma) return this.sampleOver(y, x0, x1, out, o)
     const { c0, c1, ct, mr, mg, mb, mixed } = this
     const { r, g, b, w: fw } = this.field
     const top = this.r0[y] * fw
@@ -277,6 +277,39 @@ class FrostRows {
       out[p + 1] = mg[a] + (mg[c] - mg[a]) * t
       out[p + 2] = mb[a] + (mb[c] - mb[a]) * t
       out[p + 3] = 255
+    }
+  }
+
+  /** `sample` for a field with an alpha plane: the colour and the alpha
+   *  mixed as they were blurred (multiplied), then a straight colour over
+   *  Paper. */
+  private sampleOver(y: number, x0: number, x1: number, out: Uint8ClampedArray, o: number): void {
+    const { c0, c1, ct, mr, mg, mb, mixed } = this
+    const ma = this.ma!
+    const { r, g, b, w: fw } = this.field
+    const al = this.field.a!
+    const top = this.r0[y] * fw
+    const bottom = this.r1[y] * fw
+    const s = this.rt[y]
+    const mark = y + 1
+    for (let i = c0[x0], end = c1[x1 - 1]; i <= end; i++) {
+      if (mixed[i] === mark) continue
+      mixed[i] = mark
+      mr[i] = r[top + i] + (r[bottom + i] - r[top + i]) * s
+      mg[i] = g[top + i] + (g[bottom + i] - g[top + i]) * s
+      mb[i] = b[top + i] + (b[bottom + i] - b[top + i]) * s
+      ma[i] = al[top + i] + (al[bottom + i] - al[top + i]) * s
+    }
+    for (let x = x0, p = o; x < x1; x++, p += 4) {
+      const a = c0[x]
+      const c = c1[x]
+      const t = ct[x]
+      const alpha = Math.round((ma[a] + (ma[c] - ma[a]) * t) * 255)
+      const k = alpha > 0 ? 255 / alpha : 0
+      out[p] = (mr[a] + (mr[c] - mr[a]) * t) * k
+      out[p + 1] = (mg[a] + (mg[c] - mg[a]) * t) * k
+      out[p + 2] = (mb[a] + (mb[c] - mb[a]) * t) * k
+      out[p + 3] = alpha
     }
   }
 }

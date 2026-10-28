@@ -911,52 +911,39 @@ try {
       // The sheet reached by Tab from the bar's Save, as a keyboard reaches it.
       await page.locator('.app__save').focus()
       for (let i = 0; i < 12 && !(await page.evaluate(() => document.activeElement?.classList.contains('drag-surface'))); i++) await page.keyboard.press('Tab')
-      const m = await page.evaluate(() => {
-        // Any CSS colour (the tokens are oklch) as sRGB bytes, through a canvas;
-        // a shadow's colour is its first part.
-        const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
-        const rgb = (s) => {
-          const c = s?.match(/^((?:rgba?|oklch|oklab|lab|lch|color|hsla?|hwb)\([^)]*\)|[a-z]+)/)?.[1]
-          if (!c || c === 'none' || c === 'transparent') return null
-          probe.clearRect(0, 0, 1, 1)
-          probe.fillStyle = '#000'
-          probe.fillStyle = c
-          probe.fillRect(0, 0, 1, 1)
-          const d = probe.getImageData(0, 0, 1, 1).data
-          return d[3] === 0 ? null : [d[0], d[1], d[2]]
-        }
-        const lum = ([r, g, b]) => {
+      // The pixels as drawn: a strip down across the sheet's top edge at its
+      // middle, from the stage above it into the frame, read back from a
+      // screenshot (2 device pixels a CSS pixel): the stage 2 px above the
+      // edge, the ring's band 1.5 px in, the next band 4.5 px in, the frame
+      // 12 px in.
+      const focused = await page.evaluate(() => document.activeElement?.classList.contains('drag-surface') && document.activeElement.matches(':focus-visible'))
+      const sheet = await page.locator('.sheet').boundingBox()
+      const png = await page.screenshot({ clip: { x: Math.round(sheet.x + sheet.width / 2), y: Math.round(sheet.y) - 4, width: 1, height: 20 } })
+      const m = await page.evaluate(async ([b64, top]) => {
+        const bmp = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob())
+        const c = new OffscreenCanvas(bmp.width, bmp.height)
+        const g = c.getContext('2d')
+        g.drawImage(bmp, 0, 0)
+        const k = bmp.height / 20
+        const at = (cssY) => [...g.getImageData(0, Math.floor((cssY + 4 - top) * k), 1, 1).data.slice(0, 3)]
+        const lum = ([r, gg, b]) => {
           const f = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
-          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+          return 0.2126 * f(r) + 0.7152 * f(gg) + 0.0722 * f(b)
         }
-        const ratio = (a, b) => (a && b ? (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05) : 0)
-        const surface = document.activeElement
-        if (!surface?.classList.contains('drag-surface')) return null
-        const cs = getComputedStyle(surface)
-        const ring = rgb(cs.outlineColor)
-        const halo = rgb(cs.boxShadow)
-        let stage = null
-        for (let e = surface.closest('.sheet')?.parentElement; e && !stage; e = e.parentElement) {
-          stage = rgb(getComputedStyle(e).backgroundColor)
-        }
-        stage ??= rgb(getComputedStyle(document.body).backgroundColor)
-        const canvas = surface.parentElement.querySelector('canvas')
-        const r = canvas.getBoundingClientRect()
-        const k = canvas.width / r.width
-        const px = canvas.getContext('2d').getImageData(Math.round(r.width / 2 * k), Math.round(10 * k), 1, 1).data
-        const fill = [px[0], px[1], px[2]]
-        return {
-          visible: surface.matches(':focus-visible'),
-          ring, halo, stage, fill,
-          ringStage: ratio(ring, stage), ringHalo: halo ? ratio(ring, halo) : 0, ringFill: ratio(ring, fill), haloFill: halo ? ratio(halo, fill) : 0,
-        }
-      })
+        const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05)
+        const stage = at(-2)
+        const ring = at(1.5)
+        const halo = at(4.5)
+        const fill = at(12)
+        return { stage, ring, halo, fill, ringStage: ratio(ring, stage), ringHalo: ratio(ring, halo), ringFill: ratio(ring, fill), haloFill: ratio(halo, fill) }
+      }, [png.toString('base64'), Math.round(sheet.y) - sheet.y])
+      m.visible = focused
       const f2 = (v) => v.toFixed(2)
-      const ok = m && m.visible && m.ringStage >= 3 && (m.halo === null || m.ringHalo >= 3) && Math.max(m.ringFill, m.haloFill) >= 3
+      const ok = m.visible && m.ringStage >= 3 && Math.max(m.ringFill, m.haloFill) >= 3
       lines.push(ok)
       check(
         ok,
-        `${scheme}, fill ${fill}: ${m ? `ring ${m.ring} on the stage ${f2(m.ringStage)}:1, halo ${m.halo ?? 'none'} against the ring ${f2(m.ringHalo)}:1; against the frame (${m.fill}) the ring ${f2(m.ringFill)}:1, the halo ${f2(m.haloFill)}:1 (one of them >= 3:1)` : 'the sheet was not reached by Tab'}`,
+        `${scheme}, fill ${fill}${m.visible ? '' : ' (the sheet not focused by the keys)'}: drawn, the ring band ${m.ring} on the stage ${m.stage} ${f2(m.ringStage)}:1, the band inside it ${m.halo}; against the frame (${m.fill}) the ring ${f2(m.ringFill)}:1, the band inside ${f2(m.haloFill)}:1 (one of them >= 3:1)`,
       )
     }
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)

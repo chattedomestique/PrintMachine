@@ -533,11 +533,13 @@ each its own shape on the same canvas, so the render cache stays and every
 step misses the kept covers and fields), against the same render with its
 field kept: the making's own share, held to what it measured x 1.25, 1.82x
 settled and 4.03x draft (set from 8 runs at 1.31 to 1.45 and 2.68 to 3.22;
-1.47 settled in a ninth; the
-cover and the field are 40 to 60 ms over the settled frame and 18 ms over
-the draft one). The draft bound fails a Width drag whose cover is made twice
-(5.07x to 5.21x and 4.26x to 4.32x after three measurements); the settled
-one does not (1.60x), for the reason above. A shared machine's
+1.47 settled in a ninth). The cover and the field are 34 to 66 ms over the
+settled frame and 17 to 19 ms over the draft one: the reshaped render's time
+less the kept one's, at both documents, in those 9 runs (44 to 66 and 17 to
+19) and in 8 more runs of the same gate (34 to 65 and 17 to 18). The draft
+bound fails a Width drag whose cover is made twice (5.07x to 5.21x and
+4.26x to 4.32x after three measurements); the settled one does not (1.60x),
+for the reason above. A shared machine's
 interference only ever adds time and comes in spells that can outlast a
 document's rounds taken back to back, so the two documents at the two sizes
 are measured round by round in turn (15 rounds, one render a sample), a

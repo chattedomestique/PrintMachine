@@ -155,7 +155,14 @@ opens changed (each has a test that says so):
   "Fonts"). Nothing is rewritten: the plate keeps its face, its size and its
   Bold. Tanklager is condensed, so a line sized with Fit in Helvetica Neue
   spans less of the sheet than it did; tap Fit again to fill it. Bold on a
-  Poster plate is kept and sets nothing (Poster is one weight).
+  Poster plate is kept and sets nothing (Poster is one weight). One
+  exception: a print saved before Fit became a size (with Fit to width on)
+  is converted to a size the first time it opens, measured in the face that
+  is there then; on a first launch where the face takes more than its two
+  seconds (a slow network, before it is cached), a Poster plate's size is
+  measured in the phone's own face and kept, so it opens a little smaller
+  than it fits in Tanklager (27% in the measured case): tap Fit to fill it
+  again.
 
 ### Offline, and why it is checked rather than inspected
 
@@ -176,9 +183,13 @@ playbook records — installable, and blank offline.
 
 It prints the precache's size (entries and bytes), and it checks Poster's face
 offline the way a launch from the home screen uses it, never by asking
-`document.fonts.check`, which says yes when no such face is declared at all:
-in the cold offline tab the app must have loaded the face before it mounted,
-and `document.fonts.load` must answer with the face, loaded; a line set in
+`document.fonts.check`, which says yes when no such face is declared at all.
+First, online, it serves the face a second late (half the app's wait) and
+records every `measureText` and `fillText` in Poster's stack with the face's
+status at that moment: the app must mount with the face loaded and measure
+or draw nothing in Poster before it is (an app that mounts without waiting
+measures 64 times in the fallback and fails). Then, in the cold offline tab,
+`document.fonts.load` must answer with the face, loaded; a line set in
 Poster's stack must measure differently from the same line in the stack
 without the face (equal when the face never loaded), and the same as it
 measured online; and the face's `o` must rise at most 0.9 of its `O` (see

@@ -12,10 +12,15 @@
  * sub-path is precisely where `navigateFallback` and the precache URLs go
  * wrong, and it survives every localhost test that skips it.
  *
+ * On the first, online load the face is served half the app's wait late,
+ * and every `measureText` and `fillText` in Poster's stack is recorded with
+ * the face's status then: the app must mount with the face loaded and
+ * measure or draw nothing in Poster before it is (main.tsx waits for it; an
+ * app that mounts at once measures in the fallback and fails here).
+ *
  * Then it proves the bundled face is there offline, not vacuously:
  * `document.fonts.check('40px Tanklager')` is true when no such face is
- * declared at all, so it is not used. In the cold offline tab the app must
- * have loaded the face itself before it mounted (main.tsx waits for it), and
+ * declared at all, so it is not used. In the cold offline tab
  * `document.fonts.load` must answer with the face, loaded; a string set
  * in Poster's stack must measure differently from the same string in the
  * stack without the face (equal when the face never loaded); the advance must
@@ -65,6 +70,8 @@ const FACE_PROBE = {
   text: 'RISO Print Machine 0123',
 }
 
+let faceServedLate = false
+
 /** Serve dist/ under the Pages sub-path, and nothing outside it. */
 function serve() {
   return new Promise((resolve) => {
@@ -79,6 +86,13 @@ function serve() {
       const file = join(ROOT, rel)
       try {
         await stat(file)
+        // The face, the first time it is asked for, half the app's wait
+        // late: what a slow first load looks like (step 1 checks nothing is
+        // measured or drawn in it before it is in).
+        if (extname(file) === '.woff' && !faceServedLate) {
+          faceServedLate = true
+          await new Promise((r) => setTimeout(r, FACE_WAIT_MS / 2))
+        }
         res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' })
         res.end(await readFile(file))
       } catch {
@@ -125,8 +139,43 @@ try {
     if (m.type() === 'error') errors.push(m.text())
   })
 
+  // Every measure and draw of text in Poster, with the face's status then,
+  // and its status when the app first mounts: nothing may be measured or
+  // drawn in the fallback while the face is on its way (main.tsx waits for
+  // it; the first load serves it late).
+  await page.addInitScript((family) => {
+    const status = () => [...document.fonts].filter((f) => f.family.replace(/["']/g, '') === family).map((f) => f.status).join() || 'none'
+    window.__poster = { early: [], calls: 0, atMount: null }
+    for (const proto of [CanvasRenderingContext2D.prototype, globalThis.OffscreenCanvasRenderingContext2D?.prototype].filter(Boolean)) {
+      for (const name of ['measureText', 'fillText']) {
+        const real = proto[name]
+        proto[name] = function (...args) {
+          if (this.font.includes(family)) {
+            window.__poster.calls++
+            const now = status()
+            if (now !== 'loaded') window.__poster.early.push(`${name}(${JSON.stringify(String(args[0]).slice(0, 12))}) in ${this.font} while the face is ${now}`)
+          }
+          return real.apply(this, args)
+        }
+      }
+    }
+    new MutationObserver((_, obs) => {
+      const root = document.getElementById('root')
+      if (root?.firstChild) {
+        window.__poster.atMount = status()
+        obs.disconnect()
+      }
+    }).observe(document, { subtree: true, childList: true })
+  }, POSTER_FAMILY)
+
   // 1. Online, and wait for the worker to actually take control.
   await page.goto(URL, { waitUntil: 'networkidle' })
+  await page.waitForSelector('.sheet canvas', { state: 'attached', timeout: FACE_WAIT_MS + 3000 }).catch(() => {})
+  const poster = await page.evaluate(() => window.__poster)
+  if (!faceServedLate) fail('the face was never asked for on the first load')
+  else if (poster.atMount !== 'loaded' || poster.early.length || poster.calls === 0)
+    fail(`with the face served ${FACE_WAIT_MS / 2} ms late, the app mounted with it ${poster.atMount} and measured or drew ${poster.early.length} times in Poster before it loaded: ${poster.early.slice(0, 3).join('; ')}`)
+  else console.log(`✓ the face served ${FACE_WAIT_MS / 2} ms late: the app mounted with it loaded, and measured or drew in Poster only after (${poster.calls} times)`)
   // Every wait here is bounded. `navigator.serviceWorker.ready` neither
   // rejects nor resolves when there is no worker to become ready, so an
   // unbounded await turns a failing check into a hung one — in CI that means a
@@ -221,10 +270,10 @@ try {
     }, POSTER_FAMILY)
     const declared = await cold.evaluate(declaredFaces, POSTER_FAMILY)
     const faceIn = loadedFaces.length > 0 && loadedFaces.every((f) => f.status === 'loaded') && declared.length === 1 && declared[0] === 'loaded'
-    if (byApp.length !== 1 || byApp[0] !== 'loaded') fail(`the app did not load the face before it mounted: ${JSON.stringify(byApp)}`)
+    if (byApp.length !== 1 || byApp[0] !== 'loaded') fail(`the app's own FontFace is not loaded offline: ${JSON.stringify(byApp)}`)
     else if (loadedFaces.length === 0) fail(`document.fonts.load('40px ${POSTER_FAMILY}') answered with no face: none is declared`)
     else if (!faceIn) fail(`the face did not load offline: ${JSON.stringify({ loadedFaces, declared })}`)
-    else console.log(`✓ the face loads with no network, and the app had it before it mounted (FontFace ${POSTER_FAMILY}: ${declared[0]})`)
+    else console.log(`✓ the face loads with no network (the app's FontFace ${POSTER_FAMILY}: ${declared[0]})`)
     const [stack, fallback, alone] = await cold.evaluate(measureFaces, FACE_PROBE)
     if (!faceSetsStack(stack.advance, fallback.advance)) {
       fail(`Poster's stack measures as its fallback (${stack.advance} against ${fallback.advance}): the face is not what sets it`)

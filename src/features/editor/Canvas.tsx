@@ -4,6 +4,7 @@ import { canvasMeasure } from '../../state/persist.ts'
 import { useRenderer } from './useRenderer.ts'
 import { useLayerGestures } from './useLayerGestures.ts'
 import { visibleBox, type GestureLimits, type GesturePatch, type GestureTarget, type Pt } from './gesture.ts'
+import { PHOTO_KEYS, photoKey } from './photoKeys.ts'
 import { stepSize } from '../controls/sizeScale.ts'
 import { type MediaLayer, type PrintSettings, type TextLayer } from '../../engine/types.ts'
 import { effectiveMode, sheetAspect, visibleAspect } from '../../engine/frame.ts'
@@ -28,6 +29,9 @@ const HIT_SLOP = 12
 /** How recent a double tap's first touch must be to count as its first (a
  *  platform's double-click interval is at most about half this). */
 const PICK_THEN_TAP_MS = 1000
+
+/** The keys a plate answers to, as `aria-keyshortcuts` names them. */
+const PLATE_KEYS = 'ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ]'
 
 /**
  * The print preview, plus the surface that manipulates a plate (the selected
@@ -187,11 +191,23 @@ export default function Canvas({
    * primary editing interaction is a drag, there has to be a focusable,
    * arrow-adjustable equivalent — this is that.
    *
-   * Arrows move, +/- size (5% of it, at least one step; sizeScale.ts),
-   * [/] rotate; Shift coarsens every step.
+   * With the Frame tool open the keys are the photo's, as its gestures are
+   * (photoKeys.ts: arrows move the view, +/- zoom, 0 resets; in Fit there is
+   * nothing to move, and they do nothing). Otherwise they are the selected
+   * plate's: arrows move, +/- size (5% of it, at least one step;
+   * sizeScale.ts), [/] rotate; Shift coarsens every step.
    */
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (mediaMode) {
+        const m = settings.media
+        if (!m || fit) return
+        const change = photoKey(e.key, m, placeAspect)
+        if (!change) return
+        e.preventDefault()
+        dispatch({ type: 'patchMedia', patch: change.patch, coalesce: change.coalesce })
+        return
+      }
       if (!layer) return
       const big = e.shiftKey
       const move = big ? 0.05 : 0.005
@@ -214,7 +230,7 @@ export default function Canvas({
       e.preventDefault()
       dispatch({ type: 'patchLayer', id: layer.id, patch: build(), coalesce: true })
     },
-    [dispatch, layer],
+    [dispatch, layer, mediaMode, settings.media, fit, placeAspect],
   )
 
   return (
@@ -229,9 +245,10 @@ export default function Canvas({
           !mediaMode
             ? 'Print preview. Tap a plate to pick it, drag to move it, pinch to scale and rotate, double-tap to centre. Arrow keys move the selected plate, plus and minus scale, brackets rotate.'
             : fit
-              ? 'Print preview, the photo. Fit shows the whole photo: choose Crop to move or zoom it. Arrow keys move the selected plate.'
-              : 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to reset it. Arrow keys move the selected plate.'
+              ? 'Print preview, the photo. Fit shows the whole photo: choose Crop to move or zoom it.'
+              : 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to reset it. Arrow keys move it, plus and minus zoom, 0 resets.'
         }
+        aria-keyshortcuts={!mediaMode ? PLATE_KEYS : fit ? undefined : PHOTO_KEYS}
         tabIndex={0}
         onDoubleClick={onDoubleClick}
         onKeyDown={onKeyDown}

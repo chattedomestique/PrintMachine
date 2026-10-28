@@ -38,6 +38,11 @@
  *     Studio's tap-to-select; nothing moves, no undo step); a double tap on
  *     the selected plate centres it and zeroes its turn; a mouse's
  *     double-click on a plate that is not selected only picks it too.
+ *  9. The photo's keys, with the Frame tool open on its first photo: the
+ *     sheet names them (aria-keyshortcuts); + three times zooms to 1.15^3,
+ *     Right and Down move the view right and down (the photo's centre left
+ *     and up); 0 resets it; one Undo takes back the 0 alone and one more the
+ *     whole run (one step). In Fit the keys move nothing and none is named.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -532,6 +537,66 @@ try {
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
   }
+
+  console.log("9. The photo's keys, with Frame open: the arrows move the view, + zooms, 0 resets; a run is one undo step; in Fit nothing moves")
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    await page.locator('[data-tool="frame"]').click()
+    const bytes = await page.evaluate(async () => {
+      const c = document.createElement('canvas')
+      c.width = 1200
+      c.height = 1500
+      const g = c.getContext('2d')
+      g.fillStyle = '#5a7fa8'
+      g.fillRect(0, 0, 1200, 1500)
+      const b = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9))
+      return [...new Uint8Array(await b.arrayBuffer())]
+    })
+    await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
+    await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media, KEY, { timeout: 30_000 })
+    const surface = page.locator('.drag-surface')
+    await surface.focus()
+    const shortcuts = await surface.getAttribute('aria-keyshortcuts')
+    check(shortcuts === 'ArrowUp ArrowDown ArrowLeft ArrowRight + - 0', `the sheet names the photo's keys: "${shortcuts}"`)
+    const start = (await stored(page)).media
+    // A run: three zooms in and a step right and down, inside one burst.
+    for (const key of ['+', '+', '+', 'ArrowRight', 'ArrowDown']) await page.keyboard.press(key)
+    const run = (await stored(page)).media
+    check(
+      Math.abs(run.scale - 1.15 ** 3) < 1e-9 && run.x < 0.5 && run.y < 0.5,
+      `+ three times zooms to ${run.scale.toFixed(4)} (1.15^3), and Right and Down move the view right and down: the photo's centre at ${run.x.toFixed(4)}, ${run.y.toFixed(4)}`,
+    )
+    await page.keyboard.press('0')
+    const reset = (await stored(page)).media
+    check(reset.scale === 1 && reset.x === 0.5 && reset.y === 0.5, `0 resets it: ${reset.scale}, ${reset.x}, ${reset.y}`)
+    const undo = page.locator('.app__bar button[aria-label="Undo"]')
+    await undo.click()
+    const back = (await stored(page)).media
+    check(JSON.stringify(back) === JSON.stringify(run), `one Undo takes back the 0 alone (a step of its own): ${back.scale.toFixed(4)}, ${back.x.toFixed(4)}`)
+    await undo.click()
+    const before = (await stored(page)).media
+    check(JSON.stringify(before) === JSON.stringify(start), `and one more takes back the whole run (one step): ${before.scale}, ${before.x}, ${before.y}`)
+    // Fit: the whole photo shows; the keys move nothing, and none is named.
+    await page.locator('.controls__section[data-tool="frame"] [role=tab][data-tab="crop"]').click()
+    await page.locator('.chiprow [data-chip="4:5"]').click()
+    await page.locator('.controls__section[data-tool="frame"] input[type=radio][value="fit"]').check({ force: true })
+    await surface.focus()
+    const fitDoc = (await stored(page)).media
+    for (const key of ['+', 'ArrowRight', '0']) await page.keyboard.press(key)
+    const fitAfter = (await stored(page)).media
+    const fitKeys = await surface.getAttribute('aria-keyshortcuts')
+    check(
+      JSON.stringify(fitAfter) === JSON.stringify(fitDoc) && fitKeys === null,
+      `in Fit the keys move nothing (${JSON.stringify(fitAfter) === JSON.stringify(fitDoc) ? 'unchanged' : 'moved'}) and none is named (${fitKeys})`,
+    )
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
 } finally {
   await browser.close()
   await new Promise((r) => server.httpServer.close(r))
@@ -541,4 +606,4 @@ if (failures.length) {
   console.error(`\n${failures.length} touch check(s) failed.`)
   process.exit(1)
 }
-console.log('\nTouch: a tap picks the plate under it, and the drag it starts moves that plate.')
+console.log("\nTouch: a tap picks the plate under it, the drag it starts moves that plate, and the photo's keys move the photo.")

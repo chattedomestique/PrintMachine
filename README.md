@@ -1740,7 +1740,15 @@ lifting mid-pinch re-seeds the gesture from the remaining one, so the layer
 keeps panning instead of jumping. Every gesture writes the same fields the
 parameter strips write, so each has a tap equivalent (Size, Rotation and
 Position X/Y for type; Zoom and Position for the photo), and arrow keys / +- /
-brackets mirror it for keyboards. The selected plate shows a crosshair on the
+brackets mirror it for keyboards. With Frame open the keys are the photo's,
+as Border Studio's are (`features/editor/photoKeys.ts`): the arrows move the
+view over the photo, so Right shows more of its right side (it raises
+Position X, the photo moving left: the opposite of a plate's arrows, which
+move the plate), one press 6% of its drawn size at 100%, whatever the zoom;
++ and − zoom by 1.15 within 100–400%; 0 puts it back at 100% and centred.
+A run of presses is one undo step, as a plate's keys are, and 0 a step of
+its own; in Fit they move nothing (`check:touch` presses them in the built
+app). The selected plate shows a crosshair on the
 sheet — the one editing aid, and it never reaches a saved file.
 
 **Tap a plate to pick it** (Border Studio's tap-to-select). A touch that lands

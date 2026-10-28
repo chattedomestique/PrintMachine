@@ -87,7 +87,9 @@ So:
       (Width 7.1%, the Photo fill) — a landscape photo gives a landscape sheet
       that fits the screen without distortion; Remove the photo → the sheet is
       4:5 again
-- [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac)
+- [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac);
+      with Frame open on a zoomed photo they move the view instead (Right
+      shows more of its right side), + and − zoom, 0 resets
 - [ ] Type a long string → tap Fit → it sits on the sheet, and the next pinch
       or slider touch starts from that size (no jump)
 - [ ] Type › Size: drag the slider end to end with a thumb — 10% to 100%, and a

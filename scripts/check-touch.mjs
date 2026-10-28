@@ -242,10 +242,13 @@ try {
   // teaches nothing either, and the hint stays.
   const box1 = await settledBox(page)
   const mid = { x: box1.x + box1.width / 2, y: box1.y + box1.height / 2 }
-  const still = JSON.stringify((await stored(page)).media)
+  // The placement only: the photo's palette lands in the stored document on
+  // its own time (a loaded machine has it land between the two reads).
+  const placed = async () => JSON.stringify((({ x, y, scale }) => ({ x, y, scale }))((await stored(page)).media))
+  const still = await placed()
   await touch(cdp, mid, [{ x: mid.x + 40, y: mid.y }])
   await page.waitForTimeout(300)
-  const after = JSON.stringify((await stored(page)).media)
+  const after = await placed()
   check(
     (await page.locator(HINT).count()) === 1 && after === still,
     `a drag on a photo that cannot move writes nothing (not even a float's last bit) and leaves it`,
@@ -703,6 +706,18 @@ try {
       fills.role === 'group' && fills.name === 'Fill' && fills.chips === 6 && width && !width.off && width.why === '',
       `with a photo, Frame › Border: the fill row is a ${fills.role} named "${fills.name}" of ${fills.chips} chips; Width available, described by nothing (${JSON.stringify(width)})`,
     )
+    // Choosing Frosted shows its one setting, Blur, on the strip (Border
+    // Studio's Fill › Frosted leads with it); leaving Frosted, Width again.
+    {
+      const strip = page.locator(`${border} .paramstrip__pick`)
+      await page.locator(`${border} [data-chip="frosted"]`).click()
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="frosted"]`)?.getAttribute('aria-pressed') === 'true', border)
+      const onFrosted = (await strip.textContent())?.trim()
+      await page.locator(`${border} [data-chip="photo"]`).click()
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="photo"]`)?.getAttribute('aria-pressed') === 'true', border)
+      const onPhoto = (await strip.textContent())?.trim()
+      check(onFrosted === 'Blur' && onPhoto === 'Width', `a tap on Frosted puts Blur on the strip ("${onFrosted}"), a tap on Photo puts Width back ("${onPhoto}")`)
+    }
 
     // Fit, on a 4:5 sheet: no gesture to teach, nothing moves.
     await tab('crop')
@@ -728,6 +743,40 @@ try {
     await page.waitForFunction((H) => /^Drag/.test(document.querySelector(H)?.textContent ?? ''), HINT_SAID, { timeout: 5_000 }).catch(() => {})
     const cropHint = await page.locator(HINT_SAID).textContent()
     check(/^Drag to move the photo · pinch to zoom/.test(cropHint), `back in Crop it names the photo's gestures ("${cropHint}")`)
+
+    // Keys only: Replace, Remove and Choose photo keep focus where the person
+    // is (never the page's body): on the button while the file is read and
+    // after, on Choose photo once Remove has gone, and on the fill row when
+    // a photo chosen from Frame › Border takes Choose photo's place.
+    {
+      const focusIs = () =>
+        page.evaluate(() => {
+          const a = document.activeElement
+          return a === document.body || !a ? 'body' : `${a.tagName.toLowerCase()} "${a.textContent?.trim() ?? ''}"${a.dataset?.chip ? ` [${a.dataset.chip}]` : ''}`
+        })
+      const pickWith = async (button) => {
+        await button.focus()
+        const chooser = page.waitForEvent('filechooser', { timeout: 5_000 })
+        await page.keyboard.press('Enter')
+        await (await chooser).setFiles({ name: 'again.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
+        await page.waitForTimeout(1500)
+      }
+      const photoTab = '.controls__panel[data-sub="photo"]'
+      await tab('photo')
+      await pickWith(page.locator(`${photoTab} button`, { hasText: 'Replace' }))
+      const afterReplace = await focusIs()
+      await page.locator(`${photoTab} button`, { hasText: 'Remove' }).focus()
+      await page.keyboard.press('Enter')
+      await page.waitForTimeout(300)
+      const afterRemove = await focusIs()
+      await tab('border')
+      await pickWith(page.locator(`${border} button`, { hasText: 'Choose photo' }))
+      const afterChoose = await focusIs()
+      check(
+        afterReplace === 'button "Replace"' && afterRemove === 'button "Choose photo"' && /^button "Photo" \[photo\]$/.test(afterChoose),
+        `keys only: Replace and a file leaves focus on ${afterReplace}; Remove, on ${afterRemove}; Choose photo in Frame › Border and a file, on ${afterChoose}`,
+      )
+    }
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
   }

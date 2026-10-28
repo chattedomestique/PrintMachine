@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Icon, Segmented, type SegmentedOption } from '../../ui/ui.tsx'
 import { ChipRow } from '../../ui/ChipRow.tsx'
 import { ParamStrip } from '../../ui/Slider.tsx'
@@ -12,7 +12,7 @@ import { useSettings } from '../../state/settingsStore.ts'
 import type { PhotoState } from '../media/frameInputs.ts'
 import type { PhotoImport } from '../media/usePhotoImport.ts'
 import { DockEmpty, DockPanel, Rule } from './Dock.tsx'
-import { ORIGINAL_WHOLE, fillChips, ratioChips } from './frameChoices.ts'
+import { ORIGINAL_WHOLE, fillChips, ratioChips, stripAfterFill } from './frameChoices.ts'
 import { NO_PHOTO, borderParams, photoPlacementParams } from './params.ts'
 import { SUBS, type SubId } from './tools.ts'
 
@@ -62,6 +62,11 @@ export default function FramePanel({
   const media = settings.media
   const frame = settings.frame
   const mode = effectiveMode(settings)
+  // What the strip shows after a fill chip is tapped (Blur for Frosted). The
+  // strip is keyed by whether the fill is Frosted, so it starts again, on
+  // Width, when the fill leaves Frosted by any road (a chip, Undo).
+  const [stripFirst, setStripFirst] = useState<string | undefined>(undefined)
+  const frosted = frame.fill === 'frosted'
 
   const setFrame = (p: Partial<FrameSettings>, how: ChangeHow) => dispatch({ type: 'patchFrame', patch: p, coalesce: !how.discrete, join: how.joins })
   const setPlace = (p: Partial<MediaLayer>, how: ChangeHow) => dispatch({ type: 'patchMedia', patch: p, coalesce: !how.discrete, join: how.joins })
@@ -69,8 +74,39 @@ export default function FramePanel({
   // Crop or Fit means something only for a photo on a ratio of its own.
   const modeWhy = !media ? NO_PHOTO : settings.aspect === 'original' ? ORIGINAL_WHOLE : null
 
+  // Choose photo keeps focus while the file is read (busy is aria-busy and
+  // aria-disabled, not disabled, which would drop focus to the page, as
+  // Save's busy does), and is where focus goes when Remove, the button that
+  // had it, goes. When a photo arrives and the tab no longer shows Choose
+  // (Border, Place), focus goes to the tab's first control, not the page.
+  const chooseRef = useRef<HTMLButtonElement>(null)
+  const chooseHadFocus = useRef(false)
+  useEffect(() => {
+    if (!chooseHadFocus.current || chooseRef.current) return
+    chooseHadFocus.current = false
+    if (document.activeElement && document.activeElement !== document.body) return
+    const tool = '.controls__section[data-tool="frame"]'
+    ;(
+      document.querySelector<HTMLElement>(`${tool} .controls__panel :is(.chip[tabindex="0"], .paramstrip__pick)`) ??
+      document.querySelector<HTMLElement>(`${tool} [role=tab][aria-selected="true"]`)
+    )?.focus()
+  }, [media])
   const chooseButton = (
-    <button type="button" className="btn" data-size="sm" disabled={photo.busy} onClick={photo.choose}>
+    <button
+      ref={chooseRef}
+      type="button"
+      className="btn"
+      data-size="sm"
+      aria-disabled={photo.busy || undefined}
+      aria-busy={photo.busy || undefined}
+      onFocus={() => (chooseHadFocus.current = true)}
+      onBlur={(e) => {
+        if (e.relatedTarget) chooseHadFocus.current = false
+      }}
+      onClick={() => {
+        if (!photo.busy) photo.choose()
+      }}
+    >
       <span className="btn__label">
         <Icon name="upload" />
         {photo.busy ? 'Reading…' : media ? 'Replace' : 'Choose photo'}
@@ -89,10 +125,17 @@ export default function FramePanel({
               label="Fill"
               items={fillChips(media.palette, settings.paperId, frame.fill, fillPreparing)}
               value={frame.fill}
-              onChange={(fill) => dispatch({ type: 'patchFrame', patch: { fill } })}
+              onChange={(fill) => {
+                setStripFirst(stripAfterFill(fill))
+                dispatch({ type: 'patchFrame', patch: { fill } })
+              }}
             />
             <Rule />
-            <ParamStrip key="border" params={borderParams(frame, true, setFrame)} />
+            <ParamStrip
+              key={frosted ? 'border-frosted' : 'border'}
+              first={frosted ? stripFirst : undefined}
+              params={borderParams(frame, true, setFrame)}
+            />
           </>
         ) : (
           <>
@@ -163,7 +206,16 @@ export default function FramePanel({
             {chooseButton}
             {media && (
               // Not a delete: Undo brings the photo back.
-              <button type="button" className="btn" data-size="sm" onClick={() => dispatch({ type: 'setMedia', media: null })}>
+              <button
+                type="button"
+                className="btn"
+                data-size="sm"
+                onClick={() => {
+                  // Focus to Choose photo before this button goes with the photo.
+                  chooseRef.current?.focus()
+                  dispatch({ type: 'setMedia', media: null })
+                }}
+              >
                 <span className="btn__label">
                   <Icon name="trash-2" />
                   Remove

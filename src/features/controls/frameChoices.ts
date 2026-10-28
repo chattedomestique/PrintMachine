@@ -72,3 +72,11 @@ export function fillChips(palette: FramePalette | undefined, paperId: string, ch
     return { id, label, ...face, ...(preparing && id === chosen ? { busy: true } : {}) }
   })
 }
+
+/**
+ * The setting the Border tab's strip shows after a fill chip is tapped:
+ * Blur when Frosted is chosen (choosing Frosted is choosing what kind of
+ * frost, and Blur is the one setting that says it: Border Studio's Fill ›
+ * Frosted leads with it), else the strip's first, Width.
+ */
+export const stripAfterFill = (fill: FillKey): 'blur' | undefined => (fill === 'frosted' ? 'blur' : undefined)

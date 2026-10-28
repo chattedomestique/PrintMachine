@@ -351,11 +351,20 @@ function ParamPicker({
  * up/down chevrons that say "there are more", when there are), its value, and
  * the slider. A `lead` (a colour button, say) goes at the start of the name's
  * line, so a second control costs no row. An unavailable setting shows why in
- * place of its value, and its slider is described by those words.
+ * place of its value, and its slider is described by those words. `first`
+ * names the setting shown when the strip appears (the first, else).
  */
-export function ParamStrip({ params, lead }: { params: readonly (Param | null | false | undefined)[]; lead?: ReactNode }) {
+export function ParamStrip({
+  params,
+  lead,
+  first,
+}: {
+  params: readonly (Param | null | false | undefined)[]
+  lead?: ReactNode
+  first?: string
+}) {
   const all = params.filter((p): p is Param => !!p)
-  const [key, setKey] = useState(all[0]?.key)
+  const [key, setKey] = useState(all.find((p) => p.key === first)?.key ?? all[0]?.key)
   const [pickOpen, setPickOpen] = useState(false)
   const swipe = useRef<{ y: number; fired: boolean } | null>(null)
   const whyId = useId()

@@ -10,7 +10,9 @@ import { CHIP_RATIOS, flipOf, type AspectKey } from '../../engine/aspect.ts'
 import { cssRgb, paperById, PAPERS } from '../../engine/inks.ts'
 import { chipFace, chipName, chipTap } from '../../ui/chips.ts'
 import { ASPECT_KEYS } from '../../state/fields.ts'
-import { FILL_LABELS, FROSTED_ICON, fillChips, ratioChips } from './frameChoices.ts'
+import { FILL_LABELS, FROSTED_ICON, fillChips, ratioChips, stripAfterFill } from './frameChoices.ts'
+import { borderParams } from './params.ts'
+import { frameDefaults } from '../../state/defaults.ts'
 import { FILLS } from '../../state/fields.ts'
 
 const PALETTE = { photo: '#3a6ea5', deep: '#141d26', muted: '#a8b4c0', comp: '#a5713a' }
@@ -101,6 +103,23 @@ describe('the fill chips', () => {
       expect(chips.filter((c) => c.busy).map((c) => c.id)).toEqual([chosen])
       expect(chipName(chips.find((c) => c.id === chosen)!, chosen)).toBe(`${FILL_LABELS[chosen]}, preparing`)
       expect(fillChips(PALETTE, 'natural', chosen, false).some((c) => c.busy)).toBe(false)
+    }
+  })
+})
+
+describe('the strip after a fill is chosen', () => {
+  it('shows Blur when Frosted is chosen, a setting the strip then carries; any other fill, its first (Width)', () => {
+    const set = () => {}
+    for (const fill of FILLS) {
+      const shown = stripAfterFill(fill)
+      const keys = borderParams({ ...frameDefaults(), fill }, true, set).map((p) => p.key)
+      if (fill === 'frosted') {
+        expect(shown).toBe('blur')
+        expect(keys).toContain('blur')
+      } else {
+        expect(shown).toBeUndefined()
+        expect(keys[0]).toBe('width')
+      }
     }
   })
 })

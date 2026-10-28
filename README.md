@@ -1653,7 +1653,16 @@ not assumed: `npm run verify:geometry` opens every tool, sub-tab and Over-photo
 state, and Frame › Border with Frosted chosen (its Blur on the strip), at 320,
 375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
 fails if the sheet moves by a pixel, if a panel overflows, or if the page
-scrolls sideways. Each state is measured at rest, once its transitions and
+scrolls sideways. The Frame tool's own states are swept again at every width,
+in light and dark, at 100% and 200% text: its fill row with Photo and with
+Frosted, the ratio chips on 4:5, Crop | Fit in Fit, Place and Border in Fit,
+and with the photo removed each tab (Width and Corners unavailable, Original
+unavailable). The sheet holds still among the states of one shape, nothing is
+cut off at 200%, and each chip row is scrolled to every chip in turn, as a
+swipe leaves it (at its snap position, or the row's end): every chip shows
+whole and owns 44 px both ways, and a row that overflows scrolls inside
+itself without moving the sheet or the page. At 320 px both rows overflow, so
+that scroll is always checked. Each state is measured at rest, once its transitions and
 animations have run out and its scrollers have stopped, never after a fixed
 delay, so the frame it is measured at does not depend on the machine's speed
 (a sheet caught mid-rise once failed CI, see the gate's `settle`). The one

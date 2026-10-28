@@ -62,6 +62,22 @@
  * Cancel, Share, the card's × and Choose again each answer a tap, and the
  * cards stay between the bar and the dock.
  *
+ * Then the Frame tool's own states, at every width, in light and dark, at
+ * 100% and 200% text (eachFrameState): Border with its fill row (Photo, and
+ * Frosted with its Blur), the ratio chips on a 4:5 sheet, Crop | Fit with Fit
+ * chosen, Place and Border in Fit (their reasons on screen), and with the
+ * photo removed Photo, Border (Width and Corners unavailable beside Choose
+ * photo), Crop (Original unavailable) and Place. In each: the sheet holds
+ * still among the states of one shape, no panel overflows at 100% text,
+ * nothing is cut off at 200%, the page never scrolls sideways, and every
+ * target owns 44px. And the chip rows (probeRowChips): each chip is scrolled
+ * whole into its row in turn and must then own 44px both ways, so a chip past
+ * the row's edge is measured too (the fill row's six, the ratio row's six);
+ * a row that overflows scrolls sideways inside itself, to its last chip
+ * shown whole, while the sheet does not move and the page does not scroll.
+ * At 320 px both rows overflow, so the scroll is checked, never passed for
+ * want of a row to scroll.
+ *
  * Every state is measured at rest: once its transitions and animations have
  * run out and its scrollers have stopped (settle), never on a fixed delay, so
  * the frame a state is measured at does not depend on the machine's speed.
@@ -388,6 +404,55 @@ function probeClipped() {
   return [...new Set(out)]
 }
 
+/**
+ * The chip row named `label` in the open panel: each chip scrolled into the
+ * row in turn as a swipe leaves it (instantly, so nothing is caught
+ * mid-scroll): at its snap position, its start at the row's scroll padding
+ * (the style guide's chip row snaps, x proximity, so a scroll to anywhere
+ * else is pulled to the nearest chip), or at the row's end; whether it then
+ * shows whole, and the hit area it owns through its centre each way, as
+ * probeTargets measures one (its box, its ::after, less what a neighbour
+ * covers). Leaves the row scrolled to its last chip. Null when there is no
+ * such row.
+ */
+async function probeRowChips(label) {
+  const row = [...document.querySelectorAll('.app__panel-inner .chiprow')].find((r) => r.getAttribute('aria-label') === label)
+  if (!row) return null
+  const painted = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  const overflow = row.scrollWidth - row.clientWidth
+  const pad = parseFloat(getComputedStyle(row).scrollPaddingInlineStart) || 0
+  const chips = []
+  for (const chip of row.querySelectorAll(':scope > .chip')) {
+    const rr = row.getBoundingClientRect()
+    let r = chip.getBoundingClientRect()
+    if (r.left < rr.left - 0.5 || r.right > rr.right + 0.5) {
+      const left = Math.min(overflow, Math.max(0, row.scrollLeft + (r.left - rr.left) - pad))
+      row.scrollTo({ left, behavior: 'instant' })
+      await painted()
+    }
+    r = chip.getBoundingClientRect()
+    const box = row.getBoundingClientRect()
+    const whole = r.left >= box.left - 0.5 && r.right <= box.right + 0.5
+    const cx = r.left + r.width / 2
+    const cy = r.top + r.height / 2
+    const hits = (x, y) => {
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true
+      const t = document.elementFromPoint(x, y)
+      return !!t && (t === chip || chip.contains(t))
+    }
+    const run = (dx, dy) => {
+      let k = 0
+      while (k < 40 && hits(cx + dx * (k + 1), cy + dy * (k + 1))) k++
+      return k
+    }
+    const at = hits(cx, cy)
+    const w = at ? Math.max(r.width >= 44 ? r.width : 0, run(-1, 0) + run(1, 0) + 1) : 0
+    const h = at ? Math.max(r.height >= 44 ? r.height : 0, run(0, -1) + run(0, 1) + 1) : 0
+    chips.push({ id: chip.dataset.chip, whole, w: Math.round(w), h: Math.round(h), disabled: chip.getAttribute('aria-disabled') === 'true' })
+  }
+  return { overflow, scrolled: row.scrollLeft, chips }
+}
+
 /** The app bar: its SG.fit layout, and whether it holds as one row. */
 function probeBar() {
   const bar = document.querySelector('.app__bar')
@@ -550,6 +615,87 @@ async function eachState(page, visit) {
     }
   }
   await closeTools(page)
+}
+
+/**
+ * The Frame tool's states, in order, calling `visit(name, shape)` in each,
+ * `shape` naming the sheet's shape (the states of one shape must leave the
+ * sheet where it is): with the first photo on its Original sheet, Border
+ * (Photo) and Border with Frosted and its Blur; on 4:5, Crop, Crop in Fit,
+ * Place and Border in Fit, Photo; the photo removed, Photo, Border, Crop and
+ * Place. Leaves the page without a photo, the tools closed.
+ */
+async function eachFrameState(page, visit) {
+  const panel = (sub) => page.locator(`.controls__panel[data-sub="${sub}"]`)
+  const pressed = (sub, chip) =>
+    page.waitForFunction(
+      ([sub, chip]) => document.querySelector(`.controls__panel[data-sub="${sub}"] [data-chip="${chip}"]`)?.getAttribute('aria-pressed') === 'true',
+      [sub, chip],
+    )
+  await openTab(page, 'frame', 'border')
+  await visit('frame-border', 'original')
+  await panel('border').locator('[data-chip="frosted"]').click()
+  await pressed('border', 'frosted')
+  await panel('border').locator('.paramstrip__pick').click()
+  await page.locator('dialog[open] [data-key="blur"]').click()
+  await page.waitForSelector('dialog[open]', { state: 'detached' })
+  await visit('frame-border-frosted', 'original')
+  await panel('border').locator('[data-chip="photo"]').click()
+  await pressed('border', 'photo')
+  await openTab(page, 'frame', 'crop')
+  await panel('crop').locator('[data-chip="4:5"]').click()
+  await pressed('crop', '4:5')
+  await visit('frame-crop', '4:5')
+  await panel('crop').locator('input[type=radio][value="fit"]').check({ force: true })
+  await visit('frame-crop-fit', '4:5')
+  for (const tab of ['place', 'border', 'photo']) {
+    await openTab(page, 'frame', tab)
+    await visit(`frame-${tab}-fit`, '4:5')
+  }
+  await panel('photo').locator('button', { hasText: 'Remove' }).click()
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.media === null)
+  await visit('frame-photo-none', '4:5')
+  for (const tab of ['border', 'crop', 'place']) {
+    await openTab(page, 'frame', tab)
+    await visit(`frame-${tab}-none`, '4:5')
+  }
+  await closeTools(page)
+}
+
+/**
+ * The chip rows of the Frame state on screen, at `where`: every chip of each
+ * row, scrolled whole into it in turn, owns 44px both ways; a row that
+ * overflows scrolls inside itself to its last chip, shown whole, while the
+ * sheet stays where it was (`sheet`) and the page does not scroll sideways.
+ * Returns the rows that overflowed. Leaves each row at its start.
+ */
+async function checkChipRows(page, where, sheet) {
+  const overflowed = []
+  for (const label of ['Fill', 'Sheet ratio']) {
+    const row = await page.evaluate(probeRowChips, label)
+    if (!row) continue
+    const enabled = row.chips.filter((c) => !c.disabled)
+    check(row.chips.length === 6, `${where}: the ${label} row has ${row.chips.length} chips (6)`)
+    for (const c of row.chips) check(c.whole, `${where}: the ${label} row's ${c.id} chip cannot be scrolled into view whole`)
+    for (const c of enabled) check(c.w >= 43.5 && c.h >= 43.5, `${where}: the ${label} row's ${c.id} chip owns ${c.w}x${c.h} (44x44)`)
+    if (row.overflow > 0) {
+      overflowed.push(label)
+      await settle(page, `${where}, the ${label} row scrolled`)
+      const m = await measure(page)
+      check(row.scrolled > 0, `${where}: the ${label} row overflows by ${row.overflow} px and did not scroll`)
+      check(
+        m.sheet && sheet && m.sheet.every((v, i) => Math.abs(v - sheet[i]) <= 1),
+        `${where}: scrolling the ${label} row moved the sheet: ${JSON.stringify(m.sheet)} against ${JSON.stringify(sheet)}`,
+      )
+      check(m.sideways <= 0, `${where}: scrolling the ${label} row scrolls the page sideways by ${m.sideways} px`)
+    }
+    await page.evaluate((label) => {
+      const r = [...document.querySelectorAll('.app__panel-inner .chiprow')].find((x) => x.getAttribute('aria-label') === label)
+      r?.scrollTo({ left: 0, behavior: 'instant' })
+    }, label)
+    await settle(page, `${where}, the ${label} row back at its start`)
+  }
+  return overflowed
 }
 
 /** The sheets and dialogs, each opened and closed: `visit(name)` with each
@@ -772,7 +918,51 @@ try {
     for (const tool of [null, 'frame']) await checkSaveStates(vw, vh, tool)
   }
 
-  // ── 5. The review screenshots ──
+  // ── 5. The Frame tool's states: light and dark, 100% and 200% text ──
+  for (const [vw, vh] of VIEWPORTS) {
+    for (const scheme of ['light', 'dark']) {
+      for (const text of [100, 200]) {
+        const where = `${vw}x${vh}, ${scheme}, ${text}% text, Frame`
+        const { ctx, page, errors } = await newPage({ width: vw, height: vh, scheme })
+        if (text === 200) await page.addStyleTag({ content: 'html { font-size: 200% }' })
+        const sheets = new Map()
+        const overflowed = new Set()
+        let n = 0
+        let targets = 0
+        await eachFrameState(page, async (name, shape) => {
+          const at = `${where} › ${name}`
+          await settle(page, at)
+          await dockAtStart(page, at)
+          n++
+          const m = await measure(page)
+          if (!sheets.has(shape)) sheets.set(shape, { name, sheet: m.sheet })
+          const first = sheets.get(shape)
+          // At 200% text the sheet may shrink to make room; at 100% it holds.
+          if (text === 100) {
+            check(
+              m.sheet && first.sheet && m.sheet.every((v, i) => Math.abs(v - first.sheet[i]) <= 1),
+              `${at}: the sheet moved: ${JSON.stringify(m.sheet)} against ${JSON.stringify(first.sheet)} in ${first.name}`,
+            )
+            check(m.overflow <= 0.5, `${at}: the panel overflows by ${m.overflow} px`)
+          } else {
+            for (const c of await page.evaluate(probeClipped)) check(false, `${at}: ${c}`)
+          }
+          check(m.sideways <= 0, `${at}: the page scrolls sideways by ${m.sideways} px`)
+          targets += (await (text === 100 ? checkTargets(page, at) : checkTargetsWholeDock(page, at))).measured
+          for (const label of await checkChipRows(page, at, m.sheet)) overflowed.add(label)
+        })
+        check(n === 11, `${where}: ${n} Frame states visited (11)`)
+        // At 320 px both rows run past the dock's width: their scroll is
+        // checked, not passed for want of a row to scroll.
+        if (vw === 320) check(overflowed.has('Fill') && overflowed.has('Sheet ratio'), `${where}: the rows that overflowed: ${[...overflowed].join(', ') || 'none'} (both)`)
+        check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
+        console.log(`${where}: ${n} states, ${targets} targets measured, the chip rows that scroll: ${[...overflowed].join(', ') || 'none'}`)
+        await ctx.close()
+      }
+    }
+  }
+
+  // ── 6. The review screenshots ──
   if (SHOTS) {
     for (const [vw, vh] of SHOT_WIDTHS) {
       for (const scheme of ['light', 'dark']) {
@@ -1075,5 +1265,6 @@ if (failures.length) {
 }
 console.log(
   '\nGeometry: the sheet holds still across every tool and tab, no panel overflows, every target owns 44px, ' +
-    'nothing is cut off at 200% text, and the app bar holds one row at every width.',
+    'nothing is cut off at 200% text, the app bar holds one row at every width, and the Frame tool\'s states and chip rows ' +
+    'hold in light and dark, the rows scrolling inside themselves.',
 )

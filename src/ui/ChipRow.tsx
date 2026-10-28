@@ -19,8 +19,8 @@
  * App-agnostic: the caller supplies the choices and their words.
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from 'react'
-import { chipFace, chipKeyTarget, chipName, chipTabStop, chipTap, revealDelta, type ChipItem } from './chips.ts'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from 'react'
+import { chipCut, chipFace, chipKeyTarget, chipName, chipTabStop, chipTap, revealDelta, type ChipItem } from './chips.ts'
 import { Icon } from './ui.tsx'
 
 /** Scroll `row` so `chip` shows whole, if the row scrolls at all. */
@@ -28,6 +28,31 @@ function reveal(chip: Element, row: HTMLElement, behavior: ScrollBehavior): void
   if (row.scrollWidth <= row.clientWidth) return
   const delta = revealDelta(chip.getBoundingClientRect(), row.getBoundingClientRect())
   if (delta !== 0) row.scrollBy({ left: delta, behavior })
+}
+
+/**
+ * Cut `row` where the style guide cuts a scrolling chip row (chips.ts
+ * `chipCut`): measured at rest with no cut, then every chip's side padding
+ * changed by the one amount found (the row's `--_grow`, which the chip
+ * element reads).
+ */
+function cutRow(row: HTMLElement): void {
+  row.style.removeProperty('--_grow')
+  if (row.scrollWidth <= row.clientWidth + 1) return
+  const cs = getComputedStyle(row)
+  const rtl = cs.direction === 'rtl'
+  const box = row.getBoundingClientRect()
+  const padS = parseFloat(cs.paddingInlineStart) || 0
+  const room = box.width - padS - (parseFloat(cs.paddingInlineEnd) || 0)
+  const pos = Math.abs(row.scrollLeft)
+  const items = [...row.querySelectorAll<HTMLElement>(':scope > .chip')]
+    .filter((c) => c.getClientRects().length > 0)
+    .map((c) => {
+      const r = c.getBoundingClientRect()
+      return { s: (rtl ? box.right - r.right : r.left - box.left) - padS + pos, w: r.width }
+    })
+  const grow = chipCut(items, room, box.width - padS)
+  if (grow !== null) row.style.setProperty('--_grow', `${grow}px`)
 }
 
 export function ChipRow<T extends string>({
@@ -48,6 +73,30 @@ export function ChipRow<T extends string>({
   const rowRef = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(-1)
   const stop = chipTabStop(focused, items.findIndex((it) => chipFace(it, value).pressed))
+
+  // The cut at the row's end, made when the row shows and again when it or a
+  // chip changes size (a phone turned, the text size, a face landing, the
+  // flip cue or a spinner coming and going), at most once a frame, outside
+  // the observer that sees it (the cut changes the sizes it watches).
+  const count = items.length
+  useLayoutEffect(() => {
+    const row = rowRef.current
+    if (!row) return
+    let frame = 0
+    const later = () => {
+      if (!frame) frame = requestAnimationFrame(() => ((frame = 0), cutRow(row)))
+    }
+    cutRow(row)
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(later)
+    ro?.observe(row)
+    row.querySelectorAll(':scope > .chip').forEach((c) => ro?.observe(c))
+    document.fonts?.addEventListener?.('loadingdone', later)
+    return () => {
+      cancelAnimationFrame(frame)
+      ro?.disconnect()
+      document.fonts?.removeEventListener?.('loadingdone', later)
+    }
+  }, [count])
 
   // The chosen chip in view when the choice changes (and when the row first
   // shows), at once: a choice made elsewhere (Undo) must not animate the row.

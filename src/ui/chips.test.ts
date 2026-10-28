@@ -9,7 +9,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { REVEAL_PAD_PX, chipFace, chipKeyTarget, chipName, chipTabStop, chipTap, revealDelta, type ChipItem } from './chips.ts'
+import { CUT_SHRINK, REVEAL_PAD_PX, chipCut, chipFace, chipKeyTarget, chipName, chipTabStop, chipTap, revealDelta, type ChipItem } from './chips.ts'
 import { ChipRow } from './ChipRow.tsx'
 
 type R = 'own' | 'sq' | '4:5' | '5:4' | '9:16' | '16:9'
@@ -151,5 +151,78 @@ describe('the row as rendered', () => {
     expect(chip(s, 'frost')).toMatch(/<span class="ic ic--blend" aria-hidden="true"><\/span>Frosted/)
     expect(chip(s, 'gone')).toContain('aria-disabled="true"')
     for (const id of ['paper', 'frost']) expect(chip(s, id)).not.toContain('aria-disabled')
+  })
+})
+
+describe("the chip cut at a scrolling row's end (the style guide's 42-chip cut)", () => {
+  // A row as the dock lays one out: chips of the given widths, `gap` apart,
+  // from the content's start; the row clips `pad` past its inner width.
+  const row = (widths: number[], gap = 4) => {
+    let s = 0
+    return widths.map((w) => {
+      const it = { s, w }
+      s += w + gap
+      return it
+    })
+  }
+  // What shows of the first chip not whole when every chip is `grow` wider.
+  const shown = (items: { s: number; w: number }[], room: number, edge: number, grow: number) => {
+    for (let i = 0; i < items.length; i++) {
+      const s = items[i].s + i * grow
+      const w = items[i].w + grow
+      if (s + w > room + 0.5) return { v: edge - s, w }
+    }
+    return null
+  }
+
+  it('leaves a row that fits alone, and tightens one that misses by a few pixels until it fits', () => {
+    expect(chipCut(row([48, 48, 48, 48, 48, 48]), 400, 408)).toBeNull()
+    // 6 x 48 + 5 x 4 = 308 in 306: tightened, every chip 0.5 px at a time.
+    const g = chipCut(row([48, 48, 48, 48, 48, 48]), 306, 314)!
+    expect(g).toBeLessThan(0)
+    expect(g).toBeGreaterThanOrEqual(CUT_SHRINK)
+    expect(shown(row([48, 48, 48, 48, 48, 48]), 306, 314, g)).toBeNull()
+  })
+
+  it('cuts the edge chip between 30% and 60% of itself and at least 24 px: never a sliver, never only its round end', () => {
+    // A fill row whose fifth chip (88 px) peeks in by 4 px at rest.
+    const fill = row([76, 76, 72, 80, 88, 96])
+    const before = shown(fill, 316, 324, 0)!
+    expect(before.v).toBeLessThan(24)
+    const g = chipCut(fill, 316, 324)!
+    const after = shown(fill, 316, 324, g)!
+    expect(after.v).toBeGreaterThanOrEqual(Math.max(24, 0.3 * after.w))
+    expect(after.v).toBeLessThanOrEqual(0.6 * after.w)
+  })
+
+  it('every cut it gives is fair, and it gives none only when no amount in its range would be', () => {
+    let seed = 7
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed / 2 ** 31)
+    let scrolls = 0
+    let fair = 0
+    for (let k = 0; k < 2000; k++) {
+      const items = row(Array.from({ length: 6 }, () => 40 + Math.round(rnd() * 60)))
+      const room = 220 + Math.round(rnd() * 200)
+      const edge = room + 8
+      const g = chipCut(items, room, edge)
+      const last = items[items.length - 1]
+      if (last.s + last.w <= room + 0.5) {
+        expect(g).toBeNull()
+        continue
+      }
+      const c = shown(items, room, edge, g ?? 0)
+      if (c === null) continue // tightened to fit
+      const isFair = (x: { v: number; w: number } | null) => !!x && x.v >= Math.max(24, 0.3 * x.w) && x.v <= 0.6 * x.w
+      scrolls++
+      if (g === null) {
+        // None in range: the row keeps the cut it has, as the script leaves it.
+        for (let grow = CUT_SHRINK; grow <= 48; grow += 0.5) expect(isFair(shown(items, room, edge, grow)) && !isFair(c)).toBe(false)
+        continue
+      }
+      expect(isFair(c)).toBe(true)
+      fair++
+    }
+    expect(scrolls).toBeGreaterThan(500)
+    expect(fair).toBeGreaterThan(scrolls / 2)
   })
 })

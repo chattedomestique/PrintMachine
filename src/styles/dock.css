@@ -317,14 +317,20 @@
    sides, so more of the choices fit across a phone (spread out when they all
    do, scrolling when they do not), and the chosen chip is its fill and its
    flip cue: the style guide's check in front would make it the widest chip
-   by far, and in the tray chosen is the fill (editor.css). The row is one
-   options row tall (the scroller's padding trimmed to what centres a chip in
-   it, which still holds the focus ring), so a panel with a chip row, a
-   hairline and a parameter strip is the height of every other panel. */
+   by far, and in the tray chosen is the fill (editor.css). The row takes one
+   options row in the panel, so a panel with a chip row, a hairline and a
+   parameter strip is the height of every other panel; but the scroller
+   clips, so its box keeps room for a focused chip's whole ring (the ring
+   and its offset, 6 px, round a 36 px chip in a 44 px row: 4 px of padding
+   would cut 2 px off its top and bottom), and gives back the extra with a
+   negative margin, so what the panel lays out is still the row. */
 .chiprow {
+  --_pad: calc((var(--ed-row-h) - var(--ctl-sm)) / 2);
+  --_ring-room: calc(var(--ring) + var(--ring-offset));
   justify-content: space-between;
   gap: var(--chrome-1);
-  padding-block: calc((var(--ed-row-h) - var(--ctl-sm)) / 2);
+  padding-block: max(var(--_pad), var(--_ring-room));
+  margin-block: min(0px, calc(var(--_pad) - var(--_ring-room)));
 }
 .chiprow > .chip { --_px: var(--chrome-3); }
 .chiprow > .chip::before { display: none; }

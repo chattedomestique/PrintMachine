@@ -453,6 +453,52 @@ async function probeRowChips(label) {
   return { overflow, scrolled: row.scrollLeft, chips }
 }
 
+/**
+ * The chip row named `label` at rest (scrolled to its start): how much of the
+ * first chip the row cuts shows, against its width (the style guide's cut:
+ * 30% to 60% of it and at least 24 px), and the cut the row was given. Null
+ * when there is no such row.
+ */
+async function probeRowCut(label) {
+  const row = [...document.querySelectorAll('.app__panel-inner .chiprow')].find((r) => r.getAttribute('aria-label') === label)
+  if (!row) return null
+  row.scrollTo({ left: 0, behavior: 'instant' })
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  const box = row.getBoundingClientRect()
+  const clip = box.left + row.clientLeft + row.clientWidth
+  const overflow = row.scrollWidth - row.clientWidth
+  for (const chip of row.querySelectorAll(':scope > .chip')) {
+    const r = chip.getBoundingClientRect()
+    if (r.right > clip + 0.5) return { overflow, id: chip.dataset.chip, v: clip - r.left, w: r.width, grow: row.style.getPropertyValue('--_grow') || '0px' }
+  }
+  return { overflow, id: null, v: null, w: null, grow: row.style.getPropertyValue('--_grow') || '0px' }
+}
+
+/**
+ * The focused element's keyboard ring, against every box that clips it: its
+ * outline (width and offset, from the computed style) outside its rect, and
+ * each ancestor that does not let overflow show, by its padding box. What
+ * each cuts off the ring, top, right, bottom and left; empty when none does.
+ */
+function probeFocusRing() {
+  const el = document.activeElement
+  if (!el || el === document.body) return null
+  const cs = getComputedStyle(el)
+  const out = (parseFloat(cs.outlineWidth) || 0) + (parseFloat(cs.outlineOffset) || 0)
+  const r = el.getBoundingClientRect()
+  const ring = { top: r.top - out, right: r.right + out, bottom: r.bottom + out, left: r.left - out }
+  const cuts = []
+  for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+    const as = getComputedStyle(a)
+    if (as.overflowX === 'visible' && as.overflowY === 'visible') continue
+    const b = a.getBoundingClientRect()
+    const pad = { top: b.top + a.clientTop, left: b.left + a.clientLeft, right: b.left + a.clientLeft + a.clientWidth, bottom: b.top + a.clientTop + a.clientHeight }
+    const cut = { top: pad.top - ring.top, right: ring.right - pad.right, bottom: ring.bottom - pad.bottom, left: pad.left - ring.left }
+    if (Object.values(cut).some((v) => v > 0.5)) cuts.push(`${a.className || a.tagName}: ${Object.entries(cut).filter(([, v]) => v > 0.5).map(([k, v]) => `${k} ${v.toFixed(1)}px`).join(', ')}`)
+  }
+  return { focusVisible: el.matches(':focus-visible'), outline: `${cs.outlineWidth} at ${cs.outlineOffset}`, chip: el.dataset?.chip ?? null, cuts }
+}
+
 /** The app bar: its SG.fit layout, and whether it holds as one row. */
 function probeBar() {
   const bar = document.querySelector('.app__bar')
@@ -672,6 +718,27 @@ async function eachFrameState(page, visit) {
 async function checkChipRows(page, where, sheet) {
   const overflowed = []
   for (const label of ['Fill', 'Sheet ratio']) {
+    // At rest, a row that scrolls is cut where the style guide cuts one.
+    const cut = await page.evaluate(probeRowCut, label)
+    if (!cut) continue
+    if (cut.overflow > 0) {
+      check(
+        cut.v !== null && cut.v >= Math.max(23.5, 0.3 * cut.w - 0.5) && cut.v <= 0.6 * cut.w + 0.5,
+        `${where}: at rest the ${label} row's edge chip ${cut.id} shows ${cut.v?.toFixed(1)} px of ${cut.w?.toFixed(1)} (30% to 60% of it and at least 24 px; the row's cut ${cut.grow})`,
+      )
+    }
+    // The keys into the row (the tab stop after the tool's tabs): the chip
+    // they reach draws its whole ring, nothing clipping it.
+    await page.locator('.controls__section[data-tool="frame"] [role=tab][aria-selected="true"]').focus()
+    await page.keyboard.press('Tab')
+    await settle(page, `${where}, Tab into the ${label} row`)
+    const ring = await page.evaluate(probeFocusRing)
+    check(
+      ring?.chip && ring.focusVisible && ring.cuts.length === 0,
+      `${where}: the ${label} row's chip reached by Tab (${ring?.chip}, ring ${ring?.outline}${ring?.focusVisible ? '' : ', not focus-visible'}) is clipped: ${ring?.cuts.join('; ')}`,
+    )
+    await page.evaluate(() => document.activeElement?.blur())
+    await settle(page, `${where}, the ${label} row after the keys`)
     const row = await page.evaluate(probeRowChips, label)
     if (!row) continue
     const enabled = row.chips.filter((c) => !c.disabled)

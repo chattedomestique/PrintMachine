@@ -110,3 +110,49 @@ export function revealDelta(
   if (chip.right > row.right - pad) return chip.right - row.right + pad
   return 0
 }
+
+/** How far the cut may narrow every chip (px, both sides together): a row
+ *  that misses fitting by a few pixels is tightened until it fits. */
+export const CUT_SHRINK = -8
+/** How far it may widen every chip, looking for a cut it can keep. */
+export const CUT_GROW = 48
+
+/**
+ * The style guide's chip cut (42-chip `cut()`, which Border Studio runs on
+ * every scrolling chip row): the chip that peeks in at the row's end is the
+ * sign the row goes on, so where it is cut is chosen, not luck. At rest every
+ * chip's side padding changes by one amount (`grow`, both sides together, the
+ * row's `--_grow`) until the first chip not whole shows between 30% and 60%
+ * of itself and at least 24 px: never a sliver, never a chip missing only its
+ * round end. A row that misses fitting by no more than `CUT_SHRINK` is
+ * tightened until it fits. Null: no change (the row fits, or no amount gives
+ * a fair cut). Pure, as the script's own arithmetic is.
+ *
+ * @param items each chip's start (from the content's start, at rest) and width
+ * @param room the row's inner width (its padding box less its padding)
+ * @param edge where the row clips, at rest, from the content's start
+ */
+export function chipCut(items: readonly { s: number; w: number }[], room: number, edge: number): number | null {
+  // The first chip that is not whole inside the row when every chip is
+  // `grow` wider: how much of it shows, and its width.
+  const at = (grow: number) => {
+    for (let i = 0; i < items.length; i++) {
+      const s = items[i].s + i * grow
+      const w = items[i].w + grow
+      if (s + w > room + 0.5) return { v: edge - s, w }
+    }
+    return null
+  }
+  if (!at(CUT_SHRINK)) {
+    for (let f = 0; f >= CUT_SHRINK; f -= 0.5) if (!at(f)) return f === 0 ? null : f
+    return null
+  }
+  for (let d = 0; d <= CUT_GROW; d += 0.5) {
+    for (const grow of [d, -d]) {
+      if (grow < CUT_SHRINK) continue
+      const c = at(grow)
+      if (c && c.v >= Math.max(24, 0.3 * c.w) && c.v <= 0.6 * c.w) return grow === 0 ? null : grow
+    }
+  }
+  return null
+}

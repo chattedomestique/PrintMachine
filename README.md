@@ -751,10 +751,10 @@ is now set in the same face on every phone, online and off (the face is
 precached), but for a few characters a person can type, which Tanklager
 does not draw and which are set in the next face of the stack, the phone's
 own: the dollar sign `$` (on the iPhone keyboard's `123` page), `€ £ ¥` (its
-`#+=` page), the signs a long press offers on `$`, `&` and `0` (`¢ ₩ ₽ §`),
-and `© ™`. Every other printable ASCII character, and the curly quotes,
-dashes and ellipsis an iPhone types by default, are Tanklager's;
-`check-fonts` requires them, names `$` as the one ASCII character excused,
+`#+=` page), the signs a long press offers on `$` and `&` (`¢ ₩ ₽ §`),
+and the emoji keyboard's `© ® ™`. Every other printable ASCII character,
+and the curly quotes, dashes and ellipsis an iPhone types by default, are
+Tanklager's; `check-fonts` requires them, names `$` as the one ASCII character excused,
 prints every keyboard character the face lacks, and fails a face that loses
 one more (its controls include the iPhone's apostrophe removed). Of Border
 Studio's 52 faces, by the survey that chose this one, nine can set the letters, digits and
@@ -793,7 +793,7 @@ reads the WOFF itself (its tables inflated and checksummed; `cmap` formats 4
 and 12; `GSUB`'s features) and fails unless every printable ASCII
 character and the iPhone keyboard's ‘ ’ “ ” – — … are mapped (but for the
 one it names, `$`, which it prints as set in the phone's own face, with
-the other keyboard characters the face lacks, `€ £ ¥ ¢ ₩ ₽ § © ™`), each
+the other keyboard characters the face lacks, `€ £ ¥ ¢ ₩ ₽ § © ® ™`), each
 lowercase letter maps to a glyph of its own, and no ligature
 feature (`liga clig calt dlig rlig`) is offered; four broken copies of the
 face (lowercase unmapped, the iPhone's apostrophe unmapped, lowercase set in

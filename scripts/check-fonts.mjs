@@ -64,10 +64,10 @@ const TYPED = [...Array.from({ length: 0x7f - 0x20 }, (_, k) => String.fromCodeP
  *  "Fonts"). Tanklager Kompakt has no dollar sign. */
 const FALLS_BACK = ['$']
 /** Typed from an iPhone's keyboard off its first two pages: `€ £ ¥` on the
- *  `#+=` page, `¢ ₩ ₽ §` from a long press on `$`, `&` and `0`, and `© ™`:
- *  reported (the ones the face lacks print in the phone's own face), not
- *  required. */
-const LIKELY = [...'\u20ac\u00a3\u00a5\u00a2\u20a9\u20bd\u00a7\u00a9\u2122']
+ *  `#+=` page, `¢ ₩ ₽ §` from a long press on `$` and `&`, and the emoji
+ *  keyboard's `© ® ™`: reported (the ones the face lacks print in the
+ *  phone's own face), not required. */
+const LIKELY = [...'\u20ac\u00a3\u00a5\u00a2\u20a9\u20bd\u00a7\u00a9\u00ae\u2122']
 const JOINING = ['liga', 'clig', 'calt', 'dlig', 'rlig']
 
 const align4 = (n) => (n + 3) & ~3

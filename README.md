@@ -496,7 +496,8 @@ template's, whose width is 0: unframed.
   (190.7 MP): a phone may not finish it."): the size the person chose is
   never only in a name a screen reader hears. In the dock, not over the
   stage: the sheet is laid out above it, so none of the print being framed
-  is under it and every touch on the sheet reaches the sheet; its words
+  is under it and it takes none of the sheet's touches (the gesture hint
+  covers the sheet's foot while it shows, below); its words
   wrap, never cut, and at 200% text the open panel gives up the line's
   height (it scrolls a little more, and what it shows stays where it was, so
   Fit or Width, whichever took the print past 100 MP, stays under the
@@ -1712,8 +1713,8 @@ proves the dock still holds still. The style guide's scripts that own state
 their keyboard patterns are in `ui/` instead (two owners of `aria-selected`
 fight); so are the chip script's two layout jobs for a row that scrolls:
 scrolling a chip that takes focus into view whole (`ui/chips.ts`
-`revealDelta`), and the deliberate cut at rest, the row's padding nudged so
-its edge chip shows 30% to 60% of itself and at least 24 px, a cue that the
+`revealDelta`), and the deliberate cut at rest, every chip's side padding
+nudged by one amount (the row's `--_grow`) so its edge chip shows 30% to 60% of itself and at least 24 px, a cue that the
 row goes on (`chipCut`, the script's `cut()` line for line), which `ChipRow`
 runs as the script runs `SG.chips.fit`: when the row shows, when it or any
 chip in it changes size, and when the fonts arrive.
@@ -1891,7 +1892,8 @@ is a file, and it checks more:
   box, and the line what a finger at the word's centre reaches); none of the
   sheet is under it and the sheet is between the bar and the dock; every
   button on a card over the stage is what a finger at its centre reaches, and
-  a touch at the sheet's foot reaches the sheet. Choosing Fit, which takes
+  a touch at the sheet's foot reaches the sheet, or the gesture hint (which
+  has its ×) while it shows. Choosing Fit, which takes
   the print past 100 MP, and Crop again moves neither the tool's tabs nor
   Crop | Fit by half a pixel. At 393×852 a plate dragged
   to the sheet's foot (where a story frame's caption goes) is moved again by a

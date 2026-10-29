@@ -762,9 +762,11 @@ async function newPage({ width, height, scheme = 'light', photo = PHOTOS[0], ini
  * Every tool, every sub-tab, every Over photo state, and Frame › Border with
  * Frosted chosen, in order, calling `visit(name)` in each. Leaves the second
  * ink on, the fill on Photo and the tools closed. Without a photo the states
- * a photo makes (the fill row, a second ink) are not there to visit.
+ * a photo makes (the fill row, a second ink) are not there to visit; which
+ * those are is decided by the document (`photo`), not by what the app shows,
+ * so with a photo a state the app wrongly withholds fails, never skips.
  */
-async function eachState(page, visit) {
+async function eachState(page, visit, { photo = true } = {}) {
   await closeTools(page)
   await visit('closed')
   for (const tool of TOOL_IDS) {
@@ -778,7 +780,9 @@ async function eachState(page, visit) {
         for (const mode of ['off', 'second', 'backing']) {
           await settle(page, `ink-over, before ${mode}`)
           // Without a photo a second ink has nothing to read: unavailable.
-          if (await over.locator(`input[type=radio][value="${mode}"]`).isDisabled()) continue
+          if (!photo && mode === 'second') continue
+          const off = await over.locator(`input[type=radio][value="${mode}"]`).isDisabled()
+          if (!check(!off, `Ink › Over photo's ${mode} is unavailable${photo ? ' with a photo' : ''}`)) continue
           await over.locator(`input[type=radio][value="${mode}"]`).check({ force: true })
           await visit(`${tool}-${tab}-${mode}`)
           if (mode === 'second') {
@@ -797,11 +801,11 @@ async function eachState(page, visit) {
           }
         }
         await settle(page, 'ink-over, before second')
-        if (!(await over.locator('input[type=radio][value="second"]').isDisabled())) await over.locator('input[type=radio][value="second"]').check({ force: true })
+        if (photo && !(await over.locator('input[type=radio][value="second"]').isDisabled())) await over.locator('input[type=radio][value="second"]').check({ force: true })
         continue
       }
       await visit(`${tool}-${tab}`)
-      if (tool === 'frame' && tab === 'border' && (await page.locator('.controls__panel[data-sub="border"] .chiprow').count()) > 0) {
+      if (tool === 'frame' && tab === 'border' && photo && check((await page.locator('.controls__panel[data-sub="border"] .chiprow').count()) > 0, 'Frame › Border has no fill row with a photo')) {
         // Frosted adds Blur to the strip: the sheet must not move for it,
         // with Blur the setting on screen.
         const panel = page.locator('.controls__panel[data-sub="border"]')
@@ -1073,7 +1077,7 @@ try {
           check(travel.steps === 90, `${where}: the Size slider has 90 steps (has ${travel.steps})`)
           check(travel.pxPerStep >= 1.5, `${where}: a Size step is at least 1.5 px of travel (${travel.pxPerStep.toFixed(2)})`)
         }
-      })
+      }, { photo: !!doc.photo })
       if (doc === DOCS[0]) {
         await eachDialog(page, async (name) => {
           await settle(page, `${where}, ${name}`)
@@ -1086,6 +1090,10 @@ try {
       // With every tool closed the sheet takes the dock's room as well: the
       // gesture for a full-height sheet. Every open state holds still.
       const open = states.filter((s) => s.name !== 'closed')
+      // Every state the document makes is visited: with a photo, framed or
+      // not, the fill row's Frosted and a second ink (and Keep) are there.
+      const want = doc.photo ? 18 : 15
+      check(open.length === want, `${where}: ${open.length} open states visited (${want}): ${open.map((s) => s.name).join(', ')}`)
       const first = open[0]
       for (const s of open) {
         const same = s.sheet && first.sheet && s.sheet.every((v, i) => Math.abs(v - first.sheet[i]) <= 1)

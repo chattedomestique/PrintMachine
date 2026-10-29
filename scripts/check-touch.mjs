@@ -54,6 +54,17 @@
  *     hint names no gesture and says why, a drag on the photo moves nothing
  *     (and leaves the hint), and Place's Zoom says "Fit shows the whole
  *     photo" as its description; back in Crop the hint names the photo's.
+ *     With no photo the sheet says so and names the plate's keys, and they
+ *     move the plate. Frosted puts Blur on the strip, another fill Width,
+ *     and with focus on the strip's name Ctrl+Z and Ctrl+Shift+Z across
+ *     Frosted keep it there. Keys only, Choose photo, Replace and Remove
+ *     keep focus on the button (or the tab's first control).
+ *     (Step 9 also holds the pinch about the fingers, on a photo far from
+ *     100 MP and on one the pinch takes across it, at 100% and 200% text,
+ *     and + / - about the frame's middle.)
+ * 11. The sheet's keyboard ring, read from the pixels drawn: on every fill,
+ *     light and dark, the ring or the band inside it stands at least 3:1
+ *     against what it borders.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -677,6 +688,57 @@ try {
       )
       await page.keyboard.press('0')
       await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media?.scale === 1, KEY, { timeout: 5_000 })
+    }
+
+    // A pinch that takes the print across 100 MP: a 7500x10000 first photo
+    // (Original, 9166×11666, 106.9 MP, its line up) zoomed by the fingers to
+    // under 100 MP. The very-large line keeps what it said while they are on
+    // the sheet, so the sheet is not laid out again under them; the point
+    // they zoom about stays under them, at 100% and 200% text, and the line
+    // follows the print once they lift.
+    for (const text of [100, 200]) {
+      const cx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+      const pg = await cx.newPage()
+      pg.on('pageerror', (e) => errors.push(e.message))
+      await pg.goto(APP)
+      await pg.waitForSelector('.sheet canvas')
+      if (text !== 100) await pg.addStyleTag({ content: `html { font-size: ${text}% }` })
+      await pg.locator('[data-tool="frame"]').click()
+      const big = await pg.evaluate(async () => {
+        const c = document.createElement('canvas')
+        c.width = 7500
+        c.height = 10000
+        const g = c.getContext('2d')
+        g.fillStyle = '#5a7fa8'
+        g.fillRect(0, 0, 7500, 10000)
+        const b = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.85))
+        c.width = 0
+        return [...new Uint8Array(await b.arrayBuffer())]
+      })
+      await pg.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(big) })
+      await pg.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media?.width === 7500, KEY, { timeout: 60_000 })
+      await pg.waitForFunction(() => !document.querySelector('.app__save[aria-disabled="true"]'), null, { timeout: 60_000 })
+      if (await pg.locator('.app__hint .btn').count()) await pg.locator('.app__hint .btn').click()
+      await pg.locator('.controls__section[data-tool="frame"] [role=tab][data-tab="border"]').click()
+      const line = () => pg.evaluate(() => document.querySelector('.app__large-said:not([hidden])')?.textContent ?? '')
+      const was = await line()
+      const box = await settledBox(pg)
+      const doc = await stored(pg)
+      const at = { x: box.x + box.width * 0.7, y: box.y + box.height * 0.75 }
+      const shift = { x: 15, y: -10 }
+      const held = ofPhoto(box, doc.frame.width, doc.media, at)
+      const c2 = await cx.newCDPSession(pg)
+      await pinch(c2, at, 60, 120, shift)
+      await pg.waitForTimeout(600)
+      const now = (await stored(pg)).media
+      const lands = onScreen(box, doc.frame.width, now, held.u, held.v)
+      const off = Math.hypot(lands.x - (at.x + shift.x), lands.y - (at.y + shift.y))
+      const after = await line()
+      check(
+        /a phone may not finish it/.test(was) && after === '' && now.scale > 1.5 && off < 3,
+        `${text}% text: a pinch that takes a 106.9 MP first photo under 100 MP ("${was}" before, "${after}" once the fingers lift) zooms to ${now.scale.toFixed(3)} about the fingers (${off.toFixed(1)} px off)`,
+      )
+      await cx.close()
     }
 
     // Fit: the whole photo shows; the keys move nothing, and none is named.

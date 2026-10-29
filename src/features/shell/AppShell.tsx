@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import Canvas from '../editor/Canvas.tsx'
 import Controls from '../controls/Controls.tsx'
 import { FIRST_SUBS, TOOLS, type Subs, type ToolId } from '../controls/tools.ts'
 import { Icon } from '../../ui/ui.tsx'
-import { describePlan, fileSize, planPrint } from '../../engine/export.ts'
+import { LARGE_RISK, describePlan, fileSize, planPrint } from '../../engine/export.ts'
 import { pngCompresses, storedSize } from '../../engine/encode/png.ts'
 import { effectiveMode, sheetAspect } from '../../engine/frame.ts'
 import { useSettings } from '../../state/settingsStore.ts'
@@ -17,6 +17,7 @@ import MoreSheet from './MoreSheet.tsx'
 import SaveQuestion from './SaveQuestion.tsx'
 import StatusCard from './StatusCard.tsx'
 import { gestureHint } from './hint.ts'
+import { placeLine } from './dockLine.ts'
 import {
   canStart,
   moreCaption,
@@ -80,12 +81,20 @@ export default function AppShell() {
   const appRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLElement>(null)
   const overlayRef = useRef<HTMLElement>(null)
+  const largeRef = useRef<HTMLParagraphElement>(null)
+  const bandRef = useRef<HTMLDivElement>(null)
+  // The control last touched or focused in the dock: the very-large line
+  // takes its room from the end of the open panel away from it (dockLine.ts).
+  const usedRef = useRef<Element | null>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
 
   /**
    * The dock's live height, published as `--overlay-h`: the sheet reserves
    * exactly the room the dock takes, so it is as large as it can be. And the
    * app bar's, as `--bar-h`: the cards over the stage stay between the two.
+   * And the very-large line's words: their band in the dock follows them
+   * (dockLine.ts `placeLine`), so the line comes and goes without moving
+   * what the open panel shows.
    *
    * The BORDER box: the dock has safe-area padding at the bottom, and
    * contentRect leaves it out (on a phone with a home indicator that put the
@@ -96,8 +105,10 @@ export default function AppShell() {
   useEffect(() => {
     const el = overlayRef.current
     const bar = barRef.current
+    const large = largeRef.current
+    const band = bandRef.current
     const root = appRef.current
-    if (!el || !bar || !root) return
+    if (!el || !bar || !large || !band || !root) return
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const box = entry.borderBoxSize?.[0]
@@ -106,14 +117,40 @@ export default function AppShell() {
           root.style.setProperty('--bar-h', h)
           continue
         }
+        if (entry.target === large) {
+          // The words' own height (0 when hidden): their band follows, and
+          // only placeLine changes it, so the panel's rows keep their place.
+          placeLine(root, band, large.hidden ? 0 : box ? box.blockSize : large.getBoundingClientRect().height, { fresh: false, used: usedRef.current })
+          continue
+        }
         root.style.setProperty('--overlay-h', h)
         document.documentElement.style.setProperty('--overlay-h', h)
       }
     })
     ro.observe(el)
     ro.observe(bar)
+    ro.observe(large)
     return () => ro.disconnect()
   }, [])
+
+  // A band kept empty after the line went (its rows held in place) is given
+  // back as the person scrolls the panel: what the scroll can take.
+  const giveBack = () => {
+    const root = appRef.current
+    const large = largeRef.current
+    const band = bandRef.current
+    if (root && large && band && large.hidden && parseFloat(root.style.getPropertyValue('--large-band')) > 0) placeLine(root, band, 0, { fresh: false, used: null })
+  }
+
+  // A tool or tab opened or closed: new rows in the panel, so the line's band
+  // starts again at the panel's top, holding nothing. Before paint.
+  const openTab = tool ? `${tool}/${subs[tool]}` : null
+  useLayoutEffect(() => {
+    const root = appRef.current
+    const large = largeRef.current
+    const band = bandRef.current
+    if (root && large && band) placeLine(root, band, large.hidden ? 0 : large.getBoundingClientRect().height, { fresh: true, used: null })
+  }, [openTab])
 
   // The tray mounts after the page has loaded, so the style guide's toolbar
   // script never saw it. Its documented hook for a toolbar added later: roving
@@ -254,11 +291,46 @@ export default function AppShell() {
   }
 
   // A very large print is said on screen before the tap, wherever the person
-  // is when they tap Save (the size is stated, nothing asks): the size and
-  // that a phone may not finish it, in a card over the stage while it is true. Nothing asks; Save
-  // presses it as any other (a failure is asked about after, as ever). Not
-  // while a save's own card is up, which says the size itself.
-  const largeSaid = caption.large && !pressing && status === null ? `Saves ${caption.size} (${caption.megapixels}), ${caption.large}.` : null
+  // is when they tap Save (the size is stated, nothing asks): its megapixels
+  // and that a phone may not finish it, in a line of the dock while it is
+  // true. In the dock, not over the stage: the sheet is laid out above it,
+  // so it covers none of the print being made and takes none of its touches,
+  // in every tool, open or closed. Save presses it as any other (a failure is
+  // asked about after, as ever). Not when the photo cannot be loaded or its
+  // fill made: no save can start then, and the status card says why.
+  // Short, two lines at most at 200% text on a 320 px phone: the room above
+  // a tab's first row, so the line can take its room from the open panel and
+  // cover nothing in use (dockLine.ts). The pixel size is in Save's name,
+  // More and the save's own card.
+  const largeSaid = caption.large && saveRefusal(mediaState) === null ? `${caption.megapixels}: ${LARGE_RISK}.` : null
+  // While fingers are on the sheet the line keeps what it said when they
+  // went down, so the sheet under them is not laid out again mid-gesture (a
+  // pinch that takes the print across 100 MP); it follows the print when
+  // they lift.
+  const [heldSaid, setHeldSaid] = useState<{ said: string | null } | null>(null)
+  const onStage = useRef(new Set<number>())
+  const lineSaid = heldSaid ? heldSaid.said : largeSaid
+  const holdLine = (e: React.PointerEvent) => {
+    if (onStage.current.size === 0) setHeldSaid({ said: lineSaid })
+    onStage.current.add(e.pointerId)
+  }
+  useEffect(() => {
+    const lift = (e: PointerEvent) => {
+      if (onStage.current.delete(e.pointerId) && onStage.current.size === 0) setHeldSaid(null)
+    }
+    const away = () => {
+      onStage.current.clear()
+      setHeldSaid(null)
+    }
+    window.addEventListener('pointerup', lift)
+    window.addEventListener('pointercancel', lift)
+    window.addEventListener('blur', away)
+    return () => {
+      window.removeEventListener('pointerup', lift)
+      window.removeEventListener('pointercancel', lift)
+      window.removeEventListener('blur', away)
+    }
+  }, [])
 
   // The hint is up from the first photo until it is dismissed. Its card hides
   // while the print is pressed; its words, for a screen reader, stay.
@@ -317,7 +389,7 @@ export default function AppShell() {
         </div>
       </header>
 
-      <main className="app__main" inert={pressing || undefined}>
+      <main className="app__main" inert={pressing || undefined} onPointerDownCapture={holdLine}>
         <div className="app__canvas-wrap">
           {/* Paused while pressing, so a full-size press and a preview frame
               never hold their buffers at once. */}
@@ -328,9 +400,28 @@ export default function AppShell() {
       {/* Fixed to the viewport bottom so it never takes flow space from the
           sheet; the stage reserves --overlay-h for it instead. A labelled
           landmark: a screen reader's way straight to the tools. */}
-      <section className="app__overlay" aria-label="Tools" ref={overlayRef} inert={pressing || undefined}>
+      <section
+        className="app__overlay"
+        aria-label="Tools"
+        ref={overlayRef}
+        inert={pressing || undefined}
+        onPointerDownCapture={(e) => {
+          usedRef.current = e.target as Element
+        }}
+        onFocusCapture={(e) => {
+          usedRef.current = e.target as Element
+        }}
+      >
+        {/* Save's name says it too; this is its words on screen. Always in
+            the DOM (hidden when not true), so its height is measured from
+            the first frame; drawn in a band whose height dockLine.ts sets. */}
+        <div className="app__large" ref={bandRef} data-at="top">
+          <p className="app__large-said num" ref={largeRef} hidden={!lineSaid}>
+            {lineSaid}
+          </p>
+        </div>
         <div className={`app__panel${tool ? ' app__panel--open' : ''}`}>
-          <div className="app__panel-inner" inert={tool === null || undefined}>
+          <div className="app__panel-inner" inert={tool === null || undefined} onScroll={giveBack}>
             <Controls tool={tool} subs={subs} onSub={onSub} mediaState={mediaState} fillPreparing={frameInputs.preparing} photo={photo} />
           </div>
         </div>
@@ -414,12 +505,6 @@ export default function AppShell() {
             <button type="button" className="btn ed-bare" data-shape="circle" data-size="sm" aria-label="Dismiss the hint" onClick={dismissHint}>
               <Icon name="x" />
             </button>
-          </div>
-        )}
-        {largeSaid && (
-          // Save's name says it too; this is its words on screen.
-          <div className="card app__hint app__large">
-            <p className="app__hint-text num">{largeSaid}</p>
           </div>
         )}
         {/* The one live region for state changes ("Saved 2419×3024"). Always

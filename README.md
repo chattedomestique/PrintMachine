@@ -491,11 +491,29 @@ template's, whose width is 0: unframed.
   at the photo's own pixels" has the sizes); the size, the megapixels and
   the border are said before the tap, past 100 MP with "a very large print:
   a phone may not finish it" (`LARGE_PRINT_MP`), and nothing is capped or
-  made smaller for it. Past 100 MP that is on screen too, a card over the
-  stage while it is true, in every tool ("Saves 10358×18414 (190.7 MP), a
-  very large print: a phone may not finish it."): the size the person chose
-  is never only in a name a screen reader hears. A smaller copy is only ever one the person chose,
-  after a press that failed or did not finish.
+  made smaller for it. Past 100 MP that is on screen too, a line of the
+  dock while it is true, in every tool, open or closed ("190.7 MP: a phone
+  may not finish it."); the pixel size is in More, Save's name, and the
+  save's own card. In the dock, not over the stage: the sheet is laid out
+  above it, so none of the print being framed is under it and it takes none
+  of the sheet's touches (the gesture hint covers the sheet's foot while it
+  shows, below); its words wrap, never cut, two lines at most at 200% text
+  on a 320 px phone. Its coming and going moves nothing the open panel
+  shows. Where the panel is shorter than its bound (100% text, and some tabs
+  on larger phones at 200%) the dock grows above it and the sheet gives the
+  line its room. Where the panel is at its bound (200% text on a small
+  phone) the line takes the panel's own room, so the sheet keeps its size:
+  at the panel's top, the dock's first line, or, when the control just
+  touched or focused is up there, at its foot over the tools; the panel's
+  scroll moves by as much as its box, so every row stays where it was on
+  screen and the control in use stays whole under the finger. When the line
+  goes the panel takes back what its scroll can give without moving a row,
+  and keeps the rest of the line's room, empty, until it is scrolled or the
+  tab changes. While fingers are on the sheet the line keeps what it said,
+  so a pinch that takes the print across 100 MP is not laid out again under
+  them (verify-geometry and check-touch hold all of it at 320x640 and
+  375x667 at 200% text and at 393x852 and 390x844). A smaller copy is only
+  ever one the person chose, after a press that failed or did not finish.
 
 What each part of the frame does to a pixel, and what holds it to the same
 bytes at every band height and in the preview and the save:
@@ -1154,7 +1172,7 @@ smaller for it). Save's
 own name carries the size and the frame, and the very-large note when there
 is one ("Save 2822×3528 JPEG with a 252 px frame"), so the size a frame makes
 is stated before the tap from every tool, the Frame tool's too, and past
-100 MP the card over the stage says it in words on screen (above); the toast repeats size and
+100 MP a line of the dock says it in words on screen (above); the toast repeats size and
 reason the moment a save starts, and the confirmation repeats the size. Save
 itself stays one word, so the app bar never wraps. Nothing falls back to a
 smaller file: a press that fails stops, with the reason and the numbers, and
@@ -1702,8 +1720,13 @@ re-vendors them from a sibling checkout, and `npm run verify:geometry` then
 proves the dock still holds still. The style guide's scripts that own state
 (tabs, slider, dialog, menu, chip) are not loaded: React owns that state, so
 their keyboard patterns are in `ui/` instead (two owners of `aria-selected`
-fight); so is the chip script's one layout job, scrolling a chip that takes
-focus into view whole (`ui/chips.ts` `revealDelta`).
+fight); so are the chip script's two layout jobs for a row that scrolls:
+scrolling a chip that takes focus into view whole (`ui/chips.ts`
+`revealDelta`), and the deliberate cut at rest, every chip's side padding
+nudged by one amount (the row's `--_grow`) so its edge chip shows 30% to 60% of itself and at least 24 px, a cue that the
+row goes on (`chipCut`, the script's `cut()` line for line), which `ChipRow`
+runs as the script runs `SG.chips.fit`: when the row shows, when it or any
+chip in it changes size, and when the fonts arrive.
 
 The app's own CSS is unlayered, so it beats every `sg.*` layer without
 `!important`, and so it holds no bare element rules (a `button {}` would strip
@@ -1820,8 +1843,11 @@ unavailable). The sheet holds still among the states of one shape, nothing is
 cut off at 200%, and each chip row is scrolled to every chip in turn, as a
 swipe leaves it (at its snap position, or the row's end): every chip shows
 whole and owns 44 px both ways, and a row that overflows scrolls inside
-itself without moving the sheet or the page. At 320 px both rows overflow, so
-that scroll is always checked. Each state is measured at rest, once its transitions and
+itself without moving the sheet or the page. At rest such a row is cut where
+the style guide cuts one (its edge chip 30% to 60% shown, and at least
+24 px), and the chip the keys reach from the tool's tabs shows its whole
+focus ring, no clipping box cutting it. At 320 px both rows overflow, so
+that scroll and that cut are always checked. Each state is measured at rest, once its transitions and
 animations have run out and its scrollers have stopped, never after a fixed
 delay, so the frame it is measured at does not depend on the machine's speed
 (a sheet caught mid-rise once failed CI, see the gate's `settle`). The one
@@ -1864,7 +1890,28 @@ is a file, and it checks more:
   original waiting until the state is measured), ready, and the photo that
   could not be loaded. Cancel, Share,
   the card's × and Choose again each answer a tap at their centre, and the
-  cards stay between the bar and the dock.
+  cards stay between the bar and the dock. More opens with every action and
+  Cancel on screen, unscrolled; its facts may scroll inside themselves, and
+  when they do they are a named region the keyboard reaches.
+- **A very large print**, as the owner's photos make one (a 40 MP photo on
+  9:16 in Fit, 190.7 MP), at 320×640 and 375×667 at 200% text and at
+  393×852: with the tools closed, on each Frame tab and in Type, Ink and
+  Press, the dock's line says the megapixels and that a phone may not finish
+  it, every word on screen (inside the screen and every clipping box, and
+  the line what a finger at the word's centre reaches); none of the sheet is
+  under it and the sheet is between the bar and the dock; every button on a
+  card over the stage is what a finger at its centre reaches, and a touch at
+  the sheet's foot reaches the sheet, or the gesture hint (which has its ×)
+  while it shows. First, in Frame › Crop, the print is taken across 100 MP
+  the ways a person does (from 1:1 in Fit to 9:16 and back): a tap on a
+  ratio chip with the panel at its start and at its end, a tap after it was
+  scrolled back, Crop | Fit, Undo and Redo with focus on the tab, Enter on a
+  chip, and a tap with the line already up as the tab opened; each time no
+  row of the tab moves by half a pixel (by the keys on the tab, the panel may
+  scroll to keep it whole), and the control used is whole inside the panel
+  and what a finger at its centre reaches. At 393×852 a plate dragged
+  to the sheet's foot (where a story frame's caption goes) is moved again by a
+  touch there.
 
 `--shots <dir>` writes the review set: every state, dialog and save state at
 320 and 390 px in both themes, 200% text at 390, and the wire palette (the
@@ -1914,7 +1961,9 @@ The sheet's surface takes `touch-action: none`, so its gestures are never the
 browser's: drag to move, two-finger pinch to scale and rotate, double-tap to
 centre. With the Frame tool open the same gestures pan and zoom the photo
 instead (100–400%, never off the sheet), a pinch zooming about the fingers,
-so what is under them stays under them (Border Studio's crop pinch), and
+so what is under them stays under them (Border Studio's crop pinch; one
+that takes the print across 100 MP too, the very-large line waiting for the
+fingers to lift), and
 double-tap puts it back at 100% and centred; a drag is measured against the visible rectangle inside the frame,
 so the photo stays under the finger whatever the border. In Fit the whole
 photo shows and nothing moves (the hint says so). A finger
@@ -2265,15 +2314,15 @@ video, stays live at its own address. `MediaRecorder` on iOS Safari is
 limited enough that it would have to be proven on a device rather than
 assumed.
 
-**In numbers**, against `main` before the frame (c8c0910): 976 tests in 41
-files, from 707 in 24 (`npm test`); 17,316 lines of source in 86 files under
+**In numbers**, against `main` before the frame (c8c0910): 983 tests in 42
+files, from 707 in 24 (`npm test`); 17,586 lines of source in 88 files under
 `src/`, tests and the vendored style guide not counted, from 13,700 in 69
 (`git ls-files 'src/*.ts' 'src/*.tsx' | grep -v -e '\.test\.' -e
-'^src/vendor/' | xargs cat | wc -l`); 13,774 lines of tests, from 9,380
+'^src/vendor/' | xargs cat | wc -l`); 13,827 lines of tests, from 9,380
 (`git ls-files 'src/*.test.ts' 'src/*.test.tsx' | xargs cat | wc -l`); the
-precache 19 entries and 1.097 MiB, from 18 entries (`verify:offline`); the
-JavaScript 356.9 kB (120.8 kB gzipped), from 324.6 kB (107.5), and the CSS
-207.8 kB, from 203.6 (`npm run build`). Five settings were added (Width,
+precache 19 entries and 1.100 MiB, from 18 entries (`verify:offline`); the
+JavaScript 359.9 kB (121.8 kB gzipped), from 324.6 kB (107.5), and the CSS
+208.3 kB, from 203.6 (`npm run build`). Five settings were added (Width,
 Corners, the fill, Blur, Crop or Fit) and one control replaced (the sheet's
 select, by the ratio chips).
 

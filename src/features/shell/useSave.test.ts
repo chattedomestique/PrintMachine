@@ -461,6 +461,12 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     const gone = deps({ frameInputs: async () => Promise.reject(new MissingPhotoError()) })
     await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, gone.d)).rejects.toThrow(PHOTO_MISSING)
     expect([gone.log.full, gone.log.pressed]).toEqual([[], []])
+    // An AbortError the save did not ask for (a store read aborted under it)
+    // is a fill that cannot be made, not a Cancel: only the save's signal
+    // says Cancel.
+    const aborted = deps({ frameInputs: async () => Promise.reject(new DOMException('The transaction was aborted.', 'AbortError')) })
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: new AbortController().signal }, aborted.d)).rejects.toBeInstanceOf(FillMissingError)
+    expect([aborted.log.full, aborted.log.pressed]).toEqual([[], []])
   })
 
   it('a Cancel while the frame\'s inputs are waited for ends the save then, and nothing is decoded or pressed after them', async () => {

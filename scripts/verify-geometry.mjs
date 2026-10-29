@@ -76,7 +76,25 @@
  * a row that overflows scrolls sideways inside itself, to its last chip
  * shown whole, while the sheet does not move and the page does not scroll.
  * At 320 px both rows overflow, so the scroll is checked, never passed for
- * want of a row to scroll.
+ * want of a row to scroll. At rest a row that scrolls is cut where the style
+ * guide cuts one (its edge chip 30% to 60% shown, at least 24 px), and the
+ * chip the keys reach from the tool's tabs draws its whole focus ring, no
+ * clipping box cutting it (probeRowCut, probeFocusRing).
+ *
+ * Section 1 also runs the 4:3 photo with its frame taken away (Width to 0 by
+ * the keys) and bare paper with no photo, through every state. The save
+ * states (section 4) open More too: its actions and Cancel on screen as it
+ * opens, its facts a named region the keyboard reaches when they scroll.
+ * Then a very large print (section 6, checkLargePrint): a 40 MP photo on
+ * 9:16 in Fit (190.7 MP) at 320x640 and 375x667 at 200% text and at 393x852,
+ * every tool: the dock's line says its megapixels whole and on screen, none
+ * of the sheet is under it, every button over the stage is reachable, a
+ * touch at the sheet's foot reaches the sheet (or the gesture hint, which has
+ * its ×, while it shows); in Frame › Crop the print taken across 100 MP the
+ * ways a person does (ratio taps at the panel's start and end, Crop | Fit,
+ * the keys on a focused tab and chip, the line up as the tab opens) moves no
+ * row of the tab and leaves the control used whole and under a finger; and
+ * (at 393) a plate dragged to the sheet's foot is moved again by a touch.
  *
  * Every state is measured at rest: once its transitions and animations have
  * run out and its scrollers have stopped (settle), never on a fixed delay, so
@@ -156,6 +174,14 @@ const SHOT_WIDTHS = [
 const SAVE_VIEWPORTS = [
   [320, 640],
   [375, 667],
+].filter(([w]) => ONLY_WIDTH === null || w === ONLY_WIDTH)
+
+/** Where a very large print's line is checked: the small phones at 200%
+ *  text, where room is least, and a common phone at 100%. */
+const LARGE_VIEWPORTS = [
+  [320, 640, 200],
+  [375, 667, 200],
+  [393, 852, 100],
 ].filter(([w]) => ONLY_WIDTH === null || w === ONLY_WIDTH)
 
 const failures = []
@@ -565,6 +591,240 @@ async function choosePhoto(page, w, h) {
  * then partly outside the dock and skipped in eight states, a count that
  * changed from run to run (CI's 195 targets at 320 px against 203).
  */
+/**
+ * A very large print's line, as a person meets it (in the page): each of its
+ * words on screen (inside the viewport and every clipping box around it, and
+ * the line what a finger at the word's centre reaches), none of the sheet
+ * under it, and the sheet between the bar and the dock. Over the stage, every
+ * card's button is what a finger at its centre reaches, and a touch at the
+ * sheet's foot reaches the sheet, or a card that can be put away.
+ */
+function probeLarge() {
+  const line = document.querySelector('.app__large-said:not([hidden])')
+  const sheet = document.querySelector('.sheet').getBoundingClientRect()
+  const bar = document.querySelector('.app__bar').getBoundingClientRect()
+  const dock = document.querySelector('.app__overlay').getBoundingClientRect()
+  const reaches = (q, el) => {
+    const h = document.elementFromPoint((q.left + q.right) / 2, (q.top + q.bottom) / 2)
+    return !!h && el.contains(h)
+  }
+  const r1 = (v) => Math.round(v * 10) / 10
+  const out = {
+    text: line?.textContent ?? null,
+    cut: [],
+    over: 0,
+    sheet: [sheet.left, sheet.top, sheet.right, sheet.bottom].map(r1),
+    inView: sheet.height >= 1 && sheet.top >= bar.bottom - 0.5 && sheet.bottom <= dock.top + 0.5,
+    unreached: [],
+  }
+  if (line) {
+    const l = line.getBoundingClientRect()
+    out.line = [l.left, l.top, l.right, l.bottom].map(r1)
+    out.over = r1(Math.max(0, Math.min(l.right, sheet.right) - Math.max(l.left, sheet.left)) * Math.max(0, Math.min(l.bottom, sheet.bottom) - Math.max(l.top, sheet.top)))
+    const clips = []
+    for (let a = line.parentElement; a; a = a.parentElement) {
+      const cs = getComputedStyle(a)
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') clips.push(a.getBoundingClientRect())
+    }
+    const inside = (q, c) => q.top >= c.top - 0.5 && q.bottom <= c.bottom + 0.5 && q.left >= c.left - 0.5 && q.right <= c.right + 0.5
+    const screen = { top: 0, left: 0, bottom: innerHeight, right: innerWidth }
+    const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const re = /\S+/g
+      let m
+      while ((m = re.exec(n.textContent))) {
+        const range = document.createRange()
+        range.setStart(n, m.index)
+        range.setEnd(n, m.index + m[0].length)
+        const rects = [...range.getClientRects()]
+        if (!rects.length || !rects.every((q) => inside(q, screen) && clips.every((c) => inside(q, c)) && reaches(q, line))) out.cut.push(m[0])
+      }
+    }
+  }
+  for (const b of document.querySelectorAll('.app__float .card .btn')) if (!reaches(b.getBoundingClientRect(), b)) out.unreached.push(b.getAttribute('aria-label') ?? b.textContent.trim())
+  const foot = document.elementFromPoint((sheet.left + sheet.right) / 2, sheet.bottom - 4)
+  const card = foot?.closest('.app__float .card')
+  out.foot = foot?.closest('.sheet') ? 'the sheet' : card?.querySelector('.btn') ? 'a card that can be put away' : card ? `a card that cannot be put away (${card.className})` : (foot?.className || foot?.tagName)
+  return out
+}
+
+/**
+ * A print past LARGE_PRINT_MP, made the way the owner's photos make one (a
+ * 40 MP photo matted on 9:16, Fit: 10358x18414, 190.7 MP), at `vw` x `vh` and
+ * `text`% text, with the tools closed, on each Frame tab and in Type, Ink and
+ * Press: its line says the megapixels and that a phone may not finish it,
+ * every word of it on screen, none of the sheet under it, the sheet in view,
+ * every card's button over the stage reachable, a touch at the sheet's foot
+ * reaching it (probeLarge). First the ways a person takes the print across
+ * 100 MP in Frame › Crop (checkCrossings). Then, the hint put away, a plate
+ * dragged to the sheet's foot (where a story frame's caption goes) is picked
+ * and moved there again by a touch.
+ */
+async function checkLargePrint(vw, vh, text) {
+  const where = `${vw}x${vh} at ${text}% text, a very large print`
+  const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 2, hasTouch: true, serviceWorkers: 'block' })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto(APP)
+  await page.waitForSelector('.sheet canvas')
+  if (text !== 100) await page.addStyleTag({ content: `html { font-size: ${text}% }` })
+  await openTool(page, 'frame')
+  await choosePhoto(page, 7728, 5152)
+  await openTab(page, 'frame', 'crop')
+  await checkCrossings(page, where)
+  const size = ((await page.locator('.app__save').getAttribute('aria-label')) ?? '').match(/^Save (\d+)×(\d+)/)
+  const mp = size ? `${((size[1] * size[2]) / 1e6).toFixed(1)} MP` : '?'
+  const states = [[null, null], ['frame', 'border'], ['frame', 'crop'], ['frame', 'place'], ['frame', 'photo'], ['type', null], ['ink', null], ['press', null]]
+  for (const [tool, tab] of states) {
+    const at = `${where}, ${tool ? `${tool}${tab ? ` › ${tab}` : ''}` : 'tools closed'}`
+    if (!tool) await closeTools(page)
+    else if (tab) await openTab(page, tool, tab)
+    else await openTool(page, tool)
+    await settle(page, at)
+    const p = await page.evaluate(probeLarge)
+    check(p.text !== null && p.text.includes(mp) && /a phone may not finish it/.test(p.text), `${at}: the line does not say ${mp} and that a phone may not finish it: ${JSON.stringify(p.text)}`)
+    check(p.cut.length === 0, `${at}: words of the line a person cannot see: "${p.cut.join(' ')}" (line ${JSON.stringify(p.line)})`)
+    check(p.over === 0 && p.inView, `${at}: the line covers ${p.over} px² of the sheet ${JSON.stringify(p.sheet)}, or the sheet is not between the bar and the dock (${p.inView})`)
+    check(p.unreached.length === 0, `${at}: buttons over the stage a finger cannot reach: ${p.unreached.join(', ')}`)
+    check(p.foot === 'the sheet' || p.foot === 'a card that can be put away', `${at}: a touch at the sheet's foot reaches ${p.foot}`)
+  }
+  if (text === 100) {
+    // A plate at the sheet's foot is picked and moved by a touch there.
+    const hint = page.locator('.app__hint .btn')
+    if (await hint.count()) await hint.click()
+    await openTool(page, 'type')
+    await settle(page, `${where}, Type`)
+    const cdp = await ctx.newCDPSession(page)
+    const drag = async (from, to) => {
+      const pt = ({ x, y }) => [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }]
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pt(from) })
+      for (let k = 1; k <= 8; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pt({ x: from.x + ((to.x - from.x) * k) / 8, y: from.y + ((to.y - from.y) * k) / 8 }) })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await page.waitForTimeout(700)
+    }
+    const plate = () => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null').layers[0])
+    const box = await page.evaluate(() => {
+      const r = document.querySelector('.sheet').getBoundingClientRect()
+      return { x: r.left, y: r.top, w: r.width, h: r.height }
+    })
+    const a = await plate()
+    const on = (l) => ({ x: box.x + l.x * box.w, y: box.y + l.y * box.h })
+    await drag(on(a), { x: on(a).x, y: box.y + 0.93 * box.h })
+    const b = await plate()
+    await drag(on(b), { x: on(b).x, y: on(b).y - 60 })
+    const c = await plate()
+    check(b.y > 0.88 && c.y < b.y - 0.05, `${where}: a plate dragged to the sheet's foot (y ${a.y.toFixed(3)} -> ${b.y.toFixed(3)}) and touched there is moved again (-> ${c.y.toFixed(3)})`)
+    console.log(`${where}: a plate at the sheet's foot (y ${b.y.toFixed(3)}) moved by a touch there (-> ${c.y.toFixed(3)})`)
+  }
+  check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
+  console.log(`${where}: ${mp}, its line whole and off the sheet in ${states.length} states`)
+  await ctx.close()
+}
+
+/**
+ * The 40 MP photo in Frame › Crop, taken across 100 MP the ways a person
+ * does: a tap on a ratio chip with the panel at its start and at its end, a
+ * tap after the panel was scrolled back, Crop | Fit, the keys on a focused
+ * tab (Undo and Redo) and on a focused chip (Enter), and with the line up as
+ * the tab opens. Each time no row of the tab moves by more than half a pixel
+ * (the tool's tabs, the ratio row, Crop | Fit, the line under it), and the
+ * control used is whole inside the open panel and what a finger at its
+ * centre reaches. From 1:1 in Fit (81.3 MP) to 9:16 in Fit (190.7 MP), where
+ * it leaves the print.
+ */
+async function checkCrossings(page, where) {
+  const crop = '.controls__panel[data-sub="crop"]'
+  const chip = (r) => `${crop} .chip[data-chip="${r}"]`
+  const seg = (m) => `${crop} .segmented__opt:has(input[value="${m}"])`
+  const wait = async (aspect, mode) => {
+    await page.waitForFunction(([a, m]) => {
+      const d = JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')
+      return d?.aspect === a && d?.frame?.mode === m
+    }, [aspect, mode])
+    await settle(page, `${where}, ${aspect} ${mode}`)
+  }
+  // The rows' tops, and the used control: whole inside the panel's box and
+  // what a finger at its centre reaches (a radio by its label).
+  const look = (sel) =>
+    page.evaluate(([crop, sel]) => {
+      const top = (q) => Math.round((document.querySelector(q)?.getBoundingClientRect().top ?? NaN) * 10) / 10
+      const panel = document.querySelector('.app__panel--open .app__panel-inner').getBoundingClientRect()
+      let el = sel ? document.querySelector(sel) : document.activeElement
+      el = el?.closest('label') ?? el
+      const b = el?.getBoundingClientRect()
+      const hit = b && document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)
+      return {
+        rows: [top('.controls__section[data-tool="frame"] [role=tab]'), top(`${crop} .chiprow`), top(`${crop} .segmented`), top(`${crop} .controls__say`)],
+        line: !!document.querySelector('.app__large-said:not([hidden])'),
+        used: b ? `${el.dataset.chip ?? el.dataset.tab ?? el.textContent.trim()} ${Math.round(b.top)}..${Math.round(b.bottom)} in ${Math.round(panel.top)}..${Math.round(panel.bottom)}` : 'nothing',
+        whole: !!b && b.top >= panel.top - 0.5 && b.bottom <= panel.bottom + 0.5,
+        reached: !!hit && (el.contains(hit) || hit.contains(el)),
+      }
+    }, [crop, sel])
+  const tap = async (sel) => {
+    const at = await page.evaluate((sel) => {
+      const e = document.querySelector(sel)
+      const row = e.closest('.chiprow')
+      if (row) row.scrollLeft = Math.max(0, e.offsetLeft - 24)
+      const b = e.getBoundingClientRect()
+      const x = b.left + b.width / 2
+      const y = b.top + b.height / 2
+      return { x, y, ok: !!document.elementFromPoint(x, y)?.closest(sel) }
+    }, sel)
+    check(at.ok, `${where}: ${sel} is not what a finger at its centre reaches before the tap`)
+    await page.touchscreen.tap(at.x, at.y)
+  }
+  const scroll = (to) =>
+    page.evaluate((to) => {
+      const p = document.querySelector('.app__panel--open .app__panel-inner')
+      p.scrollTop = to === 'end' ? p.scrollHeight : 0
+    }, to)
+  const fresh = async () => {
+    await openTab(page, 'frame', 'border')
+    await openTab(page, 'frame', 'crop')
+  }
+  // One crossing: `act` takes the print to `aspect` / `mode` (over 100 MP or
+  // under it, `up`), with `sel` the control used (the focused one if none).
+  const cross = async (name, act, aspect, mode, up, sel, still = true) => {
+    const a = await look(sel)
+    await act()
+    await wait(aspect, mode)
+    const b = await look(sel)
+    const moved = a.rows.map((v, i) => Math.round((b.rows[i] - v) * 10) / 10)
+    if (still) check(moved.every((d) => Math.abs(d) <= 0.5), `${where}, ${name}: the Crop tab's rows moved [tabs, ratio, Crop | Fit, its line] ${JSON.stringify(moved)}`)
+    check(b.line === up, `${where}, ${name}: the line is ${b.line ? 'up' : 'down'} at ${aspect} ${mode}`)
+    check(b.whole && b.reached, `${where}, ${name}: the control used is not whole in the panel and under a finger: ${b.used}${b.reached ? '' : ', not reached'}`)
+  }
+  await page.evaluate((sel) => document.querySelector(sel).click(), chip('1:1'))
+  await page.evaluate(() => document.querySelector('.controls__section[data-tool="frame"] input[type=radio][value="fit"]').click())
+  await wait('1:1', 'fit')
+  await cross('the panel at its start, a tap on 9:16', () => tap(chip('9:16')), '9:16', 'fit', true, chip('9:16'))
+  await scroll('start')
+  await cross('scrolled back to its start, a tap on 1:1', () => tap(chip('1:1')), '1:1', 'fit', false, chip('1:1'))
+  await fresh()
+  await scroll('end')
+  await cross('the panel at its end, a tap on 9:16', () => tap(chip('9:16')), '9:16', 'fit', true, chip('9:16'))
+  await cross('still at its end, a tap on 1:1', () => tap(chip('1:1')), '1:1', 'fit', false, chip('1:1'))
+  await fresh()
+  await page.locator('.controls__section[data-tool="frame"] [role=tab][data-tab="crop"]').focus()
+  // The keys: what has focus stays whole in view (the panel may scroll to
+  // keep it so, where its top is all the room there is).
+  await cross('focus on the Crop tab, Ctrl+Z', () => page.keyboard.press('Control+z'), '9:16', 'fit', true, null, false)
+  await cross('focus on the Crop tab, Ctrl+Shift+Z', () => page.keyboard.press('Control+Shift+z'), '1:1', 'fit', false, null, false)
+  await fresh()
+  await page.locator(chip('9:16')).focus()
+  await cross('focus on 9:16, Enter', () => page.keyboard.press('Enter'), '9:16', 'fit', true, null)
+  await fresh()
+  await cross('the line up as the tab opened, a tap on 1:1', () => tap(chip('1:1')), '1:1', 'fit', false, chip('1:1'))
+  await cross('then a tap on 9:16', () => tap(chip('9:16')), '9:16', 'fit', true, chip('9:16'))
+  // Crop | Fit, brought into the panel's view first as a person scrolls to it.
+  await page.evaluate((sel) => document.querySelector(sel).scrollIntoView({ block: 'nearest' }), seg('crop'))
+  await settle(page, `${where}, Crop | Fit in view`)
+  await cross('a tap on Crop', () => tap(seg('crop')), '9:16', 'crop', false, seg('crop'))
+  await cross('a tap on Fit', () => tap(seg('fit')), '9:16', 'fit', true, seg('fit'))
+}
+
 async function openTool(page, tool) {
   const btn = page.locator(`[data-tool="${tool}"][aria-pressed]`)
   if ((await btn.getAttribute('aria-pressed')) === 'true') return
@@ -607,9 +867,11 @@ async function newPage({ width, height, scheme = 'light', photo = PHOTOS[0], ini
  * Every tool, every sub-tab, every Over photo state, and Frame › Border with
  * Frosted chosen, in order, calling `visit(name)` in each. Leaves the second
  * ink on, the fill on Photo and the tools closed. Without a photo the states
- * a photo makes (the fill row, a second ink) are not there to visit.
+ * a photo makes (the fill row, a second ink) are not there to visit; which
+ * those are is decided by the document (`photo`), not by what the app shows,
+ * so with a photo a state the app wrongly withholds fails, never skips.
  */
-async function eachState(page, visit) {
+async function eachState(page, visit, { photo = true } = {}) {
   await closeTools(page)
   await visit('closed')
   for (const tool of TOOL_IDS) {
@@ -623,7 +885,9 @@ async function eachState(page, visit) {
         for (const mode of ['off', 'second', 'backing']) {
           await settle(page, `ink-over, before ${mode}`)
           // Without a photo a second ink has nothing to read: unavailable.
-          if (await over.locator(`input[type=radio][value="${mode}"]`).isDisabled()) continue
+          if (!photo && mode === 'second') continue
+          const off = await over.locator(`input[type=radio][value="${mode}"]`).isDisabled()
+          if (!check(!off, `Ink › Over photo's ${mode} is unavailable${photo ? ' with a photo' : ''}`)) continue
           await over.locator(`input[type=radio][value="${mode}"]`).check({ force: true })
           await visit(`${tool}-${tab}-${mode}`)
           if (mode === 'second') {
@@ -642,11 +906,11 @@ async function eachState(page, visit) {
           }
         }
         await settle(page, 'ink-over, before second')
-        if (!(await over.locator('input[type=radio][value="second"]').isDisabled())) await over.locator('input[type=radio][value="second"]').check({ force: true })
+        if (photo && !(await over.locator('input[type=radio][value="second"]').isDisabled())) await over.locator('input[type=radio][value="second"]').check({ force: true })
         continue
       }
       await visit(`${tool}-${tab}`)
-      if (tool === 'frame' && tab === 'border' && (await page.locator('.controls__panel[data-sub="border"] .chiprow').count()) > 0) {
+      if (tool === 'frame' && tab === 'border' && photo && check((await page.locator('.controls__panel[data-sub="border"] .chiprow').count()) > 0, 'Frame › Border has no fill row with a photo')) {
         // Frosted adds Blur to the strip: the sheet must not move for it,
         // with Blur the setting on screen.
         const panel = page.locator('.controls__panel[data-sub="border"]')
@@ -918,7 +1182,7 @@ try {
           check(travel.steps === 90, `${where}: the Size slider has 90 steps (has ${travel.steps})`)
           check(travel.pxPerStep >= 1.5, `${where}: a Size step is at least 1.5 px of travel (${travel.pxPerStep.toFixed(2)})`)
         }
-      })
+      }, { photo: !!doc.photo })
       if (doc === DOCS[0]) {
         await eachDialog(page, async (name) => {
           await settle(page, `${where}, ${name}`)
@@ -931,6 +1195,10 @@ try {
       // With every tool closed the sheet takes the dock's room as well: the
       // gesture for a full-height sheet. Every open state holds still.
       const open = states.filter((s) => s.name !== 'closed')
+      // Every state the document makes is visited: with a photo, framed or
+      // not, the fill row's Frosted and a second ink (and Keep) are there.
+      const want = doc.photo ? 18 : 15
+      check(open.length === want, `${where}: ${open.length} open states visited (${want}): ${open.map((s) => s.name).join(', ')}`)
       const first = open[0]
       for (const s of open) {
         const same = s.sheet && first.sheet && s.sheet.every((v, i) => Math.abs(v - first.sheet[i]) <= 1)
@@ -1065,7 +1333,10 @@ try {
     }
   }
 
-  // ── 6. The review screenshots ──
+  // ── 6. A very large print: its line ──
+  for (const [vw, vh, text] of LARGE_VIEWPORTS) await checkLargePrint(vw, vh, text)
+
+  // ── 7. The review screenshots ──
   if (SHOTS) {
     for (const [vw, vh] of SHOT_WIDTHS) {
       for (const scheme of ['light', 'dark']) {

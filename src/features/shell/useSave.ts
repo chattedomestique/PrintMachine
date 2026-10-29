@@ -545,7 +545,9 @@ export async function pressForSave(
     try {
       inputs = await untilAborted(deps.frameInputs(settings), signal)
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') throw err
+      // The save's own Cancel, known by its signal, not by an error's name
+      // (a store read aborted under it is a fill that cannot be made).
+      if (signal?.aborted) throw err
       throw err instanceof MissingPhotoError ? err : new FillMissingError()
     }
     throwIfAborted(signal)

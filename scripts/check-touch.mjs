@@ -54,6 +54,16 @@
  *     hint names no gesture and says why, a drag on the photo moves nothing
  *     (and leaves the hint), and Place's Zoom says "Fit shows the whole
  *     photo" as its description; back in Crop the hint names the photo's.
+ *     With no photo the sheet says so and names the plate's keys, and they
+ *     move the plate. Frosted puts Blur on the strip, another fill Width,
+ *     and with focus on the strip's name Ctrl+Z and Ctrl+Shift+Z across
+ *     Frosted keep it there. Keys only, Choose photo, Replace and Remove
+ *     keep focus on the button (or the tab's first control).
+ *     (Step 9 also holds the pinch about the fingers and + / - about the
+ *     frame's middle.)
+ * 11. The sheet's keyboard ring, read from the pixels drawn: on every fill,
+ *     light and dark, the ring or the band inside it stands at least 3:1
+ *     against what it borders.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */

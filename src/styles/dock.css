@@ -333,6 +333,9 @@
   margin-block: min(0px, calc(var(--_pad) - var(--_ring-room)));
 }
 .chiprow > .chip { --_px: var(--chrome-3); }
+/* A focused chip draws over its neighbour: at the row's 4 px gap the next
+   chip, painted later, covered 2 px of its ring's right side. */
+.chiprow > .chip:focus-visible { z-index: 1; }
 .chiprow > .chip::before { display: none; }
 .chiprow__flip { --ic-size: 0.9em; margin-inline-start: var(--chrome-1); }
 /* A choice's colour, a dot before its name (the fill row): the colour is

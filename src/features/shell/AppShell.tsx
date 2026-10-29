@@ -3,7 +3,7 @@ import Canvas from '../editor/Canvas.tsx'
 import Controls from '../controls/Controls.tsx'
 import { FIRST_SUBS, TOOLS, type Subs, type ToolId } from '../controls/tools.ts'
 import { Icon } from '../../ui/ui.tsx'
-import { describePlan, fileSize, planPrint } from '../../engine/export.ts'
+import { LARGE_RISK, describePlan, fileSize, planPrint } from '../../engine/export.ts'
 import { pngCompresses, storedSize } from '../../engine/encode/png.ts'
 import { effectiveMode, sheetAspect } from '../../engine/frame.ts'
 import { useSettings } from '../../state/settingsStore.ts'
@@ -80,12 +80,16 @@ export default function AppShell() {
   const appRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLElement>(null)
   const overlayRef = useRef<HTMLElement>(null)
+  const largeRef = useRef<HTMLParagraphElement>(null)
   const toolsRef = useRef<HTMLDivElement>(null)
 
   /**
    * The dock's live height, published as `--overlay-h`: the sheet reserves
    * exactly the room the dock takes, so it is as large as it can be. And the
    * app bar's, as `--bar-h`: the cards over the stage stay between the two.
+   * And the very-large line's (0 when it is not shown), as `--large-h`: the
+   * open panel gives it that much of its room, so at large text the line
+   * costs the panel a scroll, not the sheet its place.
    *
    * The BORDER box: the dock has safe-area padding at the bottom, and
    * contentRect leaves it out (on a phone with a home indicator that put the
@@ -96,8 +100,9 @@ export default function AppShell() {
   useEffect(() => {
     const el = overlayRef.current
     const bar = barRef.current
+    const large = largeRef.current
     const root = appRef.current
-    if (!el || !bar || !root) return
+    if (!el || !bar || !large || !root) return
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const box = entry.borderBoxSize?.[0]
@@ -106,12 +111,17 @@ export default function AppShell() {
           root.style.setProperty('--bar-h', h)
           continue
         }
+        if (entry.target === large) {
+          root.style.setProperty('--large-h', h)
+          continue
+        }
         root.style.setProperty('--overlay-h', h)
         document.documentElement.style.setProperty('--overlay-h', h)
       }
     })
     ro.observe(el)
     ro.observe(bar)
+    ro.observe(large)
     return () => ro.disconnect()
   }, [])
 
@@ -255,10 +265,15 @@ export default function AppShell() {
 
   // A very large print is said on screen before the tap, wherever the person
   // is when they tap Save (the size is stated, nothing asks): the size and
-  // that a phone may not finish it, in a card over the stage while it is true. Nothing asks; Save
-  // presses it as any other (a failure is asked about after, as ever). Not
-  // while a save's own card is up, which says the size itself.
-  const largeSaid = caption.large && !pressing && status === null ? `Saves ${caption.size} (${caption.megapixels}), ${caption.large}.` : null
+  // that a phone may not finish it, in a line at the top of the dock while
+  // it is true. In the dock, not over the stage: the sheet is laid out above
+  // it, so it covers none of the print being made and takes none of its
+  // touches, in every tool, open or closed. Save presses it as any other (a
+  // failure is asked about after, as ever). Not when the photo cannot be
+  // loaded: no save can start then, and the status card says why.
+  // Short, the size first, so at large text on a small phone it is a few
+  // lines of the dock (Save's name and More say "a very large print" too).
+  const largeSaid = caption.large && saveRefusal(mediaState) === null ? `Saves ${caption.size} (${caption.megapixels}): ${LARGE_RISK}.` : null
 
   // The hint is up from the first photo until it is dismissed. Its card hides
   // while the print is pressed; its words, for a screen reader, stay.
@@ -329,6 +344,13 @@ export default function AppShell() {
           sheet; the stage reserves --overlay-h for it instead. A labelled
           landmark: a screen reader's way straight to the tools. */}
       <section className="app__overlay" aria-label="Tools" ref={overlayRef} inert={pressing || undefined}>
+        {/* Save's name says it too; this is its words on screen. Always in
+            the DOM (hidden when not true), so its height is measured from
+            the first frame. */}
+        <p className="app__large num" ref={largeRef} hidden={!largeSaid}>
+          <Icon name="circle-alert" />
+          <span>{largeSaid}</span>
+        </p>
         <div className={`app__panel${tool ? ' app__panel--open' : ''}`}>
           <div className="app__panel-inner" inert={tool === null || undefined}>
             <Controls tool={tool} subs={subs} onSub={onSub} mediaState={mediaState} fillPreparing={frameInputs.preparing} photo={photo} />
@@ -414,12 +436,6 @@ export default function AppShell() {
             <button type="button" className="btn ed-bare" data-shape="circle" data-size="sm" aria-label="Dismiss the hint" onClick={dismissHint}>
               <Icon name="x" />
             </button>
-          </div>
-        )}
-        {largeSaid && (
-          // Save's name says it too; this is its words on screen.
-          <div className="card app__hint app__large">
-            <p className="app__hint-text num">{largeSaid}</p>
           </div>
         )}
         {/* The one live region for state changes ("Saved 2419×3024"). Always

@@ -392,6 +392,9 @@ export interface PlanWords {
   reason: string | null
 }
 
+/** What a print past LARGE_PRINT_MP may do on a phone: said, never acted on. */
+export const LARGE_RISK = 'a phone may not finish it'
+
 /**
  * What Save says about the size: the pixel size and the megapixels, the
  * frame when there is one, a very large print as such, and, when the print
@@ -407,7 +410,7 @@ export function describePlan(plan: ExportPlan, sheet: SheetSpec): PlanWords {
   const mp = (plan.width * plan.height) / 1e6
   const megapixels = `${mp.toFixed(1)} MP`
   const frame = plan.border > 0 ? `with a ${plan.border} px frame` : null
-  const large = mp > LARGE_PRINT_MP ? 'a very large print: a phone may not finish it' : null
+  const large = mp > LARGE_PRINT_MP ? `a very large print: ${LARGE_RISK}` : null
   const zoom = media && media.scale > 1 && effectiveMode(sheet) !== 'fit' ? ` at ${Math.round(media.scale * 100)}% zoom` : ''
   const photo = media ? `${dims(media.width, media.height)}${zoom}` : ''
   const words = { size, megapixels, frame, large }

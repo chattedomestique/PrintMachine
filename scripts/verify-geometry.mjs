@@ -76,7 +76,21 @@
  * a row that overflows scrolls sideways inside itself, to its last chip
  * shown whole, while the sheet does not move and the page does not scroll.
  * At 320 px both rows overflow, so the scroll is checked, never passed for
- * want of a row to scroll.
+ * want of a row to scroll. At rest a row that scrolls is cut where the style
+ * guide cuts one (its edge chip 30% to 60% shown, at least 24 px), and the
+ * chip the keys reach from the tool's tabs draws its whole focus ring, no
+ * clipping box cutting it (probeRowCut, probeFocusRing).
+ *
+ * Section 1 also runs the 4:3 photo with its frame taken away (Width to 0 by
+ * the keys) and bare paper with no photo, through every state. The save
+ * states (section 4) open More too: its actions and Cancel on screen as it
+ * opens, its facts a named region the keyboard reaches when they scroll.
+ * Then a very large print (section 6, checkLargePrint): a 40 MP photo on
+ * 9:16 in Fit (190.7 MP) at 320x640 and 375x667 at 200% text and at 393x852,
+ * every tool: the dock's line says its size whole and on screen, none of the
+ * sheet is under it, every button over the stage is reachable, a touch at
+ * the sheet's foot reaches the sheet, and (at 393) a plate dragged there is
+ * moved again by a touch there.
  *
  * Every state is measured at rest: once its transitions and animations have
  * run out and its scrollers have stopped (settle), never on a fixed delay, so
@@ -156,6 +170,14 @@ const SHOT_WIDTHS = [
 const SAVE_VIEWPORTS = [
   [320, 640],
   [375, 667],
+].filter(([w]) => ONLY_WIDTH === null || w === ONLY_WIDTH)
+
+/** Where a very large print's line is checked: the small phones at 200%
+ *  text, where room is least, and a common phone at 100%. */
+const LARGE_VIEWPORTS = [
+  [320, 640, 200],
+  [375, 667, 200],
+  [393, 852, 100],
 ].filter(([w]) => ONLY_WIDTH === null || w === ONLY_WIDTH)
 
 const failures = []
@@ -565,6 +587,139 @@ async function choosePhoto(page, w, h) {
  * then partly outside the dock and skipped in eight states, a count that
  * changed from run to run (CI's 195 targets at 320 px against 203).
  */
+/**
+ * A very large print's line, as a person meets it (in the page): each of its
+ * words on screen (inside the viewport and every clipping box around it, and
+ * the line what a finger at the word's centre reaches), none of the sheet
+ * under it, and the sheet between the bar and the dock. Over the stage, every
+ * card's button is what a finger at its centre reaches, and a touch at the
+ * sheet's foot reaches the sheet, or a card that can be put away.
+ */
+function probeLarge() {
+  const line = document.querySelector('.app__large:not([hidden])')
+  const sheet = document.querySelector('.sheet').getBoundingClientRect()
+  const bar = document.querySelector('.app__bar').getBoundingClientRect()
+  const dock = document.querySelector('.app__overlay').getBoundingClientRect()
+  const reaches = (q, el) => {
+    const h = document.elementFromPoint((q.left + q.right) / 2, (q.top + q.bottom) / 2)
+    return !!h && el.contains(h)
+  }
+  const r1 = (v) => Math.round(v * 10) / 10
+  const out = {
+    text: line?.textContent ?? null,
+    cut: [],
+    over: 0,
+    sheet: [sheet.left, sheet.top, sheet.right, sheet.bottom].map(r1),
+    inView: sheet.height >= 1 && sheet.top >= bar.bottom - 0.5 && sheet.bottom <= dock.top + 0.5,
+    unreached: [],
+  }
+  if (line) {
+    const l = line.getBoundingClientRect()
+    out.line = [l.left, l.top, l.right, l.bottom].map(r1)
+    out.over = r1(Math.max(0, Math.min(l.right, sheet.right) - Math.max(l.left, sheet.left)) * Math.max(0, Math.min(l.bottom, sheet.bottom) - Math.max(l.top, sheet.top)))
+    const clips = []
+    for (let a = line.parentElement; a; a = a.parentElement) {
+      const cs = getComputedStyle(a)
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') clips.push(a.getBoundingClientRect())
+    }
+    const inside = (q, c) => q.top >= c.top - 0.5 && q.bottom <= c.bottom + 0.5 && q.left >= c.left - 0.5 && q.right <= c.right + 0.5
+    const screen = { top: 0, left: 0, bottom: innerHeight, right: innerWidth }
+    const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const re = /\S+/g
+      let m
+      while ((m = re.exec(n.textContent))) {
+        const range = document.createRange()
+        range.setStart(n, m.index)
+        range.setEnd(n, m.index + m[0].length)
+        const rects = [...range.getClientRects()]
+        if (!rects.length || !rects.every((q) => inside(q, screen) && clips.every((c) => inside(q, c)) && reaches(q, line))) out.cut.push(m[0])
+      }
+    }
+  }
+  for (const b of document.querySelectorAll('.app__float .card .btn')) if (!reaches(b.getBoundingClientRect(), b)) out.unreached.push(b.getAttribute('aria-label') ?? b.textContent.trim())
+  const foot = document.elementFromPoint((sheet.left + sheet.right) / 2, sheet.bottom - 4)
+  const card = foot?.closest('.app__float .card')
+  out.foot = foot?.closest('.sheet') ? 'the sheet' : card?.querySelector('.btn') ? 'a card that can be put away' : card ? `a card that cannot be put away (${card.className})` : (foot?.className || foot?.tagName)
+  return out
+}
+
+/**
+ * A print past LARGE_PRINT_MP, made the way the owner's photos make one (a
+ * 40 MP photo matted on 9:16, Fit: 10358x18414, 190.7 MP), at `vw` x `vh` and
+ * `text`% text, with the tools closed, on each Frame tab and in Type, Ink and
+ * Press: its line says the size, the megapixels and that a phone may not
+ * finish it, every word of it on screen, none of the sheet under it, the
+ * sheet in view, every card's button over the stage reachable, a touch at
+ * the sheet's foot reaching it (probeLarge). Then, the hint put away, a plate
+ * dragged to the sheet's foot (where a story frame's caption goes) is picked
+ * and moved there again by a touch.
+ */
+async function checkLargePrint(vw, vh, text) {
+  const where = `${vw}x${vh} at ${text}% text, a very large print`
+  const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 2, hasTouch: true, serviceWorkers: 'block' })
+  const page = await ctx.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto(APP)
+  await page.waitForSelector('.sheet canvas')
+  if (text !== 100) await page.addStyleTag({ content: `html { font-size: ${text}% }` })
+  await openTool(page, 'frame')
+  await choosePhoto(page, 7728, 5152)
+  await openTab(page, 'frame', 'crop')
+  const crop = page.locator('.controls__panel[data-sub="crop"]')
+  await crop.locator('[data-chip="9:16"]').click()
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.aspect === '9:16')
+  await crop.locator('input[type=radio][value="fit"]').check({ force: true })
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.frame?.mode === 'fit')
+  const size = ((await page.locator('.app__save').getAttribute('aria-label')) ?? '').match(/^Save (\d+×\d+)/)?.[1] ?? '?'
+  const states = [[null, null], ['frame', 'border'], ['frame', 'crop'], ['frame', 'place'], ['frame', 'photo'], ['type', null], ['ink', null], ['press', null]]
+  for (const [tool, tab] of states) {
+    const at = `${where}, ${tool ? `${tool}${tab ? ` › ${tab}` : ''}` : 'tools closed'}`
+    if (!tool) await closeTools(page)
+    else if (tab) await openTab(page, tool, tab)
+    else await openTool(page, tool)
+    await settle(page, at)
+    const p = await page.evaluate(probeLarge)
+    check(p.text !== null && p.text.includes(size) && /\d+\.\d MP/.test(p.text) && /a phone may not finish it/.test(p.text), `${at}: the line does not say ${size}, its megapixels and that a phone may not finish it: ${JSON.stringify(p.text)}`)
+    check(p.cut.length === 0, `${at}: words of the line a person cannot see: "${p.cut.join(' ')}" (line ${JSON.stringify(p.line)})`)
+    check(p.over === 0 && p.inView, `${at}: the line covers ${p.over} px² of the sheet ${JSON.stringify(p.sheet)}, or the sheet is not between the bar and the dock (${p.inView})`)
+    check(p.unreached.length === 0, `${at}: buttons over the stage a finger cannot reach: ${p.unreached.join(', ')}`)
+    check(p.foot === 'the sheet' || p.foot === 'a card that can be put away', `${at}: a touch at the sheet's foot reaches ${p.foot}`)
+  }
+  if (text === 100) {
+    // A plate at the sheet's foot is picked and moved by a touch there.
+    const hint = page.locator('.app__hint .btn')
+    if (await hint.count()) await hint.click()
+    await openTool(page, 'type')
+    await settle(page, `${where}, Type`)
+    const cdp = await ctx.newCDPSession(page)
+    const drag = async (from, to) => {
+      const pt = ({ x, y }) => [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }]
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pt(from) })
+      for (let k = 1; k <= 8; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pt({ x: from.x + ((to.x - from.x) * k) / 8, y: from.y + ((to.y - from.y) * k) / 8 }) })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await page.waitForTimeout(700)
+    }
+    const plate = () => page.evaluate(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null').layers[0])
+    const box = await page.evaluate(() => {
+      const r = document.querySelector('.sheet').getBoundingClientRect()
+      return { x: r.left, y: r.top, w: r.width, h: r.height }
+    })
+    const a = await plate()
+    const on = (l) => ({ x: box.x + l.x * box.w, y: box.y + l.y * box.h })
+    await drag(on(a), { x: on(a).x, y: box.y + 0.93 * box.h })
+    const b = await plate()
+    await drag(on(b), { x: on(b).x, y: on(b).y - 60 })
+    const c = await plate()
+    check(b.y > 0.88 && c.y < b.y - 0.05, `${where}: a plate dragged to the sheet's foot (y ${a.y.toFixed(3)} -> ${b.y.toFixed(3)}) and touched there is moved again (-> ${c.y.toFixed(3)})`)
+    console.log(`${where}: a plate at the sheet's foot (y ${b.y.toFixed(3)}) moved by a touch there (-> ${c.y.toFixed(3)})`)
+  }
+  check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
+  console.log(`${where}: ${size}, its line whole and off the sheet in ${states.length} states`)
+  await ctx.close()
+}
+
 async function openTool(page, tool) {
   const btn = page.locator(`[data-tool="${tool}"][aria-pressed]`)
   if ((await btn.getAttribute('aria-pressed')) === 'true') return
@@ -1065,7 +1220,10 @@ try {
     }
   }
 
-  // ── 6. The review screenshots ──
+  // ── 6. A very large print: its line ──
+  for (const [vw, vh, text] of LARGE_VIEWPORTS) await checkLargePrint(vw, vh, text)
+
+  // ── 7. The review screenshots ──
   if (SHOTS) {
     for (const [vw, vh] of SHOT_WIDTHS) {
       for (const scheme of ['light', 'dark']) {

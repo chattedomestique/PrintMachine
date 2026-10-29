@@ -109,12 +109,31 @@
   /* Every panel is one height (editor.css), well under this. The bound only
      matters at large text, where the rows grow: the panel then scrolls
      rather than pushing the sheet off the screen. */
-  max-block-size: min(50dvh, 32rem);
+  max-block-size: calc(min(50dvh, 32rem) - var(--large-h, 0px));
   overscroll-behavior: contain;
   /* No top padding: the tabs' band is centred on its own height, so the
      dock's edge is as far above the tab names as the hairline is below. */
   padding-block: 0 var(--ed-band-pad);
 }
+
+/* ── A very large print, said before the tap ──
+   The dock's first line while it is true (AppShell.tsx): the size, the
+   megapixels and that a phone may not finish it. In the dock, so the sheet is
+   laid out above it and none of the print is under it; its words wrap, never
+   cut. The open panel gives up its height (--large-h, above), so at large
+   text on a small phone the panel scrolls a little more and the sheet keeps
+   its room. Its icon and words, not a colour, say it. */
+.app__large:not([hidden]) {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--chrome-2) var(--gutter);
+  font: var(--type-meta);
+  color: var(--ink);
+  border-block-end: var(--bw-thin) solid var(--ed-hair);
+}
+.app__large > .ic { flex: none; --ic-size: 1.2em; margin-block-start: 0.05em; }
 
 /* ── Bottom row: the tool tray, the full width of the column ── */
 .app__tools {
@@ -315,9 +334,6 @@
   color: var(--ink-soft);
 }
 .app__hint > .btn { flex: none; }
-/* A very large print, said before the tap: the hint's card, with no ×
-   (it stays while it is true), so its words keep the card's inner edge. */
-.app__large { padding-block: var(--chrome-2); padding-inline-end: var(--chrome-4); }
 
 /* ── The More sheet: what Save makes, and whether the app works offline ──
    Facts, not actions, so they sit above the menu's rows. */

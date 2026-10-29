@@ -720,14 +720,37 @@ try {
     )
     // The same photo matted on 9:16 (Fit): a sheet past LARGE_PRINT_MP. Its
     // size and that a phone may not finish it are on screen before the tap
-    // (the card over the stage, words a person reads, not only Save's name),
-    // and they were not on Original's 58 MP.
+    // (the dock's first line, words a person reads, not only Save's name),
+    // and they were not on Original's 58 MP. Only the words a person can see
+    // are read: each inside the screen, and the line what a finger at its
+    // centre reaches (verify-geometry holds the line at 200% text too).
     {
-      const seen = () => page.evaluate(() => document.querySelector('.app__float')?.innerText ?? '')
+      const seen = () =>
+        page.evaluate(() => {
+          const line = document.querySelector('.app__large:not([hidden])')
+          if (!line) return ''
+          const words = []
+          const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            const re = /\S+/g
+            let m
+            while ((m = re.exec(n.textContent))) {
+              const range = document.createRange()
+              range.setStart(n, m.index)
+              range.setEnd(n, m.index + m[0].length)
+              const shown = [...range.getClientRects()].every((q) => {
+                const hit = document.elementFromPoint((q.left + q.right) / 2, (q.top + q.bottom) / 2)
+                return q.top >= 0 && q.bottom <= innerHeight && q.left >= 0 && q.right <= innerWidth && !!hit && line.contains(hit)
+              })
+              if (shown) words.push(m[0])
+            }
+          }
+          return words.join(' ')
+        })
       const before = await seen()
       await setAspect(page, '9:16')
       await page.locator('.controls__section[data-tool="frame"] input[type=radio][value="fit"]').check({ force: true })
-      await page.waitForFunction(() => /may not finish/.test(document.querySelector('.app__float')?.innerText ?? ''), null, { timeout: 5_000 }).catch(() => {})
+      await page.waitForFunction(() => /may not finish/.test(document.querySelector('.app__large:not([hidden])')?.textContent ?? ''), null, { timeout: 5_000 }).catch(() => {})
       const label = (await page.locator(SAVE).getAttribute('aria-label')) ?? ''
       const size = label.match(/^Save (\d+×\d+)/)?.[1] ?? '?'
       const after = await seen()

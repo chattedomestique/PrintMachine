@@ -89,8 +89,9 @@
  * 9:16 in Fit (190.7 MP) at 320x640 and 375x667 at 200% text and at 393x852,
  * every tool: the dock's line says its size whole and on screen, none of the
  * sheet is under it, every button over the stage is reachable, a touch at
- * the sheet's foot reaches the sheet, and (at 393) a plate dragged there is
- * moved again by a touch there.
+ * the sheet's foot reaches the sheet, choosing Fit (past 100 MP) and Crop
+ * again moves neither the tool's tabs nor Crop | Fit, and (at 393) a plate
+ * dragged to the sheet's foot is moved again by a touch there.
  *
  * Every state is measured at rest: once its transitions and animations have
  * run out and its scrollers have stopped (settle), never on a fixed delay, so

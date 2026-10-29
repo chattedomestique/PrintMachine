@@ -498,7 +498,9 @@ template's, whose width is 0: unframed.
   stage: the sheet is laid out above it, so none of the print being framed
   is under it and every touch on the sheet reaches the sheet; its words
   wrap, never cut, and at 200% text the open panel gives up the line's
-  height (it scrolls a little more) so the sheet keeps its room
+  height (it scrolls a little more, and what it shows stays where it was, so
+  Fit or Width, whichever took the print past 100 MP, stays under the
+  finger) so the sheet keeps its room
   (verify-geometry holds it at 320x640 and 375x667 at 200% text and at
   393x852). A smaller copy is only ever one the person chose, after a press
   that failed or did not finish.
@@ -1889,7 +1891,9 @@ is a file, and it checks more:
   box, and the line what a finger at the word's centre reaches); none of the
   sheet is under it and the sheet is between the bar and the dock; every
   button on a card over the stage is what a finger at its centre reaches, and
-  a touch at the sheet's foot reaches the sheet. At 393×852 a plate dragged
+  a touch at the sheet's foot reaches the sheet. Choosing Fit, which takes
+  the print past 100 MP, and Crop again moves neither the tool's tabs nor
+  Crop | Fit by half a pixel. At 393×852 a plate dragged
   to the sheet's foot (where a story frame's caption goes) is moved again by a
   touch there.
 
@@ -2293,13 +2297,13 @@ limited enough that it would have to be proven on a device rather than
 assumed.
 
 **In numbers**, against `main` before the frame (c8c0910): 976 tests in 41
-files, from 707 in 24 (`npm test`); 17,395 lines of source in 87 files under
+files, from 707 in 24 (`npm test`); 17,404 lines of source in 87 files under
 `src/`, tests and the vendored style guide not counted, from 13,700 in 69
 (`git ls-files 'src/*.ts' 'src/*.tsx' | grep -v -e '\.test\.' -e
 '^src/vendor/' | xargs cat | wc -l`); 13,780 lines of tests, from 9,380
 (`git ls-files 'src/*.test.ts' 'src/*.test.tsx' | xargs cat | wc -l`); the
 precache 19 entries and 1.098 MiB, from 18 entries (`verify:offline`); the
-JavaScript 357.4 kB (121.0 kB gzipped), from 324.6 kB (107.5), and the CSS
+JavaScript 357.6 kB (121.1 kB gzipped), from 324.6 kB (107.5), and the CSS
 208.1 kB, from 203.6 (`npm run build`). Five settings were added (Width,
 Corners, the fill, Blur, Crop or Fit) and one control replaced (the sheet's
 select, by the ratio chips).

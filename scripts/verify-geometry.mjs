@@ -670,8 +670,31 @@ async function checkLargePrint(vw, vh, text) {
   const crop = page.locator('.controls__panel[data-sub="crop"]')
   await crop.locator('[data-chip="9:16"]').click()
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.aspect === '9:16')
-  await crop.locator('input[type=radio][value="fit"]').check({ force: true })
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.frame?.mode === 'fit')
+  // Fit takes the print past 100 MP and its line comes; Crop takes it back
+  // and the line goes. Neither moves the tool's tabs or Crop | Fit, at any
+  // text size (the panel's scroll gives way by the line's height where its
+  // bound does), so the control a finger just used stays under it. Chosen
+  // in the page, as a tap on it would: no scroll first.
+  const rows = () =>
+    page.evaluate(() => {
+      const top = (sel) => Math.round((document.querySelector(sel)?.getBoundingClientRect().top ?? NaN) * 10) / 10
+      return { tabs: top('.controls__section[data-tool="frame"] [role=tab]'), mode: top('.controls__panel[data-sub="crop"] .segmented'), line: !!document.querySelector('.app__large:not([hidden])') }
+    })
+  const choose = async (mode) => {
+    await page.evaluate((m) => document.querySelector(`.controls__section[data-tool="frame"] input[type=radio][value="${m}"]`).click(), mode)
+    await page.waitForFunction((m) => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.frame?.mode === m, mode)
+    await settle(page, `${where}, ${mode}`)
+    return rows()
+  }
+  await settle(page, `${where}, 9:16`)
+  const onCrop = await rows()
+  const onFit = await choose('fit')
+  const back = await choose('crop')
+  check(
+    !onCrop.line && onFit.line && !back.line && [onFit, back].every((r) => Math.abs(r.tabs - onCrop.tabs) <= 0.5 && Math.abs(r.mode - onCrop.mode) <= 0.5),
+    `${where}: the tool's tabs or Crop | Fit moved as the print crossed 100 MP: Crop ${JSON.stringify(onCrop)}, Fit ${JSON.stringify(onFit)}, Crop again ${JSON.stringify(back)}`,
+  )
+  await choose('fit')
   const size = ((await page.locator('.app__save').getAttribute('aria-label')) ?? '').match(/^Save (\d+×\d+)/)?.[1] ?? '?'
   const states = [[null, null], ['frame', 'border'], ['frame', 'crop'], ['frame', 'place'], ['frame', 'photo'], ['type', null], ['ink', null], ['press', null]]
   for (const [tool, tab] of states) {

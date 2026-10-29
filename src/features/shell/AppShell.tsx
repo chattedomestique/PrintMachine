@@ -112,7 +112,16 @@ export default function AppShell() {
           continue
         }
         if (entry.target === large) {
+          // The open panel's bound gives way by the line's height; where it
+          // is at that bound (large text) its top edge moves, so its scroll
+          // moves by as much the other way: what it shows stays where it
+          // was on screen, and the control a finger just used (Fit, Width)
+          // does not jump when the print crosses the line.
+          // (From the scroll it had: the new bound's layout clamps it first.)
+          const panel = root.querySelector<HTMLElement>('.app__panel--open .app__panel-inner')
+          const was = panel ? { height: panel.clientHeight, top: panel.scrollTop } : null
           root.style.setProperty('--large-h', h)
+          if (panel && was) panel.scrollTop = was.top + was.height - panel.clientHeight
           continue
         }
         root.style.setProperty('--overlay-h', h)

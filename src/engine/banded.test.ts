@@ -44,11 +44,15 @@ vi.mock('./composite.ts', async (importOriginal) => {
   }
 })
 
-import { maxWindow, plateGeometry, printSheet, printSheetSteps, sampledNoise, type GroundRows, type ToneSource } from './render.ts'
+import { FramedGroundRows, TiledGroundRows, maxWindow, outputSize, plateGeometry, printSheet, printSheetSteps, sampledNoise, type GroundRows, type ToneSource } from './render.ts'
+import { composeFrameRows, fillFor, layoutSheet, sheetAspect, type FrameInputs } from './frame.ts'
+import { frostField, frostSampler } from './frost.ts'
+import { FROST_FIELD_LONG } from './limits.ts'
+import { tileAt, tileGrid } from './tiles.ts'
 import type { PrintSettings, TextLayer } from './types.ts'
 import { lumaCell } from './media.ts'
 import { allocations, allocationsAsync, stillHeld } from './__tests__/alloc.ts'
-import { makeGround } from './__tests__/fields.ts'
+import { makeFrameSource, makeGround } from './__tests__/fields.ts'
 import { DOCS, SIZES, syntheticTones } from './__tests__/documents.ts'
 
 const sha = (b: Uint8ClampedArray | Uint8Array) => createHash('sha256').update(b).digest('hex')
@@ -142,6 +146,7 @@ describe('more documents, in bands: equal to the whole sheet', { timeout: 60_000
     paperVeil: true,
     paperId: 'natural',
     press: { method: 'halftone', screenPitch: 9, density: 0.84, misregistration: 5, edge: 0.55, wear: 0.22 },
+    frame: { width: 0, corners: 0, fill: 'photo', blur: 60, mode: 'crop' },
     seed: 7,
     layers: [],
     ...over,
@@ -195,6 +200,105 @@ describe('more documents, in bands: equal to the whole sheet', { timeout: 60_000
     printed(s, g, syntheticTones('ground', w, h), w, h, 13)
     expect(g).toEqual(before)
   })
+})
+
+describe('framed documents, in bands, on forced small tiles: equal to the whole sheet and to the preview\'s ground', { timeout: 60_000 }, () => {
+  const layer = (id: string, over: Partial<TextLayer> = {}): TextLayer => ({
+    id,
+    text: 'PRINT',
+    inkId: 'fluorescentpink',
+    fontId: 'poster',
+    bold: true,
+    size: 0.08,
+    lineHeight: 0.94,
+    tracking: -0.02,
+    contrastInkId: null,
+    contrastThreshold: 0.5,
+    align: 'center',
+    x: 0.5,
+    y: 0.5,
+    rotation: 0,
+    backing: null,
+    ...over,
+  })
+  const palette = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
+  const doc = (over: Partial<PrintSettings>): PrintSettings => ({
+    aspect: '4:5',
+    media: { id: 'p', width: 1600, height: 1200, scale: 1, x: 0.5, y: 0.5, palette },
+    paperVeil: true,
+    paperId: 'natural',
+    press: { method: 'halftone', screenPitch: 9, density: 0.84, misregistration: 5, edge: 0.55, wear: 0.22 },
+    frame: { width: 0.1, corners: 1, fill: 'muted', blur: 60, mode: 'fit' },
+    seed: 7,
+    // A second ink switching on the framed ground (the luminance pass reads
+    // it), and a backing cutting it back to paper (the knockout).
+    layers: [layer('a', { contrastInkId: 'blue', y: 0.12 }), layer('b', { inkId: 'blue', backing: 'yellow', y: 0.85, rotation: -4 })],
+    ...over,
+  })
+  const cases: [string, PrintSettings][] = [
+    ['Fit 4:5, round, Muted, the veil on', doc({})],
+    ['Original, corners 0.5, Paper, grain', doc({ aspect: 'original', frame: { width: 1 / 14, corners: 0.5, fill: 'paper', blur: 60, mode: 'crop' }, press: { method: 'grain', screenPitch: 12, density: 0.9, misregistration: 9, edge: 0.7, wear: 0.4 } })],
+    ['Crop 1:1 at 250%, widest, Photo, the veil off', doc({ aspect: '1:1', paperVeil: false, media: { id: 'p', width: 1600, height: 1200, scale: 2.5, x: 0.3, y: 0.7, palette }, frame: { width: 0.16, corners: 0, fill: 'photo', blur: 60, mode: 'crop' } })],
+    ['Crop 4:5 framed, no palette yet: Paper', doc({ media: { id: 'p', width: 1600, height: 1200, scale: 1, x: 0.5, y: 0.5 }, frame: { width: 0.05, corners: 0.3, fill: 'deep', blur: 60, mode: 'crop' } })],
+    ['Original, round, Frosted at Blur 240', doc({ aspect: 'original', frame: { width: 0.12, corners: 1, fill: 'frosted', blur: 240, mode: 'crop' } })],
+    ['Fit 4:5, Frosted at Blur 10, the veil off', doc({ paperVeil: false, frame: { width: 0.06, corners: 0.5, fill: 'frosted', blur: 10, mode: 'fit' } })],
+  ]
+
+  /** What the fill is made from: the stored palette, and for Frosted its
+   *  field, made from a synthetic source as the page makes it. */
+  const inputsOf = (s: PrintSettings): FrameInputs =>
+    s.frame.fill === 'frosted'
+      ? { palette: s.media?.palette, frost: frostField(makeFrameSource(400, 300, 5), sheetAspect(s), FROST_FIELD_LONG, s.frame.blur) }
+      : { palette: s.media?.palette }
+
+  /** The photo's ground on a grid of forced 64x32 tiles, each tile row read
+   *  out of the whole synthetic ground as the export reads it off a canvas,
+   *  and framed: what exportSteps hands the press. */
+  const framedRows = (s: PrintSettings, ground: Uint8ClampedArray, w: number, h: number, B: number): GroundRows => {
+    const grid = tileGrid(w, h, { edge: 64, pixels: 64 * 32 })
+    const tiled = new TiledGroundRows(grid, B, (ty, slot) => {
+      for (let cx = 0; cx < grid.cols; cx++) {
+        const t = tileAt(grid, cx, ty)
+        for (let r = 0; r < t.h; r++) slot.set(ground.subarray(((t.y0 + r) * w + t.x0) * 4, ((t.y0 + r) * w + t.x0 + t.w) * 4), (r * w + t.x0) * 4)
+      }
+    })
+    return new FramedGroundRows(tiled, layoutSheet(s, w, h), fillFor(s, inputsOf(s), w, h), B)
+  }
+
+  for (const [name, settings] of cases) {
+    it(name, () => {
+      const { w, h } = outputSize(sheetAspect(settings), 301)
+      const g = makeGround(w, h, 21)
+      const tones = syntheticTones(name, w, h)
+      const run = (B: number) => {
+        Object.assign(seen, { w, h, planes: [], knockout: null })
+        const s: PrintSettings = JSON.parse(JSON.stringify(settings))
+        const out = new Uint8ClampedArray(w * h * 4)
+        printSheet(out, s, framedRows(s, g, w, h, B), exactTones(tones, w, h), sampledNoise(s, w, h), w, h, { bandRows: B })
+        const k = seen.knockout as Uint8ClampedArray | null
+        const result = { planes: seen.planes.map(sha), knockout: k && k.some((v) => v !== 0) ? sha(k) : 'none', rgba: sha(out) }
+        Object.assign(seen, { w: 0, h: 0, planes: [], knockout: null })
+        return result
+      }
+      const whole = run(h)
+      for (const B of [1, 7, 97]) expect(run(B), `bands of ${B}`).toEqual(whole)
+      // The preview's way: the whole ground composed in place, pressed whole.
+      const composed = g.slice()
+      composeFrameRows(layoutSheet(settings, w, h), fillFor(settings, inputsOf(settings), w, h), composed, 0, h, composed)
+      expect(printed(JSON.parse(JSON.stringify(settings)), composed, tones, w, h, undefined, false), "the preview's ground").toEqual(whole)
+      // The frame is really there: not the unframed print.
+      expect(printed(JSON.parse(JSON.stringify(settings)), g, tones, w, h, undefined, false).rgba).not.toBe(whole.rgba)
+      // And Frosted is its field, not Paper (which every check above would
+      // pass): the sheet's top row, all border, is the field sampled there.
+      if (settings.frame.fill === 'frosted') {
+        const inputs = inputsOf(settings)
+        expect(fillFor(settings, inputs, w, h).flat, 'Frosted is a field, not a flat colour').toBeNull()
+        const want = new Uint8ClampedArray(w * 4)
+        frostSampler(inputs.frost!, w, h)(0, 0, w, want, 0)
+        expect(Buffer.from(composed.subarray(0, w * 4)).equals(Buffer.from(want)), 'the top row is the field').toBe(true)
+      }
+    })
+  }
 })
 
 describe('a band allocates nothing', { timeout: 120_000 }, () => {

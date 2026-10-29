@@ -53,6 +53,20 @@ export interface GestureLimits {
   size: readonly [number, number]
   /** Pan limits, in sheet fractions. */
   position: readonly [number, number]
+  /** Zoom about the fingers: the point under the pinch's starting centre
+   *  stays under the fingers as they spread and move (the photo's pinch, as
+   *  Border Studio's crop pinch). Without it a pinch scales about the
+   *  target's own anchor and the fingers' travel pans it (a plate). */
+  anchored?: boolean
+}
+
+/** A box a gesture is measured against: its size, and where it starts in
+ *  the surface the pointers are read in (0, 0 when it is the surface). */
+export interface GestureBox {
+  width: number
+  height: number
+  left?: number
+  top?: number
 }
 
 /** How far one finger travels, in CSS pixels, before it is a drag rather than
@@ -100,7 +114,7 @@ export function beginGesture(target: GestureTarget, pts: readonly Pt[], live: bo
 export function stepGesture(
   g: Gesture,
   pts: readonly Pt[],
-  box: { width: number; height: number },
+  box: GestureBox,
   limits: GestureLimits,
 ): { gesture: Gesture; patch: GesturePatch | null } {
   if (pts.length === 0 || box.width === 0 || box.height === 0) return { gesture: g, patch: null }
@@ -124,6 +138,16 @@ export function stepGesture(
     const spread = Math.hypot(b.x - a.x, b.y - a.y)
     const size = clamp(o.size * (spread / g.startSpread), limits.size[0], limits.size[1])
     patch.size = Math.round(size * PINCH_GRID) / PINCH_GRID
+    if (limits.anchored) {
+      // The target's centre (o.x, o.y of the box) moves so the point that was
+      // under the starting centre, its offset from the centre scaled by the
+      // zoom, is under the centre now: c' = p' - (p - c) k, in fractions.
+      const k = patch.size / o.size
+      const u = (g.startCentroid.x - (box.left ?? 0)) / box.width
+      const v = (g.startCentroid.y - (box.top ?? 0)) / box.height
+      patch.x = clamp(o.x + (centroid.x - g.startCentroid.x) / box.width - (u - o.x) * (k - 1), lo, hi)
+      patch.y = clamp(o.y + (centroid.y - g.startCentroid.y) / box.height - (v - o.y) * (k - 1), lo, hi)
+    }
 
     const angle = Math.atan2(b.y - a.y, b.x - a.x)
     let delta = ((angle - g.startAngle) * 180) / Math.PI
@@ -134,4 +158,19 @@ export function stepGesture(
   }
 
   return { gesture, patch }
+}
+
+/**
+ * The box a drag on the photo is measured against: the visible rectangle
+ * inside the frame, as it is on screen in a `box` the size of the sheet, and
+ * where it starts in the sheet (the border), for a pinch to zoom about.
+ * The photo's place is a fraction of that rectangle (media.ts `MediaPlacement`),
+ * so measured against it a finger that crosses the photo moves the photo with
+ * it, pixel for pixel; measured against the whole sheet, the photo would lag
+ * the finger by the frame. `width` is the border as a fraction of the sheet's
+ * long side (frame.ts `borderPx`); 0 is the sheet itself.
+ */
+export function visibleBox(box: { width: number; height: number }, width: number): Required<GestureBox> {
+  const border = width * Math.max(box.width, box.height)
+  return { width: Math.max(1, box.width - 2 * border), height: Math.max(1, box.height - 2 * border), left: border, top: border }
 }

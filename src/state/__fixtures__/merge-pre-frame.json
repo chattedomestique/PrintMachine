@@ -1,0 +1,59 @@
+{
+  "media": {
+    "id": "media-merge-pre-frame",
+    "width": 4032,
+    "height": 3024,
+    "scale": 2,
+    "x": 0.3,
+    "y": 0.6,
+    "native": true
+  },
+  "paperVeil": false,
+  "aspect": "original",
+  "paperId": "natural",
+  "press": {
+    "method": "grain",
+    "screenPitch": 36,
+    "density": 0.3,
+    "misregistration": 30,
+    "edge": 1,
+    "wear": 0.8
+  },
+  "seed": 4242,
+  "layers": [
+    {
+      "id": "layer-merge-1",
+      "text": "PRINT\nMACHINE",
+      "inkId": "fluorescentpink",
+      "fontId": "poster",
+      "bold": true,
+      "size": 0.09,
+      "lineHeight": 0.94,
+      "tracking": -0.02,
+      "contrastInkId": "white",
+      "contrastThreshold": 0.5,
+      "align": "center",
+      "x": 0.5,
+      "y": 0.5,
+      "rotation": 0,
+      "backing": null
+    },
+    {
+      "id": "layer-merge-2",
+      "text": "RISO",
+      "inkId": "blue",
+      "fontId": "grotesk",
+      "bold": true,
+      "size": 0.06,
+      "lineHeight": 0.94,
+      "tracking": 0.04,
+      "contrastInkId": null,
+      "contrastThreshold": 0.5,
+      "align": "center",
+      "x": 0.5,
+      "y": 0.76,
+      "rotation": -4,
+      "backing": "yellow"
+    }
+  ]
+}

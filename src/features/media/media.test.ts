@@ -12,7 +12,9 @@ import { SWEEP_AFTER_MS, mediaCreatedAt, sweepMedia, type SweepStore } from '../
 import { isReducedCopy } from '../../engine/media.ts'
 import { importMedia, type ImportDeps } from './importMedia.ts'
 import { PREVIEW_PHOTO_AREA, PREVIEW_PHOTO_AREA_LARGEST, previewArea, workingSize } from './decode.ts'
-import { coverRect } from '../../engine/media.ts'
+import { areaOf, coverRect } from '../../engine/media.ts'
+import { borderPx } from '../../engine/frame.ts'
+import { FRAME_WIDTH_MAX } from '../../engine/limits.ts'
 import { previewSize } from '../../engine/render.ts'
 import { mulberry32 } from '../../engine/rng.ts'
 import { ASPECTS } from '../../engine/types.ts'
@@ -166,7 +168,7 @@ describe("the preview's working copy follows the zoom", () => {
       const z = 1 + rand() * 3
       const { area, copy } = copyOf(w, h, z, a)
       const p = previewSize(a)
-      const r = coverRect({ width: w, height: h }, p.w, p.h, { scale: z, x: 0.5, y: 0.5 })
+      const r = coverRect({ width: w, height: h }, areaOf(p.w, p.h), { scale: z, x: 0.5, y: 0.5 })
       const needed = r.dw * r.dh
       expect(area).toBeLessThanOrEqual(PREVIEW_PHOTO_AREA_LARGEST)
       expect(copy.width * copy.height).toBeLessThanOrEqual(Math.min(PREVIEW_PHOTO_AREA_LARGEST, w * h))
@@ -178,6 +180,35 @@ describe("the preview's working copy follows the zoom", () => {
       }
       if (area > PREVIEW_PHOTO_AREA) expect(area).toBeLessThan(2 * needed)
     }
+  })
+})
+
+describe("framed, the working copy is sized for the photo inside the frame", () => {
+  it('never a larger copy than unframed; in Fit the contained photo, whatever the zoom; always as many pixels as the preview draws it at (2000 random photos, sheets, zooms, widths)', () => {
+    const rand = mulberry32(0xc9)
+    const sheets = [...Object.values(ASPECTS), 4 / 3, 3, 1 / 3]
+    for (let i = 0; i < 2000; i++) {
+      const photo = { width: Math.round(400 + rand() * 11600), height: Math.round(400 + rand() * 11600), scale: 1 + rand() * 3 }
+      const a = sheets[Math.floor(rand() * sheets.length)]
+      const width = rand() * FRAME_WIDTH_MAX
+      const crop = previewArea(photo, a, { width, mode: 'crop' })
+      const fit = previewArea(photo, a, { width, mode: 'fit' })
+      expect(crop).toBeLessThanOrEqual(previewArea(photo, a))
+      expect(fit).toBe(previewArea({ ...photo, scale: 1 }, a, { width, mode: 'fit' }))
+      expect(fit).toBeLessThanOrEqual(crop)
+      // As many pixels as the preview draws the photo at, inside the frame.
+      const p = previewSize(a)
+      const b = borderPx(width, p.w, p.h)
+      const visible = { x0: b, y0: b, w: p.w - 2 * b, h: p.h - 2 * b }
+      const drawn = coverRect(photo, visible, { scale: photo.scale, x: 0.5, y: 0.5 })
+      const copy = workingSize(photo.width, photo.height, crop) ?? photo
+      if (drawn.dw * drawn.dh <= PREVIEW_PHOTO_AREA_LARGEST) {
+        expect(copy.width).toBeGreaterThanOrEqual(Math.min(photo.width, drawn.dw) - 1)
+        expect(copy.height).toBeGreaterThanOrEqual(Math.min(photo.height, drawn.dh) - 1)
+      }
+    }
+    // Unframed Crop is what it always was.
+    expect(previewArea({ width: 4032, height: 3024, scale: 2 }, 4 / 5, { width: 0, mode: 'crop' })).toBe(previewArea({ width: 4032, height: 3024, scale: 2 }, 4 / 5))
   })
 })
 

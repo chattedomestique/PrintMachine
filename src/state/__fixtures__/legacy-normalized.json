@@ -1,0 +1,312 @@
+{
+  "legacy-default": {
+    "media": null,
+    "paperVeil": true,
+    "aspect": "4:5",
+    "paperId": "natural",
+    "press": {
+      "method": "halftone",
+      "screenPitch": 9,
+      "density": 0.84,
+      "misregistration": 5,
+      "edge": 0.55,
+      "wear": 0.22
+    },
+    "seed": 12345,
+    "layers": [
+      {
+        "id": "layer-mvkynvpy-0",
+        "text": "PRINT\nMACHINE",
+        "inkId": "fluorescentpink",
+        "fontId": "poster",
+        "bold": true,
+        "size": 0.16,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.5,
+        "rotation": 0,
+        "backing": null
+      },
+      {
+        "id": "layer-mvkynvpy-1",
+        "text": "RISO",
+        "inkId": "blue",
+        "fontId": "poster",
+        "bold": true,
+        "size": 0.3,
+        "lineHeight": 0.94,
+        "tracking": 0.04,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.76,
+        "rotation": -4,
+        "backing": null
+      }
+    ]
+  },
+  "legacy-maximal": {
+    "media": {
+      "id": "media-legacy-maximal",
+      "width": 4032,
+      "height": 3024,
+      "scale": 1,
+      "x": 0.4,
+      "y": 0.5
+    },
+    "paperVeil": false,
+    "aspect": "3:4",
+    "paperId": "cream",
+    "press": {
+      "method": "grain",
+      "screenPitch": 12,
+      "density": 0.7,
+      "misregistration": 9,
+      "edge": 0.8,
+      "wear": 0.4
+    },
+    "seed": 777,
+    "layers": [
+      {
+        "id": "layer-mvkynvpz-4",
+        "text": "PRINT\nMACHINE",
+        "inkId": "fluorescentpink",
+        "fontId": "grotesk",
+        "bold": false,
+        "size": 0.16,
+        "lineHeight": 1.1,
+        "tracking": 0.05,
+        "contrastInkId": "fluorescentpink",
+        "contrastThreshold": 0.35,
+        "align": "justify",
+        "x": 0.45,
+        "y": 0.4,
+        "rotation": 3,
+        "backing": null
+      },
+      {
+        "id": "layer-mvkynvpz-5",
+        "text": "riso on a photo",
+        "inkId": "blue",
+        "fontId": "serif",
+        "bold": true,
+        "size": 0.07,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "left",
+        "x": 0.5,
+        "y": 0.7,
+        "rotation": 0,
+        "backing": "yellow"
+      },
+      {
+        "id": "layer-mvkynvpz-6",
+        "text": "the quick brown fox",
+        "inkId": "black",
+        "fontId": "mono",
+        "bold": true,
+        "size": 0.16,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": "white",
+        "contrastThreshold": 0.5,
+        "align": "right",
+        "x": 0.5,
+        "y": 0.85,
+        "rotation": 0,
+        "backing": null
+      },
+      {
+        "id": "layer-mvkynvpz-7",
+        "text": "lowercase words",
+        "inkId": "fluorescentorange",
+        "fontId": "grotesk",
+        "bold": false,
+        "size": 0.16,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.2,
+        "rotation": 0,
+        "backing": "blue"
+      }
+    ]
+  },
+  "legacy-pre-split": {
+    "media": null,
+    "paperVeil": true,
+    "aspect": "4:5",
+    "paperId": "natural",
+    "press": {
+      "method": "halftone",
+      "screenPitch": 9,
+      "density": 0.84,
+      "misregistration": 5,
+      "edge": 0.55,
+      "wear": 0.22
+    },
+    "seed": 12345,
+    "layers": [
+      {
+        "id": "layer-mvkynvpz-8",
+        "text": "PRINT\nMACHINE",
+        "inkId": "fluorescentpink",
+        "fontId": "poster",
+        "bold": true,
+        "size": 0.16,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.5,
+        "rotation": 0,
+        "backing": null
+      },
+      {
+        "id": "layer-mvkynvpz-9",
+        "text": "RISO",
+        "inkId": "blue",
+        "fontId": "poster",
+        "bold": true,
+        "size": 0.3,
+        "lineHeight": 0.94,
+        "tracking": 0.04,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.76,
+        "rotation": -4,
+        "backing": null
+      }
+    ]
+  },
+  "legacy-photo-second-ink": {
+    "media": {
+      "id": "media-legacy-photo",
+      "width": 4032,
+      "height": 3024,
+      "scale": 1,
+      "x": 0.5,
+      "y": 0.5
+    },
+    "paperVeil": true,
+    "aspect": "4:5",
+    "paperId": "kraft",
+    "press": {
+      "method": "halftone",
+      "screenPitch": 9,
+      "density": 0.84,
+      "misregistration": 5,
+      "edge": 0.55,
+      "wear": 0.22
+    },
+    "seed": 12345,
+    "layers": [
+      {
+        "id": "layer-mvkynvpz-12",
+        "text": "PRINT\nMACHINE",
+        "inkId": "teal",
+        "fontId": "serif",
+        "bold": true,
+        "size": 0.16,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": "yellow",
+        "contrastThreshold": 0.42,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.5,
+        "rotation": 0,
+        "backing": null
+      },
+      {
+        "id": "layer-mvkynvpz-13",
+        "text": "RISO",
+        "inkId": "blue",
+        "fontId": "mono",
+        "bold": true,
+        "size": 0.3,
+        "lineHeight": 0.94,
+        "tracking": 0.04,
+        "contrastInkId": "midnight",
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.76,
+        "rotation": -4,
+        "backing": null
+      }
+    ]
+  },
+  "legacy-unknown-ids": {
+    "media": {
+      "id": "media-legacy-unknown",
+      "width": 4032,
+      "height": 3024,
+      "scale": 1,
+      "x": 0.5,
+      "y": 0.5
+    },
+    "paperVeil": true,
+    "aspect": "4:5",
+    "paperId": "natural",
+    "press": {
+      "method": "halftone",
+      "screenPitch": 9,
+      "density": 0.84,
+      "misregistration": 5,
+      "edge": 0.55,
+      "wear": 0.22
+    },
+    "seed": 12345,
+    "layers": [
+      {
+        "id": "layer-mvkynvpz-16",
+        "text": "PRINT\nMACHINE",
+        "inkId": "fluorescentpink",
+        "fontId": "poster",
+        "bold": true,
+        "size": 0.16,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.5,
+        "rotation": 0,
+        "backing": null
+      },
+      {
+        "id": "layer-mvkynvpz-17",
+        "text": "RISO",
+        "inkId": "blue",
+        "fontId": "serif",
+        "bold": true,
+        "size": 0.3,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": "white",
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.5,
+        "rotation": 0,
+        "backing": null
+      }
+    ]
+  }
+}

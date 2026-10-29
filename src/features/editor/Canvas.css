@@ -47,8 +47,14 @@
   cursor: grabbing;
 }
 /* The keyboard path to the gestures: the style guide's ring, inside the
-   sheet so the clip does not cut it. */
+   sheet so the clip does not cut it, with the style guide's halo inside it.
+   The sheet's edge is the frame, whose colour is the photo's (Deep, dark by
+   design, swallows a dark ring; Paper a light one), so the ring is two
+   tones: the focus colour on the sheet's outermost band, against the stage,
+   and the halo (the paper of the theme) within it, against the frame. One
+   of the two stands off any fill. */
 .drag-surface:focus-visible {
   outline: var(--ring) solid var(--focus);
   outline-offset: calc(-1 * var(--ring));
+  box-shadow: inset 0 0 0 calc(2 * var(--ring)) var(--focus-halo, var(--paper));
 }

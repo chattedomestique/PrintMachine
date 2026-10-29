@@ -27,8 +27,9 @@
  * need it keep the stored value.
  */
 
-import { clampPan } from '../engine/media.ts'
-import { ASPECTS, sheetAspect, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { areaOf, clampPan } from '../engine/media.ts'
+import { ASPECTS, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { sheetAspect, visibleAspect } from '../engine/frame.ts'
 import { fitSize, type FontMeasure } from '../engine/text.ts'
 import { defaultSettings, makeLayer } from './defaults.ts'
 import { INK_IDS, LAYER_FIELDS, SETTINGS_FIELDS, acceptMedia, type Row } from './fields.ts'
@@ -250,6 +251,7 @@ function field(row: Row, raw: unknown, fallback: unknown): unknown {
   switch (row.kind) {
     case 'string':
       if (typeof raw !== 'string' || (row.nonEmpty && raw.length === 0)) return invalid
+      if (row.pattern && !row.pattern.test(raw)) return invalid
       return raw
 
     case 'number': {
@@ -316,11 +318,12 @@ export function normalizeSettings(raw: unknown, env: NormalizeEnv = {}): PrintSe
   const s = object(SETTINGS_FIELDS, doc, defaults as unknown as Doc) as unknown as PrintSettings
   // Cross-field invariants, once every field is valid on its own. An Original
   // sheet takes its shape from the photo, so without one it is 4:5. The photo
-  // covers the sheet: a pan that was legal on another sheet shape is pulled
-  // back to the nearest placement that leaves no bare strip. And a plate has a
-  // backing or a second ink, never both; the backing wins, as above.
+  // covers the sheet inside its frame (the visible rectangle): a pan that was
+  // legal on another shape is pulled back to the nearest placement that
+  // leaves no bare strip. And a plate has a backing or a second ink, never
+  // both; the backing wins, as above.
   if (s.aspect === 'original' && !s.media) s.aspect = '4:5'
-  if (s.media) s.media = clampPan(s.media, sheetAspect(s), 1)
+  if (s.media) s.media = clampPan(s.media, areaOf(visibleAspect(s), 1))
   for (const l of s.layers) if (l.backing && l.contrastInkId) l.contrastInkId = null
   return s
 }

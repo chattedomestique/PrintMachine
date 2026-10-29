@@ -23,3 +23,6 @@ dev-dist
 # NOTE: package-lock.json is deliberately NOT ignored. CI runs `npm ci`,
 # which requires it, and it is what makes a past green build reproducible
 # (playbook N10 / §11.2).
+
+# A TypeScript build cache (`tsc -b`); nothing here writes one.
+*.tsbuildinfo

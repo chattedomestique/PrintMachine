@@ -5,15 +5,18 @@ import { FIRST_SUBS, TOOLS, type Subs, type ToolId } from '../controls/tools.ts'
 import { Icon } from '../../ui/ui.tsx'
 import { describePlan, fileSize, planPrint } from '../../engine/export.ts'
 import { pngCompresses, storedSize } from '../../engine/encode/png.ts'
-import { sheetAspect } from '../../engine/types.ts'
+import { effectiveMode, sheetAspect } from '../../engine/frame.ts'
 import { useSettings } from '../../state/settingsStore.ts'
 import { loadPrefs, savePrefs } from '../../state/persist.ts'
 import { getSWState, offlineJustReady, subscribeSW } from '../../state/swStatus.ts'
 import { useMediaBitmap } from '../media/useMediaBitmap.ts'
+import { useFrameInputs } from '../media/useFrameInputs.ts'
+import { frameState } from '../media/frameInputs.ts'
 import { usePhotoImport } from '../media/usePhotoImport.ts'
 import MoreSheet from './MoreSheet.tsx'
 import SaveQuestion from './SaveQuestion.tsx'
 import StatusCard from './StatusCard.tsx'
+import { gestureHint } from './hint.ts'
 import {
   canStart,
   moreCaption,
@@ -21,6 +24,7 @@ import {
   saveButton,
   saveLabel,
   saveQuestion,
+  saveRefusal,
   saveStatus,
   useSave,
   type Announcement,
@@ -54,7 +58,14 @@ export default function AppShell() {
   const { settings, undo, redo, canUndo, canRedo } = useSettings()
   // The preview's working copy of the photo. Save does not use it: it decodes
   // the original, so the print is drawn from the original's pixels.
-  const { bitmap: media, state: mediaState } = useMediaBitmap(settings.media, sheetAspect(settings))
+  const { bitmap: media, state: decoded } = useMediaBitmap(settings.media, sheetAspect(settings), { width: settings.frame.width, mode: effectiveMode(settings) })
+  // What the frame's fill is made from (the photo's palette, Frosted's
+  // field), made from the photo once its preview copy has landed.
+  const frameInputs = useFrameInputs(settings, decoded)
+  // The photo, as Save and the panels see it: a photo the frame's fill cannot
+  // be made from (it needs the frame source, which would not decode) is
+  // refused with its own words (FILL_MISSING); its frame stays Paper.
+  const mediaState = frameState(decoded, frameInputs.failed)
   const swState = useSyncExternalStore(subscribeSW, getSWState, getSWState)
   const [tool, setTool] = useState<ToolId | null>(null)
   const [subs, setSubs] = useState<Subs>(FIRST_SUBS)
@@ -152,11 +163,11 @@ export default function AppShell() {
   }, [])
 
   // Tapping the open tool closes the dock's panel: the sheet at full height.
-  // With no photo, the Photo tool opens where one is chosen.
+  // With no photo, the Frame tool opens where one is chosen.
   const toggleTool = useCallback(
     (id: ToolId) => {
       setTool((prev) => (prev === id ? null : id))
-      if (id === 'photo' && !settings.media) setSubs((s) => ({ ...s, photo: 'file' }))
+      if (id === 'frame' && !settings.media) setSubs((s) => ({ ...s, frame: 'photo' }))
     },
     [settings.media],
   )
@@ -218,11 +229,11 @@ export default function AppShell() {
   // What Save will make: the pixel size, and why when it is not the photo's
   // own pixels. Said in the More sheet (unless the photo cannot be loaded:
   // moreCaption), in Save's name, and in the toast when a save starts.
-  const caption = useMemo(() => describePlan(planPrint(settings), settings.media), [settings])
+  const caption = useMemo(() => describePlan(planPrint(settings), settings), [settings])
   // The lossless PNG's: the same but past a JPEG's edge (65,535 px), and its
   // file's size where this browser cannot compress (stored, 3 bytes a pixel).
   const pngPlan = useMemo(() => planPrint(settings, { format: 'png' }), [settings])
-  const pngCaption = useMemo(() => describePlan(pngPlan, settings.media), [pngPlan, settings.media])
+  const pngCaption = useMemo(() => describePlan(pngPlan, settings), [pngPlan, settings])
   const pngMeta = pngCompresses() ? pngCaption.size : `${pngCaption.size} (about ${fileSize(storedSize(pngPlan.width, pngPlan.height))})`
   const button = saveButton(save.state, mediaState)
   const status = saveStatus(save.state, mediaState)
@@ -242,15 +253,19 @@ export default function AppShell() {
     else startSave('jpeg')
   }
 
+  // A very large print is said on screen before the tap, wherever the person
+  // is when they tap Save (the size is stated, nothing asks): the size and
+  // that a phone may not finish it, in a card over the stage while it is true. Nothing asks; Save
+  // presses it as any other (a failure is asked about after, as ever). Not
+  // while a save's own card is up, which says the size itself.
+  const largeSaid = caption.large && !pressing && status === null ? `Saves ${caption.size} (${caption.megapixels}), ${caption.large}.` : null
+
   // The hint is up from the first photo until it is dismissed. Its card hides
   // while the print is pressed; its words, for a screen reader, stay.
   const hintUp = settings.media !== null && !hintDismissed
   const showHint = hintUp && !pressing
-  // What the sheet's gestures do in the open tool.
-  const hintText =
-    tool === 'photo'
-      ? 'Pinch to zoom the photo · drag to move it · double‑tap to fit'
-      : 'Tap type to pick it · drag to move · pinch to size and turn'
+  // What the sheet's gestures do in the open tool (hint.ts).
+  const hintText = gestureHint(tool, effectiveMode(settings))
 
   return (
     <div className="app" ref={appRef}>
@@ -291,7 +306,7 @@ export default function AppShell() {
             onClick={onSave}
             aria-busy={button.busy || undefined}
             aria-disabled={button.disabled || undefined}
-            aria-label={saveLabel(save.state, mediaState, caption.size)}
+            aria-label={saveLabel(save.state, mediaState, caption)}
           >
             <span className="btn__label">
               {/* Busy, the style guide's spinner takes the icon's place. */}
@@ -306,7 +321,7 @@ export default function AppShell() {
         <div className="app__canvas-wrap">
           {/* Paused while pressing, so a full-size press and a preview frame
               never hold their buffers at once. */}
-          <Canvas media={media} mediaMode={tool === 'photo'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
+          <Canvas media={media} inputsFor={frameInputs.inputsFor} mediaMode={tool === 'frame'} paused={pressing} onGesture={showHint ? dismissHint : undefined} />
         </div>
       </main>
 
@@ -316,7 +331,7 @@ export default function AppShell() {
       <section className="app__overlay" aria-label="Tools" ref={overlayRef} inert={pressing || undefined}>
         <div className={`app__panel${tool ? ' app__panel--open' : ''}`}>
           <div className="app__panel-inner" inert={tool === null || undefined}>
-            <Controls tool={tool} subs={subs} onSub={onSub} mediaState={mediaState} photo={photo} />
+            <Controls tool={tool} subs={subs} onSub={onSub} mediaState={mediaState} fillPreparing={frameInputs.preparing} photo={photo} />
           </div>
         </div>
 
@@ -401,6 +416,12 @@ export default function AppShell() {
             </button>
           </div>
         )}
+        {largeSaid && (
+          // Save's name says it too; this is its words on screen.
+          <div className="card app__hint app__large">
+            <p className="app__hint-text num">{largeSaid}</p>
+          </div>
+        )}
         {/* The one live region for state changes ("Saved 2419×3024"). Always
             in the DOM, so what is written into it is announced; empty (no
             toast, or one whose fade is over) it takes no room. */}
@@ -445,7 +466,7 @@ export default function AppShell() {
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
         caption={moreCaption(mediaState, caption, settings.media !== null)}
-        pngSize={mediaState === 'failed' ? null : pngMeta}
+        pngSize={saveRefusal(mediaState) ? null : pngMeta}
         swState={swState}
         canSavePng={canStart(save.state, mediaState)}
         onSavePng={() => startSave('png')}
@@ -458,7 +479,7 @@ export default function AppShell() {
         onAnswer={(height) => {
           // The size the answer saves, said as the save starts.
           const format = save.state.kind === 'tooBig' || save.state.kind === 'interrupted' ? save.state.format : 'jpeg'
-          const c = describePlan(planPrint(settings, { maxHeight: height, format }), settings.media)
+          const c = describePlan(planPrint(settings, { maxHeight: height, format }), settings)
           announce(`Saving ${c.size} ${format.toUpperCase()}${c.reason ? `: ${c.reason}` : ''}`, 'info')
           save.answer(height)
         }}

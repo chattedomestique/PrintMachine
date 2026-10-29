@@ -4,8 +4,9 @@
  * default a double-tap resets to.
  *
  * The defaults are READ from the templates (`makeLayer()`, `pressProfile()`,
- * `makeMedia()`), never retyped: a default typed twice drifts, and a reset
- * that lands somewhere a new plate does not start is a bug nobody sees. The
+ * `makeMedia()`, `frameDefaults()`), never retyped: a default typed twice
+ * drifts, and a reset that lands somewhere a new plate does not start is a
+ * bug nobody sees. (Width is the one exception, and says why.) The
  * ranges are read from the document schema (state/fields.ts), so a value a
  * saved print holds can always be nudged and typed, never clamped by the
  * control that shows it. params.test.ts holds both.
@@ -13,11 +14,11 @@
  * Pure: the panels hand in the value and the change; nothing here renders.
  */
 
-import { fromPanFraction, panFraction } from '../../engine/media.ts'
-import { SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX, SIZE_STEP } from '../../engine/limits.ts'
-import type { MediaLayer, PressProfile, TextLayer } from '../../engine/types.ts'
-import { makeLayer, makeMedia, pressProfile } from '../../state/defaults.ts'
-import { LAYER_FIELDS, MEDIA_FIELDS, PRESS_FIELDS, type Row } from '../../state/fields.ts'
+import { areaOf, fromPanFraction, panFraction } from '../../engine/media.ts'
+import { FRAME_WIDTH_FIRST, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX, SIZE_STEP } from '../../engine/limits.ts'
+import type { FrameSettings, MediaLayer, PressProfile, TextLayer } from '../../engine/types.ts'
+import { frameDefaults, makeLayer, makeMedia, pressProfile } from '../../state/defaults.ts'
+import { FRAME_FIELDS, LAYER_FIELDS, MEDIA_FIELDS, PRESS_FIELDS, type Row } from '../../state/fields.ts'
 import type { ChangeHow, Param } from '../../ui/param.ts'
 import { formatSize, fromDisplay as sizeFromDisplay, toDisplay as sizeToDisplay } from './sizeScale.ts'
 
@@ -57,10 +58,12 @@ function rangeOf(rows: readonly Row[], key: string): { min: number; max: number 
 type SetPatch<T> = (patch: Partial<T>, how: ChangeHow) => void
 
 /** The defaults a reset lands on: a NEW plate's, the press a new document
- *  pulls with, a photo as it is placed on import. */
+ *  pulls with, a photo as it is placed on import, the frame a first photo
+ *  starts from. */
 const LAYER = makeLayer()
 const PRESS = pressProfile()
 const MEDIA = makeMedia({ id: 'default', width: 1, height: 1 })
+const FRAME = frameDefaults()
 
 // ── Type ────────────────────────────────────────────────────────────────────
 
@@ -187,26 +190,113 @@ export function switchPointParam(layer: TextLayer, set: SetPatch<TextLayer>): Pa
   }
 }
 
+// ── Frame ───────────────────────────────────────────────────────────────────
+
+/** Said in place of a frame setting while there is no photo to frame. */
+export const NO_PHOTO = 'No photo yet'
+
+/** The border as a percent of the sheet's long side, to a tenth: "7.1%". */
+export const widthPercent = (v: number): string => `${signed(v * 100, 1)}%`
+
+/** Corners as Border Studio words them: "Square" at 0%, "Round" at 100%, the
+ *  percent between (read at the whole percent it shows, so 99.6% is Round). */
+export function cornersWords(v: number): string {
+  const p = Math.round(v * 100)
+  return p <= 0 ? 'Square' : p >= 100 ? 'Round' : `${p}%`
+}
+
+/**
+ * The frame's border: Width, Corners and, while the fill is Frosted, its Blur
+ * (no other fill reads it, so it is not offered). Width is the border as a
+ * fraction of the sheet's long side; its reset is the border a first photo
+ * is framed with (`FRAME_WIDTH_FIRST`), never 0, which would take the frame
+ * away. Corners round the photo's own rectangle. Blur is Border Studio's
+ * number, without its pixels: the field it blurs is not the sheet's size.
+ * Without a photo there is nothing to frame, and each says so.
+ */
+export function borderParams(frame: FrameSettings, photo: boolean, set: SetPatch<FrameSettings>): Param[] {
+  const width = rangeOf(FRAME_FIELDS, 'width')
+  const corners = rangeOf(FRAME_FIELDS, 'corners')
+  const blur = rangeOf(FRAME_FIELDS, 'blur')
+  const unavailable = photo ? undefined : NO_PHOTO
+  const params: Param[] = [
+    {
+      key: 'width',
+      label: 'Width',
+      trackMin: width.min,
+      trackMax: width.max,
+      ...width,
+      step: 0.001,
+      def: FRAME_WIDTH_FIRST,
+      ...hundred,
+      format: widthPercent,
+      value: frame.width,
+      onChange: (v, how) => set({ width: v }, how),
+      unavailable,
+    },
+    {
+      key: 'corners',
+      label: 'Corners',
+      trackMin: corners.min,
+      trackMax: corners.max,
+      ...corners,
+      step: 0.01,
+      def: FRAME.corners,
+      ...hundred,
+      format: cornersWords,
+      value: frame.corners,
+      onChange: (v, how) => set({ corners: v }, how),
+      unavailable,
+    },
+  ]
+  if (frame.fill === 'frosted') {
+    params.push({
+      key: 'blur',
+      label: 'Blur',
+      trackMin: blur.min,
+      trackMax: blur.max,
+      ...blur,
+      step: 2,
+      def: FRAME.blur,
+      toDisplay: identity,
+      fromDisplay: identity,
+      format: (v) => signed(v),
+      value: frame.blur,
+      onChange: (v, how) => set({ blur: v }, how),
+      unavailable,
+    })
+  }
+  return params
+}
+
 // ── Photo ───────────────────────────────────────────────────────────────────
 
 /** Said in place of a photo position that cannot move: at 100% on its own
  *  sheet the photo fills it exactly, so there is nowhere to move it to. */
 export const NO_TRAVEL = 'Zoom in to move the photo'
 
+/** Said in place of Zoom and Position in Fit: the whole photo shows inside
+ *  the frame, so there is nothing to zoom into or move. */
+export const FIT_WHOLE = 'Fit shows the whole photo'
+
 /**
- * The photo's framing: Zoom (in only, 100% to 400%), and where it sits as a
+ * Where the photo sits: Zoom (in only, 100% to 400%), and its place as a
  * FRACTION OF THE TRAVEL it has (0% shows its left or top edge, 100% its right
  * or bottom), so the slider always spans exactly the positions that keep the
- * sheet covered. Where there is no travel the position is unavailable, and
- * says why.
+ * visible rectangle covered. Where there is no travel the position is
+ * unavailable, and says why. `aspect` is the shape of what the photo covers:
+ * the visible rectangle inside the frame (frame.ts `visibleAspect`). In Fit
+ * (`fit`) none of the three is read, and each says why; the values are kept
+ * for Crop.
  */
-export function frameParams(media: MediaLayer, aspect: number, set: SetPatch<MediaLayer>): Param[] {
+export function photoPlacementParams(media: MediaLayer, aspect: number, set: SetPatch<MediaLayer>, fit = false): Param[] {
   const zoom = rangeOf(MEDIA_FIELDS, 'scale')
+  const area = areaOf(aspect, 1)
   const position = (axis: 'x' | 'y', label: string): Param => {
-    const f = panFraction(media, aspect, 1, axis)
+    const f = panFraction(media, area, axis)
     const travel = (() => {
-      const lo = fromPanFraction(media, aspect, 1, axis, 1)
-      const hi = fromPanFraction(media, aspect, 1, axis, 0)
+      const lo = fromPanFraction(media, area, axis, 1)
+      const hi = fromPanFraction(media, area, axis, 0)
       return hi - lo > 1e-9
     })()
     return {
@@ -218,12 +308,12 @@ export function frameParams(media: MediaLayer, aspect: number, set: SetPatch<Med
       max: 1,
       step: 0.01,
       // The photo as placed on import: centred, which is half its travel.
-      def: panFraction({ ...media, [axis]: MEDIA[axis] }, aspect, 1, axis),
+      def: panFraction({ ...media, [axis]: MEDIA[axis] }, area, axis),
       ...hundred,
       format: percent,
       value: f,
-      onChange: (v, how) => set({ [axis]: fromPanFraction(media, aspect, 1, axis, v) } as Partial<MediaLayer>, how),
-      unavailable: travel ? undefined : NO_TRAVEL,
+      onChange: (v, how) => set({ [axis]: fromPanFraction(media, area, axis, v) } as Partial<MediaLayer>, how),
+      unavailable: fit ? FIT_WHOLE : travel ? undefined : NO_TRAVEL,
     }
   }
   return [
@@ -239,6 +329,7 @@ export function frameParams(media: MediaLayer, aspect: number, set: SetPatch<Med
       format: percent,
       value: media.scale,
       onChange: (scale, how) => set({ scale }, how),
+      unavailable: fit ? FIT_WHOLE : undefined,
     },
     position('x', 'Position X'),
     position('y', 'Position Y'),

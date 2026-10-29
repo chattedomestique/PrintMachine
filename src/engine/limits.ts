@@ -102,6 +102,67 @@ export const SIZE_MAX = 1.2
 export const MAX_TEXT_PLATES = 3
 export const MAX_PRESSED_PASSES = 4
 
+/**
+ * The frame's ranges (types.ts `FrameSettings`).
+ *
+ *  - FRAME_WIDTH_MAX, 0.16: the widest border, as a fraction of the sheet's
+ *    long side. Border Studio's widest, 400 px, is 0.154 of its free sheet.
+ *  - FRAME_WIDTH_FIRST, 1/14: the border a first photo is framed with:
+ *    Border Studio's 150 px default on its free sheet (150 of 2100).
+ *  - FRAME_CORNER_DIV, 8: at Corners 1 the radius is the photo's shorter side
+ *    over this (Border Studio's Round: a quarter of half the side).
+ *  - BLUR_MIN, BLUR_MAX, BLUR_DEFAULT: Frosted's blur, 10..240, 60 (Border
+ *    Studio's range and default).
+ */
+export const FRAME_WIDTH_MAX = 0.16
+export const FRAME_WIDTH_FIRST = 1 / 14
+export const FRAME_CORNER_DIV = 8
+export const BLUR_MIN = 10
+export const BLUR_MAX = 240
+export const BLUR_DEFAULT = 60
+
+/**
+ * What the frame's photo-keyed fills are made from (features/media
+ * `frameSource`):
+ *
+ *  - FRAME_SOURCE_LONG, 1024: the photo is decoded once at this long side
+ *    (never above its own) for its colours. One fixed size, not the
+ *    preview's working copy, whose size moves with the zoom: the colours are
+ *    the same whatever zoom the photo was chosen at, in the preview, the save
+ *    and every reopen.
+ *  - PALETTE_SAMPLE, 84: the long side of the sample the palette is read
+ *    from (Border Studio's), area-averaged from that decode.
+ */
+export const FRAME_SOURCE_LONG = 1024
+export const PALETTE_SAMPLE = 84
+
+/**
+ * Frosted's field (engine/frost.ts), the photo blurred into a small image the
+ * border is sampled from:
+ *
+ *  - FROST_FIELD_LONG, 480: its long side for the settled preview and the
+ *    save. Fixed, so the preview and the save sample the same field.
+ *  - FROST_DRAFT_LONG, 160: its long side while a control is being dragged,
+ *    so a Blur drag stays fluid; the blur's radius scales with the field, so
+ *    the draft's frost looks the same.
+ *  - FROST_GRADE: Border Studio's shipped grade (brightness -15, saturation
+ *    +60), applied after the blur. Its Contrast and Vibrance shipped at 0,
+ *    which its own code skips as no change, so they are not here.
+ */
+export const FROST_FIELD_LONG = 480
+export const FROST_DRAFT_LONG = 160
+export const FROST_GRADE = { brightness: -15, saturation: 60 } as const
+
+/**
+ * Above this many megapixels, what Save says about a print (export.ts
+ * `describePlan`) adds that it is very large and a phone may not finish it.
+ * Said, never acted on: the print is still pressed at its size, and nothing
+ * smaller is made unless a press fails and the person chooses a smaller copy.
+ * 100 is a first guess, the owner's to tune: no phone has yet been seen to
+ * save a print of any size.
+ */
+export const LARGE_PRINT_MP = 100
+
 /** How many times the press runs for this document. */
 export function passCount(settings: { layers: readonly { backing: string | null }[] }): number {
   return settings.layers.length + settings.layers.filter((l) => l.backing).length

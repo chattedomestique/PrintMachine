@@ -21,8 +21,10 @@ const KEY = 'printmachine:settings:v1'
 
 /**
  * Measures text with a throwaway 2D context, the way the renderer will draw
- * it. Every face is a system stack, so nothing has to load first. Undefined
- * outside a browser, where the conversions that need it keep the stored value.
+ * it. A canvas measures in whatever face is there when it is asked, so
+ * Poster's bundled face is loaded before the first document is read
+ * (main.tsx, features/media/faces.ts). Undefined outside a browser, where the
+ * conversions that need it keep the stored value.
  */
 export function canvasMeasure(): FontMeasure | undefined {
   if (typeof document === 'undefined') return undefined

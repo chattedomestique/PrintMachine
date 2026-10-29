@@ -3,19 +3,24 @@ import { useSettings } from '../../state/settingsStore.ts'
 import { canvasMeasure } from '../../state/persist.ts'
 import { useRenderer } from './useRenderer.ts'
 import { useLayerGestures } from './useLayerGestures.ts'
-import type { GestureLimits, GesturePatch, GestureTarget, Pt } from './gesture.ts'
+import { visibleBox, type GestureLimits, type GesturePatch, type GestureTarget, type Pt } from './gesture.ts'
+import { PHOTO_KEYS, photoKey } from './photoKeys.ts'
 import { stepSize } from '../controls/sizeScale.ts'
-import { sheetAspect, type MediaLayer, type TextLayer } from '../../engine/types.ts'
-import { clampPan } from '../../engine/media.ts'
+import { type MediaLayer, type PrintSettings, type TextLayer } from '../../engine/types.ts'
+import { effectiveMode, sheetAspect, visibleAspect } from '../../engine/frame.ts'
+import { areaOf, clampPan } from '../../engine/media.ts'
 import { hitLayer, layoutIn, type FontMeasure } from '../../engine/text.ts'
+import type { FrameInputs } from '../../engine/frame.ts'
 import './Canvas.css'
 
 /** A photo's gesture limits. Pinch: a zoom on the cover fit, so 1 exactly
  *  fills the sheet and nothing below it is allowed — it would leave bare
  *  paper. Pan: not limited to the sheet the way type is; how far the photo may
  *  travel depends on the zoom and the sheet's shape, and clampPan decides that
- *  below, so the gesture is left free to reach every edge. */
-const MEDIA_LIMITS: GestureLimits = { size: [1, 4], position: [-Infinity, Infinity] }
+ *  below, so the gesture is left free to reach every edge. A pinch zooms about
+ *  the fingers, as Border Studio's crop pinch does: what is under them stays
+ *  under them. */
+const MEDIA_LIMITS: GestureLimits = { size: [1, 4], position: [-Infinity, Infinity], anchored: true }
 
 /** How far outside a plate's line boxes a touch still picks it, in CSS
  *  pixels: a caption at a few percent of the sheet is a line a few pixels
@@ -27,9 +32,16 @@ const HIT_SLOP = 12
  *  platform's double-click interval is at most about half this). */
 const PICK_THEN_TAP_MS = 1000
 
+/** The keys a plate answers to, as `aria-keyshortcuts` names them. */
+const PLATE_KEYS = 'ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ]'
+
+/** What the plate's keys do, said on the sheet wherever they are its keys. */
+const PLATE_KEYS_SAID = 'Arrow keys move the selected plate, plus and minus scale, brackets rotate.'
+
 /**
  * The print preview, plus the surface that manipulates a plate (the selected
- * one, or the one a touch lands on) or, with the Photo tool open, the photo.
+ * one, or the one a touch lands on) or, with the Frame tool open, the photo
+ * (in Crop and on Original; in Fit the whole photo shows, and nothing moves).
  *
  * Input lives on a dedicated transparent sibling with `touch-action: none`,
  * not on the canvas itself — that avoids the whole genre of "the canvas is
@@ -38,14 +50,21 @@ const PICK_THEN_TAP_MS = 1000
  */
 export default function Canvas({
   media = null,
+  inputsFor,
   mediaMode = false,
   paused = false,
   onGesture,
 }: {
   media?: ImageBitmap | null
-  /** Point the sheet's gestures at the photo instead of the type. Driven by
-   *  the open tab, so what you are touching is whatever panel you are in — no
-   *  second selection model to keep in sync. */
+  /** What the frame's fill is made from, for a document and whether the
+   *  frame is a draft (features/media `useFrameInputs`); a fill whose input
+   *  is not there yet draws as Paper. */
+  inputsFor: (s: PrintSettings, draft: boolean) => FrameInputs
+  /** Point the sheet's gestures at the photo instead of the type (the Frame
+   *  tool is open). Driven by the open tool, so what you are touching is
+   *  whatever panel you are in — no second selection model to keep in sync.
+   *  Without a photo a touch still picks no type (the Frame tool's rule), and
+   *  the keys stay the selected plate's, as the sheet then says. */
   mediaMode?: boolean
   /** Hold the preview where it is (a save is pressing the print). */
   paused?: boolean
@@ -57,7 +76,7 @@ export default function Canvas({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
 
-  useRenderer(canvasRef, settings, { selectedLayerId }, media, paused)
+  useRenderer(canvasRef, settings, { selectedLayerId }, media, inputsFor, paused)
 
   const layer = selectedLayer ?? settings.layers[0] ?? null
 
@@ -107,12 +126,21 @@ export default function Canvas({
   // bounds, which is a different feature.
   const mediaTarget = settings.media
   const aspect = sheetAspect(settings)
+  // The pan is a fraction of the visible rectangle inside the frame (the
+  // whole sheet unframed), so that is what it is clamped to, and what a drag
+  // is measured against.
+  const placeAspect = visibleAspect(settings)
+  const frameWidth = settings.media ? settings.frame.width : 0
+  const placeBox = useCallback((box: { width: number; height: number }) => visibleBox(box, frameWidth), [frameWidth])
+  // In Fit the whole photo shows: there is nothing to zoom into or move, so
+  // the gestures move nothing (the hint says why).
+  const fit = effectiveMode(settings) === 'fit'
   const photoTarget = useMemo<GestureTarget | null>(
     () =>
-      mediaMode && mediaTarget
+      mediaMode && mediaTarget && !fit
         ? { id: mediaTarget.id, x: mediaTarget.x, y: mediaTarget.y, size: mediaTarget.scale, rotation: 0 }
         : null,
-    [mediaMode, mediaTarget],
+    [mediaMode, mediaTarget, fit],
   )
 
   const patchMedia = useCallback(
@@ -125,7 +153,7 @@ export default function Canvas({
       if (Object.keys(next).length === 0) return
       // Clamped while dragging, so the photo stops at its edge on screen
       // rather than the stored value running ahead of what is drawn.
-      const placed = clampPan({ ...mediaTarget, ...next }, aspect, 1)
+      const placed = clampPan({ ...mediaTarget, ...next }, areaOf(placeAspect, 1))
       // A photo that cannot move (100% on its own sheet) clamps straight
       // back, give or take a float's last bit (0.5000000000000001): nothing
       // moved, so nothing is written (no undo step that undoes nothing) and
@@ -139,41 +167,55 @@ export default function Canvas({
       })
       onGesture?.()
     },
-    [dispatch, mediaTarget, aspect, onGesture],
+    [dispatch, mediaTarget, placeAspect, onGesture],
   )
 
   const typeGestures = useLayerGestures(surfaceRef, mediaMode ? null : layer, patch, { pick })
-  const photoGestures = useLayerGestures(surfaceRef, photoTarget, patchMedia, { limits: MEDIA_LIMITS })
+  const photoGestures = useLayerGestures(surfaceRef, photoTarget, patchMedia, { limits: MEDIA_LIMITS, area: placeBox })
   const gestures = mediaMode ? photoGestures : typeGestures
 
   /**
-   * Double-tap: fit the photo again (Photo open), or centre the selected plate
-   * and zero its turn. Not when the first tap of the two picked a plate: a tap
-   * on a plate picks it and does nothing else (Border Studio's), and a second
-   * tap, often only because the first seemed not to take, must not throw away
-   * where the plate was and how it was turned.
+   * Double-tap: the photo back to 100% and centred (Frame open; not in Fit,
+   * where it is not placed), or centre the selected plate and zero its turn.
+   * Not when the first tap of the two picked a plate: a tap on a plate picks
+   * it and does nothing else (Border Studio's), and a second tap, often only
+   * because the first seemed not to take, must not throw away where the plate
+   * was and how it was turned.
    */
   const onDoubleClick = useCallback(() => {
     if (mediaMode) {
-      if (settings.media) dispatch({ type: 'patchMedia', patch: { x: 0.5, y: 0.5, scale: 1 } })
+      if (settings.media && !fit) dispatch({ type: 'patchMedia', patch: { x: 0.5, y: 0.5, scale: 1 } })
       return
     }
     const [first] = touches.current
     if (touches.current.length === 2 && first.picked && performance.now() - first.at < PICK_THEN_TAP_MS) return
     if (!layer) return
     dispatch({ type: 'patchLayer', id: layer.id, patch: { x: 0.5, y: 0.5, rotation: 0 } })
-  }, [dispatch, layer, mediaMode, settings.media])
+  }, [dispatch, layer, mediaMode, settings.media, fit])
 
   /**
    * A keyboard path to every value the gestures write (playbook §10.1). If the
    * primary editing interaction is a drag, there has to be a focusable,
    * arrow-adjustable equivalent — this is that.
    *
-   * Arrows move, +/- size (5% of it, at least one step; sizeScale.ts),
-   * [/] rotate; Shift coarsens every step.
+   * With the Frame tool open on a photo the keys are the photo's, as its
+   * gestures are (photoKeys.ts: arrows move the view, +/- zoom, 0 resets; in
+   * Fit there is nothing to move, and they do nothing). Otherwise, and with
+   * no photo to move, they are the selected plate's: arrows move, +/- size
+   * (5% of it, at least one step; sizeScale.ts), [/] rotate; Shift coarsens
+   * every step.
    */
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const m = settings.media
+      if (mediaMode && m) {
+        if (fit) return
+        const change = photoKey(e.key, m, placeAspect)
+        if (!change) return
+        e.preventDefault()
+        dispatch({ type: 'patchMedia', patch: change.patch, coalesce: change.coalesce })
+        return
+      }
       if (!layer) return
       const big = e.shiftKey
       const move = big ? 0.05 : 0.005
@@ -196,7 +238,7 @@ export default function Canvas({
       e.preventDefault()
       dispatch({ type: 'patchLayer', id: layer.id, patch: build(), coalesce: true })
     },
-    [dispatch, layer],
+    [dispatch, layer, mediaMode, settings.media, fit, placeAspect],
   )
 
   return (
@@ -208,10 +250,15 @@ export default function Canvas({
         className="drag-surface"
         role="application"
         aria-label={
-          mediaMode
-            ? 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to fit it again. Arrow keys move the selected plate.'
-            : 'Print preview. Tap a plate to pick it, drag to move it, pinch to scale and rotate, double-tap to centre. Arrow keys move the selected plate, plus and minus scale, brackets rotate.'
+          !mediaMode
+            ? `Print preview. Tap a plate to pick it, drag to move it, pinch to scale and rotate, double-tap to centre. ${PLATE_KEYS_SAID}`
+            : !settings.media
+              ? `Print preview. No photo yet: choose one in Frame, Photo. ${PLATE_KEYS_SAID}`
+              : fit
+                ? 'Print preview, the photo. Fit shows the whole photo: choose Crop to move or zoom it.'
+                : 'Print preview, the photo. Drag to move the photo, pinch to zoom it, double-tap to reset it. Arrow keys move it, plus and minus zoom, 0 resets.'
         }
+        aria-keyshortcuts={!mediaMode || !settings.media ? PLATE_KEYS : fit ? undefined : PHOTO_KEYS}
         tabIndex={0}
         onDoubleClick={onDoubleClick}
         onKeyDown={onKeyDown}

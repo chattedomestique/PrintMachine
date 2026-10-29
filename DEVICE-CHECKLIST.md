@@ -32,6 +32,11 @@ So:
       is the app saying it has finished precaching and will open offline (the
       first time it happens, a toast says "Ready to open offline" too)
 - [ ] *Now* airplane mode → launch from the home screen → it fully boots and is usable
+- [ ] Still in airplane mode: the default plates (PRINT MACHINE, RISO) are set
+      in Tanklager, narrow and heavy, not in Helvetica; type a line in lower
+      case on a Poster plate → it prints in lower case; type `don’t “$5”…`
+      with the iPhone keyboard → the curly quotes, apostrophe and ellipsis
+      are Tanklager's, and only the `$` is in another face (README "Fonts")
 - [ ] Redeploy a visible change → relaunch online once → the new version appears
 
 > `npm run verify:offline` proves the build itself: it serves `dist/` at the
@@ -45,7 +50,7 @@ So:
 
 ## Edit
 
-- [ ] Open each tool (Type, Ink, Photo, Press) and each of its tabs: the sheet
+- [ ] Open each tool (Frame, Type, Ink, Press) and each of its tabs: the sheet
       stays exactly where it is and the same size; nothing in the dock scrolls
       at the standard text size; every control is comfortably tappable with a
       thumb (no near misses between neighbours)
@@ -54,8 +59,8 @@ So:
 - [ ] Tap targets, with a thumb: a setting's value (Size's "90%") opens the
       number pad and its name (Line height, with its chevrons) the list of
       settings, never the slider just under them; the [−] and [+] beside a
-      slider never catch the name or value above; the sheet's select and the
-      plate button open on any tap inside their frame
+      slider never catch the name or value above; a ratio or fill chip and
+      the plate button answer any tap inside their frame
 - [ ] Ink › Over photo: tap Off, Second ink and Backing in turn → the control
       stays exactly where it is while the rows under it change
 - [ ] Tap a plate on the sheet (RISO) → the plate button names it and its
@@ -69,17 +74,22 @@ So:
       zeroes its turn; a double tap on a plate that is not selected only picks
       it (RISO keeps its −4° and its place)
 - [ ] The first photo brings a hint over the dock; it names the photo's
-      gestures while Photo is open and the type's otherwise, and it goes for
+      gestures while Frame is open and the type's otherwise, and it goes for
       good with its × or with the first drag on the sheet; with VoiceOver on,
       it is read when it appears and when the tool changes, not again after
       a save
-- [ ] Photo tool open: drag and pinch the photo — it zooms 100–400% and stops
-      at its edges, never showing bare paper round it; switch the sheet shape
-      in Photo › Sheet and it still covers the sheet
-- [ ] The first photo opens on Sheet: Original, the photo's own shape — a
-      landscape photo gives a landscape sheet that fits the screen without
-      distortion; Remove the photo → the sheet is 4:5 again
-- [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac)
+- [ ] Frame tool open: drag and pinch the photo — it zooms 100–400%, stays
+      under the finger and stops at its edges, never showing the border's
+      colour inside the frame; switch the ratio in Frame › Crop and it still
+      fills the frame's inside; on a ratio with Fit chosen a drag moves
+      nothing and the hint says why
+- [ ] The first photo opens on Original, the photo's own shape, in a frame
+      (Width 7.1%, the Photo fill) — a landscape photo gives a landscape sheet
+      that fits the screen without distortion; Remove the photo → the sheet is
+      4:5 again
+- [ ] Arrow keys nudge the selected plate (attach a keyboard, or use a Mac);
+      with Frame open on a zoomed photo they move the view instead (Right
+      shows more of its right side), + and − zoom, 0 resets
 - [ ] Type a long string → tap Fit → it sits on the sheet, and the next pinch
       or slider touch starts from that size (no jump)
 - [ ] Type › Size: drag the slider end to end with a thumb — 10% to 100%, and a
@@ -93,6 +103,9 @@ So:
       preview takes a moment to redraw after the first tap; change the
       typeface, then double-tap ON the thumb (the first tap may nudge it and
       back) → 40%, and one Undo takes back only the reset (the typeface stays)
+- [ ] Type › Face on a Poster plate: the B is unpressed, cannot be pressed,
+      and "Poster is one weight" is under Bold; on Grotesk it presses again
+      and the type gets heavier
 - [ ] Drag a press slider → the preview keeps up, and the grain does **not**
       visibly re-randomise
 - [ ] One slider drag is one undo step; adding a plate is its own step; a
@@ -119,10 +132,14 @@ So:
 - [ ] Save it: completes without a tab reload (Save decodes the original,
       about 98 MB, until its last rows are in the print) and the file shows
       the photo, upright
-- [ ] A transparent PNG: paper shows through where it is transparent
+- [ ] A transparent PNG, chosen as a first photo: its holes show the
+      frame's fill, as the frame round it does (the Photo colour a first
+      photo's frame gets, so a hole may not stand out at all); choose Paper
+      in Frame › Border and they show the stock, never black; under Frosted
+      the frost, thinning to the stock
 - [ ] Remove the photo → Undo: it comes back (not bare paper, no alert)
 - [ ] A print saved by an older build (its photo cut to 2048 px) shows the
-      "saved at reduced size" note in Photo › File
+      "saved at reduced size" note in Frame › Photo
 
 > The photo is stored and decoded whole, at any size: nothing here should ever
 > show a photo cut down on import, and nothing caps a saved print: it is
@@ -130,19 +147,90 @@ So:
 > whatever their number. What bounds a save is the phone's memory (section
 > "Native resolution at any size", below).
 
+## Frame
+
+- [ ] With VoiceOver on and no photo, open Frame › Border: Width's − and +
+      are read as dimmed with "No photo yet" after them, and Choose photo
+      sits beside the same words; in Frame › Crop the ratio row is read as
+      a group, "Sheet ratio", and Original as dimmed, "No photo yet"; with a
+      photo the fill row is read as a group, "Fill"
+- [ ] With no photo, choose a large one (24 MP or more) from Frame ›
+      Border's Choose photo: until its colours are made the chosen fill's
+      chip (Photo, a first photo's) shows a small spinner where its dot goes
+      (VoiceOver: "Photo, preparing") and the border is the bare stock; then
+      the dot and the border take the colour together, and nothing else on
+      screen moves
+- [ ] In the Frame tool, VoiceOver reads Save's name with the frame
+      ("Save 9016×6440 JPEG with a 644 px frame" for a 40 MP photo on
+      Original), so the size the frame makes is heard before the tap
+- [ ] A 40 MP portrait on 16:9 in Fit: before any tap a card over the
+      stage reads "Saves ... (190.7 MP), a very large print: a phone may
+      not finish it.", in every tool; back on Original it goes
+- [ ] Frame › Crop: tap Original, then 4:5, then Original: the ratio row
+      and Crop | Fit stay where they are (only the line under them changes
+      its words)
+- [ ] The gesture hint with Frame open: "Drag to move the photo · pinch to
+      zoom · double‑tap to reset" on Original and in Crop; in Fit it names
+      no gesture ("Fit shows the whole photo · choose Crop to move or zoom
+      it"), and a drag or pinch on the photo moves nothing
+- [ ] Frame › Crop's ratio chips: a second tap on the chosen chip turns it
+      on its side (4:5 to 5:4, 9:16 to 16:9), and the sheet follows; Original
+      and 1:1 do not turn
+- [ ] Your 40 MP portrait (5152x7728) on Original in its first frame: More
+      and Save say 6440×9016 (58.1 MP, with a 644 px frame) before the tap;
+      Save completes without a tab reload, and Photos shows 6440×9016. Write
+      down the time from the tap to "Share"
+- [ ] The same photo on 1:1 Fit (9016×9016, 81.3 MP) and on 16:9 Fit
+      (18414×10358, 190.7 MP; More adds "a very large print: a phone may not
+      finish it"): write down what the phone does. A file of the size said,
+      or the smaller-copy question ("This device couldn't press ..."), or,
+      after an eviction, the next launch's "The last save, ..., did not
+      finish." with Try again and Save smaller; never a smaller file nobody
+      chose
+- [ ] A 61 MP photo (9504x6336) on Original at the widest frame (16%:
+      13976×10808, 151.1 MP): an iPhone evicts a tab that holds too much
+      rather than throwing, so expect the stated size and, if the tab was
+      evicted, the next launch's question, not a silent failure
+- [ ] Whole-save time against the one estimate there is (about 0.4 s a sheet
+      megapixel, from the device spike's encoder): about 23 s for the 58 MP
+      Original above, 33 s for 1:1 Fit (81 MP), 76 s for 16:9 Fit (191 MP).
+      Write down each, with the device
+- [ ] Frosted at Blur 240 round a photo of a smooth sky, saved, opened in
+      Photos at 100%: does the border band into visible steps anywhere?
+- [ ] Corners at 100% (Round) on a native save: open the file in Photos at
+      100% beside the photo; inside the rounded corners the photo's pixels
+      are its own (as sharp, nothing shifted), and the corners are smooth
+- [ ] Choose a photo with Frame › Border showing: write down the time from
+      the choice to the border taking the photo's colour (the frame's colours
+      come from a third decode of the photo, made once)
+- [ ] With a hardware keyboard and Frame open on a zoomed photo: the arrows
+      move the view over it (Right shows more of its right side), + and −
+      zoom, 0 puts it back at 100% and centred; a run of presses is one
+      Undo, and 0 is one of its own
+- [ ] Poster is Tanklager with the network off (Offline, above), and Type ›
+      Face shows Bold unpressed and unavailable for it ("Poster is one
+      weight")
+- [ ] An installed copy (one added before this version) updates in place on
+      its next online launch; every print saved before still opens, with
+      and without a photo, unframed, and its Poster plates in Tanklager
+- [ ] Which home-screen icon is installed: Print Machine's "Print", or the
+      old Border Studio one? (The owner's question; nothing here changes
+      it)
+
 ## Save
 
-- [ ] More says the size before the tap ("Saves 2419×3024" for a 12 MP photo
-      on 4:5), and why when it is not the photo's own pixels; VoiceOver reads
-      Save as "Save 2419×3024 JPEG"
+- [ ] More says the size before the tap ("Saves 2822×3528" for a 12 MP photo
+      on 4:5 in the frame a first photo gets, "with a 252 px frame"), and why
+      when it is not the photo's own pixels; VoiceOver reads Save as "Save
+      2822×3528 JPEG with a 252 px frame"
 - [ ] Tap Save → within a moment Save reads "Saving", a toast repeats the size,
-      and a card above the dock reads "Pressing 3024×3780: loading the photo",
+      and a card above the dock reads "Pressing 2822×3528: loading the photo",
       then (with a second ink) "...: reading the photo", then "Pressing
-      3024×3780, 0%" and on in percent, then "...: writing the file", with
+      2822×3528, 0%" and on in percent, then "...: writing the file", with
       Cancel; the preview holds still and nothing else answers a tap
 - [ ] Cancel mid-press → back to Save, no error, nothing saved
 - [ ] A press that takes more than a second → Save reads "Share" and the card
-      "3024×3780 is ready (… MB)" → tap Share → the native share sheet appears
+      "2822×3528 is ready (… MB)" → tap Share → the native share sheet appears
       → Save Image → the file **is** in Photos, at the size More said (check it
       in Photos' info panel)
 - [ ] Expect that second tap on every save: no press at a photo's own
@@ -163,12 +251,12 @@ So:
       is 1600×1200 at 300% zoom: upscaled 4.5x"), Save: while it presses, the
       card's Cancel is on screen and stops the press; when Save reads Share,
       no card covers it and one tap on it opens the share sheet. Again with
-      the Photo tool open
+      the Frame tool open
 - [ ] A confirmation appears after saving, with the pixel size
 - [ ] Cancel the share sheet → no error toast
 - [ ] Swipe the app away (or let iOS evict it) while it reads "Pressing …" →
-      reopen it → a dialog reads "The last save, 2419×3024, did not finish."
-      with Try again, Save smaller (1814×2268) and Cancel; Try again completes;
+      reopen it → a dialog reads "The last save, 2822×3528, did not finish."
+      with Try again, Save smaller (2117×2646) and Cancel; Try again completes;
       a launch after that one says nothing
 - [ ] If Save ever says "This device couldn't press W×H (reason). Save a
       smaller W'×H' copy instead?" (a canvas came back blank, memory ran out
@@ -204,8 +292,9 @@ So:
 Saving at full resolution (none of these can be automated):
 
 - [ ] 12 MP photo, default document, Save: completes without a tab reload; the
-      saved file's pixel size equals what More said; Photos shows 2419×3024
-      (or whatever More said)
+      saved file's pixel size equals what More said; Photos shows 4704×3696
+      for a 4032×3024 photo on Original in its first frame (or whatever More
+      said)
 - [ ] Two Saves in a row: both complete, both files are the size More said
 - [ ] Save in Low Power Mode: completes (slower is fine)
 - [ ] Time from the tap to the share sheet, written down with the device and
@@ -261,7 +350,8 @@ holds"). What only a phone can settle:
       below.
 - [ ] **Save a 40 MP JPEG.** Import a 7728x5152 photo (and an 8064x6048 48 MP
       camera-app JPEG, and a 9504x6336 one if one exists) from the camera roll;
-      Save on Original: the file is 7728x5152 (or the photo's own size). No tab
+      Save on Original: the file is 9016x6440, every pixel of the photo in the
+      frame a first photo gets (7728x5152 with Width at 0). No tab
       reload; note the device, the time from the tap to "Share", and whether
       the full decode (`createImageBitmap`, 159 to 241 MB) is what fails when
       something does. WebKit makes the decode's buffer at full size and, if it
@@ -270,7 +360,7 @@ holds"). What only a phone can settle:
       fails, "This device couldn't press ... (...)" must appear with a smaller
       copy, never a reload.
 - [ ] **Peak memory.** Safari Web Inspector (Timelines > Memory) during a 40 MP
-      save on Original: the peak stays under about 350 MB; during a 61 MP save
+      save on Original with Width at 0: the peak stays under about 350 MB; during a 61 MP save
       under about 450 MB; the worst legal press (grain at screen 36,
       misregistration 30) at 61 MP under about 540 MB. `measure-alloc` holds
       what it counts (the typed arrays, the canvases, the decoded photo and
@@ -278,7 +368,12 @@ holds"). What only a phone can settle:
       ±16 levels of noise; a grainier photo's file is larger) under those:
       339, 425 and 518 MB
       measured. Write down the phone's own peak beside them; what the
-      browser holds besides is what only a phone shows.
+      browser holds besides is what only a phone shows. Framed, the same
+      count is 379 MB for the 40 MP photo framed
+      on Original (9016x6440, 58 MP), 414 MB on 1:1 Fit (81 MP), 619 MB for
+      61 MP at the widest frame (151 MP), 614 MB for a 40 MP portrait on 16:9
+      Fit (191 MP) and 1239 MB at its widest (571 MP), most of it the file:
+      write down where the phone stops.
 - [ ] **Font clamp.** A 61 MP portrait photo on its own sheet (9504 px tall),
       type at 120%: the glyphs in the file are as wide as the preview shows
       them, not 17 to 38% narrower (the device spike read every font up to
@@ -298,7 +393,9 @@ holds"). What only a phone can settle:
       spike measured only the phone's encoder (62 to 65 ms a megapixel on its
       halftone image, R 0.49 to 0.52) and estimated a 40 MP save at about 16
       to 17 s from it (33 s x R, the 33 s an estimate for the reference
-      machine from before its save was measured).
+      machine from before its save was measured). That is about 0.4 s a sheet
+      megapixel; the framed saves are under "Frame". The app promises no
+      time.
 - [ ] **Backgrounding and the screen.** Start a 40 MP save and let the screen
       auto-lock (the Wake Lock should keep it on: iOS 16.4 and later); then
       switch to another app for 10 s and return: either it finished, or the

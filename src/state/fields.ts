@@ -10,7 +10,8 @@
  * `makeMedia()`), and a test holds the two key sets equal at every level.
  *
  * Kinds and their rules (normalize.ts applies them):
- *  - string   a string, else the default (`nonEmpty`: '' counts as invalid)
+ *  - string   a string, else the default (`nonEmpty`: '' counts as invalid;
+ *             `pattern`: a string it does not match is invalid)
  *  - number   finite (and above zero when `positive`), else the default;
  *             then clamped to [min, max] (and rounded when `int`)
  *  - boolean  a boolean, else the default
@@ -27,8 +28,8 @@
  */
 
 import { PAPERS, RISO_INKS } from '../engine/inks.ts'
-import { SIZE_MAX, SIZE_MIN } from '../engine/limits.ts'
-import { ASPECTS, FONTS } from '../engine/types.ts'
+import { BLUR_MAX, BLUR_MIN, FRAME_WIDTH_MAX, SIZE_MAX, SIZE_MIN } from '../engine/limits.ts'
+import { ASPECTS, FONTS, type FillKey } from '../engine/types.ts'
 import { makeLayer, makeMedia, nextLayerId } from './defaults.ts'
 
 export interface Row {
@@ -37,6 +38,8 @@ export interface Row {
   nullable?: boolean
   /** string: the empty string is not a valid value. */
   nonEmpty?: boolean
+  /** string: the whole value must match. */
+  pattern?: RegExp
   /** enum */
   values?: readonly string[]
   /** number */
@@ -70,6 +73,8 @@ export const PAPER_IDS = ids(PAPERS)
 export const ASPECT_KEYS: readonly string[] = [...Object.keys(ASPECTS), 'original']
 export const ALIGNS = ['left', 'center', 'right', 'justify'] as const
 export const METHODS = ['halftone', 'grain'] as const
+export const FILLS: readonly FillKey[] = ['paper', 'photo', 'deep', 'muted', 'comp', 'frosted']
+export const FRAME_MODES = ['crop', 'fit'] as const
 
 /** Sheet positions: the drag and the keys let type bleed a little off the trim. */
 const POSITION = { min: -0.3, max: 1.3 }
@@ -106,6 +111,23 @@ export const PRESS_FIELDS: readonly Row[] = [
   { key: 'wear', kind: 'number', min: 0, max: 0.8 },
 ]
 
+/** A colour as the palette stores it. */
+const HEX = /^#[0-9a-f]{6}$/
+
+/** The photo's four frame colours (types.ts `FramePalette`). */
+export const PALETTE_FIELDS: readonly Row[] = [
+  { key: 'photo', kind: 'string', pattern: HEX },
+  { key: 'deep', kind: 'string', pattern: HEX },
+  { key: 'muted', kind: 'string', pattern: HEX },
+  { key: 'comp', kind: 'string', pattern: HEX },
+]
+
+/** A stored palette is kept whole or not at all: a colour missing or
+ *  malformed drops it, and the app computes it again from the photo. Half a
+ *  palette would leave a chosen fill with no colour. */
+export const acceptPalette = (p: Record<string, unknown>): boolean =>
+  PALETTE_FIELDS.every((r) => typeof p[r.key] === 'string' && HEX.test(p[r.key] as string))
+
 export const MEDIA_FIELDS: readonly Row[] = [
   { key: 'id', kind: 'string', nonEmpty: true },
   // Intrinsic pixel size of the stored photo: only its ratio is read, for the
@@ -121,6 +143,24 @@ export const MEDIA_FIELDS: readonly Row[] = [
   // Stored as imported (original bytes). Optional: a document an older build
   // saved has none, and that absence is what marks its 2048 px copy.
   { key: 'native', kind: 'boolean', optional: true },
+  // Derived from the photo and stored with it: kept when whole and valid,
+  // otherwise left out (and computed again), never filled from a default.
+  {
+    key: 'palette',
+    kind: 'object',
+    optional: true,
+    fields: PALETTE_FIELDS,
+    template: () => ({ photo: '', deep: '', muted: '', comp: '' }),
+    accept: acceptPalette,
+  },
+]
+
+export const FRAME_FIELDS: readonly Row[] = [
+  { key: 'width', kind: 'number', min: 0, max: FRAME_WIDTH_MAX },
+  { key: 'corners', kind: 'number', min: 0, max: 1 },
+  { key: 'fill', kind: 'enum', values: FILLS },
+  { key: 'blur', kind: 'number', min: BLUR_MIN, max: BLUR_MAX },
+  { key: 'mode', kind: 'enum', values: FRAME_MODES },
 ]
 
 /** The media placeholder the normaliser fills a stored photo into. Its id and
@@ -142,6 +182,9 @@ export const SETTINGS_FIELDS: readonly Row[] = [
   { key: 'aspect', kind: 'enum', values: ASPECT_KEYS },
   { key: 'paperId', kind: 'enum', values: PAPER_IDS },
   { key: 'press', kind: 'object', fields: PRESS_FIELDS },
+  // A document from before the frame has none: it takes the template's, whose
+  // width is 0, and opens unframed.
+  { key: 'frame', kind: 'object', fields: FRAME_FIELDS },
   { key: 'seed', kind: 'number', min: 0, max: 0xffffffff, int: true },
   {
     key: 'layers',

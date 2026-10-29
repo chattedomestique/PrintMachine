@@ -13,6 +13,7 @@
 
 import { useEffect, useId, useRef, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { useModalDialog } from './useModalDialog.ts'
+import { useScrolls } from './scrolls.ts'
 
 /** A masked symbol (the style guide's `.ic`). Decorative: the control that
  *  holds it carries the name. */
@@ -277,6 +278,7 @@ export function ActionSheet({
   title,
   label,
   info,
+  infoLabel,
   children,
   listRef,
 }: {
@@ -285,13 +287,18 @@ export function ActionSheet({
   title?: string
   label?: string
   /** Facts to read before the rows (not rows themselves: a menu holds only
-   *  what can be chosen). */
+   *  what can be chosen). On a short screen at a large text size they
+   *  scroll, and the rows and Cancel stay on screen; scrolling, they are a
+   *  region named `infoLabel` that the keyboard reaches (useScrolls). */
   info?: ReactNode
+  infoLabel?: string
   children: ReactNode
   listRef?: RefObject<HTMLDivElement | null>
 }) {
   const ref = useModalDialog(open, onClose)
   const titleId = useId()
+  const infoRef = useRef<HTMLDivElement>(null)
+  const infoScrolls = useScrolls(infoRef, open && !!info)
   useEffect(() => {
     if (!open) return
     const list = ref.current?.querySelector('.actsheet__list')
@@ -326,7 +333,17 @@ export function ActionSheet({
           {title}
         </p>
       )}
-      {info}
+      {info && (
+        <div
+          ref={infoRef}
+          className="actsheet__info"
+          tabIndex={infoScrolls ? 0 : undefined}
+          role={infoScrolls ? 'region' : undefined}
+          aria-label={infoScrolls ? (infoLabel ?? 'Details') : undefined}
+        >
+          {info}
+        </div>
+      )}
       <div className="actsheet__list" role="menu" aria-label={label ?? title} ref={setList} onKeyDown={onKeyDown}>
         {children}
         <button type="button" className="menu__item" role="menuitem" data-variant="cancel" onClick={onClose}>

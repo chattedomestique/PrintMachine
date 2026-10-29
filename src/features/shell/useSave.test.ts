@@ -8,11 +8,13 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CanvasLimitError, MissingPhotoError, planPrint } from '../../engine/export.ts'
+import { CanvasLimitError, MissingPhotoError, PHOTO_MISSING, describePlan, planPrint } from '../../engine/export.ts'
+import { FRAME_WIDTH_FIRST } from '../../engine/limits.ts'
 import { planExport } from '../../engine/exportPlan.ts'
-import { sheetAspect, type PrintSettings } from '../../engine/types.ts'
-import { defaultSettings, makeMedia } from '../../state/defaults.ts'
+import type { PrintSettings } from '../../engine/types.ts'
+import { defaultSettings, frameDefaults, makeMedia } from '../../state/defaults.ts'
 import { PhotoDecodeError } from '../media/decode.ts'
+import { FILL_MISSING, FillMissingError } from '../media/frameInputs.ts'
 import {
   IDLE,
   SHARE_AT_ONCE_MS,
@@ -26,6 +28,7 @@ import {
   saveButton,
   saveLabel,
   saveQuestion,
+  saveRefusal,
   saveStatus,
   saveReducer,
   type SaveEvent,
@@ -33,8 +36,8 @@ import {
 } from './useSave.ts'
 
 const photo = { width: 3024, height: 4032, scale: 1 }
-const plan = planExport(4 / 5, photo)
-const planAt = (maxHeight: number) => planExport(4 / 5, photo, { maxHeight })
+const plan = planExport({ aspect: 4 / 5 }, photo)
+const planAt = (maxHeight: number) => planExport({ aspect: 4 / 5 }, photo, { maxHeight })
 const file = new File([new Uint8Array(6_200_000)], 'print-machine.jpg', { type: 'image/jpeg' })
 const run = (events: SaveEvent[], from: SaveState = IDLE) => events.reduce(saveReducer, from)
 const kinds = (events: SaveEvent[]) => {
@@ -46,6 +49,9 @@ const kinds = (events: SaveEvent[]) => {
   }, IDLE as SaveState)
   return seen
 }
+
+/** What Save's name reads of the caption: the size, and no frame. */
+const words = (size: string) => ({ size, frame: null, large: null })
 
 describe('the save flow', () => {
   it('idle → loading the photo → pressing → ready → a tap shares → idle', () => {
@@ -86,7 +92,7 @@ describe('the save flow', () => {
     const again = saveReducer(sharing, { type: 'shareFailed' })
     expect(again).toEqual({ kind: 'ready', file, plan })
     expect(saveButton(again, 'none')).toEqual({ text: 'Share', busy: false, disabled: false })
-    expect(saveLabel(again, 'none', '3024×3780')).toBe('Share 3024×3780 (6.2 MB)')
+    expect(saveLabel(again, 'none', words('3024×3780'))).toBe('Share 3024×3780 (6.2 MB)')
     expect(saveStatus(again, 'none')).toEqual({
       text: '3024×3780 is ready (6.2 MB). Tap Share to save it.',
       alert: false,
@@ -132,7 +138,7 @@ describe('the save flow', () => {
   it('waits for the document\'s photo: Save disabled and the card saying so while it decodes, refused when it failed', () => {
     expect(canStart(IDLE, 'loading')).toBe(false)
     expect(saveButton(IDLE, 'loading')).toStrictEqual({ text: 'Save', busy: false, disabled: true })
-    expect(saveLabel(IDLE, 'loading', '2419×3024')).toBe('Save: loading the photo')
+    expect(saveLabel(IDLE, 'loading', words('2419×3024'))).toBe('Save: loading the photo')
     expect(saveStatus(IDLE, 'loading')).toEqual({ text: 'Loading the photo…', alert: false, busy: true, action: null, delay: true })
     expect(canStart(IDLE, 'failed')).toBe(false)
     expect(canStart(IDLE, 'ready')).toBe(true)
@@ -141,13 +147,25 @@ describe('the save flow', () => {
     expect(saveStatus(IDLE, 'ready')).toBeNull()
     expect(saveStatus(IDLE, 'none')).toBeNull()
     expect(saveButton(IDLE, 'ready')).toStrictEqual({ text: 'Save', busy: false, disabled: false })
-    expect(saveLabel(IDLE, 'ready', '2419×3024')).toBe('Save 2419×3024 JPEG')
+    expect(saveLabel(IDLE, 'ready', words('2419×3024'))).toBe('Save 2419×3024 JPEG')
+  })
+
+  it("Save's name states the framed size before the tap: the frame in pixels, and past 100 MP that a phone may not finish it, from the real caption", () => {
+    const framed = { ...defaultSettings(), aspect: '4:5' as const, media: makeMedia({ id: 'p', width: 4032, height: 3024 }), frame: { ...frameDefaults(), width: FRAME_WIDTH_FIRST } }
+    expect(saveLabel(IDLE, 'ready', describePlan(planPrint(framed), framed))).toBe('Save 2822×3528 JPEG with a 252 px frame')
+    const portrait = { ...framed, aspect: '16:9' as const, media: makeMedia({ id: 'q', width: 5152, height: 7728 }), frame: { ...framed.frame, mode: 'fit' as const } }
+    expect(saveLabel(IDLE, 'ready', describePlan(planPrint(portrait), portrait))).toBe(
+      'Save 18414×10358 JPEG with a 1315 px frame, a very large print: a phone may not finish it',
+    )
+    // Unframed, the size alone, as before.
+    const bare = { ...framed, frame: frameDefaults() }
+    expect(saveLabel(IDLE, 'ready', describePlan(planPrint(bare), bare))).toBe('Save 2419×3024 JPEG')
   })
 
   it('a photo that could not be loaded: Save says why, in the card and in its name, and promises no size', () => {
     const why = 'This photo could not be loaded. Choose it again.'
     expect(saveButton(IDLE, 'failed')).toStrictEqual({ text: 'Save', busy: false, disabled: true, why })
-    expect(saveLabel(IDLE, 'failed', '2419×3024')).toBe(`Save: ${why}`)
+    expect(saveLabel(IDLE, 'failed', words('2419×3024'))).toBe(`Save: ${why}`)
     // The card is the alert, with the way out: choose the photo again.
     expect(saveStatus(IDLE, 'failed')).toEqual({ text: why, alert: true, busy: false, action: 'choose' })
     // Over an old error, a question, or an unfinished save's notice too.
@@ -162,8 +180,8 @@ describe('the save flow', () => {
     expect(saveStatus(ready, 'failed')?.text).toBe('3024×3780 is ready (6.2 MB). Tap Share to save it.')
     // The More sheet promises no size either: its first row says why, and
     // the PNG row has no size to show.
-    const native = { size: '3024×4032', reason: null }
-    const zoomed = { size: '2400×1800', reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
+    const native = { size: '3024×4032', megapixels: '12.2 MP', frame: null, large: null, reason: null }
+    const zoomed = { size: '2400×1800', megapixels: '4.3 MP', frame: null, large: null, reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
     for (const c of [native, zoomed]) {
       expect(moreCaption('failed', c, true)).toStrictEqual({
         size: null,
@@ -174,25 +192,64 @@ describe('the save flow', () => {
     }
   })
 
-  it('the More sheet\'s first row: the size a save makes, and why when it is not the photo\'s own pixels', () => {
-    const native = { size: '3024×4032', reason: null }
-    const zoomed = { size: '2400×1800', reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
+  it("a photo whose frame's fill cannot be made: Save refuses with the fill's own words, in the card, its name, the More sheet and the question, and promises no size", () => {
+    expect(saveRefusal('fillFailed')).toBe(FILL_MISSING)
+    expect(saveRefusal('failed')).toBe(PHOTO_MISSING)
+    for (const m of ['none', 'loading', 'ready'] as const) expect(saveRefusal(m)).toBeNull()
+    expect(FILL_MISSING).not.toBe(PHOTO_MISSING)
+    expect(canStart(IDLE, 'fillFailed')).toBe(false)
+    expect(saveButton(IDLE, 'fillFailed')).toStrictEqual({ text: 'Save', busy: false, disabled: true, why: FILL_MISSING })
+    expect(saveLabel(IDLE, 'fillFailed', words('2822×3528'))).toBe(`Save: ${FILL_MISSING}`)
+    // One persistent note: the card, an alert, with a way out (the photo
+    // chosen again; the words name Paper, which needs nothing made).
+    expect(saveStatus(IDLE, 'fillFailed')).toEqual({ text: FILL_MISSING, alert: true, busy: false, action: 'choose' })
+    expect(moreCaption('fillFailed', { size: '2822×3528', megapixels: '10.0 MP', frame: 'with a 252 px frame', large: null, reason: null }, true)).toStrictEqual({
+      size: null,
+      word: FILL_MISSING,
+      meta: 'Nothing is saved with its frame left Paper.',
+      alert: true,
+    })
+  })
+
+  it('the More sheet\'s first row: the size a save makes, why when it is not the photo\'s own pixels, its megapixels and the frame', () => {
+    const native = { size: '3024×4032', megapixels: '12.2 MP', frame: null, large: null, reason: null }
+    const zoomed = { size: '2400×1800', megapixels: '4.3 MP', frame: null, large: null, reason: 'photo is 1600×1200 at 300% zoom: upscaled 4.5x' }
     expect(moreCaption('ready', native, true)).toStrictEqual({
       size: '3024×4032',
       word: 'Saves 3024×4032',
-      meta: "The photo's own pixels, one for one.",
+      meta: "The photo's own pixels, one for one. 12.2 MP.",
       alert: false,
     })
-    expect(moreCaption('ready', zoomed, true)).toStrictEqual({ size: '2400×1800', word: 'Saves 2400×1800', meta: zoomed.reason, alert: false })
+    expect(moreCaption('ready', zoomed, true)).toStrictEqual({
+      size: '2400×1800',
+      word: 'Saves 2400×1800',
+      meta: 'Photo is 1600×1200 at 300% zoom: upscaled 4.5x. 4.3 MP.',
+      alert: false,
+    })
     // While the photo decodes the plan is already known (the layer's own
     // dimensions): the size stands.
     expect(moreCaption('loading', native, true).size).toBe('3024×4032')
-    expect(moreCaption('none', { size: '2880×3600', reason: null }, false)).toStrictEqual({
+    expect(moreCaption('none', { size: '2880×3600', megapixels: '10.4 MP', frame: null, large: null, reason: null }, false)).toStrictEqual({
       size: '2880×3600',
       word: 'Saves 2880×3600',
-      meta: 'No photo: type on bare paper.',
+      meta: 'No photo: type on bare paper. 10.4 MP.',
       alert: false,
     })
+  })
+
+  it('framed, the row says the border the frame adds, and past 100 MP that a phone may not finish it, from the real caption', () => {
+    const photo40 = makeMedia({ id: 'p', width: 7728, height: 5152 })
+    const framed = { ...defaultSettings(), aspect: 'original' as const, media: photo40, frame: { ...frameDefaults(), width: FRAME_WIDTH_FIRST } }
+    expect(moreCaption('ready', describePlan(planPrint(framed), framed), true)).toStrictEqual({
+      size: '9016×6440',
+      word: 'Saves 9016×6440',
+      meta: "The photo's own pixels, one for one. 58.1 MP, with a 644 px frame.",
+      alert: false,
+    })
+    const portrait = { ...framed, aspect: '16:9' as const, media: makeMedia({ id: 'q', width: 5152, height: 7728 }), frame: { ...framed.frame, mode: 'fit' as const } }
+    const big = moreCaption('ready', describePlan(planPrint(portrait), portrait), true)
+    expect(big.word).toBe('Saves 18414×10358')
+    expect(big.meta).toBe("The photo's own pixels, one for one. 190.7 MP, with a 1315 px frame, a very large print: a phone may not finish it.")
   })
 
   it('the card: an error is an alert with a dismiss; progress is busy, with Cancel', () => {
@@ -225,11 +282,11 @@ describe('the save flow', () => {
       saveReducer(IDLE, { type: 'interrupted', format: 'jpeg', height: 3780 }),
     ]
     for (const s of states) {
-      for (const m of ['none', 'loading', 'ready', 'failed'] as const) {
+      for (const m of ['none', 'loading', 'ready', 'failed', 'fillFailed'] as const) {
         const b = saveButton(s, m)
         expect(['Save', 'Saving', 'Share']).toContain(b.text)
         // The name starts with the word on screen (WCAG 2.5.3).
-        expect(saveLabel(s, m, '3024×3780').startsWith(b.text)).toBe(true)
+        expect(saveLabel(s, m, { size: '3024×3780', frame: 'with a 252 px frame', large: null }).startsWith(b.text)).toBe(true)
       }
     }
   })
@@ -250,7 +307,7 @@ describe('the save flow', () => {
     expect(at(19, 20)).toBe('Pressing 3024×3780, 95%')
     const pressing = run([{ type: 'photoLoaded' }, { type: 'progress', progress: { step: 'press', band: 2, bands: 6 } }], start)
     expect(saveButton(pressing, 'ready')).toEqual({ text: 'Saving', busy: true, disabled: true })
-    expect(saveLabel(pressing, 'ready', '3024×3780')).toBe('Saving 3024×3780')
+    expect(saveLabel(pressing, 'ready', words('3024×3780'))).toBe('Saving 3024×3780')
     expect(progressText(saveReducer(pressing, { type: 'progress', progress: { step: 'write', band: 6, bands: 6 } }))).toBe(
       'Pressing 3024×3780: writing the file',
     )
@@ -335,11 +392,12 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     const log = {
       full: [] as string[],
       resized: [] as string[],
-      pressed: [] as Parameters<SaveDeps['savePrint']>[2][],
+      pressed: [] as Parameters<SaveDeps['savePrint']>[3][],
       canvases: [] as string[],
       bitmaps: [] as ReturnType<typeof bitmap>[],
     }
     const d: SaveDeps = {
+      frameInputs: async (settings) => (settings.media?.palette ? { palette: settings.media.palette } : {}),
       decodeOriginal: async (id) => {
         log.full.push(id)
         const b = bitmap(4032, 3024)
@@ -352,10 +410,9 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
         log.bitmaps.push(b)
         return b as unknown as ImageBitmap
       },
-      savePrint: async (settings, _media, opts) => {
+      savePrint: async (settings, _media, _inputs, opts) => {
         log.pressed.push(opts)
-        const m = settings.media
-        const p = planExport(sheetAspect(settings), m ? { width: m.width, height: m.height, scale: m.scale } : null, { maxHeight: opts?.maxHeight, format: opts?.format })
+        const p = planPrint(settings, { maxHeight: opts?.maxHeight, format: opts?.format })
         opts?.onGround?.()
         return { blob: new Blob([new Uint8Array(10)]), plan: p, format: opts?.format ?? 'jpeg' }
       },
@@ -378,6 +435,59 @@ describe('the press behind Save: the photo decoded as the print needs it, and wh
     // On the page's canvases: the engine makes none of its own.
     expect(log.pressed[0]!.makeCanvas).toBe(d.makeCanvas)
     expect(log.bitmaps.every((b) => b.closed >= 1)).toBe(true)
+  })
+
+  it("the frame's inputs are made before the original is decoded, and the press is handed them", async () => {
+    const order: string[] = []
+    const palette = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
+    const inputs: unknown[] = []
+    const base = deps().d
+    const { d } = deps({
+      frameInputs: async () => (order.push('inputs'), { palette }),
+      decodeOriginal: async (id) => (order.push('original'), base.decodeOriginal(id)),
+      savePrint: async (settings, media, got, opts) => (inputs.push(got), base.savePrint(settings, media, got, opts)),
+    })
+    expect((await pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, d)).kind).toBe('pressed')
+    expect(order).toEqual(['inputs', 'original'])
+    expect(inputs).toEqual([{ palette }])
+    // Inputs that cannot be made: refused with the fill's own words (the
+    // page's), and nothing is decoded or pressed. A stored photo that is gone
+    // is said as that.
+    const failing = deps({ frameInputs: async () => Promise.reject(new Error("The photo's colours could not be read: no")) })
+    const refused = pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, failing.d)
+    await expect(refused).rejects.toBeInstanceOf(FillMissingError)
+    await expect(refused).rejects.toThrow(FILL_MISSING)
+    expect([failing.log.full, failing.log.pressed]).toEqual([[], []])
+    const gone = deps({ frameInputs: async () => Promise.reject(new MissingPhotoError()) })
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg' }, gone.d)).rejects.toThrow(PHOTO_MISSING)
+    expect([gone.log.full, gone.log.pressed]).toEqual([[], []])
+  })
+
+  it('a Cancel while the frame\'s inputs are waited for ends the save then, and nothing is decoded or pressed after them', async () => {
+    // The inputs held (a frame-source decode still running, any photo's).
+    let release!: (v: { palette?: undefined }) => void
+    const held = new Promise<{ palette?: undefined }>((r) => (release = r))
+    const { d, log } = deps({ frameInputs: () => held })
+    const controller = new AbortController()
+    const saving = pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: controller.signal }, d)
+    let settled = false
+    saving.catch(() => {}).finally(() => (settled = true))
+    await new Promise((r) => setTimeout(r, 5))
+    expect(settled).toBe(false)
+    controller.abort()
+    await expect(saving).rejects.toMatchObject({ name: 'AbortError' })
+    // The decodes end later: nothing follows them.
+    release({})
+    await new Promise((r) => setTimeout(r, 5))
+    expect([log.full, log.resized, log.pressed]).toEqual([[], [], []])
+    // A Cancel before the wait begins is taken too; a failure is still the
+    // fill's words, and a wait that ends first is the save's as before.
+    const early = new AbortController()
+    early.abort()
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: early.signal }, deps({ frameInputs: () => held }).d)).rejects.toMatchObject({ name: 'AbortError' })
+    const failing = deps({ frameInputs: async () => Promise.reject(new Error('no')) })
+    await expect(pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: new AbortController().signal }, failing.d)).rejects.toBeInstanceOf(FillMissingError)
+    expect((await pressForSave({ settings: doc(4032, 3024), format: 'jpeg', signal: new AbortController().signal }, deps().d)).kind).toBe('pressed')
   })
 
   it('a smaller copy decodes the photo straight to its integer rectangle and presses it there, 1:1', async () => {

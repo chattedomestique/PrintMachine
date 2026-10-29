@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import {
   CanvasLimitError,
+  MissingPhotoError,
   PHOTO_MISSING,
   SMALLER_STEP,
   SMALLEST_COPY_HEIGHT,
@@ -13,14 +14,17 @@ import {
   printFile,
   savePrint,
   type ExportFormat,
+  type PlanWords,
   type PressedPrint,
 } from '../../engine/export.ts'
 import type { ExportPlan } from '../../engine/exportPlan.ts'
+import { effectiveMode, layoutSheet } from '../../engine/frame.ts'
 import { snapCopyRect, type DrawRect } from '../../engine/media.ts'
-import { groundRect, throwIfAborted, type RenderProgress } from '../../engine/render.ts'
+import { throwIfAborted, type RenderProgress } from '../../engine/render.ts'
 import type { PrintSettings } from '../../engine/types.ts'
 import { PhotoDecodeError, decodeOriginal, decodeResized } from '../media/decode.ts'
-import type { MediaState } from '../media/useMediaBitmap.ts'
+import { FILL_MISSING, FillMissingError, ensureFrameInputs, type PhotoState } from '../media/frameInputs.ts'
+import type { FrameInputs } from '../../engine/frame.ts'
 import { clearExportInFlight, markExportInFlight, takeExportInFlight } from '../../state/persist.ts'
 import { canShareFile, deliverFile, detachedCanvas, saveMessage } from './page.ts'
 
@@ -141,11 +145,21 @@ export function pressInProgress(state: SaveState): boolean {
   return state.kind === 'loadingPhoto' || state.kind === 'pressing'
 }
 
-/** Whether a tap may start a save: not while one runs, and not while the
- *  document's photo is still loading or failed to load (the Photo panel says
- *  why). */
-export function canStart(state: SaveState, media: MediaState): boolean {
-  return startsFrom(state) && media !== 'loading' && media !== 'failed'
+/**
+ * Why nothing can be pressed for the document's photo as it is, in the words
+ * every place that refuses says: its stored photo is gone or will not decode
+ * (PHOTO_MISSING), or the photo is drawn but its frame's fill cannot be made
+ * from it (FILL_MISSING). Null when nothing stands in the way.
+ */
+export function saveRefusal(media: PhotoState): string | null {
+  return media === 'failed' ? PHOTO_MISSING : media === 'fillFailed' ? FILL_MISSING : null
+}
+
+/** Whether a tap may start a save: not while one runs, not while the
+ *  document's photo is still loading, and not while it is refused
+ *  (saveRefusal; the status card says why). */
+export function canStart(state: SaveState, media: PhotoState): boolean {
+  return startsFrom(state) && media !== 'loading' && saveRefusal(media) === null
 }
 
 /**
@@ -163,7 +177,7 @@ export function canStart(state: SaveState, media: MediaState): boolean {
  */
 export function saveButton(
   state: SaveState,
-  media: MediaState,
+  media: PhotoState,
 ): { text: 'Save' | 'Saving' | 'Share'; busy: boolean; disabled: boolean; why?: string } {
   switch (state.kind) {
     case 'loadingPhoto':
@@ -175,23 +189,31 @@ export function saveButton(
     case 'idle':
     case 'error':
     case 'tooBig':
-    case 'interrupted':
+    case 'interrupted': {
       // The document's photo is still decoding: Save waits for it.
       if (media === 'loading') return { text: 'Save', busy: false, disabled: true }
-      // The document's photo is gone: no size is promised and nothing can be
-      // pressed until it is chosen again (never the type on bare paper).
-      if (media === 'failed') return { text: 'Save', busy: false, disabled: true, why: PHOTO_MISSING }
+      // The document's photo is gone, or its frame's fill cannot be made
+      // from it: no size is promised and nothing can be pressed until that
+      // changes (never the type on bare paper, never a frame quietly Paper).
+      const why = saveRefusal(media)
+      if (why) return { text: 'Save', busy: false, disabled: true, why }
       return { text: 'Save', busy: false, disabled: false }
+    }
   }
 }
 
 /**
  * Save's accessible name: its one word first (WCAG 2.5.3, the name starts
- * with the label you see), then what it would make or why it cannot.
+ * with the label you see), then what it would make or why it cannot. What it
+ * would make is said as the More sheet's first row says it: the size, and
+ * when the photo is framed the frame in pixels (a frame adds pixels the photo
+ * does not have), and past LARGE_PRINT_MP that a phone may not finish it, so
+ * the size a frame makes is stated before the tap, from every tool the frame
+ * is set in or seen from.
  *
- * @param size what Save makes now ("2419×3024"), from the caption.
+ * @param caption what Save makes now, from describePlan.
  */
-export function saveLabel(state: SaveState, media: MediaState, size: string): string {
+export function saveLabel(state: SaveState, media: PhotoState, caption: Pick<PlanWords, 'size' | 'frame' | 'large'>): string {
   const b = saveButton(state, media)
   if (b.why) return `${b.text}: ${b.why}`
   switch (state.kind) {
@@ -202,7 +224,8 @@ export function saveLabel(state: SaveState, media: MediaState, size: string): st
     case 'ready':
       return `Share ${dims(state.plan.width, state.plan.height)} (${fileSize(state.file.size)})`
     default:
-      return media === 'loading' ? 'Save: loading the photo' : `Save ${size} JPEG`
+      if (media === 'loading') return 'Save: loading the photo'
+      return `Save ${caption.size} JPEG${caption.frame ? ` ${caption.frame}` : ''}${caption.large ? `, ${caption.large}` : ''}`
   }
 }
 
@@ -222,18 +245,31 @@ export interface MoreCaption {
 
 /**
  * The More sheet's first row, from the caption (describePlan) and the
- * document's photo. While the photo cannot be loaded no size is promised, as
- * Save's name and the status card promise none: the row says why, the same
- * sentence, and nothing is saved without the photo.
+ * document's photo: the size a save makes, why when it is not the photo's own
+ * pixels, and its megapixels with the frame's border in pixels (a frame adds
+ * pixels the photo does not have, so how many is said before the tap), and
+ * past LARGE_PRINT_MP that a phone may not finish it (said, never acted on).
+ * While the photo cannot be loaded no size is promised, as Save's name and
+ * the status card promise none: the row says why, the same sentence, and
+ * nothing is saved without the photo.
  */
-export function moreCaption(media: MediaState, caption: { size: string; reason: string | null }, photo: boolean): MoreCaption {
+export function moreCaption(
+  media: PhotoState,
+  caption: Pick<PlanWords, 'size' | 'reason' | 'megapixels' | 'frame' | 'large'>,
+  photo: boolean,
+): MoreCaption {
   if (media === 'failed') {
     return { size: null, word: PHOTO_MISSING, meta: 'Nothing is saved without it: never the type on bare paper.', alert: true }
   }
+  if (media === 'fillFailed') {
+    return { size: null, word: FILL_MISSING, meta: 'Nothing is saved with its frame left Paper.', alert: true }
+  }
+  const why = caption.reason ?? (photo ? "the photo's own pixels, one for one" : 'no photo: type on bare paper')
+  const size = [caption.megapixels, caption.frame, caption.large].filter((w) => w !== null).join(', ')
   return {
     size: caption.size,
     word: `Saves ${caption.size}`,
-    meta: caption.reason ?? (photo ? "The photo's own pixels, one for one." : 'No photo: type on bare paper.'),
+    meta: `${why.charAt(0).toUpperCase()}${why.slice(1)}. ${size.charAt(0).toUpperCase()}${size.slice(1)}.`,
     alert: false,
   }
 }
@@ -266,7 +302,7 @@ export interface SaveStatus {
  * The status card: the save flow's state when it has something to say beyond
  * the one word on Save. Null: no card.
  */
-export function saveStatus(state: SaveState, media: MediaState): SaveStatus | null {
+export function saveStatus(state: SaveState, media: PhotoState): SaveStatus | null {
   const why = saveButton(state, media).why
   if (why) return { text: why, alert: true, busy: false, action: 'choose' }
   switch (state.kind) {
@@ -382,6 +418,9 @@ const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'A
 /** What a press for Save needs from the page: the decodes, the canvases and
  *  the press itself (a test hands in its own). */
 export interface SaveDeps {
+  /** What the frame's fill is made from, made now if the document does not
+   *  hold it (features/media `ensureFrameInputs`). */
+  frameInputs(settings: PrintSettings): Promise<FrameInputs>
   decodeOriginal(id: string): Promise<ImageBitmap>
   decodeResized(id: string, width: number, height: number): Promise<ImageBitmap>
   savePrint: typeof savePrint
@@ -394,6 +433,7 @@ export interface SaveDeps {
 
 /** The page's own. */
 export const PAGE: SaveDeps = {
+  frameInputs: (settings) => ensureFrameInputs(settings),
   decodeOriginal,
   decodeResized,
   savePrint,
@@ -412,9 +452,16 @@ export const PAGE: SaveDeps = {
   },
 }
 
-/** The rectangle a smaller copy's photo is decoded to and drawn at, 1:1. */
+/**
+ * The rectangle a smaller copy's photo is decoded to and drawn at, 1:1: the
+ * cover of the visible rectangle rounded up to whole pixels (`snapCopyRect`),
+ * or in Fit the contained rectangle itself, already whole and never widened
+ * to the area it sits in.
+ */
 export function copyRect(settings: PrintSettings, plan: ExportPlan): DrawRect | null {
-  return settings.media ? snapCopyRect(groundRect(settings.media, plan.width, plan.height), plan.width, plan.height) : null
+  const { photo, visible } = layoutSheet(settings, plan.width, plan.height)
+  if (!photo) return null
+  return effectiveMode(settings) === 'fit' ? photo : snapCopyRect(photo, visible)
 }
 
 /**
@@ -444,6 +491,11 @@ export type SaveResult = { kind: 'pressed'; pressed: PressedPrint } | { kind: 't
  * The press behind Save, with no UI in it: decode the photo, press, and, when
  * this device cannot, find the copy it can.
  *
+ *  - The frame's inputs (the photo's palette, Frosted's field) are made
+ *    first when the document does not hold them, and under any fill the
+ *    page's palette decode is waited for, and every other frame-source
+ *    decode still running (`ensureFrameInputs`), so the press never starts
+ *    without them and no such decode runs beside the original's.
  *  - A print at the photo's own size decodes the ORIGINAL in full. If that
  *    fails, it is a question of size only when a smaller decode of the same
  *    file succeeds (the import already decoded it once): then the largest
@@ -479,6 +531,24 @@ export async function pressForSave(
   }
   let photo: ImageBitmap | null = null
   try {
+    // The frame's inputs first: made from a decode of their own (the
+    // photo's colours), which is over before the original is decoded, as
+    // is any such decode still running for another photo or a frame no
+    // longer shown, so the two never hold their pixels at once. A photo
+    // whose fill they cannot be made from is refused, in the page's words
+    // for it (FILL_MISSING): never pressed with a frame quietly Paper. A
+    // stored photo that is gone is said as that.
+    // A Cancel while they are waited for (their decodes may be another
+    // photo's, and slow) ends the save at once: the decodes run on, nothing
+    // is decoded or pressed after them.
+    let inputs: FrameInputs
+    try {
+      inputs = await untilAborted(deps.frameInputs(settings), signal)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
+      throw err instanceof MissingPhotoError ? err : new FillMissingError()
+    }
+    throwIfAborted(signal)
     let rect: DrawRect | undefined
     if (settings.media) {
       if (plan.limit === 'smaller') {
@@ -501,7 +571,7 @@ export async function pressForSave(
     run.onPhotoLoaded?.()
     const decoded = photo
     try {
-      const pressed = await deps.savePrint(settings, decoded, {
+      const pressed = await deps.savePrint(settings, decoded, inputs, {
         format,
         maxHeight,
         signal,
@@ -524,6 +594,25 @@ export async function pressForSave(
   }
 }
 
+/**
+ * `work`, or the save's AbortError as soon as `signal` aborts, whichever comes
+ * first. The work is not stopped (a decode cannot be), only no longer waited
+ * for; what it settles with later is dropped, never an unhandled rejection.
+ */
+export function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work
+  work.catch(() => {})
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new DOMException('The save was cancelled.', 'AbortError'))
+    if (signal.aborted) return abort()
+    signal.addEventListener('abort', abort, { once: true })
+    work.then(
+      (v) => (signal.removeEventListener('abort', abort), resolve(v)),
+      (e) => (signal.removeEventListener('abort', abort), reject(e)),
+    )
+  })
+}
+
 /** Ask the screen to stay on while the print is pressed (a screen that sleeps
  *  suspends the page's timers, and a long press is when it would). Best
  *  effort: null where there is no Wake Lock (iOS before 16.4) or it is
@@ -544,7 +633,7 @@ async function keepAwake(): Promise<{ release(): Promise<void> } | null> {
  */
 export function useSave(
   settings: PrintSettings,
-  media: MediaState,
+  media: PhotoState,
   announce: (message: string | null, kind?: Announcement) => void,
 ) {
   const [state, dispatch] = useReducer(saveReducer, IDLE)

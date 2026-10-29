@@ -17,23 +17,26 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   BAND_HALVINGS,
   CanvasLimitError,
-  ENCODINGS,
-  JPEG_QUALITY,
-  MissingPhotoError,
-  SMALLER_STEP,
-  SMALLEST_COPY_HEIGHT,
+  checkNative,
   describePlan,
+  ENCODINGS,
   fileSize,
   findSmallerPlanAsync,
   fitsCanvas,
+  JPEG_QUALITY,
+  MissingPhotoError,
   planPrint,
+  planSheet,
   pressCanvases,
   printFile,
   savePrint,
+  SMALLER_STEP,
+  SMALLEST_COPY_HEIGHT,
 } from './export.ts'
 import { planExport } from './exportPlan.ts'
 import { DRAFT_HEIGHT, PREVIEW_HEIGHT, renderPrint, renderPrintAsync, type RenderProgress } from './render.ts'
-import { REFERENCE_HEIGHT, bandHeight } from './limits.ts'
+import { LARGE_PRINT_MP, REFERENCE_HEIGHT, bandHeight } from './limits.ts'
+import { layoutSheet, sheetAspect } from './frame.ts'
 import { quantTable, LUMA_QUANT } from './encode/jpeg.ts'
 import type { PrintSettings } from './types.ts'
 import { defaultSettings, makeLayer, makeMedia } from '../state/defaults.ts'
@@ -141,9 +144,25 @@ async function sof0(blob: Blob): Promise<{ w: number; h: number; sampling: numbe
   throw new Error('no SOF0')
 }
 
+/** Set by one test: the layout the press builds draws the photo half a pixel
+ *  off, as a planner and a layout that disagree would. Off, the layout is
+ *  frame.ts's own, untouched. */
+const misplace = vi.hoisted(() => ({ on: false }))
+vi.mock('./frame.ts', async (importOriginal) => {
+  const frame = await importOriginal<typeof import('./frame.ts')>()
+  return {
+    ...frame,
+    layoutSheet: (...args: Parameters<typeof frame.layoutSheet>) => {
+      const layout = frame.layoutSheet(...args)
+      return misplace.on && layout.photo ? { ...layout, photo: { ...layout.photo, dx: layout.photo.dx + 0.5 } } : layout
+    },
+  }
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
   delete (globalThis as { __PM_TEST__?: unknown }).__PM_TEST__
+  misplace.on = false
 })
 
 describe('the export height: the planner, never the preview', () => {
@@ -164,11 +183,17 @@ describe('the export height: the planner, never the preview', () => {
     }
   })
 
-  it('plans from the photo\'s true size and zoom, through the sheet\'s numeric aspect, in the file\'s format', () => {
+  it('plans from the photo\'s true size and zoom, through the sheet\'s numeric aspect and its frame, in the file\'s format', () => {
     const s = withPhoto(5712, 4284, { aspect: 'original' })
-    expect(planPrint(s)).toEqual(planExport(5712 / 4284, { width: 5712, height: 4284, scale: 1 }, { format: 'jpeg' }))
-    expect(planPrint(s, { format: 'png' })).toEqual(planExport(5712 / 4284, { width: 5712, height: 4284, scale: 1 }))
-    expect(planPrint(defaultSettings())).toEqual(planExport(4 / 5, null))
+    const own = { aspect: 5712 / 4284, original: true, width: 0, mode: 'crop' as const }
+    expect(planSheet(s)).toEqual(own)
+    expect(planPrint(s)).toEqual(planExport(own, { width: 5712, height: 4284, scale: 1 }, { format: 'jpeg' }))
+    expect(planPrint(s, { format: 'png' })).toEqual(planExport(own, { width: 5712, height: 4284, scale: 1 }))
+    expect(planPrint(defaultSettings())).toEqual(planExport({ aspect: 4 / 5 }, null))
+    // The frame and the mode the layout uses: an Original sheet is Crop.
+    const framed = { ...s, frame: { ...s.frame, width: 0.05, mode: 'fit' as const } }
+    expect(planSheet(framed)).toEqual({ ...own, aspect: sheetAspect(framed), width: 0.05 })
+    expect(planSheet({ ...framed, aspect: '4:5' })).toEqual({ aspect: 4 / 5, original: false, width: 0.05, mode: 'fit' })
   })
 
   it('presses at the planned size: the file\'s frame is the plan\'s, for a print with a photo and one without', { timeout: 30_000 }, async () => {
@@ -177,7 +202,7 @@ describe('the export height: the planner, never the preview', () => {
       [withPhoto(1600, 1200), decoded(1600, 1200), 700],
       [withPhoto(1600, 1200), decoded(1600, 1200), undefined],
     ] as const) {
-      const pressed = await savePrint(s, media, { maxHeight, makeCanvas: canvases().makeCanvas })
+      const pressed = await savePrint(s, media, {}, { maxHeight, makeCanvas: canvases().makeCanvas })
       const plan = planPrint(s, { maxHeight })
       expect(pressed.plan).toEqual(plan)
       const f = await sof0(pressed.blob)
@@ -186,12 +211,57 @@ describe('the export height: the planner, never the preview', () => {
   })
 })
 
+describe('a native plan is pressed at the photo\'s own pixels, or not at all', () => {
+  const thrown = (f: () => unknown) => {
+    try {
+      f()
+    } catch (e) {
+      return e
+    }
+    return null
+  }
+
+  it('the layout the press builds must draw the photo at its own size, at a whole-pixel offset: Crop, Original and Fit', () => {
+    const fit = withPhoto(4032, 3024, { aspect: '1:1' })
+    for (const s of [withPhoto(4032, 3024), withPhoto(7728, 5152, { aspect: 'original' }), { ...fit, frame: { ...fit.frame, width: 1 / 14, mode: 'fit' as const } }]) {
+      const plan = planPrint(s)
+      expect(plan.limit).toBe('native')
+      const layout = layoutSheet(s, plan.width, plan.height)
+      expect(thrown(() => checkNative(plan, layout, s.media))).toBeNull()
+      const r = layout.photo!
+      // Half a pixel off, a pixel too wide, a pixel short: each would be a
+      // resample under a caption that says the photo's own pixels.
+      for (const photo of [{ ...r, dx: r.dx + 0.5 }, { ...r, dw: r.dw + 1 }, { ...r, dh: r.dh - 1 }]) {
+        const err = thrown(() => checkNative(plan, { ...layout, photo }, s.media))
+        expect(err).toBeInstanceOf(Error)
+        expect(err).not.toBeInstanceOf(RangeError)
+      }
+    }
+    // A plan that is not native promises nothing to check: an enlarged photo.
+    const small = withPhoto(1600, 1200)
+    const floor = planPrint(small)
+    expect(floor.limit).toBe('floor')
+    expect(thrown(() => checkNative(floor, layoutSheet(small, floor.width, floor.height), small.media))).toBeNull()
+  })
+
+  it('Save runs it before it makes a canvas: a layout that disagrees with the plan is a plain Error, never offered a smaller copy', async () => {
+    const s = withPhoto(4032, 3024)
+    misplace.on = true
+    const c = canvases()
+    const err = await savePrint(s, decoded(4032, 3024), {}, { makeCanvas: c.makeCanvas }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err).not.toBeInstanceOf(CanvasLimitError)
+    expect((err as Error).message).toMatch(/^A 2419×3024 print planned at the photo's own pixels would draw its 4032×3024 photo 4032×3024 at \(/)
+    expect(c.made).toHaveLength(0)
+  })
+})
+
 describe('the file', () => {
   it('JPEG at quality 95 with every colour sample kept (4:4:4); PNG lossless', async () => {
     expect(JPEG_QUALITY).toBe(0.95)
     expect(ENCODINGS.jpeg).toEqual({ mime: 'image/jpeg', ext: 'jpg', quality: 95 })
     expect(ENCODINGS.png).toEqual({ mime: 'image/png', ext: 'png', quality: undefined })
-    const jpeg = await savePrint(defaultSettings(), null, { maxHeight: 600, makeCanvas: canvases().makeCanvas })
+    const jpeg = await savePrint(defaultSettings(), null, {}, { maxHeight: 600, makeCanvas: canvases().makeCanvas })
     expect(jpeg.blob.type).toBe('image/jpeg')
     const f = await sof0(jpeg.blob)
     expect(f).toEqual({ w: 480, h: 600, sampling: [0x11, 0x11, 0x11] })
@@ -203,7 +273,7 @@ describe('the file', () => {
 
     // No CompressionStream here, as on iOS before 16.4: stored deflate.
     vi.stubGlobal('CompressionStream', undefined)
-    const png = await savePrint(defaultSettings(), null, { format: 'png', maxHeight: 600, makeCanvas: canvases().makeCanvas })
+    const png = await savePrint(defaultSettings(), null, {}, { format: 'png', maxHeight: 600, makeCanvas: canvases().makeCanvas })
     const p = new Uint8Array(await png.blob.arrayBuffer())
     expect([...p.subarray(1, 4)].map((c) => String.fromCharCode(c)).join('')).toBe('PNG')
     const view = new DataView(p.buffer, p.byteOffset)
@@ -213,17 +283,17 @@ describe('the file', () => {
 
   it('lets every canvas it made go once the file exists, and when the press fails', async () => {
     const ok = canvases()
-    await savePrint(defaultSettings(), null, { maxHeight: 600, makeCanvas: ok.makeCanvas })
+    await savePrint(defaultSettings(), null, {}, { maxHeight: 600, makeCanvas: ok.makeCanvas })
     expect(ok.made.length).toBeGreaterThan(0)
     for (const c of ok.made) expect(c.ctx.canvas.width).toBe(0)
     const blank = canvases({ maxArea: 1000 })
-    await expect(savePrint(defaultSettings(), null, { maxHeight: 600, makeCanvas: blank.makeCanvas })).rejects.toBeInstanceOf(CanvasLimitError)
+    await expect(savePrint(defaultSettings(), null, {}, { maxHeight: 600, makeCanvas: blank.makeCanvas })).rejects.toBeInstanceOf(CanvasLimitError)
     for (const c of blank.made) expect(c.ctx.canvas.width).toBe(0)
   })
 
   it('never prints a photo document without its photo, and makes no canvas for it', async () => {
     const c = canvases()
-    await expect(savePrint(withPhoto(100, 100), null, { makeCanvas: c.makeCanvas })).rejects.toBeInstanceOf(MissingPhotoError)
+    await expect(savePrint(withPhoto(100, 100), null, {}, { makeCanvas: c.makeCanvas })).rejects.toBeInstanceOf(MissingPhotoError)
     expect(c.made).toEqual([])
   })
 
@@ -239,7 +309,7 @@ describe('the file', () => {
     }
     const c = canvases()
     const steps: RenderProgress['step'][] = []
-    const run = savePrint(defaultSettings(), null, { maxHeight: 600, signal: controller.signal, makeCanvas: c.makeCanvas, onProgress: (p) => steps.push(p.step) })
+    const run = savePrint(defaultSettings(), null, {}, { maxHeight: 600, signal: controller.signal, makeCanvas: c.makeCanvas, onProgress: (p) => steps.push(p.step) })
     await expect(run).rejects.toMatchObject({ name: 'AbortError' })
     expect(started).toBe(1)
     expect(steps[steps.length - 1]).toBe('write')
@@ -286,7 +356,7 @@ describe('every canvas the press makes, proved first, at its real size', () => {
     // Canvases wider than 2000 px read back blank: the 2419 px tile.
     const c = canvases({ maxWidth: 2000 })
     const steps: RenderProgress[] = []
-    const err = await savePrint(s, decoded(4032, 3024), { makeCanvas: c.makeCanvas, onProgress: (p) => steps.push(p) }).catch((e: unknown) => e)
+    const err = await savePrint(s, decoded(4032, 3024), {}, { makeCanvas: c.makeCanvas, onProgress: (p) => steps.push(p) }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(CanvasLimitError)
     expect((err as CanvasLimitError).plan).toEqual(planPrint(s))
     expect((err as Error).message).toBe("This device couldn't press 2419×3024 (a canvas came back blank).")
@@ -295,7 +365,7 @@ describe('every canvas the press makes, proved first, at its real size', () => {
     for (const m of c.made) expect(m.ctx.canvas.width).toBe(0)
     // The photo's band canvas is proved too.
     const piece = canvases({ maxArea: 2419 * 1733 - 1 })
-    const err2 = await savePrint(s, decoded(4032, 3024), { makeCanvas: piece.makeCanvas }).catch((e: unknown) => e)
+    const err2 = await savePrint(s, decoded(4032, 3024), {}, { makeCanvas: piece.makeCanvas }).catch((e: unknown) => e)
     expect(err2).toBeInstanceOf(CanvasLimitError)
   })
 })
@@ -332,7 +402,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
     let grounded = 0
     const restore = fault ? faulty((bytes) => fault(bytes, band)) : () => {}
     try {
-      const pressed = await savePrint(s(), decoded(1600, 1200), {
+      const pressed = await savePrint(s(), decoded(1600, 1200), {}, {
         makeCanvas: canvases().makeCanvas,
         onGround: () => grounded++,
         onProgress: (p) => {
@@ -372,7 +442,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
     let pressedAgain = 0
     const restore = faulty((bytes) => bytes >= 1 << 20 && thrown++ === 0)
     try {
-      await savePrint(defaultSettings(), null, { maxHeight: 1800, makeCanvas: canvases().makeCanvas, onProgress: (p) => (pressedAgain = p.bands) })
+      await savePrint(defaultSettings(), null, {}, { maxHeight: 1800, makeCanvas: canvases().makeCanvas, onProgress: (p) => (pressedAgain = p.bands) })
     } finally {
       restore()
     }
@@ -385,7 +455,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
     let thrown = 0
     const restore = faulty((bytes) => grounded && bytes >= 1 << 18 && thrown++ === 0)
     try {
-      const err = await savePrint(withPhoto(1600, 1200), decoded(1600, 1200), { makeCanvas: canvases().makeCanvas, onGround: () => (grounded = true) }).catch((e: unknown) => e)
+      const err = await savePrint(withPhoto(1600, 1200), decoded(1600, 1200), {}, { makeCanvas: canvases().makeCanvas, onGround: () => (grounded = true) }).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(CanvasLimitError)
       expect((err as CanvasLimitError).why).toBe('Array buffer allocation failed')
     } finally {
@@ -396,7 +466,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
     const restore2 = faulty((bytes) => bytes === 1456 * 1440 * 4 / 2 ** attempts && ++attempts > 0)
     try {
       // 1440 x 1800: bands of 1456 rows, halved exactly.
-      const err = await savePrint(withPhoto(1600, 1200), decoded(1600, 1200), { makeCanvas: canvases().makeCanvas }).catch((e: unknown) => e)
+      const err = await savePrint(withPhoto(1600, 1200), decoded(1600, 1200), {}, { makeCanvas: canvases().makeCanvas }).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(CanvasLimitError)
     } finally {
       restore2()
@@ -411,7 +481,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
       return false
     })
     try {
-      const err = await savePrint(defaultSettings(), null, { maxHeight: 600, makeCanvas: canvases().makeCanvas }).catch((e: unknown) => e)
+      const err = await savePrint(defaultSettings(), null, {}, { maxHeight: 600, makeCanvas: canvases().makeCanvas }).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(TypeError)
     } finally {
       restore()
@@ -439,7 +509,7 @@ describe('out of memory: the press again, in bands half as tall, to the same fil
         }
         return ctx
       }
-      const err = await savePrint(defaultSettings(), null, { maxHeight: 1800, makeCanvas }).catch((e: unknown) => e)
+      const err = await savePrint(defaultSettings(), null, {}, { maxHeight: 1800, makeCanvas }).catch((e: unknown) => e)
       return { err, reads }
     }
     const bug = await press(() => new Error('rowsFromTiles: rows [1389, 1459) do not fit the span of 69'))
@@ -514,7 +584,7 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
   it('reports every band of the press, and prints what the sync render prints', async () => {
     const seen: RenderProgress[] = []
     let grounded = 0
-    await renderPrintAsync(fakeContext().ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {
+    await renderPrintAsync(fakeContext().ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {}, {
       onProgress: (p) => seen.push(p),
       onGround: () => grounded++,
     })
@@ -549,17 +619,17 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
     const b = fakeContext()
     const asyncOut = capture(a)
     const syncOut = capture(b)
-    await renderPrintAsync(a.ctx, fakeContext().ctx, doc(), 300, decoded(400, 500))
-    renderPrint(b.ctx, fakeContext().ctx, doc(), { current: null }, null, 300, decoded(400, 500))
+    await renderPrintAsync(a.ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {})
+    renderPrint(b.ctx, fakeContext().ctx, doc(), { current: null }, null, 300, decoded(400, 500), {})
     expect(asyncOut.bands).toBeGreaterThan(0)
     expect(asyncOut.data.length).toBe(240 * 300 * 4)
     expect(asyncOut.data).toEqual(syncOut.data)
-  })
+  }, 30_000)
 
   it('stops at the next step once cancelled, with an AbortError', async () => {
     const controller = new AbortController()
     let presses = 0
-    const run = renderPrintAsync(fakeContext().ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {
+    const run = renderPrintAsync(fakeContext().ctx, fakeContext().ctx, doc(), 300, decoded(400, 500), {}, {
       signal: controller.signal,
       onProgress: (p) => {
         if (p.step === 'press') presses++
@@ -573,7 +643,7 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
   it('a Cancel mid-press of a save: an AbortError at the next step, no file', async () => {
     const controller = new AbortController()
     let steps = 0
-    const run = savePrint(defaultSettings(), null, {
+    const run = savePrint(defaultSettings(), null, {}, {
       maxHeight: 600,
       signal: controller.signal,
       makeCanvas: canvases().makeCanvas,
@@ -587,36 +657,69 @@ describe('the async render: the same stages, with yields, progress and Cancel', 
 })
 
 describe('what Save says', () => {
-  const plan = (s: PrintSettings) => describePlan(planPrint(s), s.media)
+  const plan = (s: PrintSettings) => describePlan(planPrint(s), s)
+  const words = (size: string, megapixels: string, reason: string | null = null) => ({ size, megapixels, frame: null, large: null, reason })
 
-  it('the pixel size, and nothing more when the print is the photo\'s own pixels', () => {
-    expect(plan(withPhoto(4032, 3024))).toEqual({ size: '2419×3024', reason: null })
-    expect(plan(defaultSettings())).toEqual({ size: '2880×3600', reason: null })
+  it('the pixel size and megapixels, and nothing more when the print is the photo\'s own pixels', () => {
+    expect(plan(withPhoto(4032, 3024))).toEqual(words('2419×3024', '7.3 MP'))
+    expect(plan(defaultSettings())).toEqual(words('2880×3600', '10.4 MP'))
+  })
+
+  it('a frame, in pixels: it adds pixels the photo does not have', () => {
+    const s = withPhoto(7728, 5152, { aspect: 'original' })
+    expect(plan({ ...s, frame: { ...s.frame, width: 1 / 14 } })).toEqual({ ...words('9016×6440', '58.1 MP'), frame: 'with a 644 px frame' })
+  })
+
+  it(`over ${LARGE_PRINT_MP} MP, that a phone may not finish it; nothing is made smaller for it`, () => {
+    const s = withPhoto(5152, 7728, { aspect: '16:9' })
+    const fit = { ...s, frame: { ...s.frame, width: 1 / 14, mode: 'fit' as const } }
+    const p = planPrint(fit)
+    expect(p).toMatchObject({ width: 18414, height: 10358, limit: 'native' })
+    expect(describePlan(p, fit)).toEqual({
+      ...words('18414×10358', '190.7 MP'),
+      frame: 'with a 1315 px frame',
+      large: 'a very large print: a phone may not finish it',
+    })
+    // At the line exactly, not yet.
+    expect(describePlan({ ...p, width: 10_000, height: 10_000 }, defaultSettings()).large).toBeNull()
+    expect(describePlan({ ...p, width: 10_000, height: 10_001 }, defaultSettings()).large).not.toBeNull()
   })
 
   it('an enlarged photo, in numbers', () => {
-    expect(plan(withPhoto(1600, 1200))).toEqual({ size: '1440×1800', reason: 'photo is 1600×1200: upscaled 1.5x' })
+    expect(plan(withPhoto(1600, 1200))).toEqual(words('1440×1800', '2.6 MP', 'photo is 1600×1200: upscaled 1.5x'))
     expect(plan(withPhoto(4032, 3024, { media: makeMedia({ id: 'p', width: 4032, height: 3024, scale: 4 }) })).reason).toBe(
       'photo is 4032×3024 at 400% zoom: upscaled 2.38x',
     )
   })
 
+  it('Fit reads no zoom, so says none: a zoom kept from Crop is left out, on Original it is said whatever mode is stored', () => {
+    const zoomed = withPhoto(800, 600, { media: makeMedia({ id: 'p', width: 800, height: 600, scale: 2 }) })
+    const framed = (mode: 'crop' | 'fit', over: Partial<PrintSettings> = {}): PrintSettings => ({ ...zoomed, ...over, frame: { ...zoomed.frame, width: 1 / 14, mode } })
+    expect(plan(framed('crop')).reason).toBe('photo is 800×600 at 200% zoom: upscaled 5.14x')
+    expect(plan(framed('fit')).reason).toBe('photo is 800×600: upscaled 1.48x')
+    expect(plan(framed('fit', { aspect: 'original' })).reason).toMatch(/^photo is 800×600 at 200% zoom: upscaled /)
+  })
+
   it('no ceiling: a 24 MP and a 40 MP photo on their own sheets and cropped, at their own pixels, with nothing to explain', () => {
-    expect(plan(withPhoto(5712, 4284, { aspect: 'original' }))).toEqual({ size: '5712×4284', reason: null })
-    expect(plan(withPhoto(5712, 4284))).toEqual({ size: '3427×4284', reason: null })
-    expect(plan(withPhoto(7728, 5152, { aspect: 'original' }))).toEqual({ size: '7728×5152', reason: null })
-    expect(plan(withPhoto(7728, 5152))).toEqual({ size: '4122×5152', reason: null })
-    expect(plan(withPhoto(7728, 5152, { aspect: '1:1' }))).toEqual({ size: '5152×5152', reason: null })
+    expect(plan(withPhoto(5712, 4284, { aspect: 'original' }))).toEqual(words('5712×4284', '24.5 MP'))
+    expect(plan(withPhoto(5712, 4284))).toEqual(words('3427×4284', '14.7 MP'))
+    expect(plan(withPhoto(7728, 5152, { aspect: 'original' }))).toEqual(words('7728×5152', '39.8 MP'))
+    expect(plan(withPhoto(7728, 5152))).toEqual(words('4122×5152', '21.2 MP'))
+    expect(plan(withPhoto(7728, 5152, { aspect: '1:1' }))).toEqual(words('5152×5152', '26.5 MP'))
   })
 
   it('past a JPEG\'s edge (65,535 px), the largest JPEG, and how to get the photo\'s full size', () => {
     // A 3:1 panorama of 120,000 px (the widest an Original sheet is).
     const s = withPhoto(120_000, 40_000, { aspect: 'original' })
-    expect(describePlan(planPrint(s), s.media)).toEqual({
-      size: '65535×21845',
+    expect(describePlan(planPrint(s), s)).toEqual({
+      ...words('65535×21845', '1431.6 MP'),
+      large: 'a very large print: a phone may not finish it',
       reason: "JPEG holds at most 65,535 px a side: Save lossless PNG for the photo's full size",
     })
-    expect(describePlan(planPrint(s, { format: 'png' }), s.media)).toEqual({ size: '120000×40000', reason: null })
+    expect(describePlan(planPrint(s, { format: 'png' }), s)).toEqual({
+      ...words('120000×40000', '4800.0 MP'),
+      large: 'a very large print: a phone may not finish it',
+    })
   })
 
   it('a size in MB or KB', () => {

@@ -9,7 +9,8 @@ import { describe, expect, it } from 'vitest'
 import { defaultSettings, makeLayer } from '../../state/defaults.ts'
 import { historyReducer, initHistory } from '../../state/settingsReducer.ts'
 import { SIZE_MAX, SIZE_MIN } from '../../engine/limits.ts'
-import { DRAG_SLOP, beginGesture, stepGesture, type GestureLimits, type GesturePatch } from './gesture.ts'
+import { DRAG_SLOP, beginGesture, stepGesture, visibleBox, type GestureLimits, type GesturePatch } from './gesture.ts'
+import { layoutSheet } from '../../engine/frame.ts'
 
 const LIMITS: GestureLimits = { size: [SIZE_MIN, SIZE_MAX], position: [-0.3, 1.3] }
 const BOX = { width: 400, height: 500 }
@@ -97,5 +98,61 @@ describe('a touch on the sheet', () => {
     expect(far).toEqual({ x: 1.3, y: -0.3 })
     const pinch = beginGesture(b, [{ x: 0, y: 0 }, { x: 10, y: 0 }], false)
     expect(stepGesture(pinch, [{ x: 0, y: 0 }, { x: 10000, y: 0 }], BOX, LIMITS).patch?.size).toBe(SIZE_MAX)
+  })
+})
+
+describe('a drag on the photo, inside its frame', () => {
+  // A 400 x 500 sheet on screen with a frame a tenth of its long side: the
+  // visible rectangle is 300 x 400. The photo zoomed to 200%, so it travels.
+  const frame = { width: 0.1, corners: 0, fill: 'photo' as const, blur: 60, mode: 'crop' as const }
+  const media = { id: 'p', width: 4000, height: 3000, scale: 2, x: 0.5, y: 0.5 }
+  const doc = (x: number, y: number) => ({ aspect: '4:5' as const, media: { ...media, x, y }, frame })
+  const LIMITS_PHOTO: GestureLimits = { size: [1, 4], position: [-Infinity, Infinity] }
+
+  it('is measured against the visible rectangle, not the sheet', () => {
+    expect(visibleBox(BOX, 0.1)).toEqual({ width: 300, height: 400, left: 50, top: 50 })
+    expect(visibleBox(BOX, 0)).toEqual({ ...BOX, left: 0, top: 0 })
+  })
+
+  it('moves the photo with the finger, pixel for pixel, on the sheet as it is laid out', () => {
+    const target = { id: 'p', x: 0.5, y: 0.5, size: 2, rotation: 0 }
+    const g = beginGesture(target, [{ x: 200, y: 250 }], false)
+    const step = stepGesture(g, [{ x: 230, y: 230 }], visibleBox(BOX, frame.width), LIMITS_PHOTO)
+    const before = layoutSheet(doc(0.5, 0.5), BOX.width, BOX.height).photo!
+    const after = layoutSheet(doc(step.patch!.x!, step.patch!.y!), BOX.width, BOX.height).photo!
+    expect(after.dx - before.dx).toBeCloseTo(30, 9)
+    expect(after.dy - before.dy).toBeCloseTo(-20, 9)
+    // Against the whole sheet it would have lagged the finger by the frame.
+    const lagged = stepGesture(g, [{ x: 230, y: 230 }], BOX, LIMITS_PHOTO).patch!
+    expect(layoutSheet(doc(lagged.x!, lagged.y!), BOX.width, BOX.height).photo!.dx - before.dx).toBeCloseTo(22.5, 9)
+  })
+
+  it('a pinch zooms about the fingers: the point of the photo under them when it began stays under them (Border Studio\'s crop pinch)', () => {
+    const LIMITS_ANCHORED: GestureLimits = { ...LIMITS_PHOTO, anchored: true }
+    const start = { x: 0.62, y: 0.41 }
+    const target = { id: 'p', ...start, size: 1.5, rotation: 0 }
+    const box = visibleBox(BOX, frame.width)
+    const before = layoutSheet({ aspect: '4:5' as const, media: { ...media, scale: 1.5, ...start }, frame }, BOX.width, BOX.height).photo!
+    // Two fingers either side of a detail away from the centre, spreading
+    // and moving together.
+    const [a, b] = [{ x: 110, y: 160 }, { x: 150, y: 190 }]
+    const p0 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    const u = (p0.x - before.dx) / before.dw
+    const v = (p0.y - before.dy) / before.dh
+    const g = beginGesture(target, [a, b], false)
+    for (const [spread, dx, dy] of [[1.3, 0, 0], [2, 12, -7], [0.8, -5, 4]]) {
+      const pts = [a, b].map((p) => ({ x: p0.x + (p.x - p0.x) * spread + dx, y: p0.y + (p.y - p0.y) * spread + dy }))
+      const step = stepGesture(g, pts, box, LIMITS_ANCHORED).patch!
+      const m = { ...media, scale: step.size!, x: step.x!, y: step.y! }
+      const r = layoutSheet({ aspect: '4:5' as const, media: m, frame }, BOX.width, BOX.height).photo!
+      expect(r.dx + u * r.dw).toBeCloseTo(p0.x + dx, 6)
+      expect(r.dy + v * r.dh).toBeCloseTo(p0.y + dy, 6)
+    }
+    // Unanchored (a plate's pinch), the same spread zooms about the centre
+    // and the detail runs from the fingers.
+    const pts = [a, b].map((p) => ({ x: p0.x + (p.x - p0.x) * 2, y: p0.y + (p.y - p0.y) * 2 }))
+    const free = stepGesture(g, pts, box, LIMITS_PHOTO).patch!
+    const rf = layoutSheet({ aspect: '4:5' as const, media: { ...media, scale: free.size!, x: free.x!, y: free.y! }, frame }, BOX.width, BOX.height).photo!
+    expect(Math.abs(rf.dx + u * rf.dw - p0.x)).toBeGreaterThan(20)
   })
 })

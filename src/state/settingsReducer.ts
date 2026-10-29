@@ -1,14 +1,9 @@
-import {
-  sheetAspect,
-  type MediaLayer,
-  type PressProfile,
-  type PrintSettings,
-  type TextLayer,
-} from '../engine/types.ts'
+import { type FramePalette, type FrameSettings, type MediaLayer, type PressProfile, type PrintSettings, type TextLayer } from '../engine/types.ts'
+import { visibleAspect } from '../engine/frame.ts'
 import { makeLayer } from './defaults.ts'
 import { contrastPartner } from '../engine/inks.ts'
-import { clampPan } from '../engine/media.ts'
-import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
+import { areaOf, clampPan } from '../engine/media.ts'
+import { FRAME_WIDTH_FIRST, MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits.ts'
 
 /**
  * The document reducer plus an undo/redo history around it.
@@ -33,15 +28,23 @@ import { MAX_PRESSED_PASSES, MAX_TEXT_PLATES, passCount } from '../engine/limits
  * A join never opens or extends a burst.
  */
 export type SettingsAction =
-  | { type: 'patch'; patch: Partial<PrintSettings>; coalesce?: boolean; join?: boolean }
+  /** Anything but the photo, which `setMedia` and `patchMedia` change. */
+  | { type: 'patch'; patch: Partial<Omit<PrintSettings, 'media'>>; coalesce?: boolean; join?: boolean }
   | { type: 'patchLayer'; id: string; patch: Partial<TextLayer>; coalesce?: boolean; join?: boolean }
   /** `id`: the new plate's, so the UI that adds it can select it. */
   | { type: 'addLayer'; id?: string }
   | { type: 'removeLayer'; id: string }
   | { type: 'patchPress'; patch: Partial<PressProfile>; coalesce?: boolean; join?: boolean }
+  | { type: 'patchFrame'; patch: Partial<FrameSettings>; coalesce?: boolean; join?: boolean }
+  /** A new photo (or none). Its palette is computed from its pixels
+   *  (`setPalette`): one handed in with it is dropped. */
   | { type: 'setMedia'; media: MediaLayer | null }
-  | { type: 'patchMedia'; patch: Partial<MediaLayer>; coalesce?: boolean; join?: boolean }
-  | { type: 'reset'; settings: PrintSettings }
+  /** The photo's placement. Never its palette: that is `setPalette`'s. */
+  | { type: 'patchMedia'; patch: Partial<Omit<MediaLayer, 'palette'>>; coalesce?: boolean; join?: boolean }
+  /** The photo's frame colours, computed from it: derived data, not an
+   *  edit, so it is never an undo step. Written into every history entry
+   *  that holds the photo `mediaId`, and into no other. */
+  | { type: 'setPalette'; mediaId: string; palette: FramePalette }
 
 export type HistoryAction =
   | SettingsAction
@@ -70,19 +73,21 @@ const NEXT_INK = ['fluorescentpink', 'blue', 'yellow', 'black', 'green', 'fluore
 
 /**
  * Keep the sheet a sheet and the photo covering it. Re-applied by every action
- * that can move the photo, zoom it, replace or remove it, or change the
- * sheet's shape:
+ * that can move the photo, zoom it, replace or remove it, or change the shape
+ * of what it covers (the sheet's shape, or the frame's width):
  *
  *  - An Original sheet takes its shape from the photo, so without one it is
  *    the default 4:5 (removing the photo of an Original sheet lands there).
- *  - The pan is clamped against the NEW numeric aspect, so the stored
+ *  - The pan is clamped against the NEW shape of the visible rectangle (the
+ *    sheet inside its frame: frame.ts `visibleAspect`), so the stored
  *    placement is always one that prints with no bare strip — the renderer
  *    clamps too, but a stored value it has to correct would make the next pan
- *    start from a position the picture is not actually at.
+ *    start from a position the picture is not actually at. In Fit the
+ *    placement is not read, and is kept as Crop would show it.
  */
 function withCover(state: PrintSettings): PrintSettings {
   const sheet: PrintSettings = state.aspect === 'original' && !state.media ? { ...state, aspect: '4:5' } : state
-  return sheet.media ? { ...sheet, media: clampPan(sheet.media, sheetAspect(sheet), 1) } : sheet
+  return sheet.media ? { ...sheet, media: clampPan(sheet.media, areaOf(visibleAspect(sheet), 1)) } : sheet
 }
 
 /** True when the plate budget has no room for another pressed pass. */
@@ -151,8 +156,10 @@ function patchLayer(state: PrintSettings, l: TextLayer, patch: Partial<TextLayer
 export function applySettings(state: PrintSettings, action: SettingsAction): PrintSettings {
   switch (action.type) {
     case 'patch': {
-      const next = { ...state, ...action.patch }
-      return 'aspect' in action.patch || 'media' in action.patch ? withCover(next) : next
+      // Never the photo (held for anything typed loosely too).
+      const { media: _media, ...patch } = action.patch as Partial<PrintSettings>
+      const next = { ...state, ...patch }
+      return 'aspect' in patch ? withCover(next) : next
     }
 
     case 'patchLayer': {
@@ -187,11 +194,21 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
     case 'patchPress':
       return { ...state, press: { ...state.press, ...action.patch } }
 
+    case 'patchFrame': {
+      // A new width changes the visible rectangle's shape, which may leave
+      // the stored pan outside the travel that still covers it.
+      const next = { ...state, frame: { ...state.frame, ...action.patch } }
+      return 'width' in action.patch ? withCover(next) : next
+    }
+
     case 'setMedia': {
+      // The photo's colours are its pixels', computed once it is here: never
+      // carried in with it.
+      const media = action.media && withoutPalette(action.media)
       // Replacing a photo keeps the sheet the person chose (an Original sheet
       // takes the new photo's shape); removing one from an Original sheet
       // leaves 4:5 (withCover).
-      if (!action.media || state.media) return withCover({ ...state, media: action.media })
+      if (!media || state.media) return withCover({ ...state, media })
       // The first photo is the moment a single ink stops being enough. Type
       // that was perfectly readable on paper goes invisible over half of any
       // photograph, and the control that fixes it does not even exist in the
@@ -206,10 +223,18 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
       // centred the photo then fills it exactly, so the untouched path neither
       // crops nor resamples a pixel. Choosing 4:5 or 1:1 is a crop the person
       // makes, not one the app makes for them. Undo brings the old sheet back.
+      //
+      // And the photo is framed (Border Studio's first impression: a border
+      // keyed to the photo): a frame with no border is given the first
+      // photo's (FRAME_WIDTH_FIRST); its fill, corners and mode are already
+      // the template's. A frame the document already has is kept. The sheet
+      // grows by the border, never the photo shrinks: on Original the photo
+      // still lands at its own pixels.
       return withCover({
         ...state,
         aspect: 'original',
-        media: action.media,
+        media,
+        frame: state.frame.width > 0 ? state.frame : { ...state.frame, width: FRAME_WIDTH_FIRST },
         layers: state.layers.map((l) =>
           l.contrastInkId || l.backing ? l : { ...l, contrastInkId: contrastPartner(l.inkId) },
         ),
@@ -219,11 +244,19 @@ export function applySettings(state: PrintSettings, action: SettingsAction): Pri
     case 'patchMedia':
       // A patch with no photo present is a no-op rather than a crash: the
       // gesture layer can fire one as a drag ends just after a clear.
-      return state.media ? withCover({ ...state, media: { ...state.media, ...action.patch } }) : state
+      return state.media ? withCover({ ...state, media: { ...state.media, ...withoutPalette(action.patch) } }) : state
 
-    case 'reset':
-      return action.settings
+    case 'setPalette':
+      return state.media?.id === action.mediaId ? { ...state, media: { ...state.media, palette: action.palette } } : state
   }
+}
+
+/** A photo, or a patch of one, without a palette: only `setPalette` writes
+ *  one (the type says so; this holds it for anything typed loosely). */
+function withoutPalette<T extends Partial<MediaLayer>>(m: T): Omit<T, 'palette'> {
+  if (!('palette' in m)) return m
+  const { palette: _palette, ...rest } = m
+  return rest
 }
 
 /** Equality of plain data, which the document is (it is stored as JSON):
@@ -272,6 +305,19 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
 
     case 'endBurst':
       return state.bursting ? { ...state, bursting: false } : state
+
+    // Derived from the photo, not chosen: every entry that holds that photo
+    // takes it in place (the past and the future too, so no Undo or Redo
+    // can take it away and have the photo decoded again), and the steps,
+    // the burst and what may be joined are left as they were.
+    case 'setPalette': {
+      const keyed = (s: PrintSettings) => applySettings(s, action)
+      const present = keyed(state.present)
+      const past = state.past.map(keyed)
+      const future = state.future.map(keyed)
+      const same = present === state.present && past.every((s, i) => s === state.past[i]) && future.every((s, i) => s === state.future[i])
+      return same ? state : { ...state, past, present, future }
+    }
 
     default: {
       const next = applySettings(state.present, action)

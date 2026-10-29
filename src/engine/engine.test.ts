@@ -38,6 +38,7 @@ import {
 import { groundLuma, knockoutMask, shiftField } from './__tests__/reference.ts'
 import { MissingPhotoError, planPrint, savePrint } from './export.ts'
 import {
+  areaOf,
   bandMask,
   clampPan,
   coverRect,
@@ -54,7 +55,8 @@ import { applySettings } from '../state/settingsReducer.ts'
 import { REFERENCE_HEIGHT, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX } from './limits.ts'
 import { blurInPlace } from './blur.ts'
 import { roughenInPlace, type RoughOptions } from './rough.ts'
-import { ASPECTS, FONTS, sheetAspect, type PrintSettings, type TextLayer } from './types.ts'
+import { ASPECTS, FONTS, type PrintSettings, type TextLayer } from './types.ts'
+import { sheetAspect, visibleAspect } from './frame.ts'
 
 const W = 24
 const H = 24
@@ -830,7 +832,7 @@ describe('photo placement', () => {
     for (const src of SOURCES) {
       for (const scale of [1, 1.7, 2.5, 4]) {
         for (const [x, y] of [[0.5, 0.5], [0, 0], [1, 1], [0.2, 0.8]]) {
-          const r = coverRect(src, SHEET.w, SHEET.h, { scale, x, y })
+          const r = coverRect(src, areaOf(SHEET.w, SHEET.h), { scale, x, y })
           expect(r.dw / r.dh).toBeCloseTo(src.width / src.height, 6)
         }
       }
@@ -840,7 +842,7 @@ describe('photo placement', () => {
   it('covers the sheet at zoom 1, leaving no bare paper', () => {
     // Cover, not contain: a full-bleed print should not have letterbox bars.
     for (const src of SOURCES) {
-      const r = coverRect(src, SHEET.w, SHEET.h, { scale: 1, x: 0.5, y: 0.5 })
+      const r = coverRect(src, areaOf(SHEET.w, SHEET.h), { scale: 1, x: 0.5, y: 0.5 })
       expect(covers(r, SHEET.w, SHEET.h)).toBe(true)
       // ...and exactly fills one axis: zoom 1 crops only the overflow.
       expect(Math.min(r.dw - SHEET.w, r.dh - SHEET.h)).toBeCloseTo(0, 6)
@@ -849,16 +851,16 @@ describe('photo placement', () => {
 
   it('centres on the given point and zooms about it, inside the travel', () => {
     const src = { width: 2000, height: 1000 }
-    const centred = coverRect(src, SHEET.w, SHEET.h, { scale: 2, x: 0.5, y: 0.5 })
+    const centred = coverRect(src, areaOf(SHEET.w, SHEET.h), { scale: 2, x: 0.5, y: 0.5 })
     expect(centred.dx + centred.dw / 2).toBeCloseTo(SHEET.w / 2, 6)
     expect(centred.dy + centred.dh / 2).toBeCloseTo(SHEET.h / 2, 6)
 
-    const moved = coverRect(src, SHEET.w, SHEET.h, { scale: 2, x: 0.25, y: 0.75 })
+    const moved = coverRect(src, areaOf(SHEET.w, SHEET.h), { scale: 2, x: 0.25, y: 0.75 })
     expect(moved.dx + moved.dw / 2).toBeCloseTo(SHEET.w * 0.25, 6)
     expect(moved.dy + moved.dh / 2).toBeCloseTo(SHEET.h * 0.75, 6)
 
     // Zooming keeps the centre put rather than growing from a corner.
-    const bigger = coverRect(src, SHEET.w, SHEET.h, { scale: 4, x: 0.25, y: 0.75 })
+    const bigger = coverRect(src, areaOf(SHEET.w, SHEET.h), { scale: 4, x: 0.25, y: 0.75 })
     expect(bigger.dx + bigger.dw / 2).toBeCloseTo(moved.dx + moved.dw / 2, 6)
     expect(bigger.dw).toBeCloseTo(moved.dw * 2, 6)
   })
@@ -873,7 +875,7 @@ describe('photo placement', () => {
       const w = 200 + Math.floor(rnd() * 900)
       const h = 200 + Math.floor(rnd() * 900)
       const place = { scale: rnd() * 5, x: rnd() * 8 - 4, y: rnd() * 8 - 4 }
-      expect(covers(coverRect(src, w, h, place), w, h)).toBe(true)
+      expect(covers(coverRect(src, areaOf(w, h), place), w, h)).toBe(true)
     }
   })
 
@@ -882,11 +884,11 @@ describe('photo placement', () => {
     for (let i = 0; i < 200; i++) {
       const src = SOURCES[i % SOURCES.length]
       const media = { ...src, scale: rnd() * 5, x: rnd() * 6 - 3, y: rnd() * 6 - 3 }
-      const c = clampPan(media, SHEET.w, SHEET.h)
+      const c = clampPan(media, areaOf(SHEET.w, SHEET.h))
       expect(c.scale).toBeGreaterThanOrEqual(1)
       // Drawn from the clamped placement with NO further correction: the
       // stored value itself is honest.
-      const { dw, dh } = coverRect(src, SHEET.w, SHEET.h, { scale: c.scale, x: 0.5, y: 0.5 })
+      const { dw, dh } = coverRect(src, areaOf(SHEET.w, SHEET.h), { scale: c.scale, x: 0.5, y: 0.5 })
       const dx = c.x * SHEET.w - dw / 2
       const dy = c.y * SHEET.h - dh / 2
       expect(dx <= 1e-9 && dx + dw >= SHEET.w - 1e-9).toBe(true)
@@ -896,12 +898,12 @@ describe('photo placement', () => {
 
   it('leaves a placement that already covers exactly as it was', () => {
     const media = { width: 4032, height: 3024, scale: 2, x: 0.41, y: 0.58 }
-    expect(clampPan(media, SHEET.w, SHEET.h)).toEqual(media)
+    expect(clampPan(media, areaOf(SHEET.w, SHEET.h))).toEqual(media)
   })
 
   it('has no travel on an axis the photo exactly fits', () => {
     // A landscape photo on a portrait sheet fits the height at zoom 1.
-    const b = panBounds({ width: 4032, height: 3024, scale: 1 }, SHEET.w, SHEET.h)
+    const b = panBounds({ width: 4032, height: 3024, scale: 1 }, areaOf(SHEET.w, SHEET.h))
     expect(b.yLo).toBe(0.5)
     expect(b.yHi).toBe(0.5)
     expect(b.xLo).toBeLessThan(0.5)
@@ -911,29 +913,29 @@ describe('photo placement', () => {
   it('states position as a fraction of the travel: 0 shows the left edge, 1 the right', () => {
     const m = { width: 4032, height: 3024, scale: 1.5 }
     for (const axis of ['x', 'y'] as const) {
-      const b = panBounds(m, SHEET.w, SHEET.h)
-      const left = fromPanFraction(m, SHEET.w, SHEET.h, axis, 0)
-      const right = fromPanFraction(m, SHEET.w, SHEET.h, axis, 1)
+      const b = panBounds(m, areaOf(SHEET.w, SHEET.h))
+      const left = fromPanFraction(m, areaOf(SHEET.w, SHEET.h), axis, 0)
+      const right = fromPanFraction(m, areaOf(SHEET.w, SHEET.h), axis, 1)
       // 0: the photo's left (top) edge sits on the trim.
-      const r0 = coverRect(m, SHEET.w, SHEET.h, { scale: m.scale, x: axis === 'x' ? left : 0.5, y: axis === 'y' ? left : 0.5 })
+      const r0 = coverRect(m, areaOf(SHEET.w, SHEET.h), { scale: m.scale, x: axis === 'x' ? left : 0.5, y: axis === 'y' ? left : 0.5 })
       expect(axis === 'x' ? r0.dx : r0.dy).toBeCloseTo(0, 6)
       // 1: its right (bottom) edge does.
-      const r1 = coverRect(m, SHEET.w, SHEET.h, { scale: m.scale, x: axis === 'x' ? right : 0.5, y: axis === 'y' ? right : 0.5 })
+      const r1 = coverRect(m, areaOf(SHEET.w, SHEET.h), { scale: m.scale, x: axis === 'x' ? right : 0.5, y: axis === 'y' ? right : 0.5 })
       expect(axis === 'x' ? r1.dx + r1.dw : r1.dy + r1.dh).toBeCloseTo(axis === 'x' ? SHEET.w : SHEET.h, 6)
       expect(axis === 'x' ? [b.xHi, b.xLo] : [b.yHi, b.yLo]).toEqual([left, right])
       // Round trip.
       for (const f of [0, 0.25, 0.5, 0.9, 1]) {
-        const pos = fromPanFraction(m, SHEET.w, SHEET.h, axis, f)
-        expect(panFraction({ ...m, x: pos, y: pos }, SHEET.w, SHEET.h, axis)).toBeCloseTo(f, 9)
+        const pos = fromPanFraction(m, areaOf(SHEET.w, SHEET.h), axis, f)
+        expect(panFraction({ ...m, x: pos, y: pos }, areaOf(SHEET.w, SHEET.h), axis)).toBeCloseTo(f, 9)
       }
     }
     // No travel on an axis: the middle, whatever is asked.
     const fit = { width: 4032, height: 3024, scale: 1 }
-    expect(panFraction({ ...fit, x: 0.5, y: 0.5 }, SHEET.w, SHEET.h, 'y')).toBe(0.5)
-    expect(fromPanFraction(fit, SHEET.w, SHEET.h, 'y', 0)).toBe(0.5)
+    expect(panFraction({ ...fit, x: 0.5, y: 0.5 }, areaOf(SHEET.w, SHEET.h), 'y')).toBe(0.5)
+    expect(fromPanFraction(fit, areaOf(SHEET.w, SHEET.h), 'y', 0)).toBe(0.5)
   })
 
-  it('random aspect switches, pans, zooms and replaced photos never leave the stored photo uncovering the sheet', () => {
+  it('random aspect switches, pans, zooms and replaced photos never leave the stored photo uncovering the sheet inside its frame', () => {
     // Through the reducer, because that is what writes the stored placement:
     // pan to the side on one sheet shape, switch to another (Original among
     // them, whose shape is the photo's), or replace the photo with one of
@@ -960,14 +962,16 @@ describe('photo placement', () => {
         }
         if (s.aspect === 'original') original++
         const m = s.media!
-        const a = sheetAspect(s)
+        // What the photo covers: the visible rectangle inside the frame the
+        // first photo was given (the whole sheet when unframed).
+        const a = visibleAspect(s)
         // A fixed point of the clamp, in the units the reducer works in...
-        expect(clampPan(m, a, 1)).toEqual(m)
-        // ...and covering a real sheet in pixels.
+        expect(clampPan(m, areaOf(a, 1))).toEqual(m)
+        // ...and covering a real visible rectangle in pixels.
         const W = a * 1000
         const H = 1000
         expect(m.scale).toBeGreaterThanOrEqual(1)
-        const { dw, dh } = coverRect(m, W, H, { scale: m.scale, x: 0.5, y: 0.5 })
+        const { dw, dh } = coverRect(m, areaOf(W, H), { scale: m.scale, x: 0.5, y: 0.5 })
         expect(m.x * W - dw / 2).toBeLessThanOrEqual(1e-6)
         expect(m.x * W + dw / 2).toBeGreaterThanOrEqual(W - 1e-6)
         expect(m.y * H - dh / 2).toBeLessThanOrEqual(1e-6)
@@ -1005,9 +1009,9 @@ describe('the blit is pixel-exact when the sheet holds the photo at its own pixe
   it('snaps the 4:5 crop of a 12 MP photo at its native height to whole pixels and its own size', () => {
     // 4032x3024 on 4:5 at 3024 tall: 2419 wide, the photo centred half a
     // pixel off the grid (dx = -806.5).
-    const r = coverRect({ width: 4032, height: 3024 }, 2419, 3024, { scale: 1, x: 0.5, y: 0.5 })
+    const r = coverRect({ width: 4032, height: 3024 }, areaOf(2419, 3024), { scale: 1, x: 0.5, y: 0.5 })
     expect(r.dx).toBeCloseTo(-806.5, 9)
-    const s = snapRect(r, 4032, 3024, 2419, 3024)
+    const s = snapRect(r, 4032, 3024, areaOf(2419, 3024))
     expect(s).toEqual({ dx: -806, dy: 0, dw: 4032, dh: 3024 })
     for (const v of Object.values(s)) expect(Number.isInteger(v)).toBe(true)
   })
@@ -1020,8 +1024,8 @@ describe('the blit is pixel-exact when the sheet holds the photo at its own pixe
         [4032, 3024, 4032, 3024],
         [6000, 1200, 3600, 1200],
       ]) {
-        const r = coverRect({ width: mw, height: mh }, W, H, { scale: 1, x, y: x })
-        const s = snapRect(r, mw, mh, W, H)
+        const r = coverRect({ width: mw, height: mh }, areaOf(W, H), { scale: 1, x, y: x })
+        const s = snapRect(r, mw, mh, areaOf(W, H))
         expect([s.dw, s.dh]).toEqual([mw, mh])
         expect(s.dx).toBeLessThanOrEqual(0)
         expect(s.dy).toBeLessThanOrEqual(0)
@@ -1036,28 +1040,28 @@ describe('the blit is pixel-exact when the sheet holds the photo at its own pixe
 
   it('is the identity on an already whole-pixel native rect, and leaves every other blit alone', () => {
     // The Original sheet at native height: the photo IS the sheet.
-    const exact = coverRect({ width: 4032, height: 3024 }, 4032, 3024, { scale: 1, x: 0.5, y: 0.5 })
-    expect(snapRect(exact, 4032, 3024, 4032, 3024)).toEqual(exact)
+    const exact = coverRect({ width: 4032, height: 3024 }, areaOf(4032, 3024), { scale: 1, x: 0.5, y: 0.5 })
+    expect(snapRect(exact, 4032, 3024, areaOf(4032, 3024))).toEqual(exact)
     expect(exact).toEqual({ dx: 0, dy: 0, dw: 4032, dh: 3024 })
     // The preview (far from 1:1), and a zoom at a height where it is 1.5x:
     // untouched.
-    const preview = coverRect({ width: 4032, height: 3024 }, 800, 1000, { scale: 1, x: 0.5, y: 0.5 })
-    expect(snapRect(preview, 4032, 3024, 800, 1000)).toBe(preview)
-    const zoomed = coverRect({ width: 4032, height: 3024 }, 2419, 3024, { scale: 1.5, x: 0.5, y: 0.5 })
-    expect(snapRect(zoomed, 4032, 3024, 2419, 3024)).toBe(zoomed)
+    const preview = coverRect({ width: 4032, height: 3024 }, areaOf(800, 1000), { scale: 1, x: 0.5, y: 0.5 })
+    expect(snapRect(preview, 4032, 3024, areaOf(800, 1000))).toBe(preview)
+    const zoomed = coverRect({ width: 4032, height: 3024 }, areaOf(2419, 3024), { scale: 1.5, x: 0.5, y: 0.5 })
+    expect(snapRect(zoomed, 4032, 3024, areaOf(2419, 3024))).toBe(zoomed)
     // At the zoom's own native height (the export plan's 1613x2016) it is
     // 1:1, and snaps like any other.
-    const zoomedNative = coverRect({ width: 4032, height: 3024 }, 1613, 2016, { scale: 1.5, x: 0.5, y: 0.5 })
+    const zoomedNative = coverRect({ width: 4032, height: 3024 }, areaOf(1613, 2016), { scale: 1.5, x: 0.5, y: 0.5 })
     expect(zoomedNative.dx).toBeCloseTo(-1209.5, 9)
-    expect(snapRect(zoomedNative, 4032, 3024, 1613, 2016)).toEqual({ dx: -1209, dy: -504, dw: 4032, dh: 3024 })
+    expect(snapRect(zoomedNative, 4032, 3024, areaOf(1613, 2016))).toEqual({ dx: -1209, dy: -504, dw: 4032, dh: 3024 })
     // A photo a pixel narrower than the sheet: snapped to its own size it
     // would leave a bare column, so the blit keeps its (enlarged) rect.
-    const narrow = coverRect({ width: 1000, height: 2000 }, 1001, 1000, { scale: 1, x: 0.5, y: 0.5 })
+    const narrow = coverRect({ width: 1000, height: 2000 }, areaOf(1001, 1000), { scale: 1, x: 0.5, y: 0.5 })
     expect(Math.abs(narrow.dw / 1000 - 1)).toBeLessThan(SNAP_PX / 1000)
-    expect(snapRect(narrow, 1000, 2000, 1001, 1000)).toBe(narrow)
+    expect(snapRect(narrow, 1000, 2000, areaOf(1001, 1000))).toBe(narrow)
     // groundRect applies it: the native export of a 4:5 crop is snapped.
     const m = makeMedia({ id: 'p', width: 4032, height: 3024 })
-    expect(groundRect(m, 2419, 3024)).toEqual({ dx: -806, dy: 0, dw: 4032, dh: 3024 })
+    expect(groundRect({ aspect: '4:5', media: m, frame: defaultSettings().frame }, 2419, 3024)).toEqual({ dx: -806, dy: 0, dw: 4032, dh: 3024 })
   })
 })
 
@@ -1095,14 +1099,14 @@ describe('whichever decode of the photo is drawn, it fills the rectangle its tru
       const out = fakeContext()
       const scratch = fakeContext()
       let grounded = 0
-      renderPrint(out.ctx, scratch.ctx, s, { current: null }, null, height, bitmap, () => grounded++)
+      renderPrint(out.ctx, scratch.ctx, s, { current: null }, null, height, bitmap, {}, { onGround: () => grounded++ })
       expect(grounded).toBe(1)
       expect(scratch.drawn).toHaveLength(1)
       const [source, dx, dy, dw, dh] = scratch.drawn[0] as [CanvasImageSource, number, number, number, number]
       expect(source).toBe(bitmap)
       const { w, h } = outputSize(sheetAspect(s), height)
       // Exactly the rectangle the document and the sheet give...
-      expect({ dx, dy, dw, dh }).toEqual(groundRect(s.media!, w, h))
+      expect({ dx, dy, dw, dh }).toEqual(groundRect(s, w, h))
       // ...in sheet fractions:
       return [dx / w, dy / h, dw / w, dh / h]
     }
@@ -1118,7 +1122,7 @@ describe('Save never prints a photo as bare paper', () => {
     const s = { ...defaultSettings(), media: makeMedia({ id: 'p', width: 100, height: 100 }) }
     // Refused before any canvas is made.
     let made = 0
-    await expect(savePrint(s, null, { makeCanvas: () => (made++, {} as CanvasRenderingContext2D) })).rejects.toBeInstanceOf(MissingPhotoError)
+    await expect(savePrint(s, null, {}, { makeCanvas: () => (made++, {} as CanvasRenderingContext2D) })).rejects.toBeInstanceOf(MissingPhotoError)
     expect(made).toBe(0)
   })
 })

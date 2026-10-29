@@ -2,7 +2,8 @@
  * How much memory an export holds, measured deterministically.
  *
  *   node scripts/measure-alloc.mjs            (every case; exits 1 over a gate)
- *   FULL=1 node scripts/measure-alloc.mjs     (and case 8, the 61 MP worst press)
+ *   FULL=1 node scripts/measure-alloc.mjs     (and case 8, the 61 MP worst press, and the framed
+ *                                             13-16: 151, 191 and 571 MP, and 58 MP Frosted)
  *   node scripts/measure-alloc.mjs 1 3 7g     (just those cases)
  *
  * Each case runs in a process of its own, so nothing one case left behind is
@@ -32,9 +33,12 @@
  * recorded, not gated); cases 6-10 in megabytes, of typed arrays and of the
  * whole (the typed arrays, the canvases, the decoded photo and the file at
  * FILE_BOUND bytes an output pixel, so the gate does not depend on how well
- * the fake print compresses); and the same-width pairs, a 4000x10000
- * sheet against a 4000x5000 one, whose peaks may differ by at most 1.15
- * times (the press holds what grows with the width, not the height).
+ * the fake print compresses); the framed cases 11-16 the same way, and the
+ * whole under a ceiling scaled from case 6 by the sheet's width (CASE6,
+ * checked against case 6 whenever both run); and the same-width pairs, a
+ * sheet twice as tall as another of its width, whose peaks may differ by at
+ * most 1.15 times (the press holds what grows with the width, not the
+ * height).
  *
  * The canvas is a stand-in that rasterises nothing but hands back data of
  * the right size and plausible content (type-shaped strokes where glyphs
@@ -51,7 +55,7 @@ import { spawn } from 'node:child_process'
 import { availableParallelism } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { exportCases } from './export-cases.mjs'
+import { CASE6, ceiling, exportCases } from './export-cases.mjs'
 
 const args = process.argv.slice(2)
 const child = args[0] === '--case'
@@ -73,7 +77,7 @@ const FILE_BOUND = 1.4
 if (!child) {
   // One process per case, with the collector exposed (the accounting needs
   // it); the gate fails if any case does.
-  const all = exportCases({ defaultSettings: () => ({}), makeLayer: () => ({}), makeMedia: () => ({}), contrastPartner: () => '' })
+  const all = exportCases({ defaultSettings: () => ({}), makeLayer: () => ({}), makeMedia: () => ({}), contrastPartner: () => '', limits: {} })
   const named = args.filter((a) => a !== '')
   const ids = named.length ? named : all.filter((c) => !c.full || process.env.FULL === '1').map((c) => c.id)
   const unknown = ids.filter((id) => !all.some((c) => c.id === id))
@@ -83,8 +87,8 @@ if (!child) {
   }
   const jobs = Math.max(1, Number(process.env.MEASURE_JOBS) || Math.min(4, availableParallelism()))
   console.log(
-    'Peak live typed-array bytes; gates: cases 1-4 per output pixel, cases 6-10 in MB (typed, and with the canvases, photo and file), ' +
-      `the same-width pairs <= ${SAME_WIDTH}x. ${jobs} at a time.\n`,
+    'Peak live typed-array bytes; gates: cases 1-4 per output pixel, cases 6-16 in MB (typed, and with the canvases, photo and file; ' +
+      `the framed 11-16 under a ceiling too), the same-width pairs <= ${SAME_WIDTH}x. ${jobs} at a time.\n`,
   )
   const run = (id) =>
     new Promise((done) => {
@@ -113,6 +117,16 @@ if (!child) {
     }),
   )
   let status = results.some((r) => r.status !== 0) ? 1 : 0
+  // The framed cases' ceilings are scaled from case 6's typed peak as
+  // recorded (CASE6): when case 6 has run too, the record must be what it
+  // measures, or every ceiling rests on a stale number.
+  const case6 = results.find((r) => r.result?.id === '6')?.result
+  if (case6) {
+    const live = case6.peak / 1e6
+    const ok = Math.abs(live - CASE6.typed) <= 0.01 * CASE6.typed
+    if (!ok) status = 1
+    console.log(`case 6's typed peak, the framed ceilings' base: recorded ${CASE6.typed} MB, measured ${live.toFixed(1)} MB ${ok ? 'ok (within 1%)' : 'STALE: re-record CASE6 in export-cases.mjs'}`)
+  }
   const pairs = new Map()
   for (const r of results) if (r.result?.pair) pairs.set(r.result.pair, [...(pairs.get(r.result.pair) ?? []), r.result])
   for (const [pair, [a, b]] of pairs) {
@@ -256,13 +270,18 @@ const { JpegEncoder } = await load('src/engine/encode/jpeg.ts')
 const { planPrint } = await load('src/engine/export.ts')
 const { defaultSettings, makeLayer, makeMedia } = await load('src/state/defaults.ts')
 const { contrastPartner } = await load('src/engine/inks.ts')
+const limits = await load('src/engine/limits.ts')
+const { needsFrost, storedFrameInputs } = await load('src/features/media/frameInputs.ts')
+const { frameSourceSize } = await load('src/features/media/frameSource.ts')
+const { sheetAspect } = await load('src/engine/frame.ts')
+const { frostField } = await load('src/engine/frost.ts')
 // The modules are loaded; the server (its file watcher, its bundler) is shut
 // before anything is counted, so nothing in the background allocates while
 // the export runs.
 await server.close()
 track()
 
-const CASES = exportCases({ defaultSettings, makeLayer, makeMedia, contrastPartner })
+const CASES = exportCases({ defaultSettings, makeLayer, makeMedia, contrastPartner, limits })
 
 const only = args[1]
 const fmt = (v) => v.toFixed(1)
@@ -296,12 +315,24 @@ for (const c of CASES.filter((k) => k.id === only)) {
   meter.base = process.memoryUsage().arrayBuffers
   Object.assign(meter, { on: true, n, total: 0, peak: 0, gcs: 0, threshold: legacy ? Math.floor(n / 4) : 512 * 1024 })
   let samples = 0
+  // What the frame is made from, as Save makes it and holds it through the
+  // press: for Frosted the photo's frame source (here a smooth synthetic
+  // photo at the source's size) and the field at the save's size.
+  const inputs = storedFrameInputs(s)
+  if (needsFrost(s)) {
+    const { width: fw, height: fh } = frameSourceSize(s.media.width, s.media.height)
+    const rgba = new Uint8ClampedArray(fw * fh * 4)
+    for (let y = 0; y < fh; y++) {
+      for (let x = 0; x < fw; x++) rgba.set([40 + (180 * x) / fw, 90 + 60 * Math.sin(y / 70), 230 - (150 * y) / fh, 255], (y * fw + x) * 4)
+    }
+    inputs.frost = frostField({ w: fw, h: fh, rgba }, sheetAspect(s), limits.FROST_FIELD_LONG, s.frame.blur)
+  }
   // The real encoder, at Save's quality; its file is counted and dropped.
   let fileBytes = 0
   const t0 = performance.now()
   const jpeg = new JpegEncoder(plan.width, plan.height, 95, (chunk) => (fileBytes += chunk.length))
   const sink = { put: (rgba, rows) => jpeg.push(rgba, rows), settled: async () => {}, finish: async () => jpeg.finish(), abort: () => {} }
-  await pressToSink(s, plan.height, photo, sink, {
+  await pressToSink(s, { w: plan.width, h: plan.height }, photo, inputs, sink, {
     canvases: { tile: scratch, piece: () => measured(fakeContext(), 'piece') },
     onGround: () => sample(),
     onProgress: () => {
@@ -341,13 +372,19 @@ for (const c of CASES.filter((k) => k.id === only)) {
     const total = meter.peak + canvasBytes + photoBytes + file
     const typedOver = meter.peak > c.gate.typed * 1e6
     const totalOver = total > c.gate.total * 1e6
-    if (typedOver || totalOver) failed = true
+    // A framed case's ceiling: case 6's typed peak scaled by the width, the
+    // photo and the file, with 30% to spare (export-cases.mjs).
+    const cap = c.ceiling ? ceiling(plan.width, photoBytes, n, FILE_BOUND) : null
+    const capOver = cap !== null && total > cap * 1e6
+    if (typedOver || totalOver || capOver) failed = true
     console.log(
       `  typed arrays: peak ${mb(meter.peak)} MB (${peak.toFixed(2)} B/px)  ${typedOver ? `OVER the ${c.gate.typed} MB gate` : `ok (<= ${c.gate.typed} MB)`}; allocated in all ${(meter.total / 1e6).toFixed(0)} MB`,
     )
     console.log(
       `  with the canvases (${canvasesSaid}), the decoded photo (${mb(photoBytes)} MB, until its last rows are read) and the file at its bound ` +
-        `(${mb(file)} MB; the fake print's was ${mb(fileBytes)}):\n    ${mb(total)} MB  ${totalOver ? `OVER the ${c.gate.total} MB gate` : `ok (<= ${c.gate.total} MB)`}\n`,
+        `(${mb(file)} MB; the fake print's was ${mb(fileBytes)}):\n    ${mb(total)} MB  ${totalOver ? `OVER the ${c.gate.total} MB gate` : `ok (<= ${c.gate.total} MB)`}` +
+        (cap === null ? '' : `; ceiling ${cap.toFixed(1)} MB ${capOver ? 'OVER the ceiling' : 'ok'}`) +
+        '\n',
     )
   } else {
     // A same-width pair's half: the parent compares the two.

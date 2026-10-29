@@ -2,18 +2,30 @@
  * The dock's tools and their sub-tabs: four tools, and a feature that does not
  * fit a tool's panel (one options row, a hairline, one parameter strip) is a
  * sub-tab of its own, never another row (Border Studio 34dabad, fcd91ff).
+ *
+ * Frame leads (the job is to frame a photo, then set type on it), with
+ * Border Studio's crop glyph. It holds what Border Studio's Frame and Fill
+ * tools did, and the photo: Border (the fill, Width, Corners and Frosted's
+ * Blur), Crop (the ratio chips, then Crop or Fit), Place (Zoom and Position),
+ * Photo (Choose, Replace, Remove).
  */
 
 export const TOOLS = [
+  { id: 'frame', label: 'Frame', icon: 'crop' },
   { id: 'type', label: 'Type', icon: 'type' },
   { id: 'ink', label: 'Ink', icon: 'droplet' },
-  { id: 'photo', label: 'Photo', icon: 'image' },
   { id: 'press', label: 'Press', icon: 'press' },
 ] as const
 
 export type ToolId = (typeof TOOLS)[number]['id']
 
 export const SUBS = {
+  frame: [
+    { id: 'border', label: 'Border' },
+    { id: 'crop', label: 'Crop' },
+    { id: 'place', label: 'Place' },
+    { id: 'photo', label: 'Photo' },
+  ],
   type: [
     { id: 'text', label: 'Text' },
     { id: 'face', label: 'Face' },
@@ -28,11 +40,6 @@ export const SUBS = {
     { id: 'ink', label: 'Ink' },
     { id: 'over', label: 'Over photo' },
   ],
-  photo: [
-    { id: 'sheet', label: 'Sheet' },
-    { id: 'frame', label: 'Frame' },
-    { id: 'file', label: 'File' },
-  ],
   press: [
     { id: 'screen', label: 'Screen' },
     { id: 'press', label: 'Press' },
@@ -43,7 +50,8 @@ export const SUBS = {
 export type SubId<T extends ToolId> = (typeof SUBS)[T][number]['id']
 
 /** The sub-tab each tool shows; kept per tool, so coming back to a tool
- *  finds it where it was left. */
+ *  finds it where it was left. (Frame opens on Photo while there is none:
+ *  AppShell.) */
 export type Subs = { [T in ToolId]: SubId<T> }
 
-export const FIRST_SUBS: Subs = { type: 'text', ink: 'ink', photo: 'sheet', press: 'screen' }
+export const FIRST_SUBS: Subs = { frame: 'border', type: 'text', ink: 'ink', press: 'screen' }

@@ -3,8 +3,8 @@ import { useSettings } from '../../state/settingsStore.ts'
 import { importMedia } from './importMedia.ts'
 
 /** Choosing a photo: one file input for the whole app, opened from wherever
- *  a "Choose photo" is (the Photo tool's File tab, its empty Frame tab, the
- *  card that says a photo could not be loaded). */
+ *  a "Choose photo" is (Frame › Photo, Frame's Border and Place while there
+ *  is no photo, the card that says a photo could not be loaded). */
 export interface PhotoImport {
   /** Open the picker. */
   choose: () => void
@@ -21,7 +21,7 @@ export interface PhotoImport {
  * nothing references any more.
  *
  * @param announce says a failure in the status region too, so a pick made
- *   from outside the Photo tool is not refused in silence.
+ *   from outside Frame › Photo is not refused in silence.
  */
 export function usePhotoImport(
   /** The app's one file input. */

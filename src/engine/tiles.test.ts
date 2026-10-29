@@ -14,7 +14,7 @@ import { BAND_PIXELS, CANVAS_FONT_MAX, MIN_BAND_ROWS, TILE_EDGE, TILE_PIXELS, ba
 import { TiledGroundRows, TiledTones, isNativeRect, printSheet, sampledNoise, type ToneSource, type TonePass } from './render.ts'
 import { drawBacking, drawGlyphs, fontCapFactor, lineRects, planGlyphs } from './text.ts'
 import { TILE_BUDGET, TileRowCache, ringRows, rowsFromTiles, tileAt, tileGrid } from './tiles.ts'
-import { coverRect, snapRect } from './media.ts'
+import { areaOf, coverRect, snapRect } from './media.ts'
 import type { PrintSettings, TextLayer } from './types.ts'
 import { makeGround } from './__tests__/fields.ts'
 import { DOCS, syntheticTones } from './__tests__/documents.ts'
@@ -147,13 +147,13 @@ describe('the ring of tile rows', () => {
 describe('a photo at its own pixels', () => {
   it('is a rectangle the photo\'s size at a whole-pixel offset: the snapped native ground and a smaller copy decoded to its rectangle', () => {
     // 40 MP on 4:5, snapped (media.ts snapRect).
-    const r = snapRect(coverRect({ width: 7728, height: 5152 }, 4122, 5152, { scale: 1, x: 0.5, y: 0.5 }), 7728, 5152, 4122, 5152)
+    const r = snapRect(coverRect({ width: 7728, height: 5152 }, areaOf(4122, 5152), { scale: 1, x: 0.5, y: 0.5 }), 7728, 5152, areaOf(4122, 5152))
     expect(isNativeRect(r, 7728, 5152)).toBe(true)
     expect(r).toEqual({ dx: -1803, dy: 0, dw: 7728, dh: 5152 })
     // A copy decoded to its (integer) rectangle, drawn 1:1.
     expect(isNativeRect({ dx: -1352, dy: 0, dw: 5796, dh: 3864 }, 5796, 3864)).toBe(true)
     // A zoomed photo at its native height is snapped too.
-    const z = snapRect(coverRect({ width: 4032, height: 3024 }, 1209, 1512, { scale: 2, x: 0.3, y: 0.5 }), 4032, 3024, 1209, 1512)
+    const z = snapRect(coverRect({ width: 4032, height: 3024 }, areaOf(1209, 1512), { scale: 2, x: 0.3, y: 0.5 }), 4032, 3024, areaOf(1209, 1512))
     expect(isNativeRect(z, 4032, 3024)).toBe(true)
     // Not native: half a pixel off, a hair over 1:1, or a bitmap of another
     // size than the rectangle (the preview's working copy).

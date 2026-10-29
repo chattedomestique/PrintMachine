@@ -119,6 +119,9 @@ export function useMediaBitmap(
   media: Pick<MediaLayer, 'id' | 'width' | 'height' | 'scale'> | null,
   /** The sheet's width over its height (`sheetAspect`). */
   aspect: number,
+  /** The frame's width and how the photo is placed (`effectiveMode`): the
+   *  photo is drawn inside the frame. */
+  frame: { width: number; mode: 'crop' | 'fit' } = { width: 0, mode: 'crop' },
 ): {
   bitmap: ImageBitmap | null
   state: MediaState
@@ -130,8 +133,11 @@ export function useMediaBitmap(
   const height = media?.height ?? 0
   // Every change of these restarts the wait before a re-decode.
   const scale = media?.scale ?? 1
-  // The copy's tier: changes with the zoom and the sheet, in coarse steps.
-  const area = media ? previewArea(media, aspect) : 0
+  const frameWidth = frame.width
+  const fit = frame.mode === 'fit'
+  // The copy's tier: changes with the zoom, the sheet and its frame, in
+  // coarse steps.
+  const area = media ? previewArea(media, aspect, { width: frameWidth, mode: fit ? 'fit' : 'crop' }) : 0
   const want = media ? copyKey(width, height, area) : ''
   const [held, setHeld] = useState<(HeldMedia & DecodeJob) | null>(null)
   const currentRef = useRef<ImageBitmap | null>(null)
@@ -182,9 +188,10 @@ export function useMediaBitmap(
     )
 
     return () => window.clearTimeout(timer)
-    // `scale` and `aspect` are not read here: they are dependencies so that
-    // every change of the zoom or the sheet restarts the wait.
-  }, [id, width, height, area, want, scale, aspect, heldId, heldCopy])
+    // `scale`, `aspect`, `frameWidth` and `fit` are not read here: they are
+    // dependencies so that every change of the zoom, the sheet or its frame
+    // restarts the wait.
+  }, [id, width, height, area, want, scale, aspect, frameWidth, fit, heldId, heldCopy])
 
   // Unmount only — see above.
   useEffect(

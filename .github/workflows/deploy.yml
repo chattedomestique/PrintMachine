@@ -21,6 +21,13 @@ concurrency:
   cancel-in-progress: false # let an in-flight deploy finish
 
 jobs:
+  # The steps of this job are gates, run in this order on the one PAGES=1
+  # build `npm run verify` makes (measure-export, informational, and the
+  # upload aside), and the job is meant to be REQUIRED: a pull request into
+  # main should not merge until `verify` is green. That takes branch
+  # protection on main with `verify` as a required check, a switch in the
+  # repository's settings that only its owner can flip; until it is on,
+  # nothing stops a direct push to main, and this job is advice.
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -43,6 +50,8 @@ jobs:
       # verified by reading the precache manifest and deciding it looked right,
       # which is inspection, not verification. This serves the build at the real
       # Pages sub-path, installs the worker, cuts the network and cold-launches.
+      # It also holds the precache to its budget (23 entries, 1.12 MiB), which
+      # a phone downloads whole before the app opens offline.
       # Runners ship Chrome, which playwright-core drives without downloading
       # a browser.
       - run: node scripts/verify-offline.mjs
@@ -94,6 +103,21 @@ jobs:
       - run: node scripts/harness/run.mjs --out "$RUNNER_TEMP/parity.json" --no-hashes --parity 1000 --file-parity 1000 --retry
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
+      # The whole chain in Frosted: a photo imported, its palette stored,
+      # its frame made from it as Save makes it; the preview, the export and
+      # the file Save writes give the same bytes (it fails if not).
+      - run: node scripts/harness/run.mjs --out "$RUNNER_TEMP/chain.json" --no-hashes --chain
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+      # The frame's cost in the preview: framed renders (Crop, Fit and
+      # Frosted, settled and draft) against the same print unframed and
+      # against their own compose skipped, at most 1.10x settled and 1.25x
+      # draft; Frosted with its field made again within its own bound. A
+      # shared runner's slow spells are measured again, up to twice, before
+      # a row fails (README "The frame is ground").
+      - run: node scripts/harness/run.mjs --out "$RUNNER_TEMP/frame-cost.json" --no-hashes --frame-cost
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
       # The device spike (scripts/device-spike/spike.html), the page a phone
       # runs before the native-resolution save is built on it: it still
       # loads, runs every test and prints its table, asking for nothing but
@@ -115,7 +139,16 @@ jobs:
       - run: node scripts/check-bands.mjs
         env:
           CHROMIUM_PATH: /usr/bin/google-chrome
-      # Time and resident memory of an export in desktop Chrome, 12 to 48 MP.
+      # The frame against Border Studio's own (frozen at 597ce7a in
+      # scripts/parity-borders/; the Borders repo is never fetched): the
+      # sheet, the border and the matte, the photo, the corners and Frosted,
+      # each within the bound the script states.
+      - run: node scripts/parity-borders.mjs
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+      # Time and resident memory of an export in desktop Chrome, 12 to 81 MP,
+      # the framed 58 and 81 MP sheets among them, each save's time a sheet
+      # megapixel beside the device spike's estimate for a phone.
       # Informational: V8 frees what JavaScriptCore keeps, so measure-alloc
       # is the gate.
       - run: node scripts/measure-export.mjs

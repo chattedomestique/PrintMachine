@@ -1,9 +1,18 @@
 # Print Machine
 
-Type in, Risograph print out. A single-screen, installable, iOS-first PWA that
-renders text as an authentic multi-colour Riso print — real ink colours, angled
-halftone screens, misregistration, ink mottle and paper tooth — and saves the
-result straight to the camera roll via the share sheet.
+**Frame a photo and put risographic text on it, saved at the photo's own full
+resolution.** That is the one job, and every control earns its place by it
+("Removed on purpose").
+
+A single-screen, installable, iOS-first PWA. The photo is framed (a border of
+the paper, of a colour keyed to the photo, or of the photo itself frosted,
+its corners square or round, on the sheet ratio you choose, the photo cropped
+to it or fitted inside it: "The frame"), and type is pressed over it as an
+authentic multi-colour Riso print: real ink colours, angled halftone screens,
+misregistration, ink mottle and paper tooth. The print is saved at the
+photo's own pixels, every one of them, straight to the camera roll via the
+share sheet. The frame came from Border Studio, the owner's framing app
+("Where this joins Border Studio").
 
 **Deployed:** https://chattedomestique.github.io/PrintMachine/
 
@@ -23,6 +32,10 @@ printed, all of which this engine models:
 | Edge (torn edges)  | The master is a thermal stencil burned as a coarse raster, then ink is forced through it into paper fibre. Nothing in that chain makes a clean curve: the tear and the ink's bleed, on one control. |
 | Backing as a plate | A block behind the type is its own plate in its own ink, so it screens, misregisters and wears like everything else — and the type overprints it into a third colour. |
 
+The frame is none of these: it is the ground the ink lands on, as the photo
+is ("The frame"), so the type overprints the border as it overprints the
+photo, and the paper's veil, when it is on, lies over both.
+
 ## Running it
 
 ```sh
@@ -31,7 +44,7 @@ npm run dev        # http://localhost:5173
 ```
 
 ```sh
-npm run verify          # the gate: lint + typecheck + check-css + test + build
+npm run verify          # the gate: lint + typecheck + check-css + check-fonts + test + build
 npm run verify:offline  # proves the build boots with no network (a PAGES=1 build)
 npm run verify:geometry # the dock holds still; 44px targets; 200% text; the app bar
 PAGES=1 npm run build   # production build for the GitHub Pages sub-path
@@ -41,18 +54,22 @@ npm run sync:styleguide # re-vendor the style guide from ../styleguide
 ```sh
 npm run measure:fidelity  # Save keeps every pixel of the photo, up to 61 MP (fails under a gate)
 npm run measure:alloc     # what an export holds, up to 61 MP (fails over a gate; FULL=1 adds the 61 MP worst press)
-npm run measure:export    # export time and desktop memory (informational)
+npm run measure:export    # export time and desktop memory, beside the phone's estimate (informational)
 npm run build && npm run check:save   # the save flow in the built app, tapped
 npm run build && npm run check:touch  # tap-to-select on the sheet, touched
 npm run check:spike       # the device spike page still runs (see below)
 npm run check:encode      # the save's JPEG and PNG encoders, decoded by Chromium (fails over a bound)
+npm run check:parity-borders  # the frame against Border Studio's own frozen frames (fails outside a bound)
 ```
 
-The six that can fail run in CI after `verify`, `verify:offline` and
-`verify:geometry`, with the harness's parity gate (`npm run harness -- --out
-p.json --no-hashes --parity 1000`: the preview's entry point and the export's
-give the same bytes); `measure:export` runs there too, for the record (see
-"Every pixel of the photo, measured" and "What an export holds").
+The seven that can fail run in CI after `verify`, `verify:offline` and
+`verify:geometry`, with `check-bands` and the harness's gates (`npm run
+harness -- --out p.json --no-hashes --parity 1000`: the preview's entry point
+and the export's give the same bytes; `--chain`: the whole chain in Frosted,
+from an imported photo to Save's file; `--frame-cost`: what the frame costs
+the preview, "The frame is ground"); `measure:export` runs there too, for the
+record (see "Every pixel of the photo, measured" and "What an export
+holds").
 
 `scripts/device-spike/spike.html` is a page for a phone, not part of the app:
 one self-contained file, no network, that measures what only a device can
@@ -79,15 +96,25 @@ whole set from the same overprint math the app uses.
 src/
   engine/    pure, framework-free canvas + typed-array maths. No React, no DOM
              events, no state. This is the product, and most of what is tested.
+             The frame is three of its files: frame.ts (the sheet's three
+             rectangles, the fill and the corners composed a band at a time),
+             palette.ts (the four colours keyed to the photo) and frost.ts
+             (Frosted's field).
   state/     the document: its schema and load-time normaliser, defaults,
              persistence, and one settings reducer + Context over a coalescing
              undo/redo hook. Tested in node like the engine.
   ui/        the style guide's elements as React components (Segmented, Tabs,
-             Switch, SwatchSet, ActionSheet, the Slider and its parameter
-             strip), app-agnostic: nothing in it knows what a print is.
+             Switch, SwatchSet, ActionSheet, ChipRow, the Slider and its
+             parameter strip), app-agnostic: nothing in it knows what a print
+             is (ui/layering.test.ts: it imports only React and itself).
   features/  app-aware composition — the only layer that knows what the app is.
-  styles/    the app's own CSS over the style guide: index.css (app facts),
-             editor.css (the planes), dock.css (the panels), shell.css.
+             features/media/ decodes the photo for the engine: the preview's
+             working copy, the original for a save, and the frame's source
+             (frameSource.ts), with the fields made from it (frostField.ts).
+  styles/    the app's own CSS over the style guide: fonts.css (Poster's
+             face), index.css (app facts), editor.css (the planes), dock.css
+             (the panels), shell.css.
+  assets/    the one bundled typeface, Tanklager.woff (see "Fonts").
   vendor/    the style guide, vendored (never edited here; see "Design system").
 ```
 
@@ -114,6 +141,13 @@ is null (a chosen second ink is a string, its default `null`).
 Frozen documents written by older builds live in `state/__fixtures__/`, and the
 tests load each one: it opens, normalising it twice changes nothing, no key
 survives that the current model does not have, and no valid value is lost.
+A print saved before the frame has no `frame` and opens with the template's,
+whose width is 0: unframed, as it was saved. `legacy-normalized.json` is what
+the last build before the frame made of each legacy document, and a test holds
+the normaliser to it, plus that unframed frame; `merge-pre-frame.json` is a
+print that build saved (a photo zoomed and panned on its own sheet, a second
+ink, a backing, the press at the ends of its ranges), and `merge-frame-edges.json`
+two framed ones with every frame field at both ends of its range.
 
 Every feature under "Removed on purpose" is gone from old prints too: a print
 that used one opens without it (the smear, a second press, a dither algorithm,
@@ -135,6 +169,42 @@ opens changed (each has a test that says so):
   word numbers the text no longer has, never printed and becomes nothing). A
   plate takes a backing or a second ink, so a plate that had both keeps the
   backing and stops switching ink over the photo.
+- **A Poster plate is set in Tanklager Kompakt**, the face the app now
+  bundles, where it was set in whatever the machine's system stack found:
+  Impact on a desktop that has it, Helvetica Neue on an iPhone, which has no
+  Impact. It is the one change of look in a stored print, on purpose (see
+  "Fonts"). Nothing is rewritten: the plate keeps its face, its size and its
+  Bold. Tanklager is condensed, so a line sized with Fit in Helvetica Neue
+  spans less of the sheet than it did; tap Fit again to fill it. Bold on a
+  Poster plate is kept and sets nothing (Poster is one weight). One
+  exception: a print saved before Fit became a size (with Fit to width on)
+  is converted to a size the first time it opens, measured in the face that
+  is there then; on a first launch where the face takes more than its two
+  seconds (a slow network, before it is cached), a Poster plate's size is
+  measured in the phone's own face and kept, so it opens smaller than it
+  fits in Tanklager (27% in the measured case): tap Fit to fill it
+  again.
+
+An old print opens as it was saved, unframed, and looks as it did (Poster's
+face aside); one kind saves a row larger than it did. An Original print of
+a photo taller than 1:2 saves every row of the photo now (a 4000x12000 photo
+saved at 4000x11999), and one zoomed past 100% may save a pixel or two larger
+or smaller, at the photo's own pixels either way ("Saving at the photo's own
+pixels").
+
+**Border Studio's saves are not carried.** Its settings, its Looks and its
+three small preferences live under its own storage keys
+(`border-studio:settings:v1`, `border-studio:presets:v1`, `bs-snap`,
+`bs-grid`, `bs-hint-seen`), and this app never reads, writes or deletes any of
+them, for four reasons: Border Studio never stored a photo or a print, so
+there is no work in them to lose; Looks are cut, so they have nowhere to go;
+the four frame basics it carried from photo to photo (border, corners, crop
+ratio, Crop or Fit) are set once in a visit; and whether one installed iOS
+app can read another's storage at all is untested. While Border Studio is
+live at its own address its keys stay where they are, usable there. A test
+fails if any source here names one (`state/borderStudioKeys.test.ts`, which
+spares only the route that froze Border Studio's frames for
+`parity-borders`).
 
 ### Offline, and why it is checked rather than inspected
 
@@ -153,13 +223,36 @@ It is checked against two deliberate breakages: a missing worker, and a worker
 that installs but precaches only the shell. The second is the failure the
 playbook records — installable, and blank offline.
 
+It prints the precache's size, entries and bytes, and fails above its
+budget: 23 entries and 1.12 MiB (`PRECACHE_MAX_*`; it measured 19 entries
+and 1.098 MiB when the budget was set, with the frame and Poster's face in,
+against 18 entries before either; x 1.25 is 23 entries and 1.37 MiB, and the
+1.12 MiB the frame was planned to is the lower). A phone downloads all of it
+before the app opens offline. And it checks Poster's face
+offline the way a launch from the home screen uses it, never by asking
+`document.fonts.check`, which says yes when no such face is declared at all.
+First, online, it serves the face a second late (half the app's wait) and
+records every `measureText` and `fillText` in Poster's stack with the face's
+status at that moment: the app must mount with the face loaded and measure
+or draw nothing in Poster before it is (an app that mounts without waiting
+measures 64 times in the fallback and fails). Then, in the cold offline tab,
+`document.fonts.load` must answer with the face, loaded; a line set in
+Poster's stack must measure differently from the same line in the stack
+without the face (equal when the face never loaded), and the same as it
+measured online; and the face's `o` must rise at most 0.9 of its `O` (see
+"Fonts"). Built with the face left out of the precache, it fails each of
+them.
+
 **On iOS the build being correct is not sufficient.** A home-screen PWA has to
 be launched once *while online* before it will ever open offline; going straight
 from "Add to Home Screen" into airplane mode fails regardless. The More sheet
 says when precaching has finished ("Works offline", with an icon, never a
 colour alone), and the status region says it once when it happens, so that
 state is visible before you are somewhere without signal rather than
-discovered there. It is only as honest as the manifest, though — a truncated
+discovered there. Under it is the build stamp (Border Studio's: the commit and
+the day it was built, `vite.config.ts`), because an installed copy updates
+itself in place with nothing else to say which version is running;
+`verify:offline` checks the cold offline tab carries it. It is only as honest as the manifest, though — a truncated
 one would still say it is ready, which is what the CI check is for.
 
 ### The photo is the paper
@@ -170,11 +263,12 @@ falls out of the compositor already reading paper as `rgb × shade`, and it is
 why type genuinely overprints a photo rather than sitting on top of it: pink
 over a white highlight goes bright, pink over a dark area goes deep.
 
-"Paper over the photo" is a switch. On, the photo takes on the stock's tint
-and grain the way printing on toned paper actually does, so the photo and the
-type read as one printed sheet; off, the ink lands straight on the photograph's
-own colour. With no photo the switch is inert and the arithmetic collapses back
-to exactly what the app draws on bare paper.
+"Paper over the photo and frame" is a switch, in Press › Paper beside the
+stock it lays over them. On, the photo and its frame take on the stock's tint
+and grain the way printing on toned paper actually does, so the photo, the
+frame and the type read as one printed sheet; off, the ink lands straight on
+the photograph's own colour. With no photo the switch is inert and the
+arithmetic collapses back to exactly what the app draws on bare paper.
 
 The photo is never printed itself — no separation, no screen, no second press.
 Halftoning the photograph is a different job ("riso a photo"); here it is the
@@ -268,6 +362,8 @@ both reproduce the shipped amounts exactly. **Ink** is the density ceiling and
 **Misregistration** where each pass lands. **Re-roll** pulls another sheet: a
 different tear, mottle, registration and paper grain from the same settings.
 
+### The photo on the sheet
+
 #### Nothing is ever stretched
 
 The scale factor is the same on both axes, always. That is asserted directly —
@@ -283,39 +379,42 @@ and no sensible size to export it at.
 
 #### The Original sheet: the photo's own shape
 
-The Sheet choice leads with **Original** — the photo's own shape, upright —
-before 1:1, 4:5, 3:4 and 2:3, and the first photo opens on it. With the zoom
+The ratio chips (Frame › Crop) lead with **Original** — the photo's own
+shape, upright — before 1:1, 4:5, 3:4, 9:16 and 2:3 (a second tap on the
+chosen chip turns it on its side: 5:4, 4:3, 16:9, 3:2), and the first photo
+opens on it. With the zoom
 at 100% and no pan the photo then fills the sheet exactly, so the untouched
 path neither crops nor resamples a pixel: a crop is something the person
 chooses, not something the app does for them. Replacing the photo keeps the
 sheet that was chosen (an Original sheet takes the new photo's shape);
 removing the photo from an Original sheet leaves 4:5, since there is no shape
 to take. A photo more extreme than 3:1 (a panorama) is cover-cropped to 3:1,
-so no sheet is a sliver. `sheetAspect` is the one place a sheet becomes a
-number, and everything downstream — the cover fit, the pan limits, Fit, the
-preview and the export — takes that number.
+so no sheet is a sliver. `sheetAspect` (`engine/frame.ts`) is the one place
+a sheet becomes a number, and the preview and the export size the sheet from
+it. The photo is placed on the sheet's visible rectangle, the sheet inside its
+frame (unframed, the whole sheet): the cover fit and the pan limits are
+relative to that rectangle (`visibleAspect`, `layoutSheet`), and Fit is the
+whole photo contained in it.
 
-At the height where the sheet holds the photo at its own pixels, the blit is
+At the size where the sheet holds the photo at its own pixels, the blit is
 **snapped**: drawn at exactly the photo's size, at a whole-pixel offset, kept
 inside the travel that still covers the sheet (`snapRect`). Centred, the 4:5
 crop of a 12 MP photo sits half a pixel off the grid, and a bilinear blit at a
 half-pixel offset blurs every pixel into its neighbour: measured, 0.753 of the
 original's Laplacian energy unsnapped, 1.000 snapped. A zoomed photo snaps the
-same way at its own native height. "Holds the photo at its own pixels" means a
-scale within 2.5 px of 1:1 over the sheet's shorter side (`SNAP_PX`): the
-planner's native height can land up to a pixel and a half past 1:1 across the
-sheet's shorter side on the app's sheets, so on a tall sheet whose width binds
-(a 2268x4032 photo on its own sheet at 113% is drawn at 1.0005) a tolerance
-taken over the height let a resample of every pixel through. A test plans real
-and random photo sizes on every sheet the app makes, at exactly 100% and at
+same way at its own native size. "Holds the photo at its own pixels" means a
+scale within 2.5 px of 1:1 over the sheet's shorter side (`SNAP_PX`): on a
+tall sheet whose width binds (a 2268x4032 photo on its own sheet at 113% is
+drawn at 1.0005) a tolerance taken over the height let a resample of every
+pixel through. The planner steps the sheet's long side a pixel at a time (a
+landscape sheet's width, any other's height), so the side that binds reaches
+the photo's exactly: 3001x2251 on a fixed 3:2 sheet saves at 3001x2001, at
+its own pixels (stepping the height made it 3002x2001, a pixel too wide for
+the photo to cover, and resampled it). A test plans real and random photo
+sizes on every sheet, the landscape ones included, at exactly 100% and at
 every zoom to 400%, and the planner's random photos on any aspect zoomed past
 100%, and checks that each native plan is drawn at the photo's own pixels, at
-a whole-pixel offset. The claim stops there on purpose: on a fixed landscape
-sheet, which the app does not make, the native width at exactly 100% can be a
-pixel or two wider than the photo (3001x2251 on 3:2 plans 3002x2001), the
-photo at its own size would not cover it, and the blit stays a cover-fit
-resample; such a sheet would need the planner to fit its width to the photo's
-first, and a test pins the case. A preview is 1:1
+a whole-pixel offset. A preview is 1:1
 when the photo lands on it at its own size (a photo no larger than the
 preview, or one zoomed to that point), and snaps then too; a blit that is not
 1:1 (a large photo's preview at 100%, a small photo enlarged to the reference
@@ -323,16 +422,21 @@ height) is left alone.
 
 #### The photo always covers the sheet
 
-Panning is limited to where the photo still covers the sheet: its centre can
-move until one of its edges reaches the trim, and no further. That limit is
-enforced **where the sheet is drawn** (`coverRect` clamps whatever placement it
-is handed), and again by every edit that moves the photo, zooms it or changes
-the sheet's shape, so the stored value is honest too. The second place matters
+Panning is limited to where the photo still covers what it is placed on, the
+sheet's visible rectangle (the whole sheet unframed, the sheet inside its
+frame otherwise): its centre can move until one of its edges reaches that
+rectangle's edge, and no further. (Fit shows the whole photo inside the
+rectangle and reads no pan; the stored one is kept, clamped as Crop would
+show it.) That limit is enforced **where the sheet is drawn** (`coverRect`
+clamps whatever placement it is handed), and again by every edit that moves
+the photo, zooms it or changes the sheet's shape or frame, so the stored
+value is honest too. The second place matters
 because a pan that is legal on one sheet is not on another: push a landscape
 photo to one side on a square sheet, switch to 4:5, and without it a strip of
 bare sheet would print. A property test throws random sheet changes (Original
 among them), pans, zooms and replaced photos at the document and checks the
-sheet stays covered after every one.
+sheet stays covered after every one, and another random frame and sheet
+changes, checking the stored pan stays inside the visible rectangle's travel.
 
 The compositor still treats a transparent ground pixel as paper rather than
 black — `getImageData` hands untouched pixels back as transparent *black*, and
@@ -340,8 +444,270 @@ the first cut printed exactly that. Panning can no longer uncover the sheet, but
 the same path carries the knockout under the second ink (the photo's alpha goes
 down there) and a transparent PNG's own transparency, and there is a test that
 uncovered ground is bit-for-bit the paper the app draws with no photo at all.
+(Unframed. Inside a frame a transparent pixel of the photo shows the frame's
+fill: the bare stock under Paper, the colour under a palette colour, and
+under Frosted the frost, which over a cut-out's clear parts is partly the
+bare stock where it thins and wholly the stock where the blur of its opaque
+pixels does not reach.)
 
-#### The photo is stored exactly as it came
+### The frame
+
+The frame is what surrounds the photo and sets the print's shape: the
+border's width and corners, its fill, and the sheet's ratio, the photo
+cropped to it or fitted inside it (Frame › Border and Frame › Crop). The
+document stores each as a choice or a fraction (`frame`: width, corners,
+fill, blur, mode), never as a colour or a count of pixels, so a print is the
+same at every size, and a print saved before the frame opens with the
+template's, whose width is 0: unframed.
+
+- **Width is a fraction of the sheet's long side**, 0 to 16%, shown as a
+  percent to one decimal; the border is `round(width x the long side)`
+  pixels at any size (`borderPx`). A first photo gets 7.1% (1/14: Border
+  Studio's 150 px default on its 2100 px free-ratio sheet), and a double tap
+  on Width goes back there, never to 0, which would take the frame away.
+- **Three rectangles.** The sheet; the visible rectangle, the sheet inset by
+  the border on every side, which the photo's zoom and pan are measured
+  against (the stored position is the photo's centre as a fraction of it, so
+  moving Width never moves which part of the photo shows, and a print saved
+  unframed, where it is the whole sheet, means what it meant); and the shown
+  rectangle, where the photo is, whose four corners Corners rounds (a radius
+  of `corners x its shorter side / 8`, on Border Studio's curve). Outside the
+  shown rectangle every pixel is the fill.
+- **Three modes.** **Crop**: the ratio is the sheet's, and the photo covers
+  the visible rectangle at 100 to 400%, panned. **Original**: the sheet is
+  the photo's own shape plus the border, `(vw + 2b) x (vh + 2b)`, `b` the
+  smallest whole border with `b = round(width x the sheet's long side)` (a
+  photo past 3:1 is cut to 3:1 first, as unframed), so moving Width never
+  changes the crop; zoom and pan work as in Crop, and Original is Crop
+  whatever mode a fixed sheet left stored. **Fit**: the whole photo,
+  contained in the visible rectangle, the fill a matte round it at least a
+  border wide; its zoom and pan stay in the document, unread. One scale both
+  ways in every mode: the photo is never stretched.
+- **The fills** (below): Paper is the stock, alpha 0, so the press prints
+  bare paper there; a colour is opaque ground and, when "Paper over the
+  photo and frame" is on, takes the stock's tint and tooth as the photo does.
+- **A large sheet is stated, never refused.** A frame adds pixels the photo
+  does not have, and Fit on a ratio not the photo's own adds many ("Saving
+  at the photo's own pixels" has the sizes); the size, the megapixels and
+  the border are said before the tap, past 100 MP with "a very large print:
+  a phone may not finish it" (`LARGE_PRINT_MP`), and nothing is capped or
+  made smaller for it. Past 100 MP that is on screen too, a card over the
+  stage while it is true, in every tool ("Saves 10358×18414 (190.7 MP), a
+  very large print: a phone may not finish it."): the size the person chose
+  is never only in a name a screen reader hears. A smaller copy is only ever one the person chose,
+  after a press that failed or did not finish.
+
+What each part of the frame does to a pixel, and what holds it to the same
+bytes at every band height and in the preview and the save:
+
+| Part | Reads its neighbours | Held by |
+|---|---|---|
+| A flat fill (Paper, Photo, Deep, Muted, Comp) | no: a pixel is its place's fill | `frame.test.ts` and `banded.test.ts` (bands of 1, 7 and 97 rows and the whole sheet compose the same bytes); the harness's `--bands` on the frame documents |
+| Frosted | one field, made once per photo, sheet shape and blur, sampled per pixel in float | `frost.test.ts` (the same bytes from the same inputs; a function of the position alone, any band); `--parity` and `--chain` (the preview's bytes are the save's) |
+| The photo inside the shown rectangle | no: a byte copy at a whole-pixel offset, when native | `frame.test.ts` (an opaque pixel away from the corners is its own bytes); `measure-fidelity`'s framed cases |
+| The rounded corners | no: each pixel's exact covered area, laid over the fill once, in straight alpha | `frame.test.ts` (the numerically integrated curve, to 1e-6) |
+| Fit's matte | no | `frame.test.ts` (every pixel outside the photo IS the fill, Paper and a colour alike) |
+| The palette | one 84 px sample, once per photo | stored with the photo; `palette.test.ts` |
+| The veil, tooth, knockout and second ink | as before | `banded.test.ts` (the second ink switching on the framed ground) |
+
+#### The frame is ground, composed a band at a time
+
+The frame is not a plate: the fill, the photo and its rounded corners are the
+ground the ink prints on (`engine/frame.ts`). Every layout has three
+rectangles: the sheet; the visible rectangle, the sheet inset by the border,
+which the photo's zoom and pan are relative to and which lands on the photo
+pixel for pixel; and the shown rectangle, where the photo is (the visible one
+in Crop and on Original; in Fit the whole photo contained in it). Outside the
+shown rectangle every pixel IS the fill: the border, and in Fit the matte
+(the photo's ground is never read there). Inside it the photo is laid over
+the fill in straight alpha, rounded once, its corners cut by the exact area
+under Border Studio's curve (sqrt x + sqrt y = sqrt r, in closed form; tested
+against a numerical integral). An opaque photo pixel away from the corners is
+copied byte for byte, so a native save keeps every pixel of the photo inside
+its frame. Paper is alpha 0, so the press prints the bare stock there; a
+colour is opaque and takes the stock's veil when "Paper over the photo" is on.
+
+The document stores the fill's choice, never a colour: the colour comes from
+the photo's palette stored with it (`media.palette`), handed to the engine
+beside the photo (`FrameInputs`); until it is there, the fill draws as Paper.
+The palette is Border Studio's (`engine/palette.ts`, its `palette.js` at
+597ce7a trimmed to the four colours the fill shows: the median cut, the most
+photogenic cluster as the hero, the undertone for a grey hero's hue; Photo,
+Deep, Muted and Comp, always all four even when two are the same hex). It is
+made once a photo, the first time a frame shows on it, whatever the fill (so
+the fill's four swatches have their colours before one is chosen, as Border
+Studio's do; under Frosted it comes from the decode Frosted needs anyway),
+from an 84 px area-averaged sample of one fixed decode of the photo (1024 px
+on its long side, `features/media/frameSource.ts`), never from the preview's
+copy, whose size moves with the zoom; it is stored with the photo
+(`setPalette`, not an undo step, and the one thing that writes it; every
+history entry that holds the photo takes it, so no Undo or Redo takes it
+away and has the photo decoded again), so the preview, the save and every
+reopen agree, and Save makes it first when a palette colour needs it, so a
+press never starts without it. While the chosen fill is still being made
+(a palette colour before its palette, Frosted before its source) the border
+is Paper and its chip in Frame › Border says so quietly: a spinner where its
+colour dot or glyph goes, "preparing" in its name, the row aria-busy. A
+photo whose frame source will not decode is one state, kept with the photo
+while it is shown: while the print needs that source (a palette colour not
+yet stored, or Frosted) the frame stays Paper, and one persistent note, the
+status card, says so in the fill's own words ("The fill could not be made
+from this photo. Choose Paper, or choose the photo again."), as Save's name,
+the More sheet and a save question do: Save refuses it rather than press a
+frame that is quietly bare, and never says that a photo on screen could not
+be loaded. Paper, or a colour already stored with the photo, saves as it
+shows. Another photo shown lets the failure go, so a
+photo an Undo brings back reads as it does at first load (Paper, Save
+offered and waiting for it) while it is decoded again, and is refused again
+only if that fails; a photo whose earlier decode is still kept is drawn from
+it meanwhile, and a failure of the new one lets that go too, so the frame is
+Paper whenever the card says the fill could not be made. A decode that ends after its photo was replaced or
+undone changes nothing of the photo shown, so a late one never turns the
+shown photo's Frosted border to Paper under a Save that presses it
+(`check-save` step 10: the decode held back and failing, for a palette
+colour and for Frosted on a photo whose palette is stored; a Replace and an
+Undo, the photo brought back held while it decodes; a Replace undone while
+the replaced photo still decodes).
+Fed Border Studio's own recorded sample of its two block photos, 36
+photograph-like samples, 72 at the page's own sample sizes (half with a
+clear corner) and 81 flat colours on the hue boundaries, each keyed by
+Border Studio's own `palette.js`, the port gives Border Studio's hex exactly
+(`palette.test.ts`).
+
+Frosted is a border made of the photo itself (`engine/frost.ts`, Border
+Studio's `drawFrostedBg`), with Blur its one setting (10 to 240). The frame's
+source is cover-filled into a small FIELD of the sheet's shape, 480 px on its
+long side (160 while a control is dragged), by an area average, blurred by
+Border Studio's three box passes whose windows shrink at the edges (`blur.ts`,
+the same passes the plates use, with an edge rule; the plates' are unchanged
+to the byte) at a radius that scales with the field (14 at Blur 60, 44 at
+240), and graded as Border Studio ships it (brightness x 0.85, then
+saturation x 1.6 about Rec. 709 luma). The field's size is a function of the
+sheet's shape alone, never of a rendered size, so the preview and the save
+sample the same field; it stays in float, and each sheet pixel samples it
+bilinearly (with Border Studio's 2% overscan) and is rounded to a byte once.
+Rounding the field to bytes first would leave a stair as wide as a field
+pixel (19 sheet pixels at 58 MP); here the only step is the one-level step
+rounding must make. A photo with transparent pixels is frosted as it would
+print on the bare stock: blurred with its alpha (each colour multiplied by
+it) and the blurred alpha kept, so the field is a colour over Paper, the
+photo's own colour where its pixels reach, never black (Border Studio's
+canvas frosts it black), thinning into the stock as smoothly as the blur
+spreads them, with no step the same photo flattened on Paper would not have
+(`frost.test.ts`: a cut-out from dark blue to light yellow, its steepest
+texel step within 3 levels of the flattened photo's at Blur 10, 60 and 240;
+a mean colour where no opaque pixel reached made a 66-level seam). A photo
+whose every pixel is clear has no colour to frost and frosts to Paper. One
+whose pixels are all faint (each under alpha 125 of 255) frosts to their
+colour at their strength over Paper, though its colour fills are Paper (the
+palette skips such pixels). The field is made by the page from
+the photo's frame source and kept (a few, by photo, sheet shape and blur:
+`features/media/frostField.ts`), never in the render cache, and a field made
+for another shape or blur is not used (the border is Paper until the right
+one is there). The photo cover-filled into the field's grid, before the
+blur (the area average of the 1024 px source, most of a field's cost), is
+kept too, by photo, sheet shape and field size, so a frame of a Blur drag
+runs only the three passes and the grade: about 2 ms over a draft frame
+with its field kept (it was 11 to 17 ms when each field was made whole). A
+Width drag on Original changes the sheet's shape, so each of its frames
+makes a cover as well, and the frame-cost gate times that too (below). Save
+makes the field at 480 before it presses.
+
+The preview composes the frame into its ground in place, and the export
+composes it a band of rows at a time into a band buffer of its own
+(`FramedGroundRows`, one band more than an unframed press holds), reading the
+photo only for the rows it shows; each pixel is a function of its place and
+its own photo pixel, so every band height gives the same bytes and the
+preview's ground is the export's rows put together (`frame.test.ts`,
+`frost.test.ts`, `banded.test.ts`, `frameRender.test.ts`; the harness's
+`--bands`, `--parity` and `--file-parity` on five frame documents, one of
+them Frosted; `check-bands` in CI on two, one of them at its native height,
+so its photo is pressed from its own rows). A print without a frame (width
+0, square corners, Crop) composes nothing and presses the bytes it always
+did.
+
+`node scripts/parity-borders.mjs` (in CI) renders Border Studio's own
+frozen frames (`scripts/parity-borders/`: its preview canvas at 597ce7a, on
+generated flat-block photos) through this engine and compares: the sheet's
+size, the border and the matte every byte equal, the photo at its own pixels
+every byte equal, and each rounded corner within a mean of 1.02 levels
+(measured 0.24 to 0.81: the references are a canvas's antialiased clip, the
+engine's corner the exact area). Frosted, at Blur 60 and 240, its field made
+from the block photo's bytes through the app's own frame source: a mean of
+0.48 and 0.49 levels against Border Studio's, a 99th percentile of 3 and 2
+(held to 0.62 and 3.75; a radius not scaled with the field, the grade's
+brightness or the overscan left out, or the passes clamped at the edges,
+each fails it). `npm run harness -- --out c.json --no-hashes
+--frame-cost` times the preview framed (a photo at its own size and a 12 MP
+photo from its working copy, in Crop and in Fit, and in Frosted with its field
+kept, settled and draft) against the same print unframed, what a person waits
+for, and against the same framed render with the fill and the corners left
+out (a test seam), the frame's own work: at most 1.10x settled and 1.25x
+draft, each. Frosted with its field made again inside the render, from
+the kept cover, through the page's own `frostFields` (each frame of a Blur
+drag), is timed too, against the print unframed, and held to what it
+measured x 1.25: 1.58x settled, 1.60x draft (set from 8 runs at 1.12 to 1.26
+and 1.21 to 1.28; 1.10 to 1.24 and 1.23 to 1.32 in the 9 runs of the gate as
+it is now; the passes and the grade are 8 to 27 ms over the settled frame
+and 1.6 to 2.0 ms over the draft one). The draft bound fails a Blur drag
+that makes the cover again each frame (2.67x and 3.32x measured); the
+settled one does not see that (1.36x and 1.44x), nor the passes run twice
+(1.27x to 1.36x settled, 1.43x to 1.50x draft): the made-again work is a
+fifth of a settled render now, so a bound that saw its doubling would sit
+within a few percent of a clean run's spread. And Frosted on Original with
+its field made for a new sheet shape inside the render (each frame of a
+Width drag there: the cover and the field, through the same `frostFields`;
+the timed render steps through six widths a few hundred-thousandths apart,
+each its own shape on the same canvas, so the render cache stays and every
+step misses the kept covers and fields; the rig counts what each step
+makes, and a step that makes no cover or no field stops the gate with an
+error (as does a Blur step that makes no field), so a page that keeps more
+of them cannot turn the row into a timing of kept renders), against the
+same render with its field kept: the making's own share, held to what it measured x 1.25, 1.82x
+settled and 4.03x draft (set from 8 runs at 1.31 to 1.45 and 2.68 to 3.22;
+1.47 settled in a ninth). The cover and the field are 34 to 66 ms over the
+settled frame and 17 to 19 ms over the draft one: the reshaped render's time
+less the kept one's, at both documents, in those 9 runs (44 to 66 and 17 to
+19) and in 8 more runs of the same gate (34 to 65 and 17 to 18). The draft
+bound fails a Width drag whose cover is made twice (5.07x to 5.21x and
+4.26x to 4.32x after three measurements); the settled one does not (1.60x),
+for the reason above. A shared machine's
+interference only ever adds time and comes in spells that can outlast a
+document's rounds taken back to back, so the two documents at the two sizes
+are measured round by round in turn (15 rounds, one render a sample), a
+render's time is the mean of its three fastest samples (thirty in draft, ten
+a round), and a document and size with a row over its bound is measured
+again, up to twice, its samples pooled; it fails only if still over. On the
+gate as it is now (Crop, Fit, Frosted kept, Frosted made again and Frosted
+made for a new shape on Original, both documents at both sizes: 20 rows), 9
+runs on one machine all passed; three of them (each once) measured one
+document and size again, each time the 12 MP photo's settled size for its
+kept Frosted row (1.100x and 1.104x its own compose skipped, and 1.144x
+unframed, then in). Their verdicts: against unframed, Crop 0.97 to 1.07,
+Fit 0.94 to 1.03 (under 1 in Fit, which draws the photo smaller), Frosted
+0.97 to 1.07; against the compose skipped, Crop 0.97 to 1.08, Fit 0.96 to
+1.06, Frosted 1.01 to 1.09 (bound 1.10 settled, 1.25 draft); Frosted made
+again 1.10 to 1.24 settled, 1.23 to 1.32 draft; made for a new shape 1.31 to
+1.47 settled, 2.68 to 3.22 draft. The kept Frosted settled row is the
+gate's closest to its bound: its verdicts reach 1.09 to 1.10, and one run in
+three or four measures it again; it has failed once in the runs known to
+date, a run whose mutant could not touch it, so a red there is about one CI
+run in a hundred, and a re-run is the answer. Before
+Frosted, M2's gate (Crop and Fit only) passed 75 runs in three batches of
+25, its verdicts 0.85 to 1.08 and 0.90 to 1.09. With the preview's compose
+run ten times over, the 16-row gate (before the Original rows) failed in
+both runs of it (10 and 11 rows over). In both, over: the four Frosted rows
+with the field kept, the two draft made-again ones, a photo at its own
+size's Crop at both sizes and its settled Fit, the 12 MP photo's settled
+Crop; in: the 12 MP photo's Fit at both sizes (its frame a flat matte round
+a photo a third of the sheet, about 1% of the render) and the settled
+made-again rows, whose bound is the looser. Three rows sit at the 1.25
+draft bound and go either way by run: a photo at its own size's draft Fit
+(1.260 over, 1.242 in) and draft Crop (1.259 and 1.254, over by a hair) and
+the 12 MP photo's draft Crop (1.244 and 1.245, in by a hair). Twenty times
+over failed all 16.
+
+### The photo is stored exactly as it came
 
 An import keeps the picked file's **bytes**: never resampled, never re-encoded,
 at any size — a 24 MP iPhone capture is stored at 5712x4284, a transparent PNG
@@ -379,6 +745,16 @@ live where those are used:
   the photo's true size from the document, and the copy is drawn scaled into
   the same rectangle, so the preview places the photo exactly where the print
   does.
+- **The frame's colours** come from a third decode, made once a photo when a
+  frame first shows on it: the photo at 1024 px on its long side (or
+  its own size, if smaller), read back and kept for that photo (2.8 MB for a
+  3:2 photo). It waits for the preview's copy to land, and Save, under every
+  fill, waits for it (or makes it, when it is missing) before it decodes the
+  original, and for any such decode still running that was begun for
+  another photo (one replaced, or undone) or for a frame that no longer
+  shows, so none runs beside either (check-save step 10 taps Save under
+  Paper with it held back, and back on a photo by an Undo with the replaced
+  photo's held back: nothing is decoded and no file written until it ends).
 - **Save** decodes the *original*, in full (4 bytes a pixel of the photo, about
   98 MB for 24 MP, 159 MB for 40 MP), and closes it the moment its last rows
   are in the print, so the print is drawn from the original's pixels, never
@@ -389,11 +765,11 @@ live where those are used:
 
 Photos saved by an older build are the 2048 px copies it made; the originals
 are gone. Such a photo (no `native` flag, a long edge of exactly 2048) carries
-a note in the Photo tool's File tab: "This photo was saved at reduced size by an older
+a note in Frame › Photo: "This photo was saved at reduced size by an older
 version. Choose it again for full resolution."
 
 **A photo cannot silently drop out of a print.** If the stored image is missing
-or cannot be decoded, the Photo tool's File tab says so ("This photo could not
+or cannot be decoded, Frame › Photo says so ("This photo could not
 be loaded. Choose it again.") for as long as it is true, and so does Save,
 whichever tool is open: Save cannot be pressed, its name carries the sentence,
 and the status card above the dock shows the same sentence as an alert, with
@@ -496,8 +872,75 @@ widest line lands on 92% of the width to within a pixel at every render height.
 
 The weight decision that matters over a photo is regular or bold — heavier
 strokes survive the screen, the tear and the bleed — so it is a **Bold** switch
-(700 or 400). The faces are Poster, Grotesk, Serif and Mono; all four are system
-stacks, so nothing loads and everything works offline.
+(700 or 400), off and unavailable on Poster, which is one weight ("Poster is
+one weight", under it). The faces are Poster, Grotesk, Serif and Mono.
+
+### Fonts
+
+**Poster is one bundled face, Tanklager Kompakt** (Ariel Martín Pérez, Tunera
+Type Foundry, SIL Open Font License 1.1; one WOFF of 18,908 bytes in
+`src/assets/fonts/`, from Border Studio's library, its notice and licence in
+`public/licences.txt`). Poster's system stack led with Impact, which an
+iPhone does not have, so on the owner's phone the default plate was set in
+Helvetica Neue and on a desktop in Impact: the same print, two faces. A print
+is now set in the same face on every phone, online and off (the face is
+precached), but for a few characters a person can type, which Tanklager
+does not draw and which are set in the next face of the stack, the phone's
+own: the dollar sign `$` (on the iPhone keyboard's `123` page), `€ £ ¥` (its
+`#+=` page), the signs a long press offers on `$` and `&` (`¢ ₩ ₽ §`),
+and the emoji keyboard's `© ® ™`. Every other printable ASCII character,
+and the curly quotes, dashes and ellipsis an iPhone types by default, are
+Tanklager's; `check-fonts` requires them, names `$` as the one ASCII character excused,
+prints every keyboard character the face lacks, and fails a face that loses
+one more (its controls include the iPhone's apostrophe removed). Of Border
+Studio's 52 faces, by the survey that chose this one, nine can set the letters, digits and
+punctuation this app prints with a lowercase of their own and no ligatures,
+and Tanklager is the one of the nine that is condensed and heavy, as the
+stack meant Impact to be; it is the only one that came across. The other
+three faces stay system stacks. Railroad Gothic, Border Studio's heavier
+wood type, draws capitals only (its lowercase glyphs are capitals), and
+choosing it instead would take more than its file: it ships as TrueType
+(`ttf` added to the precache glob), its family name changed where Poster's
+is written (`fonts.css`, `features/media/faces.ts`, `engine/types.ts`,
+`scripts/face-checks.mjs`, `check-fonts.mjs`, `verify-offline.mjs`), and the
+lowercase verdict dropped, which refuses it (its `o` measures 1.00 of its
+`O`): the owner's alternative, at that cost. The owner kept Tanklager.
+
+It is one weight, so **Bold sets nothing on a Poster plate**, and the switch
+says so: a bold made by the browser from the regular smears the glyphs
+differently in each engine, so the press would differ between Chromium and an
+iPhone. The stored Bold is kept, so a plate moved to another face keeps its
+choice. A stored print's Poster plates keep their sizes; a line sized with
+Fit in the old face may want Fit again (see "Saved prints keep opening").
+
+**The face is in before anything measures.** The layout's advances, Fit, a tap
+on a plate and the normaliser's one Fit conversion all measure text
+synchronously, and a canvas measures and draws in a fallback while a face is
+still loading. So `main.tsx` waits for the face (`features/media/faces.ts`)
+before the document is read or the sheet drawn, for two seconds at most: a
+face that fails or is slow never leaves a blank app, the app goes on in the
+rest of Poster's stack, and if the face lands later the preview's glyph
+rasters, keyed by a face generation (`render.ts` `ensureCache`), are set
+again in it. `font-display: block`, weight 400 only, so nothing asks a browser
+to fake a bold.
+
+**The face is checked, not trusted.** `check-fonts` (in `npm run verify`)
+reads the WOFF itself (its tables inflated and checksummed; `cmap` formats 4
+and 12; `GSUB`'s features) and fails unless every printable ASCII
+character and the iPhone keyboard's ‘ ’ “ ” – — … are mapped (but for the
+one it names, `$`, which it prints as set in the phone's own face, with
+the other keyboard characters the face lacks, `€ £ ¥ ¢ ₩ ₽ § © ® ™`), each
+lowercase letter maps to a glyph of its own, and no ligature
+feature (`liga clig calt dlig rlig`) is offered; four broken copies of the
+face (lowercase unmapped, the iPhone's apostrophe unmapped, lowercase set in
+the capitals, a `liga` added) must each fail it (`node
+scripts/check-fonts.mjs --controls dir/` writes them out, and `node
+scripts/check-fonts.mjs dir/liga.woff` checks one, or any other face). Its
+lowercase rule is a pre-check only: Railroad Gothic passes it, its separate
+lowercase glyphs being capitals. The real test is the ink: `verify-offline` measures `o`
+against `O` in the browser (Tanklager: 0.68; a lowercase that is capitals:
+1.00; fails over 0.9), with its verdict tested on measured heights it is
+handed (`faces.test.ts`), since node cannot read the face's CFF outlines.
 
 ### Tracking and line height
 
@@ -620,13 +1063,22 @@ aspect ratio, so both constraints hold at once and neither axis is ever clamped
 alone. `container-type: size` on the wrapper is what makes `cqw`/`cqh` resolve
 against the space the sheet is actually given. The ratio is a number the sheet
 is handed (`--sheet-ratio`, from `sheetAspect`), not one of a list of shapes,
-so an Original sheet of any photo's proportions sizes the same way.
+so an Original sheet of any photo's proportions sizes the same way. It is the
+whole sheet's ratio, the frame included (a framed Original is `(vw + 2b) /
+(vh + 2b)`, "The frame"), so the border is drawn inside the box the sheet is
+given, and a Width drag on Original reshapes the box without ever squeezing
+the photo in it.
 
 ### Saving at the photo's own pixels
 
 Save presses the print at the size the planner gives (`engine/exportPlan.ts`),
-never at the preview's: the height at which the photo lands on the sheet pixel
-for pixel, whatever the photo's size. A 12 MP landscape photo on 4:5 saves at
+never at the preview's: the smallest sheet on which the photo lands pixel for
+pixel, whatever the photo's size. What must land is the photo's own
+rectangle inside the frame, not the sheet: the border is added round it, and
+never takes a pixel from it. In the frame a first photo gets (Width 7.1%), a
+12 MP landscape photo on 4:5 saves at 2822×3528 (a 252 px border) and a 40 MP
+one on Original at 9016×6440 (644 px), every pixel of the photo inside.
+Unframed (Width 0), a 12 MP landscape photo on 4:5 saves at
 2419×3024, the same photo upright at 3024×3780, a 24 MP iPhone capture on 4:5
 at its own 3427×4284 and on its own Original sheet at 5712×4284; a 40 MP
 photo (7728×5152) at 7728×5152 on Original, 4122×5152 on 4:5 and 5152×5152 on
@@ -641,11 +1093,68 @@ on its own sheet saved at 42% of its pixels.) The one limit left is the JPEG
 format's own: 65,535 px a side, which only a photo wider than that meets;
 Save then says so and offers the PNG, which has none.
 
+"Lands pixel for pixel" depends on how the photo is placed. A cropped sheet
+(4:5, 1:1...) is covered by the photo, so its plan is the smallest sheet on
+which the photo's cover fit reaches 1:1 on the side that binds. An Original
+sheet must HOLD the photo: the smallest sheet on which the whole photo fits at
+its own pixels on both sides, so at 100% it saves every row and column of it.
+(A cover lands a row early on a photo taller than 1:2, and a 4000x12000 photo
+used to save at 4000x11999.) Zoomed past 100%, an Original sheet holds the
+part of the photo the zoom shows on both sides, where the cover was at 1:1 on
+one; so an Original print zoomed past 100% may save a pixel or two larger or
+smaller than it did before the frame came in, both at the photo's own pixels:
+larger where the cover's sheet was a row or a column short of holding it (a
+4730x6159 photo at 200%: 2365x3079 then, 2365x3080 now), smaller where a
+smaller sheet holds it too (7500x4203 at 200%: 3751x2102 then, 3750x2102
+now). A test holds every such plan within 2 px a side of the old one, larger
+only where the old one did not hold. A Fit sheet must CONTAIN the photo: the
+smallest sheet whose visible rectangle holds the whole photo at its own
+pixels, its zoom not read; the rest of the sheet is the matte.
+
+With a border, landing is not a threshold: the border is rounded to a whole
+pixel, so a pixel more of sheet can be a pixel less of visible rectangle (on
+1:1 at the widest frame, an 8248x6671 photo in Crop lands on a 9809 px sheet,
+not on 9810, and again on 9811). So the planner steps the sheet's long side
+a pixel at a time, from an estimate up to the first size that lands, then
+down until `min(1000, ceil(1 / width))` sizes in a row do not, and keeps the
+smallest that did (`engine/exportPlan.ts`); a test holds it to a scan from 1
+on 2,000 plans, and pins that sawtooth.
+A floor, a smaller copy and the JPEG's edge are sized by the height, the
+width following from the shape, as the preview is.
+
+Fit, and a wide border, add pixels the photo does not have, and the caption
+says how many before the tap (below). Real sizes, from the planner
+(`exportPlan.test.ts` holds each):
+
+| Photo | Width | Sheet | Size |
+|---|---|---|---|
+| 7728x5152 (40 MP) | 7.1% | Original, 9016x6440 | 58.1 MP |
+| the same | 7.1% | 1:1 Fit, 9016x9016 | 81.3 MP |
+| 5152x7728 (a 40 MP portrait) | 7.1% | Original, 6440x9016 | 58.1 MP |
+| the same | 7.1% | 9:16 Fit, 6906x12277 | 84.8 MP |
+| the same | 7.1% | 3:2 Fit, 14754x9836 | 145.1 MP |
+| the same | 7.1% | 16:9 Fit, 18414x10358 | 190.7 MP, 4.8x the photo |
+| the same | 16% | 16:9 Fit, 31864x17924 | 571.1 MP |
+| 9504x6336 (61 MP) | 16% | Original, 13976x10808 | 151.1 MP |
+| the same | 16% | 1:1 Fit, 13976x13976 | 195.3 MP |
+| the same | 16% | 9:16 Fit, 22044x39189 | 863.9 MP |
+
+Every added pixel is the frame's (the border, and in Fit the matte); none is
+taken from the photo. What a save holds and how long it takes grow with the
+sheet ("What an export holds").
+
 It says so **before** the tap. The More sheet's first row reads "Saves
-2419×3024", and when the print is not the photo's own pixels, why, in numbers:
-"photo is 1600×1200: upscaled 1.5x", or, zoomed in, "photo is 1600×1200 at
-300% zoom: upscaled 4.5x" (the longest reason a real document gives). Save's
-own name carries the size ("Save 2419×3024 JPEG"), the toast repeats size and
+2822×3528", and under it, when the print is not the photo's own pixels, why,
+in numbers: "photo is 1600×1200: upscaled 1.5x", or, zoomed in, "photo is
+1600×1200 at 300% zoom: upscaled 4.5x" (the longest reason a real document
+gives); then the megapixels and the frame's border, since a frame adds pixels
+the photo does not have ("10.0 MP, with a 252 px frame"), and past 100 MP
+that a phone may not finish it (said, never acted on: nothing is made
+smaller for it). Save's
+own name carries the size and the frame, and the very-large note when there
+is one ("Save 2822×3528 JPEG with a 252 px frame"), so the size a frame makes
+is stated before the tap from every tool, the Frame tool's too, and past
+100 MP the card over the stage says it in words on screen (above); the toast repeats size and
 reason the moment a save starts, and the confirmation repeats the size. Save
 itself stays one word, so the app bar never wraps. Nothing falls back to a
 smaller file: a press that fails stops, with the reason and the numbers, and
@@ -703,15 +1212,16 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   out for a typed array (a `RangeError`) anywhere in the press presses it again
   from the first band in bands half as tall (the same file, more slowly), up to
   four times, while the photo is still held. Only a `RangeError` is read that
-  way: the engine's own checks (the tile ring, the encoders' sizes) throw a
-  plain `Error`, so a bug is said as itself, pressed once, never offered as a
-  smaller copy. What still cannot be pressed — a
+  way: the engine's own checks (the tile ring, the encoders' sizes, a native
+  plan laid out off the photo's own pixels) throw a plain `Error`, so a bug
+  is said as itself, pressed once, never offered as a smaller copy. What
+  still cannot be pressed — a
   canvas that comes back blank, memory out at the smallest band, or an original
   that cannot be decoded whole while a smaller decode of it can (the import
   already read it, so that is this device's memory) — is one error,
   `CanvasLimitError`, with the plan in it. Save then asks, in numbers and with
-  the reason: "This device couldn't press 2419×3024 (a canvas came back blank).
-  Save a smaller 1814×2268 copy instead?" (a reason in the browser's own words
+  the reason: "This device couldn't press 2822×3528 (a canvas came back blank).
+  Save a smaller 2117×2646 copy instead?" (a reason in the browser's own words
   — "Out of memory" — is shown as it came, so a fault that is not about size
   cannot hide behind the offer). The copy offered is the largest that proves
   itself here, its canvases first and then its photo decoded at its size,
@@ -723,13 +1233,13 @@ is a flow (`features/shell/useSave.ts`, a state machine with no UI in it):
   ("The photo could not be decoded to save: ..."), never an offer. Nothing is
   pressed until the person picks Save smaller; the copy's photo is decoded
   straight to the copy's size, once, and drawn at its own pixels; and the
-  confirmation names what was saved ("Saved 1814×2268, a smaller copy").
+  confirmation names what was saved ("Saved 2117×2646, a smaller copy").
 - **A save that did not finish.** iOS evicts a tab that holds too much without
   a word, and the app restarts as if nothing happened. Save marks itself in
   `localStorage` before it decodes the photo (the height and the format) and
   clears the mark when it ends either way, so a launch that finds the mark
-  says so: "The last save, 2419×3024, did not finish.", with **Try again**,
-  **Save smaller (1814×2268)** and Cancel. It does not claim the device ran out
+  says so: "The last save, 2822×3528, did not finish.", with **Try again**,
+  **Save smaller (2117×2646)** and Cancel. It does not claim the device ran out
   of memory: a mark only says the save did not end.
 
 ### Every pixel of the photo, measured
@@ -765,7 +1275,38 @@ this app used to draw a photo, and the script fails if either passes. Each
 40 and 61 MP photo is saved a second time as Save saves it by default, a
 JPEG, whose own header must say a baseline frame (SOF0) of the plan's size
 with every component sampled 1x1 (4:4:4): 24.7 MB at 7728x5152 for this
-zone plate, written in 12.2 s. A JPEG
+zone plate, written in 12.2 s.
+
+Framed, the photo still lands at its own pixels, and the gate says so pixel
+by pixel: the 40 MP zone plate on its own sheet with the first photo's frame
+and round corners (9016x6440, a 644 px frame), a 3000x2000 one in Fit on 4:5
+(3652x4565, the photo at (326, 1283)) and that one's smaller copy at 60%
+(2191x2739, the copy decoded at its contained 1799x1199 and drawn 1:1). In
+each, inside the photo's rectangle and outside its corners, every byte is the
+photo Save drew (38.2 million pixels at 40 MP: largest difference 0/255,
+Laplacian 1.0000); every pixel of the frame and the matte is the fill's colour
+(18.2 million at 40 MP); every corner pixel is the photo over the fill at the
+corner's exact coverage, within the half level of one rounding; Fit's
+rectangle holds the photo's shape to half a pixel; and the 40 MP framed print
+saved as Save's JPEG is a 9016x6440 SOF0 sampled 4:4:4. Frosted at its
+heaviest blur (240) on a 40 MP photo that fades over a smooth colour gradient
+(case 16; a grey zone plate frosts to one flat grey, where nothing could
+show): its field made from the stored file as Save makes it (about half a
+second) is float (4 in a million of its values on a whole level, held under
+1%: a field rounded to bytes before it is stretched, the stair this guards
+against, has all of them there and fails); every one of the frame's 18.2
+million pixels is that field sampled exactly, in float64 by the harness's
+own code rather than the engine's sampler, and rounded once (a sampler that
+rounds before it has finished mixing is off by a level at 2.2 million of
+them, and fails); along the middle row of the left border the longest run
+of one value is printed against the field's own (167, 644 and 177 px in
+red, green and blue, against the same: green runs the whole border because
+the gradient runs down, not across), but at this size the field moves under
+a level across the 644 px border, so that run cannot tell a rounded field
+from a float one, and the two checks before it are the gate; and it presses
+in at most 1.25x the time of the same photo in a palette colour, pressed just
+before it (one sample each, so a few percent of drift is in the ratio:
+interleaved and repeated, the two measured 1.00x). A JPEG
 whose EXIF says to rotate it saves upright, a PNG's
 transparent hole prints as paper (never black), a document whose stored photo
 is gone is refused rather than printed on bare paper, and the default print
@@ -774,10 +1315,11 @@ and two documents of small type correlate with themselves at twice the height
 0.95.
 
 `scripts/check-save.mjs` taps the same flow in the built app: a 12 MP photo on
-4:5 (Save reads Saving and the card offers Cancel within 100 ms, the card
+4:5 in the frame a first photo gets, the ratio chosen with the Frame tool's
+chips (Save reads Saving and the card offers Cancel within 100 ms, the card
 counts the press in percent and says when it writes the file, the file is the
 size the More sheet and Save's name promised), a device whose canvases come
-back blank wider than 2000 px (the smaller-copy question before anything is
+back blank wider than 2500 px (the smaller-copy question before anything is
 pressed, then that file), a tab closed mid-press (the notice at the next
 launch, its choices waiting, and saying so, until the photo is back), a stored
 photo deleted (the card and Save say so, and no file), a Cancel tapped while
@@ -785,22 +1327,27 @@ the file is written (no file, with a share sheet or without), Ctrl+Z pressed
 during a press (the document stays as it was, and the file is that print),
 where focus is while it presses, the gesture hint across two saves (its
 card hides, its words are not read out again), and a 40 MP photo on Original
-(More and Save promise 7728×5152; the percent moves; Cancel leaves no file;
-Save again writes a 7728x5152 baseline JPEG sampled 4:4:4, read from its
-header).
+in its first frame (More and Save promise 9016×6440; the percent moves;
+Cancel leaves no file; Save again writes a 9016x6440 baseline JPEG sampled
+4:4:4, read from its header).
 
 #### Test seams
 
-The gates need a press slow enough to tap Cancel in, and small tiles on a small
-sheet. Save reads `globalThis.__PM_TEST__` once per press (`engine/export.ts`),
-and nothing else reads it; absent, it does nothing:
+The gates need a press slow enough to tap Cancel in, small tiles on a small
+sheet, and a framed preview without its frame's work. Save reads
+`globalThis.__PM_TEST__` once per press (`engine/export.ts`), the preview one
+field of it once per framed render (`engine/render.ts`), and nothing else
+reads it; absent, it does nothing:
 
 - `finishDelayMs`: the file's writing waits this long after the last band
   (check-save and verify-geometry hold it 1.5 to 3 s, as a phone's can take);
 - `onFinishStart`: called as the file's writing starts (check-save times its
   Cancel from it);
 - `tileBudget: { edge, pixels }`: the tile grid's budget instead of 4096 and
-  2^22.
+  2^22;
+- `skipFrameCompose`: the preview draws a framed photo into its rectangle and
+  leaves the fill and the corners out, so the harness's `--frame-cost` can
+  time the frame's own work against the same render without it.
 
 ### What an export holds
 
@@ -977,19 +1524,51 @@ photograph and would put case 6 at about 379 MB. The gate in brackets):
 | 9. A 48 MP 3:1 panorama on Original, the default document, second ink | 12000x4000 | 121.2 MB (150) | 400.0 MB (420) | 18.5 s: 386 (320 + 65) | +245 MB |
 | 10. 3:1 on Original, type at 10%, second ink (the luminance at one cell a pixel) | 6399x2133 | 149.2 MB (185) | 245.1 MB (290) | 5.6 s: 410 (346 + 64) | +261 MB |
 
+Framed, a photo at its own pixels inside the first photo's frame (round
+corners, the photo's own colour) or the widest; the sheet grows by the frame
+and, in Fit on a ratio not the photo's own, by much more, and every added
+pixel is the frame's. Each is gated at what it measured x 1.25 and under a
+ceiling that is not its own measurement: case 6's typed peak scaled by the
+sheet's width, plus the decoded photo and the file, x 1.30
+(`scripts/export-cases.mjs`); where measured x 1.25 is over it, the gate is
+the ceiling:
+
+| Case | Sheet | Typed arrays, peak | With canvases, the decoded photo and the file | Ceiling |
+|---|---|---|---|---|
+| 11. 40 MP on Original, the first photo's frame | 9016x6440 (58.1 MP) | 118.0 MB (147.5) | 379.1 MB (467) | 467.9 MB |
+| 12. The same photo on 1:1 Fit | 9016x9016 (81.3 MP) | 120.1 MB (150) | 413.8 MB (510) | 510.1 MB |
+| 13. 61 MP on Original, the widest frame | 13976x10808 (151 MP) | 147.5 MB (184) | 619.1 MB (773) | 828.6 MB |
+| 14. A 40 MP portrait (5152x7728) on 16:9 Fit | 18414x10358 (191 MP) | 168.7 MB (210) | 613.6 MB (767) | 871.1 MB |
+| 15. The same at the widest frame (memory only) | 31864x17924 (571 MP) | 262.2 MB (327) | 1238.8 MB (1548) | 1794.8 MB |
+| 16. Case 11 in Frosted at Blur 240 (the frame source and the field held through the press) | 9016x6440 (58.1 MP) | 123.1 MB (154) | 384.2 MB (467) | 467.9 MB |
+
+The frame adds one band buffer to the press (the framed ground's own); the
+rest grows with the width as before, and slower than it, since a wider sheet
+is pressed fewer rows at a time. Past 100 MP most of what a save holds is the
+file (at 1.4 bytes a pixel, 800 MB at 571 MP) and the photo, so a very large
+framed print is a matter of the phone's memory for its file, which the
+caption's size says before the tap.
+
 What the press holds grows with the sheet's WIDTH (its tile rings and band
-buffers), not its height: a 4000x10000 photo on Original (a 4000x9999 sheet)
+buffers), not its height: a 4000x10000 photo on Original (a 4000x10000 sheet)
 holds 109.2 MB of typed arrays at its peak against 107.4 MB for a 4000x5000
 one under case 2's document (1.017 times), and 120.8 against 113.2 MB under
-its worst press (1.068 times).
+its worst press (1.068 times); framed, a 3618x6284 photo on Original (a
+4666x7332 sheet) 120.8 MB against 120.1 MB for a 4000x3000 one (4666x3666,
+1.006 times).
 
 The gates (the script exits 1 over any): cases 1-4 at what they measured
 once Save pressed into the encoder, x 1.25 (9.1, 7.8, 8.0 and 6.3 bytes of
 typed arrays an output pixel; case 5 is recorded, not gated); cases 6-10 in
 megabytes, the typed arrays and the whole, at the ceilings the band engine
 was designed to or at what they measured x 1.25 where that is lower (case 7:
-144); the same-width pairs at 1.15 times. Case 8 (81 s in node) runs with
-`FULL=1`; CI runs the rest, four processes at a time (2 min 16 s here).
+144); cases 11-16 as above; the same-width pairs at 1.15 times. Case 8
+(78 to 81 s in node) and the framed 13 to 16 (115 to 209, 151 to 272, 451 to
+807 and 50 to 93 s, on a fast day of this machine and a slow one) run with
+`FULL=1`; CI runs the rest, four processes at a time (2 min 55 s here, the
+framed 11 and 12 and the framed pair among them, when the precache budget
+was set; 4 min 51 s with them on a slower day, 3 min 39 s without them that
+day, and 2 min 16 s without them on a faster one).
 Desktop Chromium's memory is informational (V8 frees short-lived buffers far
 more eagerly than an iPhone's JavaScriptCore), and the phone's own is a
 DEVICE-CHECKLIST item. The legacy five-plate print (kept whole: see "The
@@ -1004,14 +1583,29 @@ synthetic photo): a 40 MP save on Original takes 15.1 s, 379 ms a megapixel
 worst legal document 17.3 s (539: 473 and 65); the 61 MP worst press on
 Original 37.0 s. The encoder's share depends on the picture: 62 to 71 ms a
 megapixel on these prints, 112 on the device spike's noisy halftone. In the
-built app (`check-save`), a 40 MP photo on Original is saved 15.0 s after
-the tap. On a phone only the encoder has been measured: the device spike ran
+built app (`check-save`), a 40 MP photo on Original in the frame a first
+photo gets (9016×6440, 58 MP) is saved 21 to 29 s after the tap (21.1, 22.6,
+24.8 and 28.5 s in four runs). On a phone only the encoder has been measured: the device spike ran
 it at 62, 65 and 62 ms a megapixel on its halftone test image on an iPhone
 (iOS 18.7, the Claude app's in-app WebKit view), R 0.49, 0.52 and 0.49 of
 the reference machine's 126; its estimate of a 40 MP save, 33 s x R, is 16
 to 17 s, the 33 s being this machine's estimate from before the save was
 measured here at 15.1 s. How long a save takes on a phone is a
 DEVICE-CHECKLIST item.
+
+A framed save costs what its sheet's megapixels cost: in the run of
+`measure:export` made with every CI step in order when the precache budget
+was set, the 40 MP photo framed on Original took 23.9 s for 58.1 MP, 412 ms
+a megapixel, and on 1:1 Fit 32.1 s for 81.3 MP, 395, against 16.5 s and 415
+for the same photo unframed (on a slower day of this machine, 33.9, 46.9 and
+23.4 s). On a phone the only whole-save figure is the device spike's
+estimate, about 16 s at 40 MP: about 0.4 s a sheet megapixel, so about 23 s
+for the framed 58 MP, 33 s at 81 MP and 76 s at 191 MP. `measure:export`
+prints that estimate beside every case it times (`SPIKE_ESTIMATE`); on this
+desktop the whole save ran at 0.40 to 0.43 s a sheet megapixel under the
+default document on a photo, framed or not, 0.37 with no photo, and 0.53 to
+0.98 under the documents of three to five plates. These are estimates; the
+app promises no time.
 
 ### The same print at every size
 
@@ -1040,8 +1634,9 @@ correlate with the render at the height (`npm run harness -- --out s.json
 every height a print is saved at, the default print and type at 40% correlate
 at 0.97 or better, and type at 20% at 0.95 or better. At 20% the halftone
 lattice is under 4 px at 1800, so how closely the two heights agree depends on
-the glyphs and therefore on the machine's fonts: 0.9706 on one machine, 0.9644
-on the CI runner. Before the scale fixes the same document read 0.77. Below the
+the glyphs: 0.9712 in Tanklager, Poster's bundled face (before it was bundled,
+Poster fell back to each machine's fonts and read 0.9706 on one machine and
+0.9644 on the CI runner). Before the scale fixes the same document read 0.77. Below the
 reference height the preview is a lower-fidelity picture: a halftone for small
 type is finer than a 900 px raster can draw, and a speck or a fibre stops at
 one pixel.
@@ -1094,17 +1689,21 @@ point, and keeps no cache at all: it reads the noise where it prints it (see
 
 The interface is built on the owner's style guide, vendored exactly as Border
 Studio (the app this one follows) vendors it: `scripts/sync-styleguide.mjs`
-copies the core CSS, the icon masks, the Archivo font and fourteen elements
+copies the core CSS, the icon masks, the Archivo font and fifteen elements
 (button, card, appbar, toolbar, tabs, segmented, slider, switch, swatch,
-select, input, dialog, menu, spinner) into `src/vendor/styleguide/`, and the
-layout-only scripts (core's `SG.fit`, the segmented control's fit, the
+select, input, dialog, menu, spinner, chip) into `src/vendor/styleguide/`,
+and the layout-only scripts (core's `SG.fit`, the segmented control's fit, the
 toolbar's paging, and the scrubber script only because the toolbar calls its
-`SG.afterParse`) into `public/sg/`. `VERSION.md` records the commit
-(`e38263e`). The copies are never edited here: `npm run sync:styleguide`
+`SG.afterParse`) into `public/sg/`. The app loads every element but the
+select, which nothing draws since the ratio chips replaced the sheet's one
+select; it stays in the vendored set, which is the style guide's as synced.
+`VERSION.md` records the commit (`e38263e`). The copies are never edited here: `npm run sync:styleguide`
 re-vendors them from a sibling checkout, and `npm run verify:geometry` then
 proves the dock still holds still. The style guide's scripts that own state
-(tabs, slider, dialog, menu) are not loaded: React owns that state, so their
-keyboard patterns are in `ui/` instead (two owners of `aria-selected` fight).
+(tabs, slider, dialog, menu, chip) are not loaded: React owns that state, so
+their keyboard patterns are in `ui/` instead (two owners of `aria-selected`
+fight); so is the chip script's one layout job, scrolling a chip that takes
+focus into view whole (`ui/chips.ts` `revealDelta`).
 
 The app's own CSS is unlayered, so it beats every `sg.*` layer without
 `!important`, and so it holds no bare element rules (a `button {}` would strip
@@ -1161,26 +1760,68 @@ looks wrong is caught.
 
 ### The dock
 
-Four tools — **Type, Ink, Photo, Press** — are a toolbar of toggle buttons,
+Four tools — **Frame, Type, Ink, Press** — are a toolbar of toggle buttons,
 not tabs: tapping the open tool closes its panel for a full-height sheet, and a
-tab cannot be "none open". Each tool's panel is two bands of fixed height: a
+tab cannot be "none open". Frame leads because the job is to frame a photo,
+then set type on it; it holds what Border Studio's Frame and Fill tools did
+and what this app's Photo tool did, and with no photo yet it opens on Photo.
+Each tool's panel is two bands of fixed height: a
 head row (the plate button, on Type and Ink, then the sub-tabs) and a content
 area of one options row, a hairline and one parameter strip (141 px). A feature
 that does not fit is a sub-tab, never another row:
 
 | Tool | Sub-tabs |
 |---|---|
+| Frame | Border (the fill: Paper, Photo, Deep, Muted, Comp, Frosted; Width, Corners, and Blur under Frosted) · Crop (the ratio chips, a second tap flipping the chosen one; Crop or Fit) · Place (zoom, position) · Photo (choose, replace, remove) |
 | Type | Text (the words) · Face (typeface, Bold) · Size (Fit, Size) · Space (alignment; line height, tracking) · Place (rotation, position) |
 | Ink | Ink (the plate's ink, from the 77 in a dialog) · Over photo (Off, Second ink, Backing; the second ink and its Switch point, or the backing's ink) |
-| Photo | Sheet (Original, 1:1, 4:5, 3:4, 2:3; paper over the photo) · Frame (zoom, position) · File (choose, replace, remove) |
-| Press | Screen (halftone or grain; screen size) · Press (Re-roll; ink, misregistration, Edge, Wear) · Paper (the stock) |
+| Press | Screen (halftone or grain; screen size) · Press (Re-roll; ink, misregistration, Edge, Wear) · Paper (the stock; paper over the photo and frame) |
+
+The fill and the ratio are rows of the style guide's chips on one scrolling
+line, each a button, the chosen one pressed (`ui/ChipRow.tsx`): one tab stop,
+the arrows move along the row and Enter or Space chooses, so the print is not
+remade at every arrow. A fill chip shows the colour the frame is drawn in (a
+dot before its name, so no colour has to be told apart by eye; Frosted, the
+photo blurred, is a glyph), and while the photo's palette is still being made
+it shows the stock, as the frame does. The fill row is chips, not Border
+Studio's swatch circles with their names under them: a swatch cell is 70 px
+tall, and with a hairline and the strip the Border panel would be 167 px, the
+sheet moving 26 px whenever it opened; a chip row is one options row. Crop or
+Fit is unavailable on Original ("Original keeps the whole photo": the sheet is
+the photo's shape and its border) and without a photo; Place's Zoom and
+Position are unavailable in Fit ("Fit shows the whole photo"). Without a photo
+Border keeps Width and Corners on its strip, unavailable ("No photo yet"),
+under the same words and Choose photo, which stand where the fill row goes
+once there is a photo to take its colours from; Place says there is none, with Choose photo.
+The ratio is the sheet's, so it can be chosen on bare paper (Original, the
+photo's own shape, needs a photo, and says so). Every reason is said with
+its control: an unavailable setting's slider and its − and + are described
+by the words that show where its value would, a chip that cannot be chosen
+by the line that says why, Crop | Fit by the line under it. That line is
+always there, saying why the row is off or what the chosen one does
+("Trimmed to fill the frame", "The whole photo, matted"), in a box sized for
+the longest of its wordings: Border Studio's Crop tab moves nothing when a
+ratio is chosen, and neither does this one (`verify:geometry` holds the tab's
+rows still between Original and 4:5, at 100% and 200% text).
 
 The panel is the same height in every tool and every tab, so **the sheet never
 changes size or place between them** (Border Studio fcd91ff). That is checked,
 not assumed: `npm run verify:geometry` opens every tool, sub-tab and Over-photo
-state at 320, 375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo, and
+state, and Frame › Border with Frosted chosen (its Blur on the strip), at 320,
+375, 393 and 430 px wide, with a 4:3, a 3:2 and a 1:3 photo each in the
+frame a first photo gets, the 4:3 again with its frame taken away (Width to 0,
+as every print saved before the frame opens) and bare paper with no photo, and
 fails if the sheet moves by a pixel, if a panel overflows, or if the page
-scrolls sideways. Each state is measured at rest, once its transitions and
+scrolls sideways. The Frame tool's own states are swept again at every width,
+in light and dark, at 100% and 200% text: its fill row with Photo and with
+Frosted, the ratio chips on 4:5, Crop | Fit in Fit, Place and Border in Fit,
+and with the photo removed each tab (Width and Corners unavailable, Original
+unavailable). The sheet holds still among the states of one shape, nothing is
+cut off at 200%, and each chip row is scrolled to every chip in turn, as a
+swipe leaves it (at its snap position, or the row's end): every chip shows
+whole and owns 44 px both ways, and a row that overflows scrolls inside
+itself without moving the sheet or the page. At 320 px both rows overflow, so
+that scroll is always checked. Each state is measured at rest, once its transitions and
 animations have run out and its scrollers have stopped, never after a fixed
 delay, so the frame it is measured at does not depend on the machine's speed
 (a sheet caught mid-rise once failed CI, see the gate's `settle`). The one
@@ -1217,8 +1858,8 @@ is a file, and it checks more:
   layout steps full → compact → tight as it narrows (tight only when the
   title needs a second line).
 - **The save states at 200% text** on a 320×640 and a 375×667 phone, with the
-  dock closed and with the Photo tool open: a 5712×4284 photo on its own sheet
-  (so the toast carries the longest reason the planner gives), pressing with
+  dock closed and with the Frame tool open: a 1600×1200 photo on its own sheet
+  zoomed to 300% (so the toast carries the longest reason the planner gives), pressing with
   that toast up (the press held at "loading the photo", its decode of the
   original waiting until the state is measured), ready, and the photo that
   could not be loaded. Cancel, Share,
@@ -1271,13 +1912,33 @@ readers; the why is here, in this README.
 
 The sheet's surface takes `touch-action: none`, so its gestures are never the
 browser's: drag to move, two-finger pinch to scale and rotate, double-tap to
-centre. With the Photo tool open the same gestures pan and zoom the photo
-instead (100–400%, never off the sheet), and double-tap fits it again. A finger
+centre. With the Frame tool open the same gestures pan and zoom the photo
+instead (100–400%, never off the sheet), a pinch zooming about the fingers,
+so what is under them stays under them (Border Studio's crop pinch), and
+double-tap puts it back at 100% and centred; a drag is measured against the visible rectangle inside the frame,
+so the photo stays under the finger whatever the border. In Fit the whole
+photo shows and nothing moves (the hint says so). A finger
 lifting mid-pinch re-seeds the gesture from the remaining one, so the layer
 keeps panning instead of jumping. Every gesture writes the same fields the
 parameter strips write, so each has a tap equivalent (Size, Rotation and
 Position X/Y for type; Zoom and Position for the photo), and arrow keys / +- /
-brackets mirror it for keyboards. The selected plate shows a crosshair on the
+brackets mirror it for keyboards. With Frame open the keys are the photo's,
+as Border Studio's are (`features/editor/photoKeys.ts`): the arrows move the
+view over the photo, so Right shows more of its right side (it raises
+Position X, the photo moving left: the opposite of a plate's arrows, which
+move the plate), one press 6% of its drawn size at 100%, whatever the zoom;
++ and − zoom by 1.15 within 100–400% about the middle of the frame (what is
+there stays there, as Border Studio's keys leave the view's centre); 0 puts
+it back at 100% and centred.
+A run of presses is one undo step, as a plate's keys are, and 0 a step of
+its own; in Fit they move nothing (`check:touch` presses them in the built
+app). With no photo there is nothing of the photo's to move: a touch still
+picks no type, and the keys stay the selected plate's, as the sheet's name
+says ("No photo yet", then the plate's keys). With the keys on it, the sheet
+wears the style guide's ring in two tones, the focus colour on its outermost
+band and the theme's paper inside that: the band under them is the frame,
+whose colour is the photo's, and one of the two stands off any fill (3:1 at
+least, `check:touch` step 11 measures all six in both themes). The selected plate shows a crosshair on the
 sheet — the one editing aid, and it never reaches a saved file.
 
 **Tap a plate to pick it** (Border Studio's tap-to-select). A touch that lands
@@ -1305,8 +1966,10 @@ re-render would start the drag from the previous plate's place and move it
 built app).
 
 The first photo brings a short gesture hint saying what the sheet's
-gestures do in the open tool (the photo with Photo open, the type otherwise).
-It goes for good with its ×, or with the first gesture that moves something:
+gestures do in the open tool (`features/shell/hint.ts`): with Frame open,
+"Drag to move the photo · pinch to zoom · double‑tap to reset" on Original
+and in Crop, and in Fit none ("Fit shows the whole photo · choose Crop to
+move or zoom it"); with any other tool, or none, the type's. It goes for good with its ×, or with the first gesture that moves something:
 by then it has been learned, and while it shows it covers the foot of the
 sheet.
 
@@ -1342,34 +2005,134 @@ sheet and the download are the page's (`features/shell/page.ts`); the engine
 returns a Blob. `src/engine/layering.test.ts` reads the engine's sources and
 fails on an import from those folders or a `document`, `window` or
 `navigator`. `ui/` knows nothing about riso and imports nothing
-from `engine/`.
+from `engine/`. The frame keeps to the same rule: `frame.ts`, `palette.ts`
+and `frost.ts` take the photo's pixels as arrays and what is made from them
+as an argument (`FrameInputs`), never a decode of their own; the decode, and
+what is kept of it, are `features/media/`'s.
 
-## Where this departs from Border Studio
+## Where this joins Border Studio
 
-The interface follows Border Studio (the owner's app this one is told to
-match) as its PR #1 left it at 597ce7a: the same vendored style guide and
-planes, the same dock of tools, sub-tabs, parameter strips and pickers, the
-same value modal, action sheets, toast and app bar. What differs, and why:
+Border Studio is the owner's framing app; this one pressed type on a photo.
+They are one app now, this one, which already had the press, the save at the
+photo's own pixels and the saved prints to keep opening. Border Studio
+itself stays live and untouched at its own address until the owner retires
+it, and whether video comes across is the owner's question. Its interface
+was already this app's model, as its PR #1 left it at 597ce7a: the same
+vendored style guide and planes, the same dock of tools, sub-tabs, parameter
+strips and pickers, the same value modal, action sheets, toast and app bar.
+
+**What came across**, each rebuilt in this app's engine (pressed in bands, at
+the photo's own pixels, the preview the same bytes as the save) rather than
+copied:
+
+- **The border** (Width) and **its corners** (Corners, on Border Studio's
+  curve), checked against Border Studio's own frozen frames
+  (`parity-borders`).
+- **The ratio chips with their flip** (a second tap turns the chosen chip on
+  its side), now the one ratio control, and **Crop or Fit**.
+- **The fills keyed to the photo**: its `palette.js`, trimmed to Photo, Deep,
+  Muted and Comp, beside Paper; and **Frosted**, with its one setting, Blur,
+  and its shipped grade kept as the look.
+- **Its keys for the photo** (the arrows move the view over it, + and − zoom,
+  0 resets) and **its build stamp**, in More's offline row.
+- **Tanklager Kompakt**, from its font library, as Poster's face ("Fonts").
+
+**One sampler for the palette.** The four colours are `palette.js`'s,
+exactly (fed the same 84 px sample, the port gives Border Studio's hex), but
+the sample is taken differently: Border Studio drew its working image down to
+84 px with the browser's own downscale, which depends on the browser and on
+the zoom the photo was decoded at; here it is an area average of one fixed
+1024 px decode of the photo ("The palette"), so the colours are the same on
+every device, at every zoom, in the preview and the save. The same photo can
+therefore key a different Photo colour than Border Studio gave it: on a
+smooth blue-to-tan photo Border Studio's Photo was a grey taupe (#ab988a)
+and this app's is a tan (#d8ac84), about 45 levels apart in red; Deep, Muted
+and Comp moved less (#231e1a / #271e17, #b3a79e / #bba795, #4c94c2 /
+#5293c4). Border Studio's own sample, fed to the port, gives its own hex.
+
+**One unit for Width.** Width is one fraction of the sheet's long side in
+every mode ("The frame"). In Crop and on Original that makes the first
+photo's border Border Studio's default (150 px of its 2100 px sheet, the
+photo held at 1800), and the widest, 16%, covers its 400 of 2600. In Fit
+Border Studio held the sheet, not the photo, at 1800 px, so there the border
+here is 14% thinner than its default and, at the widest, 28% thinner (16%
+against its 400 of 1800).
+
+**What did not come across, and why** (the trial's ids, in brackets):
+
+- **Film grain** (B43 to B45): it writes noise onto the photograph's own
+  pixels, and the photo is shown as shot; the paper's tooth and the press's
+  Grain screen already texture the print.
+- **Marks** (B46 to B51): a mark is neither the frame nor the text; the
+  block that serves the type is the Backing, pressed in a real ink.
+- **Shadow and outline** (B55): a blurred black shadow and a stroke are not
+  inks a press can print, and a nudged second plate already makes the riso
+  offset shadow.
+- **Blob** (B57): a digital sticker outline, not an ink, made by a
+  whole-sheet pass that cannot be pressed in bands; the Backing and the
+  second ink already make type read.
+- **Motion** (B58): a ghost that doubles the type and hurts legibility, the
+  reason this app's smear went.
+- **Echo** (B60): up to 16 blurred ghosts, and a chromatic tint the
+  subtractive inks cannot express.
+- **Looks** (B22): a saved look changes nothing about how a print looks,
+  and the document already persists whole (so its saved Looks are not
+  carried: "Saved prints keep opening").
+- **Snapping, its grid and guides** (B28, B24): Position X/Y, double-tap to
+  centre and the arrow keys already place type.
+- **Inspect zoom** (B25): the preview is a reduced copy, so a zoomed view
+  shows less than the file, and its pinch would collide with the type's.
+- **New photo's Keep, Reset and Cancel** (B9): Replace keeps the print, and
+  the fill re-keys itself to the new photo.
+- **The canvas's Fit and Fill view** (B12): a view preference that changes
+  nothing on the print.
+- **The colour editor and manual colour** (B20, B40): the border's colours
+  come from the photo or the paper, and an any-colour editor changes the
+  exact colour, not how the frame reads.
+- **The eyedropper** (B29): the fills already key the frame to the photo,
+  and as built it sampled the rendered canvas, ink and veil included.
+- **The other accents, and Soft** (B39, B38): Comp is the one colour that
+  stands off the photo, the rest the same idea at other angles; Soft sat
+  within a few dE of a paper stock.
+- **Frosted's grade sliders** (B41b): they re-grade a copy of the photo
+  rather than choose a frame.
+- **Show photo** (B33): a frame around nothing is not a print, and Remove
+  already leaves bare paper.
+- **51 of the 52 fonts** (B53): 11 cannot set A-Z, a-z and 0-9, 17 set
+  lowercase at capital height, 18 lean on ligatures this glyph-by-glyph
+  engine drops, and none adds a printed character the four faces lack.
+- **The 4096 px import and export ceilings** (B2, B37): they are the
+  down-rez the owner banned; a 40 MP portrait kept about a fifth of its
+  pixels in Border Studio's saved frame.
+- **Video** (B3, B64, B65): the job is a photo, and video was saved at the
+  1800 px preview by construction; it is the owner's question, and Border
+  Studio, which makes it, stays live until it is answered.
+
+**Where the interface differs**, and why:
 
 - **No upload screen.** Border Studio starts on a photo picker; a print here
   exists without a photo (type on paper), so the app opens on the editor and
-  the photo is chosen in Photo › File.
-- **Pinch scales and turns the type; there is no inspect zoom.** Border Studio
-  pinches the view outside Crop. Here a pinch on the sheet is the type's size
-  and rotation (rotation is a feature; Border Studio has none), and a zoomed
-  view would show a 1000 px preview the saved file does not have.
-- **No snapping, grid or guides; no eye-dropper; no presets; no "New photo"
-  seed modes; no canvas view modes in More; no build stamp.** The grid
-  informed but never acted (cut with the thirds guides); inks are Riso's
-  table, not a colour picked off the photo; presets and seeds were never
-  this app's, and the restyle added no features (what the app keeps, and
-  why, is under "Removed on purpose"). More holds what Save makes, the
-  offline state and the lossless PNG.
+  the photo is chosen in Frame › Photo (where the Frame tool opens while there
+  is none).
+- **Pinch scales and turns the type.** Border Studio pinches the view outside
+  Crop. Here a pinch on the sheet is the type's size and rotation (rotation
+  is a feature; Border Studio has none).
+- **More holds what Save makes**, the offline state with the build stamp
+  (Border Studio's, moved from its upload screen to the offline row) and the
+  lossless PNG; New photo, Looks and the canvas view went with their
+  features (above).
 - **The style guide's `default` palette, not `sand`** (below, under the
   playbook's deviations).
-- **A native select for the sheet's shape** (five choices; Border Studio's
-  crop ratios are chips), and the typefaces as a segmented control with Bold
-  as its own B toggle (Border Studio lists fonts).
+- **The typefaces as a segmented control** with Bold as its own B toggle
+  (Border Studio lists fonts).
+- **The ratio is the sheet's, in Crop and in Fit.** Border Studio's chips
+  came across with their flip, but in Crop its ratio was the photo's, with the
+  border outside it, so its 9:16 saved a 5:8 file; here a 9:16 sheet is a
+  9:16 file. Its Free is Original, which keeps the whole photo, so Crop or Fit
+  has nothing to do there and says so.
+- **The fill is one row of chips in Frame › Border**, not a Fill tool of
+  four sub-tabs: Paper, Photo, Deep, Muted, Comp, Frosted, each chip a dot of
+  its colour and its name, so the panel keeps the dock's one height.
 - **Tap-to-select picks with a slop** (12 px, the nearest plate, a touch
   inside a box beating one beside it) and a drag starts after 4 px, so a tap
   picks without moving; Border Studio hit-tests the exact box and moves on any
@@ -1383,7 +2146,7 @@ same value modal, action sheets, toast and app bar. What differs, and why:
 - **Targets own 44 px everywhere.** Border Studio's parameter name and value
   own 40 px of height on the 36 px line over the slider; here their hit areas
   grow upward. Its hex field owns 40 of its 44 px the way the style guide's
-  select does; here the sheet's select fills its frame.
+  select does; there is no such field here.
 - **The app bar's compact layout is reachable.** Border Studio's Save hit area
   hangs past its bar and SG.fit skips compact for tight at every narrow width;
   here the bar has room for it.
@@ -1405,14 +2168,31 @@ same value modal, action sheets, toast and app bar. What differs, and why:
   centres the selected plate and zeroes its turn; Border Studio has no such
   gesture (its double tap resets the inspect view), and this app's type is
   placed and turned on the sheet, so a way back to the centre belongs there.
-  With Photo open, a double tap fits the photo again, as Border Studio's does
-  in Crop.
-- **With the Photo tool open, a touch on type does not pick it.** Border
+  With Frame open, a double tap puts the photo back at 100% and centred, as
+  Border Studio's does in Crop (in Fit there is nothing to put back).
+- **With the Frame tool open, a touch on type does not pick it.** Border
   Studio hit-tests text in every tool, Crop included, so a drag that starts on
   a line of text moves the text even while framing the photo. Here the
   photo's tool points every gesture at the photo: a headline usually covers
   much of it, and framing a photo under its type would otherwise be a hunt for
   bare patches. The plate button picks plates in Type and Ink.
+- **With the Frame tool open, every gesture is the photo's, on every tab.**
+  Border Studio moves the photo only in Frame › Crop; in Frame › Border a drag
+  on it pans its inspect view. Here Border, Crop, Place and Photo all point the
+  sheet's gestures at the photo (this app's Photo tool's rule, kept by the
+  plan for the Frame tool): framing never needs a tab change, and with no
+  inspect view (cut, B25) a drag that moved nothing would be a dead touch. A
+  pinch zooms about the fingers, as Border Studio's crop pinch does.
+- **The photo zooms 100% to 400%.** Border Studio's crop reached 6x. The
+  verdict kept this app's 400% (B26): past it a phone shows a few hundred of
+  the photo's pixels across the sheet, and zooming deeper only enlarges a
+  smaller part of it; the saved print still holds every pixel shown.
+- **The frame's names and units.** Border Studio's "Border" read in pixels of
+  its 1800 px canvas (0 to 400 px); here it is Width, a percent of the
+  sheet's long side (0.0% to 16.0%), so it means the same at every export
+  size and in every mode ("One unit for Width"). Frosted's Blur reads as a
+  bare number: Border Studio's "60px" was pixels of its canvas, and here the
+  radius is the frost field's, scaled with it, not a pixel of the sheet.
 - **"New plate" starts from the defaults, with no offer to copy a plate.**
   Border Studio's Add opens a sheet ("Start from defaults", "Or copy the
   settings of …"). Not ported: the restyle added no features (this app never
@@ -1469,17 +2249,33 @@ height, tracking, rotation, alignment with per-line justify), each in a real
 Riso ink with an optional second ink or backing over the photo; the press
 (halftone or grain, screen size, ink, misregistration, Edge, Wear, Re-roll,
 stock); an imported photo as the printing ground (stored exactly as imported,
-shown as shot, on its own Original sheet or a 1:1, 4:5, 3:4 or 2:3 crop,
-zoomed and panned within the sheet, paper over it or not); undo/redo,
+shown as shot, on its own Original sheet or a 1:1, 4:5, 3:4, 9:16 or 2:3
+sheet or its landscape twin, cropped or fitted, zoomed and panned within its
+frame, paper over it or not); the frame round it; undo/redo,
 persistence that opens every older save, and save via the share sheet. Four
-tools — Type, Ink, Photo, Press — on the vendored style guide, in Border
+tools — Frame, Type, Ink, Press — on the vendored style guide, in Border
 Studio's dock: one geometry for every tool and tab, every numeric setting a
 strip with a tap equivalent, a plate picked by tapping it on the sheet, and
 gates that check it in CI (`check-css`, `verify:geometry`, `check:touch`).
 
-Photos only — **video is not in yet**. A JPEG cannot hold one, so it needs a
-decision about what Save produces, and `MediaRecorder` on iOS Safari is limited
-enough that it would have to be proven on a device rather than assumed.
+Photos only. **Video is not built**: the job is a photo, a JPEG cannot hold
+a video, and Border Studio's saved at its 1800 px preview by construction.
+Whether it comes is the owner's call; until then Border Studio, which makes
+video, stays live at its own address. `MediaRecorder` on iOS Safari is
+limited enough that it would have to be proven on a device rather than
+assumed.
+
+**In numbers**, against `main` before the frame (c8c0910): 976 tests in 41
+files, from 707 in 24 (`npm test`); 17,316 lines of source in 86 files under
+`src/`, tests and the vendored style guide not counted, from 13,700 in 69
+(`git ls-files 'src/*.ts' 'src/*.tsx' | grep -v -e '\.test\.' -e
+'^src/vendor/' | xargs cat | wc -l`); 13,774 lines of tests, from 9,380
+(`git ls-files 'src/*.test.ts' 'src/*.test.tsx' | xargs cat | wc -l`); the
+precache 19 entries and 1.097 MiB, from 18 entries (`verify:offline`); the
+JavaScript 356.9 kB (120.8 kB gzipped), from 324.6 kB (107.5), and the CSS
+207.8 kB, from 203.6 (`npm run build`). Five settings were added (Width,
+Corners, the fill, Blur, Crop or Fit) and one control replaced (the sheet's
+select, by the ratio chips).
 
 Lines break where you break them. There is no automatic wrapping yet, so a long
 paragraph typed as one line stays one line and runs off the sheet until you tap
@@ -1544,15 +2340,19 @@ trade. PNG, the lossless choice, is several times larger again.
   run there yet), how much memory a
   tab may hold during a 40 MP save, how long one takes, whether the share
   sheet still opens after a press of a minute (the second tap is there for
-  when it does not), EXIF orientation on the oldest supported iOS, and Blobs
-  kept in IndexedDB across launches.
+  when it does not), EXIF orientation on the oldest supported iOS, Blobs
+  kept in IndexedDB across launches, and the frame's own (DEVICE-CHECKLIST
+  "Frame": framed saves of 58 to 191 MP, Frosted's smoothness at Blur 240,
+  the time the frame's colours take to appear).
 
 ## Removed on purpose
 
-The app does one job — risographic type on a photo — and every control left
-earns its place by changing how the type reads or looks on the photo in a way
-nothing else does. These went, and saved prints that used them still open
-(each is converted or dropped by the normaliser, with a test per case):
+The app does one job — frame a photo and put risographic text on it, saved
+at the photo's own full resolution — and every control left earns its place
+by changing how the photo's frame, or the risographic text on it, reads or
+looks, in a way nothing else in the app already does; fewer controls breaks
+a tie. These went, and saved prints that used them still open (each is
+converted or dropped by the normaliser, with a test per case):
 
 - **Print the photo** (separating and halftoning the photograph, with its own
   ink, contrast and highlight dropout, its own second press `photoPress`, and
@@ -1602,10 +2402,25 @@ nothing else does. These went, and saved prints that used them still open
 - **The thirds guides** and their header toggle: they informed but never acted.
   The selection crosshair stays.
 
+And from Border Studio, when its frame came across, the same test cut film
+grain, marks, shadow, outline, blob, motion and echo, Looks, snapping and its
+grid, inspect zoom, New photo's choices, the canvas view, the colour editor
+and the eyedropper, the other accents and Soft, Frosted's grade sliders, Show
+photo, 51 of its 52 fonts, its 4096 px ceilings and, for now, video: each is
+under "Where this joins Border Studio" with its reason. None was ever in a
+print saved here, so the normaliser has nothing of theirs to convert.
+
 ## Licences and provenance
 
 Print Machine's own code is written for it. One part is translated from
-another project, and says so:
+another project, and says so, and one typeface is bundled:
+
+- **Tanklager Kompakt** (`src/assets/fonts/Tanklager.woff`), by Ariel Martín
+  Pérez, Tunera Type Foundry (http://www.tunera.xyz/), under the SIL Open Font
+  License 1.1, unmodified (copied from Border Studio's library, where it is
+  credited the same way). The site ships the notice the font carries and the
+  licence's full text in `public/licences.txt`, as the OFL asks of software
+  that bundles a font.
 
 - **The JPEG encoder's forward DCT** (`src/engine/encode/jpeg.ts`, and its
   copy in `scripts/device-spike/spike.html`) is `jpeg_fdct_float` from the

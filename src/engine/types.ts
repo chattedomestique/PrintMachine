@@ -32,12 +32,52 @@ export interface MediaLayer {
    *  build, whose stored copy was cut to a 2048 px long edge (media.ts
    *  `isReducedCopy`). */
   native?: boolean
-  /** Zoom on the cover fit, at least 1: 1 exactly fills the sheet. */
+  /** Zoom on the cover fit, at least 1: 1 exactly fills the visible
+   *  rectangle (the sheet inside its frame; unframed, the sheet). */
   scale: number
-  /** Centre of the photo in sheet fractions, kept inside the range where the
-   *  photo still covers the sheet (media.ts `panBounds`). */
+  /** Centre of the photo in fractions of the visible rectangle, kept inside
+   *  the range where the photo still covers it (media.ts `panBounds`). */
   x: number
   y: number
+  /** The frame's four photo-keyed colours, computed once from this photo and
+   *  stored with it, so the preview, the save and every reopen agree. Absent
+   *  until computed; never set by hand (the reducer's `setPalette`). */
+  palette?: FramePalette
+}
+
+/** The four colours a frame can take from its photo, as '#rrggbb'. */
+export interface FramePalette {
+  photo: string
+  deep: string
+  muted: string
+  comp: string
+}
+
+/** What fills the frame: bare paper, one of the photo's four colours, or a
+ *  blurred copy of the photo. The document stores the choice, never a
+ *  colour, so a new photo re-keys the frame by itself. */
+export type FillKey = 'paper' | keyof FramePalette | 'frosted'
+
+/**
+ * The frame round the photo.
+ *
+ * A document from before the frame opens with the template's width of 0:
+ * unframed, exactly as it was saved.
+ */
+export interface FrameSettings {
+  /** The border, as a fraction of the sheet's long side, 0..FRAME_WIDTH_MAX.
+   *  0 is no frame. */
+  width: number
+  /** 0..1: the radius of the photo's corners, as a fraction of an eighth of
+   *  the photo's shorter side. 0 is square. */
+  corners: number
+  fill: FillKey
+  /** Frosted's blur, BLUR_MIN..BLUR_MAX; read only when the fill is Frosted. */
+  blur: number
+  /** Crop fills the inside of the frame with the photo, trimming what
+   *  overhangs; Fit shows the whole photo inside it, matted by the fill. An
+   *  Original sheet is always Crop. */
+  mode: 'crop' | 'fit'
 }
 
 /** Screening method. A duplicator's RIP does one or the other, not both. */
@@ -46,16 +86,22 @@ export type ScreenMethod = 'halftone' | 'grain'
 export interface FontChoice {
   readonly id: string
   readonly name: string
-  /** A CSS font-family stack. System fonts only — an external font in an
-   *  offline-first app is a contradiction (playbook §3.6). */
+  /** A CSS font-family stack. Poster leads with the one bundled face,
+   *  Tanklager Kompakt (src/styles/fonts.css, precached, so it is there
+   *  offline); the others are system stacks. The rest of a stack is what a
+   *  face that will not load falls back to. */
   readonly stack: string
+  /** Whether the face has a bold. Tanklager is one weight: a Poster plate's
+   *  Bold is kept in the document but sets nothing (`layerFont`), so no
+   *  browser fakes one, and the press is the same on every engine. */
+  readonly bold: boolean
 }
 
 export const FONTS: readonly FontChoice[] = [
-  { id: 'grotesk', name: 'Grotesk', stack: `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` },
-  { id: 'serif', name: 'Serif', stack: `ui-serif, 'New York', Georgia, 'Times New Roman', serif` },
-  { id: 'mono', name: 'Mono', stack: `ui-monospace, SFMono-Regular, Menlo, 'Courier New', monospace` },
-  { id: 'poster', name: 'Poster', stack: `Impact, Haettenschweiler, 'Arial Narrow Bold', 'Helvetica Neue', sans-serif` },
+  { id: 'grotesk', name: 'Grotesk', stack: `-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`, bold: true },
+  { id: 'serif', name: 'Serif', stack: `ui-serif, 'New York', Georgia, 'Times New Roman', serif`, bold: true },
+  { id: 'mono', name: 'Mono', stack: `ui-monospace, SFMono-Regular, Menlo, 'Courier New', monospace`, bold: true },
+  { id: 'poster', name: 'Poster', stack: `Tanklager, Impact, Haettenschweiler, 'Arial Narrow Bold', 'Helvetica Neue', sans-serif`, bold: false },
 ]
 
 export function fontById(id: string): FontChoice {
@@ -159,8 +205,8 @@ export interface PrintSettings {
   paperVeil: boolean
 
   /** The sheet's shape: a fixed ratio, or 'original', the photo's own shape
-   *  (`sheetAspect`). The render resolution does not depend on the display
-   *  size (playbook §5.2). */
+   *  (frame.ts `sheetAspect`). The render resolution does not depend on the
+   *  display size (playbook §5.2). */
   aspect: FixedAspect | 'original'
 
   /** The stock. Its tooth and cloudiness are fixed (render.ts). */
@@ -169,42 +215,26 @@ export interface PrintSettings {
   /** How the type is pulled. */
   press: PressProfile
 
+  /** The frame round the photo (none at width 0). */
+  frame: FrameSettings
+
   seed: number
   layers: TextLayer[]
 }
 
-/** A sheet shape with a fixed ratio. */
-export type FixedAspect = '1:1' | '4:5' | '3:4' | '2:3'
+/** A sheet shape with a fixed ratio: square, or a portrait ratio and its
+ *  landscape twin (aspect.ts `flipOf`). */
+export type FixedAspect = '1:1' | '4:5' | '5:4' | '3:4' | '4:3' | '2:3' | '3:2' | '9:16' | '16:9'
 
 /** Width over height of each fixed sheet shape. */
 export const ASPECTS: Record<FixedAspect, number> = {
   '1:1': 1,
   '4:5': 4 / 5,
+  '5:4': 5 / 4,
   '3:4': 3 / 4,
+  '4:3': 4 / 3,
   '2:3': 2 / 3,
-}
-
-/** How far from square an Original sheet may go: a photo more extreme than
- *  3:1 (a panorama) is cover-cropped to 3:1, so no sheet is a sliver. */
-const ORIGINAL_ASPECT_RANGE: readonly [number, number] = [1 / 3, 3]
-
-/** The Original sheet's shape when there is no photo to take it from (a
- *  document holds 'original' only with a photo; this is the fallback). */
-const ORIGINAL_WITHOUT_PHOTO = ASPECTS['4:5']
-
-/**
- * The sheet's width over its height, as a number: the one place an aspect key
- * becomes a ratio. 'original' is the photo's own shape — its true, upright
- * size — clamped to ORIGINAL_ASPECT_RANGE; with no photo, 4:5.
- *
- * Original is what the first photo opens on: with zoom at 100% and no pan the
- * photo then fills the sheet exactly, so the untouched path neither crops nor
- * resamples a pixel.
- */
-export function sheetAspect(s: { aspect: PrintSettings['aspect']; media: { width: number; height: number } | null }): number {
-  if (s.aspect !== 'original') return ASPECTS[s.aspect]
-  if (!s.media || !(s.media.width > 0) || !(s.media.height > 0)) return ORIGINAL_WITHOUT_PHOTO
-  const [lo, hi] = ORIGINAL_ASPECT_RANGE
-  const a = s.media.width / s.media.height
-  return a < lo ? lo : a > hi ? hi : a
+  '3:2': 3 / 2,
+  '9:16': 9 / 16,
+  '16:9': 16 / 9,
 }

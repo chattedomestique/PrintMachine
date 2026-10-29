@@ -4,7 +4,8 @@ import { registerSW } from 'virtual:pwa-register'
 // The style guide first: core declares the layer order (sg.reset … sg.utilities)
 // that everything after it slots into. Then only the elements the app uses
 // (src/vendor/styleguide/VERSION.md; never edited here, see
-// scripts/sync-styleguide.mjs).
+// scripts/sync-styleguide.mjs). The vendored select is not loaded: the ratio
+// chips replaced the app's one select, and nothing else draws one.
 import './vendor/styleguide/core.min.css'
 import './vendor/styleguide/icons.css'
 import './vendor/styleguide/elements/button.min.css'
@@ -18,17 +19,19 @@ import './vendor/styleguide/elements/swatch.min.css'
 import './vendor/styleguide/elements/switch.min.css'
 import './vendor/styleguide/elements/dialog.min.css'
 import './vendor/styleguide/elements/input.min.css'
-import './vendor/styleguide/elements/select.min.css'
 import './vendor/styleguide/elements/spinner.min.css'
 import './vendor/styleguide/elements/menu.min.css'
+import './vendor/styleguide/elements/chip.min.css'
 // The app's own CSS is unlayered, so it wins over every sg.* layer without
-// !important. In this order: app facts, the editor's planes and type scale,
-// the dock's panels, the shell.
+// !important. In this order: the bundled face, app facts, the editor's planes
+// and type scale, the dock's panels, the shell.
+import './styles/fonts.css'
 import './styles/index.css'
 import './styles/editor.css'
 import './styles/dock.css'
 import './styles/shell.css'
 import App from './App.tsx'
+import { loadFaces } from './features/media/faces.ts'
 import { setOfflineReady, setUnsupported } from './state/swStatus.ts'
 
 // The build owns the service worker (playbook N1). autoUpdate + immediate
@@ -87,8 +90,14 @@ document.fonts?.addEventListener?.('loadingdone', () => window.SG?.fit?.update?.
 const root = document.getElementById('root')
 if (!root) throw new Error('#root is missing from index.html')
 
-createRoot(root).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+// Poster's face first: the document is read (and a stored Fit converted) and
+// the sheet measured and drawn only once it is in, or once two seconds have
+// gone by without it, when the app goes on in the fallback stack and the
+// preview sets the type again if the face lands (features/media/faces.ts).
+void loadFaces().then(() =>
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  ),
 )

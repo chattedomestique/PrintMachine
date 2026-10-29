@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { execSync } from 'node:child_process'
 
 // One source of truth for the base path (playbook §3.5). GitHub Pages serves
 // this repo from /PrintMachine/, dev serves from /. Every base-aware thing
@@ -14,8 +15,21 @@ const base = process.env.PAGES ? '/PrintMachine/' : '/'
 // them together with data-palette.
 const THEME_COLOR = '#F5F5F5'
 
+// The build stamp (Border Studio's, vite.config.js): the commit and the day
+// this build was made, shown in the More sheet's offline row, so which
+// version is running is never a guess. An installed app updates itself in
+// place, with nothing else to say it did.
+let sha = 'dev'
+try {
+  sha = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+} catch {
+  // Not a git checkout: the stamp says 'dev'.
+}
+const BUILD_ID = `${sha} · ${new Date().toISOString().slice(0, 10)}`
+
 export default defineConfig({
   base,
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   plugins: [
     react(),
     VitePWA({
@@ -25,7 +39,9 @@ export default defineConfig({
         id: base,
         name: 'Print Machine',
         short_name: 'Print',
-        description: 'Turn type into an authentic Risograph print, on your phone.',
+        // The one job (README). The name, short name, id, scope, start URL
+        // and icons do not change: an installed copy updates in place.
+        description: "Frame a photo and put risographic text on it, saved at the photo's own full resolution.",
         start_url: base,
         scope: base,
         display: 'standalone',
@@ -40,7 +56,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // woff: Poster's bundled face (src/styles/fonts.css); woff2: the
+        // style guide's Archivo. Both precached, so the print and the chrome
+        // are set in their own faces offline.
+        globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2}'],
         // Base-aware — this is the one that breaks offline only on Pages (§3.5).
         navigateFallback: `${base}index.html`,
         cleanupOutdatedCaches: true,

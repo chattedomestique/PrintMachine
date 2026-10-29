@@ -1,7 +1,7 @@
 /* ── The dock's panels, on the style guide ───────────────────────────────────
    Ported from Border Studio's Controls.css (PR #1, 597ce7a). The controls are
    the style guide's elements — .btn, .tabs, .segmented, .slider, .switch,
-   .swatch-set, .select, .input, .card / .dialog — so this file holds no
+   .swatch-set, .chip, .input, .card / .dialog — so this file holds no
    button, toggle or slider styling of its own (how they look in the tray,
    without frames, is editor.css). It lays those elements out for a short
    panel under the sheet, and draws the few things the style guide has no
@@ -297,17 +297,6 @@
   border: var(--bw-thin) solid var(--ink-faint);
 }
 
-/* A native select in a row: never under 16px (iOS zooms below that). The
-   style guide draws its frame on the wrapper and sets the <select> a
-   border's width inside it each way, so a tap on the frame's edge opened
-   nothing: 40px of target in a 44px control. The select fills the frame
-   (its own border is transparent, so nothing drawn moves). */
-.controls__select { flex: 0 0 auto; min-inline-size: 9rem; }
-.controls__select-field {
-  min-block-size: var(--_h);
-  margin-block: calc(-1 * var(--_bw));
-}
-
 /* Stocks on one scrolling line in the dock: a second row of chips would cost
    the sheet ~90px. The chip cut at the edge says "more"; the padding keeps
    the rings and the chosen chip's second ring unclipped. */
@@ -324,6 +313,40 @@
 }
 .controls__section .swatch-set__list::-webkit-scrollbar { display: none; }
 .controls__section .swatch-set__opt { flex: 0 0 auto; min-inline-size: 4.5rem; }
+/* A row of chips (ui/ChipRow.tsx), as Border Studio's ratio row: tighter
+   sides, so more of the choices fit across a phone (spread out when they all
+   do, scrolling when they do not), and the chosen chip is its fill and its
+   flip cue: the style guide's check in front would make it the widest chip
+   by far, and in the tray chosen is the fill (editor.css). The row takes one
+   options row in the panel, so a panel with a chip row, a hairline and a
+   parameter strip is the height of every other panel; but the scroller
+   clips, so its box keeps room for a focused chip's whole ring (the ring
+   and its offset, 6 px, round a 36 px chip in a 44 px row: 4 px of padding
+   would cut 2 px off its top and bottom), and gives back the extra with a
+   negative margin, so what the panel lays out is still the row. */
+.chiprow {
+  --_pad: calc((var(--ed-row-h) - var(--ctl-sm)) / 2);
+  --_ring-room: calc(var(--ring) + var(--ring-offset));
+  justify-content: space-between;
+  gap: var(--chrome-1);
+  padding-block: max(var(--_pad), var(--_ring-room));
+  margin-block: min(0px, calc(var(--_pad) - var(--_ring-room)));
+}
+.chiprow > .chip { --_px: var(--chrome-3); }
+.chiprow > .chip::before { display: none; }
+.chiprow__flip { --ic-size: 0.9em; margin-inline-start: var(--chrome-1); }
+/* A choice's colour, a dot before its name (the fill row): the colour is
+   data (--swatch); its own edge, so a colour as pale as the tray, or as the
+   chosen chip's fill, still has one (1.4.11). */
+.chiprow__swatch {
+  flex: none;
+  inline-size: 1em;
+  block-size: 1em;
+  border-radius: var(--radius-pill);
+  background: var(--swatch);
+  border: var(--bw-thin) solid var(--ink-faint);
+}
+
 /* In the dock the swatch cell is one 44px chip and its name, close under it:
    the style guide's roomier cell would make the Paper panel taller than every
    other, and the sheet would jump for it. */
@@ -358,3 +381,15 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* A chip whose choice is still being made: the style guide's spinner where
+   its dot or glyph goes, in the same room (1em, the dot's size), so the row
+   does not move when the colour lands. */
+.chiprow > .chip > .spinner { flex: none; font-size: inherit; --_size: 1em; }
+
+/* A line whose words change with a choice (Frame › Crop's, under Crop |
+   Fit): every wording it can take is laid in the same cell, all but the
+   one said unseen, so its box is the tallest of them in every state and the
+   rows above it never move. */
+.controls__say { display: grid; }
+.controls__say > * { grid-area: 1 / 1; }
+.controls__say > .controls__say-room { visibility: hidden; }

@@ -8,9 +8,11 @@
  * rectangle across every tool and tab", and no such file exists in it. This
  * is that file. In Chromium, at 320x640, 375x812, 393x852 and 430x932, with a
  * photo chosen through the real file input (a 4:3, a 3:2 and a 1:3 photo, each
- * on its own Original sheet, the shape a first photo opens on), it opens every
- * tool and every sub-tab, and every state of Ink > Over photo (Off, Second
- * ink, Keep this ink, Backing), and checks:
+ * on its own Original sheet in the frame a first photo gets, the shape and
+ * the frame a first photo opens on), it opens every tool (Frame, Type, Ink,
+ * Press) and every sub-tab, Frame › Border with Frosted chosen (its Blur in
+ * the strip) as well as without, and every state of Ink > Over photo (Off,
+ * Second ink, Keep this ink, Backing), and checks:
  *
  *  - the sheet: its rectangle is the same, to a pixel, in every one of those
  *    states at one viewport. The photo never changes size or place between
@@ -59,6 +61,22 @@
  * cards over the stage are taller than the room they have (checkSaveStates):
  * Cancel, Share, the card's × and Choose again each answer a tap, and the
  * cards stay between the bar and the dock.
+ *
+ * Then the Frame tool's own states, at every width, in light and dark, at
+ * 100% and 200% text (eachFrameState): Border with its fill row (Photo, and
+ * Frosted with its Blur), the ratio chips on a 4:5 sheet, Crop | Fit with Fit
+ * chosen, Place and Border in Fit (their reasons on screen), and with the
+ * photo removed Photo, Border (Width and Corners unavailable beside Choose
+ * photo), Crop (Original unavailable) and Place. In each: the sheet holds
+ * still among the states of one shape, no panel overflows at 100% text,
+ * nothing is cut off at 200%, the page never scrolls sideways, and every
+ * target owns 44px. And the chip rows (probeRowChips): each chip is scrolled
+ * whole into its row in turn and must then own 44px both ways, so a chip past
+ * the row's edge is measured too (the fill row's six, the ratio row's six);
+ * a row that overflows scrolls sideways inside itself, to its last chip
+ * shown whole, while the sheet does not move and the page does not scroll.
+ * At 320 px both rows overflow, so the scroll is checked, never passed for
+ * want of a row to scroll.
  *
  * Every state is measured at rest: once its transitions and animations have
  * run out and its scrollers have stopped (settle), never on a fixed delay, so
@@ -117,6 +135,9 @@ const VIEWPORTS = [
   [393, 852],
   [430, 932],
 ].filter(([w]) => ONLY_WIDTH === null || w === ONLY_WIDTH)
+
+/** The dock's tools, in its order (src/features/controls/tools.ts). */
+const TOOL_IDS = ['frame', 'type', 'ink', 'press']
 
 /** Photos chosen through the file input: a camera's 4:3, a 3:2 and a 1:3. */
 const PHOTOS = [
@@ -383,6 +404,101 @@ function probeClipped() {
   return [...new Set(out)]
 }
 
+/**
+ * The chip row named `label` in the open panel: each chip scrolled into the
+ * row in turn as a swipe leaves it (instantly, so nothing is caught
+ * mid-scroll): at its snap position, its start at the row's scroll padding
+ * (the style guide's chip row snaps, x proximity, so a scroll to anywhere
+ * else is pulled to the nearest chip), or at the row's end; whether it then
+ * shows whole, and the hit area it owns through its centre each way, as
+ * probeTargets measures one (its box, its ::after, less what a neighbour
+ * covers). Leaves the row scrolled to its last chip. Null when there is no
+ * such row.
+ */
+async function probeRowChips(label) {
+  const row = [...document.querySelectorAll('.app__panel-inner .chiprow')].find((r) => r.getAttribute('aria-label') === label)
+  if (!row) return null
+  const painted = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  const overflow = row.scrollWidth - row.clientWidth
+  const pad = parseFloat(getComputedStyle(row).scrollPaddingInlineStart) || 0
+  const chips = []
+  for (const chip of row.querySelectorAll(':scope > .chip')) {
+    const rr = row.getBoundingClientRect()
+    let r = chip.getBoundingClientRect()
+    if (r.left < rr.left - 0.5 || r.right > rr.right + 0.5) {
+      const left = Math.min(overflow, Math.max(0, row.scrollLeft + (r.left - rr.left) - pad))
+      row.scrollTo({ left, behavior: 'instant' })
+      await painted()
+    }
+    r = chip.getBoundingClientRect()
+    const box = row.getBoundingClientRect()
+    const whole = r.left >= box.left - 0.5 && r.right <= box.right + 0.5
+    const cx = r.left + r.width / 2
+    const cy = r.top + r.height / 2
+    const hits = (x, y) => {
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return true
+      const t = document.elementFromPoint(x, y)
+      return !!t && (t === chip || chip.contains(t))
+    }
+    const run = (dx, dy) => {
+      let k = 0
+      while (k < 40 && hits(cx + dx * (k + 1), cy + dy * (k + 1))) k++
+      return k
+    }
+    const at = hits(cx, cy)
+    const w = at ? Math.max(r.width >= 44 ? r.width : 0, run(-1, 0) + run(1, 0) + 1) : 0
+    const h = at ? Math.max(r.height >= 44 ? r.height : 0, run(0, -1) + run(0, 1) + 1) : 0
+    chips.push({ id: chip.dataset.chip, whole, w: Math.round(w), h: Math.round(h), disabled: chip.getAttribute('aria-disabled') === 'true' })
+  }
+  return { overflow, scrolled: row.scrollLeft, chips }
+}
+
+/**
+ * The chip row named `label` at rest (scrolled to its start): how much of the
+ * first chip the row cuts shows, against its width (the style guide's cut:
+ * 30% to 60% of it and at least 24 px), and the cut the row was given. Null
+ * when there is no such row.
+ */
+async function probeRowCut(label) {
+  const row = [...document.querySelectorAll('.app__panel-inner .chiprow')].find((r) => r.getAttribute('aria-label') === label)
+  if (!row) return null
+  row.scrollTo({ left: 0, behavior: 'instant' })
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  const box = row.getBoundingClientRect()
+  const clip = box.left + row.clientLeft + row.clientWidth
+  const overflow = row.scrollWidth - row.clientWidth
+  for (const chip of row.querySelectorAll(':scope > .chip')) {
+    const r = chip.getBoundingClientRect()
+    if (r.right > clip + 0.5) return { overflow, id: chip.dataset.chip, v: clip - r.left, w: r.width, grow: row.style.getPropertyValue('--_grow') || '0px' }
+  }
+  return { overflow, id: null, v: null, w: null, grow: row.style.getPropertyValue('--_grow') || '0px' }
+}
+
+/**
+ * The focused element's keyboard ring, against every box that clips it: its
+ * outline (width and offset, from the computed style) outside its rect, and
+ * each ancestor that does not let overflow show, by its padding box. What
+ * each cuts off the ring, top, right, bottom and left; empty when none does.
+ */
+function probeFocusRing() {
+  const el = document.activeElement
+  if (!el || el === document.body) return null
+  const cs = getComputedStyle(el)
+  const out = (parseFloat(cs.outlineWidth) || 0) + (parseFloat(cs.outlineOffset) || 0)
+  const r = el.getBoundingClientRect()
+  const ring = { top: r.top - out, right: r.right + out, bottom: r.bottom + out, left: r.left - out }
+  const cuts = []
+  for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+    const as = getComputedStyle(a)
+    if (as.overflowX === 'visible' && as.overflowY === 'visible') continue
+    const b = a.getBoundingClientRect()
+    const pad = { top: b.top + a.clientTop, left: b.left + a.clientLeft, right: b.left + a.clientLeft + a.clientWidth, bottom: b.top + a.clientTop + a.clientHeight }
+    const cut = { top: pad.top - ring.top, right: ring.right - pad.right, bottom: ring.bottom - pad.bottom, left: pad.left - ring.left }
+    if (Object.values(cut).some((v) => v > 0.5)) cuts.push(`${a.className || a.tagName}: ${Object.entries(cut).filter(([, v]) => v > 0.5).map(([k, v]) => `${k} ${v.toFixed(1)}px`).join(', ')}`)
+  }
+  return { focusVisible: el.matches(':focus-visible'), outline: `${cs.outlineWidth} at ${cs.outlineOffset}`, chip: el.dataset?.chip ?? null, cuts }
+}
+
 /** The app bar: its SG.fit layout, and whether it holds as one row. */
 function probeBar() {
   const bar = document.querySelector('.app__bar')
@@ -479,7 +595,7 @@ async function newPage({ width, height, scheme = 'light', photo = PHOTOS[0], ini
   await page.goto(APP)
   await page.waitForSelector('.sheet canvas')
   if (photo) {
-    await openTool(page, 'photo')
+    await openTool(page, 'frame')
     await choosePhoto(page, ...photo)
     // The hint covers the foot of the sheet until it is dismissed.
     await page.locator('.app__hint .btn').click()
@@ -488,13 +604,15 @@ async function newPage({ width, height, scheme = 'light', photo = PHOTOS[0], ini
 }
 
 /**
- * Every tool, every sub-tab, every Over photo state, in order, calling
- * `visit(name)` in each. Leaves the second ink on and the tools closed.
+ * Every tool, every sub-tab, every Over photo state, and Frame › Border with
+ * Frosted chosen, in order, calling `visit(name)` in each. Leaves the second
+ * ink on, the fill on Photo and the tools closed. Without a photo the states
+ * a photo makes (the fill row, a second ink) are not there to visit.
  */
 async function eachState(page, visit) {
   await closeTools(page)
   await visit('closed')
-  for (const tool of ['type', 'ink', 'photo', 'press']) {
+  for (const tool of TOOL_IDS) {
     await openTool(page, tool)
     const tabs = await page.locator(`.controls__section[data-tool="${tool}"] [role=tab]`).evaluateAll((els) => els.map((e) => e.dataset.tab))
     for (const tab of tabs) {
@@ -504,6 +622,8 @@ async function eachState(page, visit) {
         const over = page.locator('.controls__panel[data-sub="over"]')
         for (const mode of ['off', 'second', 'backing']) {
           await settle(page, `ink-over, before ${mode}`)
+          // Without a photo a second ink has nothing to read: unavailable.
+          if (await over.locator(`input[type=radio][value="${mode}"]`).isDisabled()) continue
           await over.locator(`input[type=radio][value="${mode}"]`).check({ force: true })
           await visit(`${tool}-${tab}-${mode}`)
           if (mode === 'second') {
@@ -522,13 +642,134 @@ async function eachState(page, visit) {
           }
         }
         await settle(page, 'ink-over, before second')
-        await over.locator('input[type=radio][value="second"]').check({ force: true })
+        if (!(await over.locator('input[type=radio][value="second"]').isDisabled())) await over.locator('input[type=radio][value="second"]').check({ force: true })
         continue
       }
       await visit(`${tool}-${tab}`)
+      if (tool === 'frame' && tab === 'border' && (await page.locator('.controls__panel[data-sub="border"] .chiprow').count()) > 0) {
+        // Frosted adds Blur to the strip: the sheet must not move for it,
+        // with Blur the setting on screen.
+        const panel = page.locator('.controls__panel[data-sub="border"]')
+        const fills = panel.locator('.chiprow')
+        await fills.locator('[data-chip="frosted"]').click()
+        await page.waitForFunction(() => document.querySelector('.chiprow [data-chip="frosted"]')?.getAttribute('aria-pressed') === 'true')
+        await panel.locator('.paramstrip__pick').click()
+        await page.locator('dialog[open] [data-key="blur"]').click()
+        await page.waitForSelector('dialog[open]', { state: 'detached' })
+        await page.waitForFunction(() => document.querySelector('.controls__panel[data-sub="border"] .paramstrip__pick')?.textContent?.includes('Blur'))
+        await visit(`${tool}-${tab}-frosted`)
+        await fills.locator('[data-chip="photo"]').click()
+        await page.waitForFunction(() => document.querySelector('.chiprow [data-chip="photo"]')?.getAttribute('aria-pressed') === 'true')
+      }
     }
   }
   await closeTools(page)
+}
+
+/**
+ * The Frame tool's states, in order, calling `visit(name, shape)` in each,
+ * `shape` naming the sheet's shape (the states of one shape must leave the
+ * sheet where it is): with the first photo on its Original sheet, Border
+ * (Photo) and Border with Frosted and its Blur; on 4:5, Crop, Crop in Fit,
+ * Place and Border in Fit, Photo; the photo removed, Photo, Border, Crop and
+ * Place. Crop is visited on Original first, then on 4:5. Leaves the page
+ * without a photo, the tools closed.
+ */
+async function eachFrameState(page, visit) {
+  const panel = (sub) => page.locator(`.controls__panel[data-sub="${sub}"]`)
+  const pressed = (sub, chip) =>
+    page.waitForFunction(
+      ([sub, chip]) => document.querySelector(`.controls__panel[data-sub="${sub}"] [data-chip="${chip}"]`)?.getAttribute('aria-pressed') === 'true',
+      [sub, chip],
+    )
+  await openTab(page, 'frame', 'border')
+  await visit('frame-border', 'original')
+  await panel('border').locator('[data-chip="frosted"]').click()
+  await pressed('border', 'frosted')
+  await panel('border').locator('.paramstrip__pick').click()
+  await page.locator('dialog[open] [data-key="blur"]').click()
+  await page.waitForSelector('dialog[open]', { state: 'detached' })
+  await visit('frame-border-frosted', 'original')
+  await panel('border').locator('[data-chip="photo"]').click()
+  await pressed('border', 'photo')
+  await openTab(page, 'frame', 'crop')
+  // Crop on Original (Crop | Fit off, saying why), then on 4:5: the tab's
+  // rows must not move between the two (section 5 holds them still).
+  await visit('frame-crop-original', 'original')
+  await panel('crop').locator('[data-chip="4:5"]').click()
+  await pressed('crop', '4:5')
+  await visit('frame-crop', '4:5')
+  await panel('crop').locator('input[type=radio][value="fit"]').check({ force: true })
+  await visit('frame-crop-fit', '4:5')
+  for (const tab of ['place', 'border', 'photo']) {
+    await openTab(page, 'frame', tab)
+    await visit(`frame-${tab}-fit`, '4:5')
+  }
+  await panel('photo').locator('button', { hasText: 'Remove' }).click()
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.media === null)
+  await visit('frame-photo-none', '4:5')
+  for (const tab of ['border', 'crop', 'place']) {
+    await openTab(page, 'frame', tab)
+    await visit(`frame-${tab}-none`, '4:5')
+  }
+  await closeTools(page)
+}
+
+/**
+ * The chip rows of the Frame state on screen, at `where`: every chip of each
+ * row, scrolled whole into it in turn, owns 44px both ways; a row that
+ * overflows scrolls inside itself to its last chip, shown whole, while the
+ * sheet stays where it was (`sheet`) and the page does not scroll sideways.
+ * Returns the rows that overflowed. Leaves each row at its start.
+ */
+async function checkChipRows(page, where, sheet) {
+  const overflowed = []
+  for (const label of ['Fill', 'Sheet ratio']) {
+    // At rest, a row that scrolls is cut where the style guide cuts one.
+    const cut = await page.evaluate(probeRowCut, label)
+    if (!cut) continue
+    if (cut.overflow > 0) {
+      check(
+        cut.v !== null && cut.v >= Math.max(23.5, 0.3 * cut.w - 0.5) && cut.v <= 0.6 * cut.w + 0.5,
+        `${where}: at rest the ${label} row's edge chip ${cut.id} shows ${cut.v?.toFixed(1)} px of ${cut.w?.toFixed(1)} (30% to 60% of it and at least 24 px; the row's cut ${cut.grow})`,
+      )
+    }
+    // The keys into the row (the tab stop after the tool's tabs): the chip
+    // they reach draws its whole ring, nothing clipping it.
+    await page.locator('.controls__section[data-tool="frame"] [role=tab][aria-selected="true"]').focus()
+    await page.keyboard.press('Tab')
+    await settle(page, `${where}, Tab into the ${label} row`)
+    const ring = await page.evaluate(probeFocusRing)
+    check(
+      ring?.chip && ring.focusVisible && ring.cuts.length === 0,
+      `${where}: the ${label} row's chip reached by Tab (${ring?.chip}, ring ${ring?.outline}${ring?.focusVisible ? '' : ', not focus-visible'}) is clipped: ${ring?.cuts.join('; ')}`,
+    )
+    await page.evaluate(() => document.activeElement?.blur())
+    await settle(page, `${where}, the ${label} row after the keys`)
+    const row = await page.evaluate(probeRowChips, label)
+    if (!row) continue
+    const enabled = row.chips.filter((c) => !c.disabled)
+    check(row.chips.length === 6, `${where}: the ${label} row has ${row.chips.length} chips (6)`)
+    for (const c of row.chips) check(c.whole, `${where}: the ${label} row's ${c.id} chip cannot be scrolled into view whole`)
+    for (const c of enabled) check(c.w >= 43.5 && c.h >= 43.5, `${where}: the ${label} row's ${c.id} chip owns ${c.w}x${c.h} (44x44)`)
+    if (row.overflow > 0) {
+      overflowed.push(label)
+      await settle(page, `${where}, the ${label} row scrolled`)
+      const m = await measure(page)
+      check(row.scrolled > 0, `${where}: the ${label} row overflows by ${row.overflow} px and did not scroll`)
+      check(
+        m.sheet && sheet && m.sheet.every((v, i) => Math.abs(v - sheet[i]) <= 1),
+        `${where}: scrolling the ${label} row moved the sheet: ${JSON.stringify(m.sheet)} against ${JSON.stringify(sheet)}`,
+      )
+      check(m.sideways <= 0, `${where}: scrolling the ${label} row scrolls the page sideways by ${m.sideways} px`)
+    }
+    await page.evaluate((label) => {
+      const r = [...document.querySelectorAll('.app__panel-inner .chiprow')].find((x) => x.getAttribute('aria-label') === label)
+      r?.scrollTo({ left: 0, behavior: 'instant' })
+    }, label)
+    await settle(page, `${where}, the ${label} row back at its start`)
+  }
+  return overflowed
 }
 
 /** The sheets and dialogs, each opened and closed: `visit(name)` with each
@@ -637,10 +878,22 @@ const shotName = (...parts) => parts.join('-').replace(/[^a-z0-9-]+/gi, '-') + '
 
 try {
   // ── 1. Every viewport, every photo, at 100% text ──
+  // Each photo as a first photo is placed (in its frame); the first of them
+  // with its frame taken away (Width to 0 by the keys, as every print saved
+  // before the frame opens); and bare paper, no photo at all.
+  const DOCS = [...PHOTOS.map((photo) => ({ photo })), { photo: PHOTOS[0], unframed: true }, { photo: null }]
   for (const [vw, vh] of VIEWPORTS) {
-    for (const [pw, ph] of PHOTOS) {
-      const where = `${vw}x${vh}, a ${pw}x${ph} photo`
-      const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [pw, ph] })
+    for (const doc of DOCS) {
+      const [pw, ph] = doc.photo ?? []
+      const where = `${vw}x${vh}, ${doc.photo ? `a ${pw}x${ph} photo${doc.unframed ? ', unframed' : ''}` : 'no photo'}`
+      const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: doc.photo })
+      if (doc.unframed) {
+        await openTab(page, 'frame', 'border')
+        await page.locator('.controls__panel[data-sub="border"] input[type=range]').focus()
+        await page.keyboard.press('Home')
+        await page.waitForFunction(() => JSON.parse(localStorage.getItem('printmachine:settings:v1') ?? 'null')?.frame?.width === 0, null, { timeout: 5_000 })
+        await closeTools(page)
+      }
       const states = []
       let targets = 0
       await eachState(page, async (name) => {
@@ -666,7 +919,7 @@ try {
           check(travel.pxPerStep >= 1.5, `${where}: a Size step is at least 1.5 px of travel (${travel.pxPerStep.toFixed(2)})`)
         }
       })
-      if (pw === PHOTOS[0][0]) {
+      if (doc === DOCS[0]) {
         await eachDialog(page, async (name) => {
           await settle(page, `${where}, ${name}`)
           targets += (await checkTargets(page, `${where}, ${name}`)).measured
@@ -748,10 +1001,71 @@ try {
 
   // ── 4. The save states on a small phone at 200% text ──
   for (const [vw, vh] of SAVE_VIEWPORTS) {
-    for (const tool of [null, 'photo']) await checkSaveStates(vw, vh, tool)
+    for (const tool of [null, 'frame']) await checkSaveStates(vw, vh, tool)
   }
 
-  // ── 5. The review screenshots ──
+  // ── 5. The Frame tool's states: light and dark, 100% and 200% text ──
+  for (const [vw, vh] of VIEWPORTS) {
+    for (const scheme of ['light', 'dark']) {
+      for (const text of [100, 200]) {
+        const where = `${vw}x${vh}, ${scheme}, ${text}% text, Frame`
+        const { ctx, page, errors } = await newPage({ width: vw, height: vh, scheme })
+        if (text === 200) await page.addStyleTag({ content: 'html { font-size: 200% }' })
+        const sheets = new Map()
+        const overflowed = new Set()
+        let n = 0
+        let targets = 0
+        const cropRows = new Map()
+        await eachFrameState(page, async (name, shape) => {
+          const at = `${where} › ${name}`
+          await settle(page, at)
+          await dockAtStart(page, at)
+          n++
+          const m = await measure(page)
+          if (name === 'frame-crop-original' || name === 'frame-crop')
+            cropRows.set(
+              name,
+              await page.evaluate(() => {
+                const p = document.querySelector('.controls__panel[data-sub="crop"]')
+                const top = (sel) => Math.round((p?.querySelector(sel)?.getBoundingClientRect().top ?? NaN) * 10) / 10
+                return { panel: Math.round((p?.getBoundingClientRect().top ?? NaN) * 10) / 10, tabs: Math.round(document.querySelector('.controls__section[data-tool="frame"] [role=tab]')?.getBoundingClientRect().top * 10) / 10, ratio: top('.chiprow'), mode: top('.segmented') }
+              }),
+            )
+          if (!sheets.has(shape)) sheets.set(shape, { name, sheet: m.sheet })
+          const first = sheets.get(shape)
+          // At 200% text the sheet may shrink to make room; at 100% it holds.
+          if (text === 100) {
+            check(
+              m.sheet && first.sheet && m.sheet.every((v, i) => Math.abs(v - first.sheet[i]) <= 1),
+              `${at}: the sheet moved: ${JSON.stringify(m.sheet)} against ${JSON.stringify(first.sheet)} in ${first.name}`,
+            )
+            check(m.overflow <= 0.5, `${at}: the panel overflows by ${m.overflow} px`)
+          } else {
+            for (const c of await page.evaluate(probeClipped)) check(false, `${at}: ${c}`)
+          }
+          check(m.sideways <= 0, `${at}: the page scrolls sideways by ${m.sideways} px`)
+          targets += (await (text === 100 ? checkTargets(page, at) : checkTargetsWholeDock(page, at))).measured
+          for (const label of await checkChipRows(page, at, m.sheet)) overflowed.add(label)
+        })
+        check(n === 12, `${where}: ${n} Frame states visited (12)`)
+        // Choosing a ratio moves nothing in the Crop tab: its tabs, the ratio
+        // row and Crop | Fit stand where they stood on Original.
+        const [onOriginal, on45] = [cropRows.get('frame-crop-original'), cropRows.get('frame-crop')]
+        check(
+          onOriginal && on45 && Object.keys(on45).every((k) => Math.abs(on45[k] - onOriginal[k]) <= 0.5),
+          `${where}: Frame › Crop moved between Original and 4:5: ${JSON.stringify(onOriginal)} against ${JSON.stringify(on45)}`,
+        )
+        // At 320 px both rows run past the dock's width: their scroll is
+        // checked, not passed for want of a row to scroll.
+        if (vw === 320) check(overflowed.has('Fill') && overflowed.has('Sheet ratio'), `${where}: the rows that overflowed: ${[...overflowed].join(', ') || 'none'} (both)`)
+        check(errors.length === 0, `${where}: page errors: ${errors.join(' | ')}`)
+        console.log(`${where}: ${n} states, ${targets} targets measured, the chip rows that scroll: ${[...overflowed].join(', ') || 'none'}`)
+        await ctx.close()
+      }
+    }
+  }
+
+  // ── 6. The review screenshots ──
   if (SHOTS) {
     for (const [vw, vh] of SHOT_WIDTHS) {
       for (const scheme of ['light', 'dark']) {
@@ -785,7 +1099,7 @@ try {
       await closeTools(page)
       await settle(page, `screenshot 390 ${scheme} wire closed`)
       await page.screenshot({ path: join(SHOTS, shotName(390, scheme, 'wire', 'closed')) })
-      for (const tool of ['type', 'ink', 'photo', 'press']) {
+      for (const tool of TOOL_IDS) {
         await openTool(page, tool)
         await settle(page, `screenshot 390 ${scheme} wire ${tool}`)
         await page.waitForTimeout(250)
@@ -927,7 +1241,7 @@ function probeSaveCard(sel) {
  * sheet zoomed to 300% (the longest reason a real document gives: "photo is
  * 1600×1200 at 300% zoom: upscaled 4.5x", in the toast as the press starts),
  * the file's writing held 3 s as a phone's can take, with the dock closed and
- * with the Photo tool open (where it is right after a photo is chosen).
+ * with the Frame tool open (where it is right after a photo is chosen).
  * Pressing, with that toast shown: Cancel answers a tap. Ready: Share in the
  * bar answers a tap, and so does the card's ×. The stored photo gone: Choose
  * again answers a tap. In each, the cards stay between the bar and the dock.
@@ -961,7 +1275,7 @@ async function checkSaveStates(vw, vh, tool) {
         : decode(src, ...rest)
   `
   const { ctx, page, errors } = await newPage({ width: vw, height: vh, photo: [1600, 1200], init: slowEncoder })
-  // Zoomed to 300% (what the Photo tool's Zoom stores), read back from
+  // Zoomed to 300% (what Frame › Place's Zoom stores), read back from
   // storage as a reload does. Set as the reloaded page starts, before the
   // app reads it: the page being left writes its own document on `pagehide`.
   await page.addInitScript(() => {
@@ -992,6 +1306,35 @@ async function checkSaveStates(vw, vh, tool) {
   if (tool) await openTool(page, tool)
   else await closeTools(page)
   await settle(page, `${where}, before Save`)
+  // More, on a short phone at 200% text: its actions and Cancel on screen as
+  // it opens, without scrolling (its facts may scroll inside themselves).
+  if (!tool) {
+    await page.locator('.app__bar [aria-label="More"]').click()
+    await page.waitForSelector('dialog[open] .actsheet__list')
+    await settle(page, `${where}, More`)
+    const more = await page.evaluate(() => {
+      const d = document.querySelector('dialog[open]')
+      const inView = (el) => {
+        const r = el?.getBoundingClientRect()
+        return !!r && r.top >= -0.5 && r.bottom <= innerHeight + 0.5
+      }
+      const items = [...d.querySelectorAll('.actsheet__list .menu__item')]
+      const info = d.querySelector('.actsheet__info')
+      const facts = !!info && info.scrollHeight > info.clientHeight + 1
+      // A box that scrolls with nothing focusable in it must be a keyboard
+      // stop of its own, named (Safari makes none by itself).
+      const reach = !facts || (info.tabIndex === 0 && info.getAttribute('role') === 'region' && !!info.getAttribute('aria-label'))
+      return { scrolled: d.scrollTop, all: items.length, shown: items.filter(inView).map((i) => i.textContent.trim().slice(0, 24)), facts, reach }
+    })
+    check(
+      more.all >= 2 && more.shown.length === more.all && more.scrolled === 0,
+      `${where}, More: its actions on screen as it opens: ${JSON.stringify(more)}`,
+    )
+    check(more.reach, `${where}, More: its facts scroll but are not a named region the keyboard reaches: ${JSON.stringify(more)}`)
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('dialog[open]', { state: 'detached' }).catch(() => undefined)
+    await settle(page, `${where}, More closed`)
+  }
   await page.evaluate(() => {
     window.__holdOriginal()
     // A clock on the toast: from when it shows (no toast is up before Save).
@@ -1054,5 +1397,6 @@ if (failures.length) {
 }
 console.log(
   '\nGeometry: the sheet holds still across every tool and tab, no panel overflows, every target owns 44px, ' +
-    'nothing is cut off at 200% text, and the app bar holds one row at every width.',
+    'nothing is cut off at 200% text, the app bar holds one row at every width, and the Frame tool\'s states and chip rows ' +
+    'hold in light and dark, the rows scrolling inside themselves.',
 )

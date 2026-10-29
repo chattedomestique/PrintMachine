@@ -1,6 +1,6 @@
 {
   "meta": {
-    "note": "Committed hashes for the one text-free frozen document. Recorded at 8d17b48 (before the simplification); re-record only when a commit changes the photo ground on purpose, and say so.",
+    "note": "Committed hashes for the text-free documents. text-free-photo recorded at 8d17b48 (before the simplification); the four frame-* documents at the commit that put the frame in the engine, and frame-frosted at the commit that put Frosted's field in, Chromium 141.0.7390.37. Re-record only when a commit changes the photo ground or the frame on purpose, and say so.",
     "commit": "8d17b48",
     "chromium": "141.0.7390.37"
   },
@@ -18,6 +18,81 @@
     "text-free-photo@1800": {
       "sha256": "4935c5c59bf13729ee03f4d718d2b997ca84ec6aa916c358d0bfbdf7725c6cdc",
       "w": 1440,
+      "h": 1800
+    },
+    "frame-original@300": {
+      "sha256": "efd227c1576e035a3d4371a6e974f8b2ab3ec45d320f83af905b170694d9a614",
+      "w": 382,
+      "h": 300
+    },
+    "frame-original@1000": {
+      "sha256": "a4a32f67ac0c1773532776305c25376e0d964a14261ade4cae932abb812f880f",
+      "w": 1273,
+      "h": 1000
+    },
+    "frame-original@1800": {
+      "sha256": "37b78dd3021b52b0accec4735130afc36e9a229b0324884db2ae6ddbd8782a75",
+      "w": 2291,
+      "h": 1800
+    },
+    "frame-fit@300": {
+      "sha256": "a7c96746114db2fa6a84b1ff10c963312bb75ccb2caba5bc5c2b9bd2891eeede",
+      "w": 240,
+      "h": 300
+    },
+    "frame-fit@1000": {
+      "sha256": "de5764743ef31ed00fa46e5027b09a72d9a65e91859715469a3663646fee6e75",
+      "w": 800,
+      "h": 1000
+    },
+    "frame-fit@1800": {
+      "sha256": "d17f4c1d9a36b7854360fc3a70562200e0411f77b5e0db203005296021dfd76e",
+      "w": 1440,
+      "h": 1800
+    },
+    "frame-corners@300": {
+      "sha256": "7139c47a43e44b24e7e367b2a6862a48813ff9ca778e2fc9f6588be833819f67",
+      "w": 233,
+      "h": 300
+    },
+    "frame-corners@1000": {
+      "sha256": "0c3a1591901f8d1448344a712867e94494b3e506e70729c94f92b9fd6529685e",
+      "w": 775,
+      "h": 1000
+    },
+    "frame-corners@1800": {
+      "sha256": "1e61d6342009254183bec77b57b680a3588403937253692057b8d4aed3e4143a",
+      "w": 1395,
+      "h": 1800
+    },
+    "frame-crop-zoomed@300": {
+      "sha256": "97d1d48da1f44621d90afd8d3b51601f06c740e23340b729c798b63f88c38e91",
+      "w": 300,
+      "h": 300
+    },
+    "frame-crop-zoomed@1000": {
+      "sha256": "500f323612993dd71ef0f9df031435282c812f5630687717a7d1aeaff91711bf",
+      "w": 1000,
+      "h": 1000
+    },
+    "frame-crop-zoomed@1800": {
+      "sha256": "95d301a92c9598182f72ba3d6dc4318a22fa4055ffe4b7b594cf96a6553d90a8",
+      "w": 1800,
+      "h": 1800
+    },
+    "frame-frosted@300": {
+      "sha256": "5d9c526198ecf29bb1102b2326ae4f206ca5b2382adc30f866401e65ec8df30a",
+      "w": 370,
+      "h": 300
+    },
+    "frame-frosted@1000": {
+      "sha256": "0a42b52b3ebbb115e5ccece72c3f23b9e1df85b6f13c52aa3c2e7c075139b772",
+      "w": 1235,
+      "h": 1000
+    },
+    "frame-frosted@1800": {
+      "sha256": "205da38daa86a5b2d536089178fbc4fce9d0b45d1ff57ff345517945fa388a6f",
+      "w": 2223,
       "h": 1800
     }
   }

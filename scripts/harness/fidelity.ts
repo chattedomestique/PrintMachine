@@ -1,5 +1,5 @@
 /**
- * Does a saved print keep every pixel of the photo? The REAL import
+ * Does a saved print keep every pixel of the photo, framed or not? The REAL import
  * (`importMedia`, into this page's IndexedDB), the REAL decode for Save
  * (`decodeOriginal`) and the REAL `savePrint`, on generated photos, with the
  * type taken off and the paper veil off so that the print IS the photo
@@ -12,11 +12,15 @@
  */
 
 import { MissingPhotoError, describePlan, planPrint, savePrint, type ExportFormat } from '../../src/engine/export.ts'
+import { cornerCoverage, layoutSheet } from '../../src/engine/frame.ts'
+import type { FrostField } from '../../src/engine/frost.ts'
 import { groundRect } from '../../src/engine/render.ts'
-import type { PrintSettings } from '../../src/engine/types.ts'
-import { decodeOriginal, decodeOriented } from '../../src/features/media/decode.ts'
+import type { FrameSettings, PrintSettings } from '../../src/engine/types.ts'
+import { decodeOriginal, decodeOriented, decodeResized } from '../../src/features/media/decode.ts'
+import { ensureFrameInputs, storedFrameInputs } from '../../src/features/media/frameInputs.ts'
 import { importMedia } from '../../src/features/media/importMedia.ts'
 import { detachedCanvas } from '../../src/features/shell/page.ts'
+import { copyRect } from '../../src/features/shell/useSave.ts'
 import { defaultSettings } from '../../src/state/defaults.ts'
 import { deleteMedia, getMedia } from '../../src/state/mediaStore.ts'
 
@@ -33,8 +37,10 @@ const encode = (c: HTMLCanvasElement, type: string, quality?: number) =>
   new Promise<Blob>((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error(`could not encode ${type}`))), type, quality))
 
 /** A zone plate: cos(k r^2) about the centre, its local frequency k r / pi
- *  reaching 0.45 cycles per pixel at the corners. */
-function zonePlate(w: number, h: number): HTMLCanvasElement {
+ *  reaching 0.45 cycles per pixel at the corners. With `sky`, its rings fade
+ *  out toward the edges over a smooth colour gradient (warm to cool across,
+ *  dark to light down): what a frosted border must carry without a stair. */
+function zonePlate(w: number, h: number, sky = false): HTMLCanvasElement {
   const ctx = canvas(w, h)
   const img = ctx.createImageData(w, h)
   const d = img.data
@@ -45,9 +51,16 @@ function zonePlate(w: number, h: number): HTMLCanvasElement {
     const dy = y - cy
     for (let x = 0; x < w; x++) {
       const dx = x - cx
-      const v = 128 + 110 * Math.cos(k * (dx * dx + dy * dy))
       const o = (y * w + x) * 4
-      d[o] = d[o + 1] = d[o + 2] = v
+      if (sky) {
+        const fade = Math.max(0, 1 - Math.hypot(dx / cx, dy / cy))
+        const ring = 60 * fade * Math.cos(k * (dx * dx + dy * dy))
+        d[o] = 60 + (150 * x) / w + ring
+        d[o + 1] = 70 + (110 * y) / h + ring
+        d[o + 2] = 210 - (130 * x) / w + ring
+      } else {
+        d[o] = d[o + 1] = d[o + 2] = 128 + 110 * Math.cos(k * (dx * dx + dy * dy))
+      }
       d[o + 3] = 255
     }
   }
@@ -147,7 +160,7 @@ async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format
   const imported = (await importMedia(file)).layer
   const stored = await getMedia(imported.id)
   const byteForByte = !!stored && stored.size === file.size && (await sha256(stored)) === (await sha256(file))
-  // Zoomed (to crop) as the Photo tool would: centred, at `zoom` on the cover
+  // Zoomed (to crop) as Frame › Place would: centred, at `zoom` on the cover
   // fit.
   const layer = { ...imported, scale: zoom }
   const s = photoOnly(layer, aspect)
@@ -156,7 +169,7 @@ async function importAndSave(file: Blob, aspect: PrintSettings['aspect'], format
   const t0 = performance.now()
   // As Save presses it (useSave.ts): its own canvases, the photo closed once
   // its last rows are in the print.
-  const pressed = await savePrint(s, original, { format, makeCanvas: detachedCanvas, onGround: () => original.close() })
+  const pressed = await savePrint(s, original, storedFrameInputs(s), { format, makeCanvas: detachedCanvas, onGround: () => original.close() })
   const ms = performance.now() - t0
   return { layer, byteForByte, s, plan, pressed, ms }
 }
@@ -170,7 +183,7 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
   const file = await encode(zonePlate(w, h), 'image/jpeg', 0.92)
   const { layer, byteForByte, s, plan, pressed, ms } = await importAndSave(file, aspect, format, zoom)
   const out = await pixelsOf(pressed.blob)
-  const r = groundRect(layer, plan.width, plan.height)
+  const r = groundRect(s, plan.width, plan.height)
   const aligned = r.dw === layer.width && r.dh === layer.height && Number.isInteger(r.dx) && Number.isInteger(r.dy)
   // The reference: the original, decoded as Save decodes it, drawn at the
   // sheet's rectangle (when that is the photo's own pixels, an integer
@@ -195,7 +208,7 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
   if (alsoJpeg) {
     const again = await decodeOriginal(layer.id)
     const t1 = performance.now()
-    const saved = await savePrint(s, again, { format: 'jpeg', makeCanvas: detachedCanvas, onGround: () => again.close() })
+    const saved = await savePrint(s, again, storedFrameInputs(s), { format: 'jpeg', makeCanvas: detachedCanvas, onGround: () => again.close() })
     jpeg = { ...frameOf(new Uint8Array(await saved.blob.arrayBuffer())), bytes: saved.blob.size, ms: Math.round(performance.now() - t1) }
   }
   await deleteMedia(layer.id)
@@ -206,7 +219,7 @@ async function zone(w: number, h: number, aspect: PrintSettings['aspect'], forma
     format,
     stored: { byteForByte, fileBytes: file.size, layer: `${layer.width}x${layer.height}` },
     plan: { width: plan.width, height: plan.height, limit: plan.limit },
-    caption: describePlan(plan, s.media),
+    caption: describePlan(plan, s),
     file: `${out.w}x${out.h}`,
     dimsMatch: same,
     aligned,
@@ -252,8 +265,9 @@ async function controls() {
   const h = 3024
   const file = await encode(zonePlate(w, h), 'image/jpeg', 0.92)
   const layer = { id: 'control', width: w, height: h, scale: 1, x: 0.5, y: 0.5 }
-  const plan = planPrint(photoOnly(layer, '4:5'))
-  const r = groundRect(layer, plan.width, plan.height)
+  const s = photoOnly(layer, '4:5')
+  const plan = planPrint(s)
+  const r = groundRect(s, plan.width, plan.height)
   const bmp = await decodeOriented(file)
   const draw = (src: CanvasImageSource, dx: number, dy: number, dw: number, dh: number) => {
     const ctx = canvas(plan.width, plan.height)
@@ -274,6 +288,256 @@ async function controls() {
   copy.close()
   bmp.close()
   return { halfPixel, oldImport }
+}
+
+/** The palette the framed prints carry (the frame's colour is looked up in
+ *  it; computing it from the photo is not what is measured here). */
+const FRAME_PALETTE = { photo: '#2896c8', deep: '#152228', muted: '#90b1c1', comp: '#cb712e' }
+const hexRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+
+/**
+ * A zone plate of w x h through the real import and the real Save, framed:
+ * `frame` on `aspect`, as a PNG (and, with `jpeg`, again as Save's JPEG for
+ * its header). With `smaller`, a smaller copy at that fraction of the height,
+ * decoded at the photo's contained rectangle as Save decodes one (useSave
+ * `copyRect`, `decodeResized`) and drawn 1:1. Every pixel of the file is
+ * checked against what it must be:
+ *  - outside the photo's rectangle (`shown`): the fill's colour exactly (the
+ *    paper veil is off); Frosted's, the field sampled at that pixel exactly
+ *    and rounded once (`exactFrost`, not the engine's sampler), its field
+ *    made as Save makes it (`ensureFrameInputs`: the photo's frame source
+ *    decoded from the stored file, the field at the save's size);
+ *  - inside it, away from the corners: the photo Save drew (the original, or
+ *    the smaller copy), at its own pixels, every byte;
+ *  - in the corners' patches: the photo over the fill at the corner's exact
+ *    coverage, c P + (1 - c) F, rounded once (within half a level).
+ * And the Laplacian energy of the photo's rectangle (the corners masked)
+ * against the same rectangle of the photo itself. Frosted also measures its
+ * banding: along the sheet's middle row through the left border, the longest
+ * run of one value in each channel, against the run the field itself gives
+ * there (sampled exactly, in float64, and rounded once).
+ */
+async function framed(w: number, h: number, aspect: PrintSettings['aspect'], frame: Partial<FrameSettings>, opts: { jpeg?: boolean; smaller?: number; sky?: boolean } = {}) {
+  const file = await encode(zonePlate(w, h, opts.sky), 'image/jpeg', 0.92)
+  const imported = (await importMedia(file)).layer
+  const layer = { ...imported, palette: FRAME_PALETTE }
+  const s = photoOnly(layer, aspect)
+  s.frame = { ...s.frame, ...frame }
+  const full = planPrint(s)
+  const maxHeight = opts.smaller ? Math.round(full.height * opts.smaller) : undefined
+  const plan = planPrint(s, { maxHeight })
+  const layout = layoutSheet(s, plan.width, plan.height)
+  // The photo as Save decodes it: the original, or a smaller copy decoded at
+  // its rectangle.
+  const rect = opts.smaller ? (copyRect(s, plan) ?? undefined) : undefined
+  const decode = () => (rect ? decodeResized(layer.id, rect.dw, rect.dh) : decodeOriginal(layer.id))
+  // What Save makes the frame from (useSave `pressForSave`): Frosted's
+  // field made now, from the stored photo; a colour from the palette held.
+  const t00 = performance.now()
+  const inputs = s.frame.fill === 'frosted' ? await ensureFrameInputs(s) : storedFrameInputs(s)
+  const inputsMs = performance.now() - t00
+  const photo = await decode()
+  const t0 = performance.now()
+  const pressed = await savePrint(s, photo, inputs, { format: 'png', maxHeight, rect, makeCanvas: detachedCanvas, onGround: () => photo.close() })
+  const ms = performance.now() - t0
+  const out = await pixelsOf(pressed.blob)
+  // The reference: the same decode, read at its own size.
+  const refBmp = await decode()
+  const rw = refBmp.width
+  const rh = refBmp.height
+  const rc = canvas(rw, rh)
+  rc.drawImage(refBmp, 0, 0)
+  refBmp.close()
+  const ref = rc.getImageData(0, 0, rw, rh).data
+  rc.canvas.width = 0
+  const drawn = rect ?? layout.photo!
+  const aligned = drawn.dw === rw && drawn.dh === rh && Number.isInteger(drawn.dx) && Number.isInteger(drawn.dy)
+  // The fill at a pixel: the colour, or Frosted's field sampled there,
+  // exactly (in float64, by code of its own, not the engine's sampler) and
+  // rounded once: a sampler that rounds before it has mixed, or a field
+  // rounded to bytes before it is stretched, is off by a level somewhere.
+  const frost = inputs.frost ? exactFrost(inputs.frost, plan.width, plan.height) : null
+  const flat = frost ? null : hexRgb(FRAME_PALETTE[s.frame.fill as keyof typeof FRAME_PALETTE])
+  const fillRow = new Uint8ClampedArray(plan.width * 4)
+  let fillY = -1
+  const fillAt = (x: number, y: number): ArrayLike<number> => {
+    if (!frost) return flat!
+    if (fillY !== y) {
+      frost(y, 0, plan.width, fillRow, 0)
+      fillY = y
+    }
+    return fillRow.subarray(x * 4, x * 4 + 3)
+  }
+  const { x0, y0, w: sw, h: sh } = layout.shown
+  const patch = Math.ceil(layout.radius)
+  const W = out.w
+  let notFill = 0
+  let photoPx = 0
+  let photoDiff = 0
+  let maxDiff = 0
+  let cornerPx = 0
+  let cornerDev = 0
+  const inPatch = (x: number, y: number) => patch > 0 && Math.min(x - x0, x0 + sw - 1 - x) < patch && Math.min(y - y0, y0 + sh - 1 - y) < patch
+  const same = out.w === plan.width && out.h === plan.height
+  if (same && aligned) {
+    for (let y = 0; y < out.h; y++) {
+      for (let x = 0; x < out.w; x++) {
+        const o = (y * W + x) * 4
+        if (x < x0 || x >= x0 + sw || y < y0 || y >= y0 + sh) {
+          const fill = fillAt(x, y)
+          if (out.data[o] !== fill[0] || out.data[o + 1] !== fill[1] || out.data[o + 2] !== fill[2]) notFill++
+          continue
+        }
+        const r = ((y - drawn.dy) * rw + (x - drawn.dx)) * 4
+        if (inPatch(x, y)) {
+          const c = cornerCoverage(layout.radius, Math.min(x - x0, x0 + sw - 1 - x), Math.min(y - y0, y0 + sh - 1 - y))
+          const fill = fillAt(x, y)
+          for (let k = 0; k < 3; k++) cornerDev = Math.max(cornerDev, Math.abs(out.data[o + k] - (c * ref[r + k] + (1 - c) * fill[k])))
+          cornerPx++
+          continue
+        }
+        let d = 0
+        for (let k = 0; k < 3; k++) d = Math.max(d, Math.abs(out.data[o + k] - ref[r + k]))
+        if (d) photoDiff++
+        maxDiff = Math.max(maxDiff, d)
+        photoPx++
+      }
+    }
+  }
+  // The finest detail of the photo's rectangle, the corners and the border
+  // pixel round it masked, against the photo's own.
+  const lumaAt = (d: Uint8ClampedArray, i: number) => 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2]
+  let eOut = 0
+  let eRef = 0
+  if (same && aligned) {
+    for (let y = y0 + 1; y < y0 + sh - 1; y++) {
+      for (let x = x0 + 1; x < x0 + sw - 1; x++) {
+        if (inPatch(x, y) || inPatch(x - 1, y) || inPatch(x + 1, y) || inPatch(x, y - 1) || inPatch(x, y + 1)) continue
+        const i = y * W + x
+        const j = (y - drawn.dy) * rw + (x - drawn.dx)
+        const a = 4 * lumaAt(out.data, i) - lumaAt(out.data, i - 1) - lumaAt(out.data, i + 1) - lumaAt(out.data, i - W) - lumaAt(out.data, i + W)
+        const b = 4 * lumaAt(ref, j) - lumaAt(ref, j - 1) - lumaAt(ref, j + 1) - lumaAt(ref, j - rw) - lumaAt(ref, j + rw)
+        eOut += a * a
+        eRef += b * b
+      }
+    }
+  }
+  // Frosted's banding, along the middle row through the left border; and
+  // how much of the field Save pressed sits on a whole level (a field kept
+  // in float has next to none; one rounded to bytes, all of it).
+  const banding = inputs.frost && same ? { ...bandingOf(out.data, W, plan.height, layout.shown.x0, inputs.frost), whole: wholeShare(inputs.frost) } : null
+  let jpeg: (ReturnType<typeof frameOf> & { bytes: number; ms: number }) | null = null
+  if (opts.jpeg) {
+    const again = await decode()
+    const t1 = performance.now()
+    const saved = await savePrint(s, again, inputs, { format: 'jpeg', maxHeight, rect, makeCanvas: detachedCanvas, onGround: () => again.close() })
+    jpeg = { ...frameOf(new Uint8Array(await saved.blob.arrayBuffer())), bytes: saved.blob.size, ms: Math.round(performance.now() - t1) }
+  }
+  await deleteMedia(layer.id)
+  // Fit's contained rectangle: the side that binds is the visible
+  // rectangle's exactly; the other is the photo's shape times it, rounded:
+  // off by under a pixel.
+  const aspectError = layout.shown.w / layout.shown.h > w / h ? Math.abs(layout.shown.w - (layout.shown.h * w) / h) : Math.abs(layout.shown.h - (layout.shown.w * h) / w)
+  return {
+    photo: `${w}x${h}`,
+    plan: { width: plan.width, height: plan.height, limit: plan.limit, border: plan.border },
+    file: `${out.w}x${out.h}`,
+    dimsMatch: same,
+    shown: `${sw}x${sh} at (${x0}, ${y0})`,
+    drawn: `${rw}x${rh} at (${drawn.dx}, ${drawn.dy})`,
+    aligned,
+    radius: layout.radius,
+    border: { pixels: out.w * out.h - sw * sh, notFill },
+    photoRect: { pixels: photoPx, differ: photoDiff, maxDiff },
+    corners: { pixels: cornerPx, maxDev: cornerDev },
+    lapRatio: eRef > 0 ? eOut / eRef : NaN,
+    aspectError,
+    ms: Math.round(ms),
+    inputsMs: Math.round(inputsMs),
+    banding,
+    jpeg,
+  }
+}
+
+/**
+ * Frosted's field as a W x H sheet's fill, sampled exactly: each pixel's
+ * centre on the field (the field stretched over the sheet and 2% of its long
+ * side past each edge, a texel's centre at i + 0.5, held inside), bilinear
+ * in float64 from the field's float values (across each field row, then
+ * down), rounded once. Written from the definition, apart from the engine's
+ * `frostSampler`, which mixes down first, so the two agree only if neither
+ * rounds early.
+ */
+function exactFrost(field: FrostField, W: number, H: number): (y: number, x0: number, x1: number, out: Uint8ClampedArray, o: number) => void {
+  const pad = Math.round(0.02 * Math.max(W, H))
+  const at = (v: number, n: number, f: number) => Math.min(f - 1, Math.max(0, ((v + 0.5 + pad) / (n + 2 * pad)) * f - 0.5))
+  const planes = [field.r, field.g, field.b]
+  return (y, x0, x1, out, o) => {
+    const fy = at(y, H, field.h)
+    const j0 = Math.floor(fy)
+    const j1 = Math.min(field.h - 1, j0 + 1)
+    const s = fy - j0
+    for (let x = x0, q = o; x < x1; x++, q += 4) {
+      const fx = at(x, W, field.w)
+      const i0 = Math.floor(fx)
+      const i1 = Math.min(field.w - 1, i0 + 1)
+      const t = fx - i0
+      for (let c = 0; c < 3; c++) {
+        const p = planes[c]
+        const top = p[j0 * field.w + i0] + (p[j0 * field.w + i1] - p[j0 * field.w + i0]) * t
+        const bottom = p[j1 * field.w + i0] + (p[j1 * field.w + i1] - p[j1 * field.w + i0]) * t
+        out[q + c] = top + (bottom - top) * s
+      }
+      out[q + 3] = 255
+    }
+  }
+}
+
+/** The share of a field's values that sit on a whole level. */
+function wholeShare(field: FrostField): number {
+  let whole = 0
+  for (const p of [field.r, field.g, field.b]) for (const v of p) if (v === Math.round(v)) whole++
+  return whole / (3 * field.w * field.h)
+}
+
+/**
+ * The longest run of one value along the middle row of a W x H print, over
+ * its first `border` pixels (the left border), in each channel; and the same
+ * for the field itself along that row: sampled there exactly (bilinear, in
+ * float64, from the field's own float values) and rounded once. A print that
+ * rounded the field to bytes before stretching it over the sheet would show
+ * runs as long as a field pixel is wide.
+ */
+function bandingOf(data: Uint8ClampedArray, W: number, H: number, border: number, field: FrostField) {
+  const y = H >> 1
+  const pad = Math.round(0.02 * Math.max(W, H))
+  const at = (v: number, n: number, f: number) => Math.min(f - 1, Math.max(0, ((v + 0.5 + pad) / (n + 2 * pad)) * f - 0.5))
+  const fy = at(y, H, field.h)
+  const j0 = Math.floor(fy)
+  const j1 = Math.min(field.h - 1, j0 + 1)
+  const s = fy - j0
+  const runs = (value: (x: number, c: number) => number) =>
+    [0, 1, 2].map((c) => {
+      let longest = 1
+      let run = 1
+      for (let x = 1; x < border; x++) {
+        run = value(x, c) === value(x - 1, c) ? run + 1 : 1
+        longest = Math.max(longest, run)
+      }
+      return longest
+    })
+  const planes = [field.r, field.g, field.b]
+  const exact = (x: number, c: number) => {
+    const fx = at(x, W, field.w)
+    const i0 = Math.floor(fx)
+    const i1 = Math.min(field.w - 1, i0 + 1)
+    const t = fx - i0
+    const p = planes[c]
+    const top = p[j0 * field.w + i0] + (p[j0 * field.w + i1] - p[j0 * field.w + i0]) * t
+    const bottom = p[j1 * field.w + i0] + (p[j1 * field.w + i1] - p[j1 * field.w + i0]) * t
+    return Uint8ClampedArray.of(top + (bottom - top) * s)[0]
+  }
+  return { row: y, pixels: border, print: runs((x, c) => data[(y * W + x) * 4 + c]), field: runs(exact) }
 }
 
 /** A JPEG stored sideways with EXIF Orientation 6 (rotate 90 clockwise): its
@@ -323,9 +587,9 @@ async function pngAlpha() {
   ctx.clearRect(hole.x0, hole.y0, hole.x1 - hole.x0, hole.y1 - hole.y0)
   const file = await encode(ctx.canvas, 'image/png')
   ctx.canvas.width = 0
-  const { layer, byteForByte, plan, pressed } = await importAndSave(file, 'original', 'png')
+  const { layer, byteForByte, s, plan, pressed } = await importAndSave(file, 'original', 'png')
   const out = await pixelsOf(pressed.blob)
-  const r = groundRect(layer, plan.width, plan.height)
+  const r = groundRect(s, plan.width, plan.height)
   const ref = canvas(plan.width, plan.height)
   const bmp = await decodeOriented(file)
   ref.drawImage(bmp, r.dx, r.dy, r.dw, r.dh)
@@ -373,7 +637,7 @@ async function missingPhoto() {
   const s = photoOnly(layer, '4:5')
   s.layers = defaultSettings().layers
   let canvases = 0
-  const saveError = await savePrint(s, null, {
+  const saveError = await savePrint(s, null, storedFrameInputs(s), {
     makeCanvas: () => {
       canvases++
       return canvas(0, 0)
@@ -399,8 +663,9 @@ declare global {
       orientation: typeof orientation
       pngAlpha: typeof pngAlpha
       missingPhoto: typeof missingPhoto
+      framed: typeof framed
     }
   }
 }
 
-window.F = { zone, controls, orientation, pngAlpha, missingPhoto }
+window.F = { zone, controls, orientation, pngAlpha, missingPhoto, framed }

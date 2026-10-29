@@ -17,12 +17,13 @@
  *  3. A drag that starts on no plate moves the selected plate, as always.
  *  4. A tap just beside a small caption still picks it (the hit slop), and a
  *     tap inside one plate picks that plate, not a neighbour within the slop.
- *  5. With the Photo tool open, a drag that starts on a plate neither picks
+ *  5. With the Frame tool open, a drag that starts on a plate neither picks
  *     it nor moves it (the gestures are the photo's there).
  *  6. The gesture hint, after the first photo: it says what the sheet's
- *     gestures do in the open tool (the photo with Photo open, the type
+ *     gestures do in the open tool (the photo with Frame open, the type
  *     otherwise); a tap leaves it, and so does a drag on a photo that cannot
- *     move; the first drag that moves something dismisses it for good.
+ *     move (at 100% on its own sheet, inside the frame a first photo gets);
+ *     the first drag that moves something dismisses it for good.
  *  7. A double tap on Type › Size's track (two touches 100 ms apart, where
  *     each alone would move the thumb) ends at the default, 40%, and one Undo
  *     goes back to where it was; a mouse's double-click the same. Then on a
@@ -37,6 +38,22 @@
  *     Studio's tap-to-select; nothing moves, no undo step); a double tap on
  *     the selected plate centres it and zeroes its turn; a mouse's
  *     double-click on a plate that is not selected only picks it too.
+ *  9. The photo's keys, with the Frame tool open on its first photo: the
+ *     sheet names them (aria-keyshortcuts); + three times zooms to 1.15^3,
+ *     Right and Down move the view right and down (the photo's centre left
+ *     and up); 0 resets it; one Undo takes back the 0 alone and one more the
+ *     whole run (one step). In Fit the keys move nothing and none is named.
+ * 10. The Frame tool's states, said: with no photo, Frame › Border keeps
+ *     Width and Corners on its strip, unavailable (the track disabled, its
+ *     − and + aria-disabled and in the tab order), each described by "No
+ *     photo yet", beside Choose photo; Frame › Crop's ratio row is a group
+ *     named "Sheet ratio" whose Original chip is aria-disabled, described by
+ *     the line that says why, and a tap on it changes nothing. With a photo
+ *     the fill row is a group named "Fill" of six chips and Width is
+ *     available, described by nothing. On a 4:5 sheet in Fit the gesture
+ *     hint names no gesture and says why, a drag on the photo moves nothing
+ *     (and leaves the hint), and Place's Zoom says "Fit shows the whole
+ *     photo" as its description; back in Crop the hint names the photo's.
  *
  * The Chromium binary: CHROMIUM_PATH, or the first of the usual places.
  */
@@ -118,6 +135,38 @@ async function touch(cdp, from, path = []) {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 }
 
+/** Two fingers, through the browser's touch input: down `from` px apart
+ *  across `at`, then in steps apart by `to` px with their centre moved by
+ *  `shift`, then up. */
+async function pinch(cdp, at, from, to, shift = { x: 0, y: 0 }) {
+  const points = (spread, k) => [
+    { x: at.x + shift.x * k - spread / 2, y: at.y + shift.y * k, id: 1, radiusX: 4, radiusY: 4, force: 1 },
+    { x: at.x + shift.x * k + spread / 2, y: at.y + shift.y * k, id: 2, radiusX: 4, radiusY: 4, force: 1 },
+  ]
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(from, 0) })
+  for (let k = 1; k <= 12; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(from + ((to - from) * k) / 12, k / 12) })
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+}
+
+/** Where a point of the photo is on screen, for a stored placement on a
+ *  sheet `box` with a frame `width` of its long side: the photo's centre is
+ *  `x`, `y` of the visible rectangle, drawn at `scale` times its cover fit
+ *  (media.ts coverRect). `u`, `v` are fractions of the photo. */
+function onScreen(box, width, m, u, v) {
+  const b = width * Math.max(box.width, box.height)
+  const vis = { x: box.x + b, y: box.y + b, w: box.width - 2 * b, h: box.height - 2 * b }
+  const cover = Math.max(vis.w / m.width, vis.h / m.height) * m.scale
+  const dw = m.width * cover
+  const dh = m.height * cover
+  return { x: vis.x + m.x * vis.w - dw / 2 + u * dw, y: vis.y + m.y * vis.h - dh / 2 + v * dh }
+}
+/** The fraction of the photo at a point on screen (onScreen's inverse). */
+function ofPhoto(box, width, m, pt) {
+  const o = onScreen(box, width, m, 0, 0)
+  const one = onScreen(box, width, m, 1, 1)
+  return { u: (pt.x - o.x) / (one.x - o.x), v: (pt.y - o.y) / (one.y - o.y) }
+}
+
 try {
   const ctx = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -196,8 +245,8 @@ try {
   await touch(cdp, at(print.x + 20 / box.width, print.y - 0.04))
   check((await selected(page, 'PRINT')) === 'PRINT', 'a tap on PRINT MACHINE picks PRINT MACHINE')
 
-  console.log('5. With the Photo tool open, a drag on a plate neither picks nor moves it')
-  await page.locator('[data-tool="photo"]').click()
+  console.log('5. With the Frame tool open, a drag on a plate neither picks nor moves it')
+  await page.locator('[data-tool="frame"]').click()
   await touch(cdp, at(riso.x, riso.y), [at(riso.x + 0.1, riso.y)])
   await page.locator('[data-tool="type"]').click()
   check((await selected(page)) === 'PRINT', 'the selection stayed on PRINT MACHINE')
@@ -206,7 +255,7 @@ try {
 
   console.log('6. The gesture hint teaches what the sheet does, until a drag shows it is learned')
   const HINT = '.app__hint-text'
-  await page.locator('[data-tool="photo"]').click()
+  await page.locator('[data-tool="frame"]').click()
   const bytes = await page.evaluate(async () => {
     const c = document.createElement('canvas')
     c.width = 1200
@@ -220,15 +269,22 @@ try {
   await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
   await page.waitForSelector(HINT, { timeout: 30_000 })
   const photoHint = await page.locator(HINT).textContent()
-  check(/zoom the photo/.test(photoHint), `with Photo open it is about the photo ("${photoHint}")`)
+  check(/^Drag to move the photo · pinch to zoom/.test(photoHint), `with Frame open it is about the photo ("${photoHint}")`)
   // The photo is at 100% on its own sheet: a drag on it moves nothing, so it
   // teaches nothing either, and the hint stays.
   const box1 = await settledBox(page)
   const mid = { x: box1.x + box1.width / 2, y: box1.y + box1.height / 2 }
-  const still = JSON.stringify((await stored(page)).media)
+  // The placement only: the photo's palette lands in the stored document on
+  // its own time (a loaded machine has it land between the two reads).
+  const placed = async () => {
+    const m = (await stored(page)).media
+    return m ? JSON.stringify({ x: m.x, y: m.y, scale: m.scale }) : 'none'
+  }
+  await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media, KEY, { timeout: 30_000 })
+  const still = await placed()
   await touch(cdp, mid, [{ x: mid.x + 40, y: mid.y }])
   await page.waitForTimeout(300)
-  const after = JSON.stringify((await stored(page)).media)
+  const after = await placed()
   check(
     (await page.locator(HINT).count()) === 1 && after === still,
     `a drag on a photo that cannot move writes nothing (not even a float's last bit) and leaves it`,
@@ -531,6 +587,392 @@ try {
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     await ctx.close()
   }
+
+  console.log("9. The photo's keys, with Frame open: the arrows move the view, + zooms, 0 resets; a run is one undo step; in Fit nothing moves")
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    await page.locator('[data-tool="frame"]').click()
+    const bytes = await page.evaluate(async () => {
+      const c = document.createElement('canvas')
+      c.width = 1200
+      c.height = 1500
+      const g = c.getContext('2d')
+      g.fillStyle = '#5a7fa8'
+      g.fillRect(0, 0, 1200, 1500)
+      const b = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9))
+      return [...new Uint8Array(await b.arrayBuffer())]
+    })
+    await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
+    await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media, KEY, { timeout: 30_000 })
+    const surface = page.locator('.drag-surface')
+    await surface.focus()
+    const shortcuts = await surface.getAttribute('aria-keyshortcuts')
+    check(shortcuts === 'ArrowUp ArrowDown ArrowLeft ArrowRight + - 0', `the sheet names the photo's keys: "${shortcuts}"`)
+    const start = (await stored(page)).media
+    // A run: three zooms in and a step right and down, inside one burst.
+    for (const key of ['+', '+', '+', 'ArrowRight', 'ArrowDown']) await page.keyboard.press(key)
+    const run = (await stored(page)).media
+    check(
+      Math.abs(run.scale - 1.15 ** 3) < 1e-9 && run.x < 0.5 && run.y < 0.5,
+      `+ three times zooms to ${run.scale.toFixed(4)} (1.15^3), and Right and Down move the view right and down: the photo's centre at ${run.x.toFixed(4)}, ${run.y.toFixed(4)}`,
+    )
+    await page.keyboard.press('0')
+    const reset = (await stored(page)).media
+    check(reset.scale === 1 && reset.x === 0.5 && reset.y === 0.5, `0 resets it: ${reset.scale}, ${reset.x}, ${reset.y}`)
+    const undo = page.locator('.app__bar button[aria-label="Undo"]')
+    await undo.click()
+    const back = (await stored(page)).media
+    check(JSON.stringify(back) === JSON.stringify(run), `one Undo takes back the 0 alone (a step of its own): ${back.scale.toFixed(4)}, ${back.x.toFixed(4)}`)
+    await undo.click()
+    const before = (await stored(page)).media
+    check(JSON.stringify(before) === JSON.stringify(start), `and one more takes back the whole run (one step): ${before.scale}, ${before.x}, ${before.y}`)
+    // + and − zoom about the middle of the frame: what is there stays there
+    // (Border Studio's keys leave the view's centre where it is).
+    {
+      await surface.focus()
+      for (const key of ['+', 'ArrowRight', 'ArrowRight', 'ArrowDown']) await page.keyboard.press(key)
+      const box9 = await settledBox(page)
+      const centre = { x: box9.x + box9.width / 2, y: box9.y + box9.height / 2 }
+      const doc9 = await stored(page)
+      const off = doc9.media
+      const held = ofPhoto(box9, doc9.frame.width, off, centre)
+      await page.keyboard.press('+')
+      const zoomed = (await stored(page)).media
+      const moved = onScreen(box9, doc9.frame.width, zoomed, held.u, held.v)
+      const drift = Math.hypot(moved.x - centre.x, moved.y - centre.y)
+      await page.keyboard.press('-')
+      const back = (await stored(page)).media
+      check(
+        zoomed.scale > off.scale && off.x !== 0.5 && drift < 1 && Math.abs(back.x - off.x) < 1e-9 && Math.abs(back.y - off.y) < 1e-9,
+        `panned off the middle (${off.x.toFixed(4)}, ${off.y.toFixed(4)}), + zooms about the middle of the frame (the point there moves ${drift.toFixed(2)} px) and − takes it back (${back.x.toFixed(4)}, ${back.y.toFixed(4)})`,
+      )
+      await page.keyboard.press('0')
+      await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media?.scale === 1, KEY, { timeout: 5_000 })
+    }
+
+    // A pinch on a detail away from the centre zooms about the fingers: the
+    // point of the photo under them stays under them (Border Studio's crop
+    // pinch), as it spreads and as the fingers move.
+    {
+      const cdp = await ctx.newCDPSession(page)
+      const box = await settledBox(page)
+      const doc = await stored(page)
+      const at = { x: box.x + box.width * 0.3, y: box.y + box.height * 0.35 }
+      const shift = { x: 15, y: -10 }
+      const was = ofPhoto(box, doc.frame.width, doc.media, at)
+      await pinch(cdp, at, 60, 120, shift)
+      await page.waitForTimeout(300)
+      await surface.focus()
+      const now = (await stored(page)).media
+      const lands = onScreen(box, doc.frame.width, now, was.u, was.v)
+      const off = Math.hypot(lands.x - (at.x + shift.x), lands.y - (at.y + shift.y))
+      check(
+        now.scale > 1.5 && off < 3,
+        `a pinch spreading 60 -> 120 px on a point at 30%, 35% of the sheet zooms to ${now.scale.toFixed(3)} and that point of the photo stays under the fingers (${off.toFixed(1)} px off)`,
+      )
+      await page.keyboard.press('0')
+      await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media?.scale === 1, KEY, { timeout: 5_000 })
+    }
+
+    // Fit: the whole photo shows; the keys move nothing, and none is named.
+    await page.locator('.controls__section[data-tool="frame"] [role=tab][data-tab="crop"]').click()
+    await page.locator('.chiprow [data-chip="4:5"]').click()
+    await page.locator('.controls__section[data-tool="frame"] input[type=radio][value="fit"]').check({ force: true })
+    await surface.focus()
+    const fitDoc = (await stored(page)).media
+    for (const key of ['+', 'ArrowRight', '0']) await page.keyboard.press(key)
+    const fitAfter = (await stored(page)).media
+    const fitKeys = await surface.getAttribute('aria-keyshortcuts')
+    check(
+      JSON.stringify(fitAfter) === JSON.stringify(fitDoc) && fitKeys === null,
+      `in Fit the keys move nothing (${JSON.stringify(fitAfter) === JSON.stringify(fitDoc) ? 'unchanged' : `moved: ${Object.keys(fitAfter).filter((k) => JSON.stringify(fitAfter[k]) !== JSON.stringify(fitDoc[k])).map((k) => `${k} ${JSON.stringify(fitDoc[k])} -> ${JSON.stringify(fitAfter[k])}`).join(', ')}`}) and none is named (${fitKeys})`,
+    )
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
+  console.log("10. The Frame tool's states, said: reasons described, chips in named groups, the hint in Fit")
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const cdp = await ctx.newCDPSession(page)
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    const tab = (sub) => page.locator(`.controls__section[data-tool="frame"] [role=tab][data-tab="${sub}"]`).click()
+    // What a control is described by, in words (its aria-describedby's
+    // elements, read), and whether it is aria-disabled.
+    const said = (sel) =>
+      page.evaluate((sel) => {
+        const el = document.querySelector(sel)
+        if (!el) return null
+        const ids = (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+        return {
+          off: el.getAttribute('aria-disabled') === 'true' || el.disabled === true,
+          focusable: el.tabIndex >= 0 && !el.disabled,
+          why: ids.map((id) => document.getElementById(id)?.textContent?.trim() ?? `(no #${id})`).join(' '),
+        }
+      }, sel)
+    await page.locator('[data-tool="frame"]').click()
+    // No photo: the sheet is not the photo's. It says there is none, names
+    // the plate's keys, and an arrow moves the selected plate (PRINT MACHINE,
+    // at 0.5 across until something moves it).
+    {
+      const surface = page.locator('.drag-surface')
+      const keys = await surface.getAttribute('aria-keyshortcuts')
+      const name = (await surface.getAttribute('aria-label')) ?? ''
+      const x = async () => (await stored(page))?.layers?.[0]?.x ?? 0.5
+      const before = await x()
+      await surface.focus()
+      await page.keyboard.press('ArrowRight')
+      const after = await x()
+      check(
+        keys === 'ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ]' && /^Print preview\. No photo yet/.test(name) && !/move the photo|zoom/.test(name) && after > before,
+        `no photo, Frame open: the sheet says "${name}", names the plate's keys ("${keys}"), and ArrowRight moves the plate (${before} -> ${after})`,
+      )
+    }
+    await tab('border')
+    const border = '.controls__panel[data-sub="border"]'
+    const dec = await said(`${border} [aria-label="Decrease Width"]`)
+    const track = await said(`${border} input[type=range]`)
+    const choose = await page.locator(`${border} button`, { hasText: 'Choose photo' }).count()
+    check(
+      dec?.off && dec.focusable && dec.why === 'No photo yet' && track?.off && track.why === 'No photo yet' && choose === 1,
+      `no photo, Frame › Border: Width is there, unavailable (− ${JSON.stringify(dec)}, track ${JSON.stringify(track)}), beside Choose photo (${choose})`,
+    )
+    await page.locator(`${border} .paramstrip__pick`).click()
+    await page.locator('dialog[open] [data-key="corners"]').click()
+    await page.waitForSelector('dialog[open]', { state: 'detached' })
+    const corners = await said(`${border} [aria-label="Increase Corners"]`)
+    check(corners?.off && corners.why === 'No photo yet', `and so is Corners (+ ${JSON.stringify(corners)})`)
+
+    await tab('crop')
+    const ratio = await page.evaluate(() => {
+      const row = document.querySelector('.controls__panel[data-sub="crop"] .chiprow')
+      return { role: row?.getAttribute('role'), name: row?.getAttribute('aria-label') }
+    })
+    const original = await said('.controls__panel[data-sub="crop"] [data-chip="original"]')
+    const before = (await stored(page)).aspect
+    // Tapped as a finger would: Playwright will not click an aria-disabled
+    // control unless forced; the app must ignore the tap itself.
+    await page.locator('.controls__panel[data-sub="crop"] [data-chip="original"]').click({ force: true })
+    const after = (await stored(page)).aspect
+    check(
+      ratio.role === 'group' && ratio.name === 'Sheet ratio' && original?.off && original.why === 'No photo yet' && after === before,
+      `Frame › Crop: the ratio row is a ${ratio.role} named "${ratio.name}"; Original is unavailable and says why ("${original?.why}"), and a tap on it changes nothing (${before} -> ${after})`,
+    )
+
+    // A photo: the fill row, and Width available.
+    const bytes = await page.evaluate(async () => {
+      const c = document.createElement('canvas')
+      c.width = 1200
+      c.height = 1500
+      const g = c.getContext('2d')
+      g.fillStyle = '#5a7fa8'
+      g.fillRect(0, 0, 1200, 1500)
+      const b = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9))
+      return [...new Uint8Array(await b.arrayBuffer())]
+    })
+    await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
+    await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media, KEY, { timeout: 30_000 })
+    await tab('border')
+    const fills = await page.evaluate(() => {
+      const row = document.querySelector('.controls__panel[data-sub="border"] .chiprow')
+      return { role: row?.getAttribute('role'), name: row?.getAttribute('aria-label'), chips: row?.querySelectorAll('.chip').length ?? 0 }
+    })
+    const width = await said(`${border} [aria-label="Decrease Width"]`)
+    check(
+      fills.role === 'group' && fills.name === 'Fill' && fills.chips === 6 && width && !width.off && width.why === '',
+      `with a photo, Frame › Border: the fill row is a ${fills.role} named "${fills.name}" of ${fills.chips} chips; Width available, described by nothing (${JSON.stringify(width)})`,
+    )
+    // Choosing Frosted shows its one setting, Blur, on the strip (Border
+    // Studio's Fill › Frosted leads with it); leaving Frosted, Width again.
+    {
+      const strip = page.locator(`${border} .paramstrip__pick`)
+      await page.locator(`${border} [data-chip="frosted"]`).click()
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="frosted"]`)?.getAttribute('aria-pressed') === 'true', border)
+      const onFrosted = (await strip.textContent())?.trim()
+      await page.locator(`${border} [data-chip="photo"]`).click()
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="photo"]`)?.getAttribute('aria-pressed') === 'true', border)
+      const onPhoto = (await strip.textContent())?.trim()
+      check(onFrosted === 'Blur' && onPhoto === 'Width', `a tap on Frosted puts Blur on the strip ("${onFrosted}"), a tap on Photo puts Width back ("${onPhoto}")`)
+      // Keys only: Undo and Redo take the fill across Frosted with focus on
+      // the strip's name; the strip follows the fill in place, so focus stays
+      // on that name (a strip made anew dropped it to the page).
+      await page.locator(`${border} [data-chip="frosted"]`).click()
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="frosted"]`)?.getAttribute('aria-pressed') === 'true', border)
+      await strip.focus()
+      const where = () =>
+        page.evaluate((b) => {
+          const a = document.activeElement
+          return { onName: !!a?.matches(`${b} .paramstrip__pick`), name: !a || a === document.body ? 'the page' : a.textContent?.trim() || a.tagName }
+        }, border)
+      await page.keyboard.press('Control+z')
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="photo"]`)?.getAttribute('aria-pressed') === 'true', border)
+      const undone = await where()
+      await page.keyboard.press('Control+Shift+z')
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="frosted"]`)?.getAttribute('aria-pressed') === 'true', border)
+      const redone = await where()
+      await page.keyboard.press('Control+z')
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="photo"]`)?.getAttribute('aria-pressed') === 'true', border)
+      check(
+        undone.onName && undone.name === 'Width' && redone.onName && redone.name === 'Blur',
+        `keys only: with focus on the strip's name, Ctrl+Z (Frosted to Photo) keeps it there ("${undone.name}"), and so does Ctrl+Shift+Z (Photo to Frosted: "${redone.name}")`,
+      )
+    }
+
+    // Fit, on a 4:5 sheet: no gesture to teach, nothing moves.
+    await tab('crop')
+    await page.locator('.controls__panel[data-sub="crop"] [data-chip="4:5"]').click()
+    await page.locator('.controls__section[data-tool="frame"] input[type=radio][value="fit"]').check({ force: true })
+    const HINT_SAID = '.app__float > p.sr-only[role=status]'
+    await page.waitForFunction((H) => /^Fit shows/.test(document.querySelector(H)?.textContent ?? ''), HINT_SAID, { timeout: 5_000 }).catch(() => {})
+    const fitHint = await page.locator(HINT_SAID).textContent()
+    const box = await settledBox(page)
+    const mid = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    const still = JSON.stringify((await stored(page)).media)
+    await touch(cdp, mid, [{ x: mid.x + 40, y: mid.y + 30 }])
+    const moved = JSON.stringify((await stored(page)).media) !== still
+    check(
+      fitHint === 'Fit shows the whole photo · choose Crop to move or zoom it' && !moved && (await page.locator('.app__hint').count()) === 1,
+      `in Fit the hint names no gesture ("${fitHint}"), a drag moves nothing (${moved ? 'moved' : 'unchanged'}) and leaves it`,
+    )
+    await tab('place')
+    const zoom = await said('.controls__panel[data-sub="place"] [aria-label="Decrease Zoom"]')
+    check(zoom?.off && zoom.why === 'Fit shows the whole photo', `Frame › Place in Fit: Zoom unavailable, described by "${zoom?.why}"`)
+    await tab('crop')
+    await page.locator('.controls__section[data-tool="frame"] input[type=radio][value="crop"]').check({ force: true })
+    await page.waitForFunction((H) => /^Drag/.test(document.querySelector(H)?.textContent ?? ''), HINT_SAID, { timeout: 5_000 }).catch(() => {})
+    const cropHint = await page.locator(HINT_SAID).textContent()
+    check(/^Drag to move the photo · pinch to zoom/.test(cropHint), `back in Crop it names the photo's gestures ("${cropHint}")`)
+
+    // Keys only: Replace, Remove and Choose photo keep focus where the person
+    // is (never the page's body): on the button while the file is read and
+    // after, on Choose photo once Remove has gone, and on the fill row when
+    // a photo chosen from Frame › Border takes Choose photo's place.
+    {
+      const focusIs = () =>
+        page.evaluate(() => {
+          const a = document.activeElement
+          return a === document.body || !a ? 'body' : `${a.tagName.toLowerCase()} "${a.textContent?.trim() ?? ''}"${a.dataset?.chip ? ` [${a.dataset.chip}]` : ''}`
+        })
+      // The app's file input answers its click with a file at once, as a
+      // chooser would (a native chooser opened from a key press is not
+      // dependably reported to the driver): the keys' path is the app's own,
+      // Enter on the button, its click, the input's click, the file read.
+      await page.evaluate((b64) => {
+        const input = document.querySelector('input[type=file]')
+        input.click = () => {
+          const dt = new DataTransfer()
+          dt.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'again.jpg', { type: 'image/jpeg' }))
+          input.files = dt.files
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+      }, Buffer.from(bytes).toString('base64'))
+      const pickWith = async (button) => {
+        await button.focus()
+        await page.keyboard.press('Enter')
+        await page.waitForTimeout(1500)
+      }
+      const photoTab = '.controls__panel[data-sub="photo"]'
+      await tab('photo')
+      await pickWith(page.locator(`${photoTab} button`, { hasText: 'Replace' }))
+      const afterReplace = await focusIs()
+      await page.locator(`${photoTab} button`, { hasText: 'Remove' }).focus()
+      await page.keyboard.press('Enter')
+      await page.waitForTimeout(300)
+      const afterRemove = await focusIs()
+      await tab('border')
+      await pickWith(page.locator(`${border} button`, { hasText: 'Choose photo' }))
+      const afterChoose = await focusIs()
+      check(
+        afterReplace === 'button "Replace"' && afterRemove === 'button "Choose photo"' && /^button "Photo" \[photo\]$/.test(afterChoose),
+        `keys only: Replace and a file leaves focus on ${afterReplace}; Remove, on ${afterRemove}; Choose photo in Frame › Border and a file, on ${afterChoose}`,
+      )
+    }
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
+
+  console.log("11. The sheet's keyboard ring stands off every fill, light and dark")
+  for (const scheme of ['light', 'dark']) {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: scheme, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(APP)
+    await page.waitForSelector('.sheet canvas')
+    await page.locator('[data-tool="frame"]').click()
+    // A photo of a few colours, so its palette has a dark Deep and a pale Muted.
+    const bytes = await page.evaluate(async () => {
+      const c = document.createElement('canvas')
+      c.width = 1200
+      c.height = 1500
+      const g = c.getContext('2d')
+      const grad = g.createLinearGradient(0, 0, 1200, 1500)
+      grad.addColorStop(0, '#b4562a')
+      grad.addColorStop(0.5, '#d9b38c')
+      grad.addColorStop(1, '#2f5f8f')
+      g.fillStyle = grad
+      g.fillRect(0, 0, 1200, 1500)
+      const b = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9))
+      return [...new Uint8Array(await b.arrayBuffer())]
+    })
+    await page.locator('input[type=file]').setInputFiles({ name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(bytes) })
+    await page.waitForFunction((k) => JSON.parse(localStorage.getItem(k) ?? 'null')?.media?.palette, KEY, { timeout: 30_000 })
+    await page.locator('.controls__section[data-tool="frame"] [role=tab][data-tab="border"]').click()
+    const lines = []
+    for (const fill of ['paper', 'photo', 'deep', 'muted', 'comp', 'frosted']) {
+      await page.locator(`.controls__panel[data-sub="border"] [data-chip="${fill}"]`).click()
+      await page.waitForFunction((f) => document.querySelector(`[data-chip="${f}"]`)?.getAttribute('aria-pressed') === 'true' && !document.querySelector('.chiprow[aria-busy="true"]'), fill, { timeout: 30_000 })
+      await page.waitForTimeout(1200)
+      // The sheet reached by Tab from the bar's Save, as a keyboard reaches it.
+      await page.locator('.app__save').focus()
+      for (let i = 0; i < 12 && !(await page.evaluate(() => document.activeElement?.classList.contains('drag-surface'))); i++) await page.keyboard.press('Tab')
+      // The pixels as drawn: a strip down across the sheet's top edge at its
+      // middle, from the stage above it into the frame, read back from a
+      // screenshot (2 device pixels a CSS pixel): the stage 2 px above the
+      // edge, the ring's band 1.5 px in, the next band 4.5 px in, the frame
+      // 12 px in.
+      const focused = await page.evaluate(() => document.activeElement?.classList.contains('drag-surface') && document.activeElement.matches(':focus-visible'))
+      const sheet = await page.locator('.sheet').boundingBox()
+      const png = await page.screenshot({ clip: { x: Math.round(sheet.x + sheet.width / 2), y: Math.round(sheet.y) - 4, width: 1, height: 20 } })
+      const m = await page.evaluate(async ([b64, top]) => {
+        const bmp = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob())
+        const c = new OffscreenCanvas(bmp.width, bmp.height)
+        const g = c.getContext('2d')
+        g.drawImage(bmp, 0, 0)
+        const k = bmp.height / 20
+        const at = (cssY) => [...g.getImageData(0, Math.floor((cssY + 4 - top) * k), 1, 1).data.slice(0, 3)]
+        const lum = ([r, gg, b]) => {
+          const f = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+          return 0.2126 * f(r) + 0.7152 * f(gg) + 0.0722 * f(b)
+        }
+        const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05)
+        const stage = at(-2)
+        const ring = at(1.5)
+        const halo = at(4.5)
+        const fill = at(12)
+        return { stage, ring, halo, fill, ringStage: ratio(ring, stage), ringHalo: ratio(ring, halo), ringFill: ratio(ring, fill), haloFill: ratio(halo, fill) }
+      }, [png.toString('base64'), Math.round(sheet.y) - sheet.y])
+      m.visible = focused
+      const f2 = (v) => v.toFixed(2)
+      const ok = m.visible && m.ringStage >= 3 && Math.max(m.ringFill, m.haloFill) >= 3
+      lines.push(ok)
+      check(
+        ok,
+        `${scheme}, fill ${fill}${m.visible ? '' : ' (the sheet not focused by the keys)'}: drawn, the ring band ${m.ring} on the stage ${m.stage} ${f2(m.ringStage)}:1, the band inside it ${m.halo}; against the frame (${m.fill}) the ring ${f2(m.ringFill)}:1, the band inside ${f2(m.haloFill)}:1 (one of them >= 3:1)`,
+      )
+    }
+    check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+    await ctx.close()
+  }
+
 } finally {
   await browser.close()
   await new Promise((r) => server.httpServer.close(r))
@@ -540,4 +982,4 @@ if (failures.length) {
   console.error(`\n${failures.length} touch check(s) failed.`)
   process.exit(1)
 }
-console.log('\nTouch: a tap picks the plate under it, and the drag it starts moves that plate.')
+console.log("\nTouch: a tap picks the plate under it, the drag it starts moves that plate, the photo's keys move the photo, and the Frame tool says why what is off is off.")

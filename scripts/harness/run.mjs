@@ -13,6 +13,14 @@
  *   ... --bands 1,7,97,full --tile 512,65536   (the same on a grid of forced 512x128 tiles: --tile edge,pixels)
  *   node scripts/harness/run.mjs --out f.json --no-hashes --file-parity 1000 --retry   (P-5: the real savePrint's PNG decodes to
  *       the export entry's canvas, every document; P-6: a RangeError injected once at set-up and once mid-press gives the same file)
+ *   node scripts/harness/run.mjs --out c.json --no-hashes --chain   (the whole chain in Frosted: a photo imported for real, its
+ *       palette stored, its PNG written by the app's own pressForSave at the photo's own size, 1800; the preview, the export and
+ *       that file the same bytes; exits 1 if not)
+ *   node scripts/harness/run.mjs --out c.json --no-hashes --frame-cost   (the frame's cost in the preview: photo documents framed
+ *       (Crop, Fit, Frosted) against unframed and against the same framed render with its compose skipped, and Frosted with
+ *       its field made again against unframed, settled and draft, each render the mean of its fastest samples over 15
+ *       interleaved rounds (--runs n); a document and size with a row over its bound is measured again, up to twice, its
+ *       samples pooled; exits 1 if a row is still over)
  *   node scripts/harness/run.mjs --out s.json --no-hashes --seam photo-second-ink@3000,default@3600 [--tile 512,65536]
  *       (tiles against one canvas: the export on the tile grid, the real one or --tile's, against the same on a single tile;
  *       prints the differing pixels against the inked ones and the plates whose box crosses a seam; exits 1 outside the bounds)
@@ -36,7 +44,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
 
 function parseArgs(argv) {
-  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], seam: [], parity: null, fileParity: null, retry: false, bands: null, tile: null, photoMp: undefined, runs: 3, hashes: true, out: null, png: null }
+  const opts = { heights: [300, 1000, 1800], docs: null, time: [], scale: [], seam: [], parity: null, fileParity: null, retry: false, chain: false, bands: null, tile: null, frameCost: false, photoMp: undefined, runs: null, hashes: true, out: null, png: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = () => {
@@ -52,6 +60,8 @@ function parseArgs(argv) {
     else if (a === '--parity') opts.parity = Number(next())
     else if (a === '--file-parity') opts.fileParity = Number(next())
     else if (a === '--retry') opts.retry = true
+    else if (a === '--chain') opts.chain = true
+    else if (a === '--frame-cost') opts.frameCost = true
     else if (a === '--bands') opts.bands = next().split(',').map((b) => (b === 'full' ? null : Number(b)))
     else if (a === '--tile') opts.tile = next().split(',').map(Number)
     else if (a === '--seam') opts.seam.push(...next().split(','))
@@ -115,6 +125,10 @@ async function openPage() {
   await page.waitForFunction(() => window.H !== undefined, null, { timeout: 30_000 }).catch(() => {
     throw new Error(`harness did not load: ${errors.join(' | ') || 'no error reported'}`)
   })
+  // Poster set in a fallback would be a different print, and an A/B would
+  // call it a change (harness.ts header).
+  const faces = await page.evaluate(() => window.H.faces)
+  if (faces !== 'loaded') throw new Error(`harness: Poster's face did not load (${faces})`)
   return { page, errors }
 }
 
@@ -132,8 +146,10 @@ const result = {
   parity: {},
   fileParity: {},
   retry: {},
+  chain: null,
   bands: {},
   seam: {},
+  frameCost: {},
 }
 let failed = false
 let failure = ''
@@ -234,6 +250,23 @@ try {
     await page.close()
   }
 
+  if (opts.chain) {
+    // The whole chain in Frosted: a photo imported for real, its palette
+    // stored, the file Save writes (the app's own pressForSave, at the
+    // photo's own size); the preview, the export and that file, the same
+    // bytes.
+    const { page, errors } = await openPage()
+    const r = await page.evaluate((h) => window.H.chain(h), 1800)
+    if (!r.same) {
+      failed = true
+      failure = r.sameField ? 'the whole chain: the preview, the export and the file differ' : "the whole chain: the preview's field is not the one Save presses"
+    }
+    result.chain = r
+    console.log(`chain frosted@1800`.padEnd(32), r.same ? 'SAME' : 'DIFFERS', `${r.w}x${r.h}`, r.preview.slice(0, 12), r.exported.slice(0, 12), r.file.slice(0, 12), r.sameField ? "the preview's field is Save's" : 'ANOTHER FIELD')
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
   if (opts.bands) {
     // Pressed in bands of every height asked for, through the export entry:
     // each must give the bytes the sheet pressed whole (one band) gives.
@@ -315,6 +348,184 @@ try {
     await page.close()
   }
 
+  if (opts.frameCost) {
+    // The frame's cost in the preview: a photo document framed (the first
+    // photo's width, round corners, the photo's own colour, in Crop and in
+    // Fit; and Frosted at Blur 60 in Crop, its field made once, as the page
+    // keeps it) at the settled and the draft size, rendered the way the
+    // preview renders a frame (its canvases and cache kept; the photo drawn
+    // and the frame composed every time), against two others:
+    //  - the same document unframed: what a person waits for with the frame
+    //    on, against without it;
+    //  - the same framed render with its compose skipped (the preview's test
+    //    seam): the photo drawn into the same rectangle, so the ratio is the
+    //    frame's own work alone (in Fit the photo is drawn smaller than
+    //    unframed, and that saving would hide the frame's cost).
+    // Each bounded by FRAME_COST, the plan's 1.10x settled and 1.25x draft.
+    // And Frosted with its field made again inside the render, against the
+    // same document unframed (REMAKE_COST); and Frosted on Original with its
+    // field made for a new sheet shape (a Width drag there), against the
+    // same render with its field kept (RESHAPE_COST).
+    //
+    // A shared machine's interference only ever adds time, comes in spells
+    // (a fixed piece of plain JavaScript, 145 ms at its fastest, took up to
+    // 274 ms on the machine these numbers come from), and a spell can outlast
+    // every round of a document and size taken back to back. So:
+    //  - a sample is one render. The four documents and sizes are
+    //    interleaved round by round, so each one's rounds spread over the
+    //    whole measurement (15 rounds, `--runs n`; a draft render being
+    //    ~8 ms, a draft round is 10 samples of each). Within a round the
+    //    ten renders run in a cycle, started one further on each round and
+    //    reversed every other round, and the first render of each round's
+    //    turn is not timed (the first render after another document or size
+    //    ran 2 to 6% slower);
+    //  - a render's time is the mean of its fastest samples, a fifth of one
+    //    measurement's (3 settled, 30 draft), from every sample taken of it;
+    //  - a document and size with a row (Crop, Fit, Frosted, Frosted made
+    //    again, or Frosted made for a new shape) over its bound is
+    //    measured again, up to twice, its new samples added to its old, and
+    //    every measurement is printed. A row fails if it is still over after
+    //    the third. More samples only bring a render's time nearer its floor:
+    //    a spell that slowed a framed render in one measurement is outweighed
+    //    by the next, and so is one that slowed the render it is compared
+    //    with, which would otherwise let a costly frame through.
+    // The numbers this gives are in the README ("The frame is ground").
+    const FRAME_COST = { settled: 1.1, draft: 1.25 }
+    // Frosted with its field made again inside the render from the kept
+    // cover (each frame of a Blur drag: the passes and the grade), against
+    // the same document unframed: no bound of the plan's own, so what it
+    // measured x 1.25 (1.12 to 1.26 settled, 1.21 to 1.28 draft, over 8
+    // runs). The draft bound fails a drag that makes the cover again each
+    // frame (2.67x, 3.32x); README "The frame is ground" says what the
+    // settled one cannot see.
+    const REMAKE_COST = { settled: 1.58, draft: 1.6 }
+    // Frosted on Original with its field made again for a new sheet shape
+    // inside the render (each frame of a Width drag there: the cover and
+    // the field), against the same render with its field kept: the
+    // making's own share, what it measured x 1.25 (RESHAPE_COST, set from
+    // a batch at this code: 1.31 to 1.45 settled, 2.68 to 3.22 draft, over
+    // 8 runs). The draft bound fails a drag whose cover is made twice
+    // (4.26x to 5.21x); the settled one cannot see it (1.60x), as the
+    // made-again row's cannot (README "The frame is ground").
+    const RESHAPE_COST = { settled: 1.82, draft: 4.03 }
+    const MEASUREMENTS = 3
+    const DRAFT_SAMPLES = 10
+    const rounds = Math.max(5, opts.runs ?? 15)
+    const { page, errors } = await openPage()
+    // No render next to its own bare or framed twin, either way round (a
+    // precaution: measured, a bare render ran no faster straight after its
+    // framed twin's canvases and cache than after another's).
+    const kinds = [
+      ['none', 'none', false, false],
+      ['crop', 'crop', false, false],
+      ['frosted', 'frosted', false, false],
+      ['fit', 'fit', false, false],
+      ['frosted-original', 'frosted-original', false, false],
+      ['crop-bare', 'crop', true, false],
+      ['frosted-remake', 'frosted', false, true],
+      ['fit-bare', 'fit', true, false],
+      ['frosted-bare', 'frosted', true, false],
+      ['frosted-reshape', 'frosted-original', false, 'reshape'],
+    ]
+    const FRAMED = ['crop', 'fit', 'frosted']
+    // Round i's turn of n timed renders, behind one untimed: the cycle,
+    // reversed on odd rounds, from position i (each kind n / 5 times).
+    const turnOf = (i, n) => {
+      const cycle = i % 2 === 0 ? kinds : [...kinds].reverse()
+      const at = (s) => cycle[(((i + s - 1) % cycle.length) + cycle.length) % cycle.length]
+      return Array.from({ length: n + 1 }, (_, s) => at(s))
+    }
+    const meanOfFastest = (xs, n) => {
+      const v = [...xs].sort((a, b) => a - b).slice(0, n)
+      return v.reduce((s, x) => s + x, 0) / v.length
+    }
+    const phases = ['native-photo', 'photo-12mp'].flatMap((doc) =>
+      [false, true].map((draft) => ({
+        doc,
+        draft,
+        size: '',
+        samples: Object.fromEntries(kinds.map(([k]) => [k, []])),
+        measurements: [],
+        ok: { crop: false, fit: false, frosted: false, 'frosted-remake': false, 'frosted-reshape': false },
+      })),
+    )
+    // One measurement of some documents and sizes, their rounds interleaved.
+    // The first round only warms the canvases and the cache.
+    const measure = async (list) => {
+      const times = new Map(list.map((p) => [p, Object.fromEntries(kinds.map(([k]) => [k, []]))]))
+      for (let i = -1; i < rounds; i++) {
+        for (const p of list) {
+          const turn = turnOf(i, kinds.length * (p.draft ? DRAFT_SAMPLES : 1))
+          for (let s = 0; s < turn.length; s++) {
+            const [k, f, bare, remake] = turn[s]
+            const r = await page.evaluate(([d, ff, dr, b, m]) => window.H.frameCost(d, ff, dr, b, m), [p.doc, f, p.draft, bare, remake])
+            if (i >= 0 && s > 0) times.get(p)[k].push(r.ms)
+            if (k === 'none') p.size = `${r.w}x${r.h}`
+          }
+        }
+      }
+      return times
+    }
+    let pending = phases
+    for (let m = 1; m <= MEASUREMENTS && pending.length > 0; m++) {
+      const times = await measure(pending)
+      for (const p of pending) {
+        for (const [k] of kinds) p.samples[k].push(...times.get(p)[k])
+        const fastest = Math.max(1, Math.round(((p.draft ? DRAFT_SAMPLES : 1) * rounds) / 5))
+        const at = Object.fromEntries(kinds.map(([k]) => [k, meanOfFastest(p.samples[k], fastest)]))
+        const bound = p.draft ? FRAME_COST.draft : FRAME_COST.settled
+        const remakeBound = p.draft ? REMAKE_COST.draft : REMAKE_COST.settled
+        const reshapeBound = p.draft ? RESHAPE_COST.draft : RESHAPE_COST.settled
+        const row = { unframed: Number(at.none.toFixed(2)) }
+        for (const f of FRAMED) {
+          const waits = at[f] / at.none
+          const own = at[f] / at[`${f}-bare`]
+          p.ok[f] = waits <= bound && own <= bound
+          row[f] = { ms: Number(at[f].toFixed(2)), bare: Number(at[`${f}-bare`].toFixed(2)), ratio: Number(waits.toFixed(3)), own: Number(own.toFixed(3)), ok: p.ok[f] }
+        }
+        {
+          const waits = at['frosted-remake'] / at.none
+          p.ok['frosted-remake'] = waits <= remakeBound
+          row['frosted-remake'] = { ms: Number(at['frosted-remake'].toFixed(2)), ratio: Number(waits.toFixed(3)), ok: p.ok['frosted-remake'] }
+        }
+        {
+          const own = at['frosted-reshape'] / at['frosted-original']
+          p.ok['frosted-reshape'] = own <= reshapeBound
+          row['frosted-reshape'] = { ms: Number(at['frosted-reshape'].toFixed(2)), kept: Number(at['frosted-original'].toFixed(2)), own: Number(own.toFixed(3)), ok: p.ok['frosted-reshape'] }
+        }
+        // The verdict on every sample so far, and this measurement's own samples.
+        p.measurements.push({ ...row, runs: times.get(p) })
+        const done = Object.values(p.ok).every(Boolean)
+        const name = { crop: 'Crop', fit: 'Fit', frosted: 'Frosted' }
+        console.log(
+          `frame-cost ${p.doc} ${p.draft ? 'draft' : 'settled'} ${p.size}${m > 1 ? ` (${m} measurements)` : ''}`.padEnd(40),
+          `unframed ${at.none.toFixed(1)} ms;`,
+          FRAMED.map((f) => `${name[f]} ${row[f].ms.toFixed(1)} ms (${row[f].ratio}x unframed, ${row[f].own}x its own compose skipped)${row[f].ok ? '' : ' over'}`).join('; '),
+          `bound ${bound}x;`,
+          `Frosted, its field made again ${row['frosted-remake'].ms.toFixed(1)} ms (${row['frosted-remake'].ratio}x unframed, bound ${remakeBound}x)${row['frosted-remake'].ok ? '' : ' over'};`,
+          `on Original, made for a new shape ${row['frosted-reshape'].ms.toFixed(1)} ms (${row['frosted-reshape'].own}x its field kept, ${row['frosted-reshape'].kept.toFixed(1)} ms; bound ${reshapeBound}x)${row['frosted-reshape'].ok ? '' : ' over'}`,
+          done ? 'ok' : m < MEASUREMENTS ? 'OVER, measured again' : `OVER after ${MEASUREMENTS} measurements`,
+        )
+      }
+      pending = pending.filter((p) => !Object.values(p.ok).every(Boolean))
+    }
+    for (const p of phases) {
+      result.frameCost[`${p.doc} ${p.draft ? 'draft' : 'settled'} ${p.size}`] = {
+        bound: p.draft ? FRAME_COST.draft : FRAME_COST.settled,
+        remakeBound: p.draft ? REMAKE_COST.draft : REMAKE_COST.settled,
+        reshapeBound: p.draft ? RESHAPE_COST.draft : RESHAPE_COST.settled,
+        ok: p.ok,
+        measurements: p.measurements,
+      }
+    }
+    if (pending.length > 0) {
+      failed = true
+      failure = 'a framed preview costs more than its bound'
+    }
+    if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)
+    await page.close()
+  }
+
   for (const spec of opts.time) {
     const [doc, h] = spec.split('@')
     const height = Number(h)
@@ -322,7 +533,7 @@ try {
     // A fresh page per run, so one render's garbage is not the next one's cost.
     // Through the EXPORT entry (renderPrintAsync, no cache): a timing is of
     // what Save runs, not of the preview's cached path.
-    for (let i = 0; i < opts.runs; i++) {
+    for (let i = 0; i < (opts.runs ?? 3); i++) {
       const { page, errors } = await openPage()
       const r = await page.evaluate(([d, hh, mp]) => window.H.render(d, hh, { photo: mp, async: true }), [doc, height, opts.photoMp])
       if (errors.length) throw new Error(`page errors: ${errors.join(' | ')}`)

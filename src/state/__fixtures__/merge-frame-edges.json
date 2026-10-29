@@ -1,0 +1,146 @@
+[
+  {
+    "media": {
+      "id": "media-merge-edges-low",
+      "width": 4032,
+      "height": 3024,
+      "scale": 1,
+      "x": 0.5,
+      "y": 0.5,
+      "native": true,
+      "palette": {
+        "photo": "#2896c8",
+        "deep": "#152228",
+        "muted": "#90b1c1",
+        "comp": "#cb712e"
+      }
+    },
+    "paperVeil": false,
+    "aspect": "16:9",
+    "paperId": "natural",
+    "press": {
+      "method": "grain",
+      "screenPitch": 36,
+      "density": 0.3,
+      "misregistration": 30,
+      "edge": 1,
+      "wear": 0.8
+    },
+    "frame": {
+      "width": 0,
+      "corners": 0,
+      "fill": "paper",
+      "blur": 10,
+      "mode": "crop"
+    },
+    "seed": 4242,
+    "layers": [
+      {
+        "id": "layer-merge-1",
+        "text": "PRINT\nMACHINE",
+        "inkId": "fluorescentpink",
+        "fontId": "poster",
+        "bold": true,
+        "size": 0.09,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": "white",
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.5,
+        "rotation": 0,
+        "backing": null
+      },
+      {
+        "id": "layer-merge-2",
+        "text": "RISO",
+        "inkId": "blue",
+        "fontId": "grotesk",
+        "bold": true,
+        "size": 0.06,
+        "lineHeight": 0.94,
+        "tracking": 0.04,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.76,
+        "rotation": -4,
+        "backing": "yellow"
+      }
+    ]
+  },
+  {
+    "media": {
+      "id": "media-merge-edges-high",
+      "width": 4032,
+      "height": 3024,
+      "scale": 1,
+      "x": 0.5,
+      "y": 0.5,
+      "native": true,
+      "palette": {
+        "photo": "#2896c8",
+        "deep": "#152228",
+        "muted": "#90b1c1",
+        "comp": "#cb712e"
+      }
+    },
+    "paperVeil": false,
+    "aspect": "3:2",
+    "paperId": "natural",
+    "press": {
+      "method": "grain",
+      "screenPitch": 36,
+      "density": 0.3,
+      "misregistration": 30,
+      "edge": 1,
+      "wear": 0.8
+    },
+    "frame": {
+      "width": 0.16,
+      "corners": 1,
+      "fill": "frosted",
+      "blur": 240,
+      "mode": "fit"
+    },
+    "seed": 4242,
+    "layers": [
+      {
+        "id": "layer-merge-1",
+        "text": "PRINT\nMACHINE",
+        "inkId": "fluorescentpink",
+        "fontId": "poster",
+        "bold": true,
+        "size": 0.09,
+        "lineHeight": 0.94,
+        "tracking": -0.02,
+        "contrastInkId": "white",
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.5,
+        "rotation": 0,
+        "backing": null
+      },
+      {
+        "id": "layer-merge-2",
+        "text": "RISO",
+        "inkId": "blue",
+        "fontId": "grotesk",
+        "bold": true,
+        "size": 0.06,
+        "lineHeight": 0.94,
+        "tracking": 0.04,
+        "contrastInkId": null,
+        "contrastThreshold": 0.5,
+        "align": "center",
+        "x": 0.5,
+        "y": 0.76,
+        "rotation": -4,
+        "backing": "yellow"
+      }
+    ]
+  }
+]

@@ -60,15 +60,90 @@ function boxV(src: Float32Array, dst: Float32Array, w: number, h: number, r: num
   }
 }
 
-/** Three box passes at an integer radius, on `a` in place, with `b` as the
- *  other half of the ping-pong. */
-function boxesInPlace(a: Float32Array, b: Float32Array, w: number, h: number, r: number): void {
-  const sums = new Float64Array(w)
-  for (let pass = 0; pass < 3; pass++) {
-    boxH(a, b, w, h, r)
-    boxV(b, a, w, h, r, sums)
+/** 1 / the number of samples in each window of a pass shrunk at the edges:
+ *  min(i + r, n - 1) - max(i - r, 0) + 1 for i in [0, n). */
+function shrunkCounts(n: number, r: number): Float64Array {
+  const inv = new Float64Array(n)
+  for (let i = 0; i < n; i++) inv[i] = 1 / (Math.min(i + r, n - 1) - Math.max(i - r, 0) + 1)
+  return inv
+}
+
+/**
+ * One horizontal box pass with radius r, its window SHRUNK at the edges:
+ * near an edge it averages only the samples there are, dividing by their
+ * count (min(x + r, w - 1) - max(x - r, 0) + 1), so an edge is not pulled
+ * toward a repeated edge sample. Border Studio's frosted pass, the sum seeded
+ * from samples 0..min(r, w - 1) only.
+ */
+function boxHShrink(src: Float32Array, dst: Float32Array, w: number, h: number, r: number, inv: Float64Array): void {
+  for (let y = 0; y < h; y++) {
+    const row = y * w
+    let sum = 0
+    for (let k = 0; k <= Math.min(r, w - 1); k++) sum += src[row + k]
+    for (let x = 0; x < w; x++) {
+      dst[row + x] = sum * inv[x]
+      if (x - r >= 0) sum -= src[row + x - r]
+      if (x + r + 1 < w) sum += src[row + x + r + 1]
+    }
   }
 }
+
+/** One vertical box pass, its window shrunk at the edges (boxHShrink), row
+ *  by row with a running sum per column, as boxV walks. */
+function boxVShrink(src: Float32Array, dst: Float32Array, w: number, h: number, r: number, sums: Float64Array, inv: Float64Array): void {
+  sums.fill(0, 0, w)
+  for (let k = 0; k <= Math.min(r, h - 1); k++) {
+    const row = k * w
+    for (let x = 0; x < w; x++) sums[x] += src[row + x]
+  }
+  for (let y = 0; y < h; y++) {
+    const out = y * w
+    const n = inv[y]
+    for (let x = 0; x < w; x++) dst[out + x] = sums[x] * n
+    if (y - r >= 0) {
+      const drop = (y - r) * w
+      for (let x = 0; x < w; x++) sums[x] -= src[drop + x]
+    }
+    if (y + r + 1 < h) {
+      const add = (y + r + 1) * w
+      for (let x = 0; x < w; x++) sums[x] += src[add + x]
+    }
+  }
+}
+
+/**
+ * What a box pass does at the edge of the plane:
+ *  - `clamp`: the window reaches past the edge and repeats the edge sample
+ *    (every plate's blur: a tear, a bleed, the luminance);
+ *  - `shrink`: the window holds only the samples there are and is divided
+ *    by their count (Frosted's field, as Border Studio blurs it).
+ */
+export type BoxEdge = 'clamp' | 'shrink'
+
+/**
+ * Three box passes (each horizontal, then vertical) at the integer radius
+ * `r`, on `plane` in place, with `scratch` (the same size) as the other half
+ * of the ping-pong. `clamp` is the plates' blur exactly (what
+ * `blurInPlace` runs).
+ */
+export function boxBlurPlane(plane: Float32Array, scratch: Float32Array, w: number, h: number, r: number, edge: BoxEdge = 'clamp'): void {
+  const sums = new Float64Array(w)
+  const across = edge === 'shrink' ? shrunkCounts(w, r) : null
+  const down = edge === 'shrink' ? shrunkCounts(h, r) : null
+  for (let pass = 0; pass < 3; pass++) {
+    if (across && down) {
+      boxHShrink(plane, scratch, w, h, r, across)
+      boxVShrink(scratch, plane, w, h, r, sums, down)
+    } else {
+      boxH(plane, scratch, w, h, r)
+      boxV(scratch, plane, w, h, r, sums)
+    }
+  }
+}
+
+/** Three box passes at an integer radius, on `a` in place, with `b` as the
+ *  other half of the ping-pong, edges clamped. */
+const boxesInPlace = (a: Float32Array, b: Float32Array, w: number, h: number, r: number): void => boxBlurPlane(a, b, w, h, r, 'clamp')
 
 /**
  * Above this a whole pixel of radius is a small change in blur strength and the

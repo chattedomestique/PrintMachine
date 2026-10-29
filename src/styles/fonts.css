@@ -1,0 +1,23 @@
+/* ── The bundled face ────────────────────────────────────────────────────────
+   Poster is Tanklager Kompakt (Ariel Martín Pérez, Tunera Type Foundry; SIL
+   Open Font License 1.1: public/licences.txt). One file, imported here so
+   Vite hashes it and the service worker precaches it: the print is set in the
+   same face online, offline and on every phone, where a system stack set it
+   in whatever the phone had (README "Fonts"). What a person can type that it
+   does not draw prints in the phone's own face: `$` (the iPhone keyboard's
+   `123` page), `€ £ ¥` (its `#+=` page), the long-press signs `¢ ₩ ₽ §`, and
+   the emoji keyboard's `© ® ™` (scripts/check-fonts.mjs prints the list).
+
+   One weight: Bold is off for Poster (engine/types.ts `bold: false`), and no
+   weight but 400 is declared, so nothing asks a browser to fake a bold.
+   `block`: a sheet is never measured or drawn in the fallback while the face
+   is on its way (main.tsx waits for it, features/media/faces.ts). Its own
+   stylesheet so the render harness loads exactly this. */
+
+@font-face {
+  font-family: 'Tanklager';
+  src: url('../assets/fonts/Tanklager.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}

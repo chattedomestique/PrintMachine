@@ -315,6 +315,9 @@
   color: var(--ink-soft);
 }
 .app__hint > .btn { flex: none; }
+/* A very large print, said before the tap: the hint's card, with no ×
+   (it stays while it is true), so its words keep the card's inner edge. */
+.app__large { padding-block: var(--chrome-2); padding-inline-end: var(--chrome-4); }
 
 /* ── The More sheet: what Save makes, and whether the app works offline ──
    Facts, not actions, so they sit above the menu's rows. */
@@ -346,6 +349,9 @@
 /* Nothing can be saved (the photo cannot be loaded): the status card's
    alert, in the same words and ink. */
 .more__fact[data-alert] :is(.ic, .more__fact-word) { color: var(--bad-ink); }
+/* The build stamp: a commit and a day, in the style guide's mono face, as
+   Border Studio set it. */
+.more__build { font-family: var(--font-mono); }
 
 /* ── Save questions (a print too big, a save that did not finish) ── */
 .savequestion .card__text { margin: 0; }

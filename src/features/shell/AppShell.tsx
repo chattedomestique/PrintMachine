@@ -254,8 +254,8 @@ export default function AppShell() {
   }
 
   // A very large print is said on screen before the tap, wherever the person
-  // is when they tap Save (D-17): the size and that a phone may not finish
-  // it, in a card over the stage while it is true. Nothing asks; Save
+  // is when they tap Save (the size is stated, nothing asks): the size and
+  // that a phone may not finish it, in a card over the stage while it is true. Nothing asks; Save
   // presses it as any other (a failure is asked about after, as ever). Not
   // while a save's own card is up, which says the size itself.
   const largeSaid = caption.large && !pressing && status === null ? `Saves ${caption.size} (${caption.megapixels}), ${caption.large}.` : null

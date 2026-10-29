@@ -71,10 +71,5 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
     setupFiles: ['src/vitest.setup.ts'],
-    // Vitest's own 5 s sits within 2x of what several pressing tests
-    // typically take on a 4-core machine, so a loaded runner turned one red
-    // for no change. 15 s is 3x the slowest test that has no limit of its
-    // own; the heaviest name theirs.
-    testTimeout: 15_000,
   },
 })

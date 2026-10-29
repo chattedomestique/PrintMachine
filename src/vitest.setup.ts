@@ -10,6 +10,18 @@
  * Node 20). `setImmediate` resolves after the loop's poll phase, where the
  * answers are read, so a report is never older than one test.
  */
-import { afterEach } from 'vitest'
+import { afterEach, vi } from 'vitest'
 
 afterEach(() => new Promise<void>((resolve) => setImmediate(resolve)))
+
+/**
+ * Each test's limit, unless it names its own: 15 s.
+ *
+ * Vitest's own 5 s sits within 2x of what several pressing tests typically
+ * take on a 4-core machine, so a loaded runner turned one red for no change.
+ * 15 s is 3x the slowest test that has no limit of its own; the heaviest name
+ * theirs. Set here, the runner's own setup file, rather than in
+ * vite.config.ts, whose diff from the app before the frame stays the
+ * precache's patterns, the manifest's description and the build stamp.
+ */
+vi.setConfig({ testTimeout: 15_000 })

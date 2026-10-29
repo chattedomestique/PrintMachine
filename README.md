@@ -491,20 +491,29 @@ template's, whose width is 0: unframed.
   at the photo's own pixels" has the sizes); the size, the megapixels and
   the border are said before the tap, past 100 MP with "a very large print:
   a phone may not finish it" (`LARGE_PRINT_MP`), and nothing is capped or
-  made smaller for it. Past 100 MP that is on screen too, the dock's first
-  line while it is true, in every tool, open or closed ("Saves 10358×18414
-  (190.7 MP): a phone may not finish it."): the size the person chose is
-  never only in a name a screen reader hears. In the dock, not over the
-  stage: the sheet is laid out above it, so none of the print being framed
-  is under it and it takes none of the sheet's touches (the gesture hint
-  covers the sheet's foot while it shows, below); its words
-  wrap, never cut, and at 200% text the open panel gives up the line's
-  height (it scrolls a little more, and what it shows stays where it was, so
-  Fit or Width, whichever took the print past 100 MP, stays under the
-  finger) so the sheet keeps its room
-  (verify-geometry holds it at 320x640 and 375x667 at 200% text and at
-  393x852). A smaller copy is only ever one the person chose, after a press
-  that failed or did not finish.
+  made smaller for it. Past 100 MP that is on screen too, a line of the
+  dock while it is true, in every tool, open or closed ("190.7 MP: a phone
+  may not finish it."); the pixel size is in More, Save's name, and the
+  save's own card. In the dock, not over the stage: the sheet is laid out
+  above it, so none of the print being framed is under it and it takes none
+  of the sheet's touches (the gesture hint covers the sheet's foot while it
+  shows, below); its words wrap, never cut, two lines at most at 200% text
+  on a 320 px phone. Its coming and going moves nothing the open panel
+  shows. Where the panel is shorter than its bound (100% text, and some tabs
+  on larger phones at 200%) the dock grows above it and the sheet gives the
+  line its room. Where the panel is at its bound (200% text on a small
+  phone) the line takes the panel's own room, so the sheet keeps its size:
+  at the panel's top, the dock's first line, or, when the control just
+  touched or focused is up there, at its foot over the tools; the panel's
+  scroll moves by as much as its box, so every row stays where it was on
+  screen and the control in use stays whole under the finger. When the line
+  goes the panel takes back what its scroll can give without moving a row,
+  and keeps the rest of the line's room, empty, until it is scrolled or the
+  tab changes. While fingers are on the sheet the line keeps what it said,
+  so a pinch that takes the print across 100 MP is not laid out again under
+  them (verify-geometry and check-touch hold all of it at 320x640 and
+  375x667 at 200% text and at 393x852 and 390x844). A smaller copy is only
+  ever one the person chose, after a press that failed or did not finish.
 
 What each part of the frame does to a pixel, and what holds it to the same
 bytes at every band height and in the preview and the save:
@@ -1163,7 +1172,7 @@ smaller for it). Save's
 own name carries the size and the frame, and the very-large note when there
 is one ("Save 2822×3528 JPEG with a 252 px frame"), so the size a frame makes
 is stated before the tap from every tool, the Frame tool's too, and past
-100 MP the dock's first line says it in words on screen (above); the toast repeats size and
+100 MP a line of the dock says it in words on screen (above); the toast repeats size and
 reason the moment a save starts, and the confirmation repeats the size. Save
 itself stays one word, so the app bar never wraps. Nothing falls back to a
 smaller file: a press that fails stops, with the reason and the numbers, and
@@ -1887,15 +1896,20 @@ is a file, and it checks more:
 - **A very large print**, as the owner's photos make one (a 40 MP photo on
   9:16 in Fit, 190.7 MP), at 320×640 and 375×667 at 200% text and at
   393×852: with the tools closed, on each Frame tab and in Type, Ink and
-  Press, the dock's line says the size, the megapixels and that a phone may
-  not finish it, every word on screen (inside the screen and every clipping
-  box, and the line what a finger at the word's centre reaches); none of the
-  sheet is under it and the sheet is between the bar and the dock; every
-  button on a card over the stage is what a finger at its centre reaches, and
-  a touch at the sheet's foot reaches the sheet, or the gesture hint (which
-  has its ×) while it shows. Choosing Fit, which takes
-  the print past 100 MP, and Crop again moves neither the tool's tabs nor
-  Crop | Fit by half a pixel. At 393×852 a plate dragged
+  Press, the dock's line says the megapixels and that a phone may not finish
+  it, every word on screen (inside the screen and every clipping box, and
+  the line what a finger at the word's centre reaches); none of the sheet is
+  under it and the sheet is between the bar and the dock; every button on a
+  card over the stage is what a finger at its centre reaches, and a touch at
+  the sheet's foot reaches the sheet, or the gesture hint (which has its ×)
+  while it shows. First, in Frame › Crop, the print is taken across 100 MP
+  the ways a person does (from 1:1 in Fit to 9:16 and back): a tap on a
+  ratio chip with the panel at its start and at its end, a tap after it was
+  scrolled back, Crop | Fit, Undo and Redo with focus on the tab, Enter on a
+  chip, and a tap with the line already up as the tab opened; each time no
+  row of the tab moves by half a pixel (by the keys on the tab, the panel may
+  scroll to keep it whole), and the control used is whole inside the panel
+  and what a finger at its centre reaches. At 393×852 a plate dragged
   to the sheet's foot (where a story frame's caption goes) is moved again by a
   touch there.
 
@@ -1947,7 +1961,9 @@ The sheet's surface takes `touch-action: none`, so its gestures are never the
 browser's: drag to move, two-finger pinch to scale and rotate, double-tap to
 centre. With the Frame tool open the same gestures pan and zoom the photo
 instead (100–400%, never off the sheet), a pinch zooming about the fingers,
-so what is under them stays under them (Border Studio's crop pinch), and
+so what is under them stays under them (Border Studio's crop pinch; one
+that takes the print across 100 MP too, the very-large line waiting for the
+fingers to lift), and
 double-tap puts it back at 100% and centred; a drag is measured against the visible rectangle inside the frame,
 so the photo stays under the finger whatever the border. In Fit the whole
 photo shows and nothing moves (the hint says so). A finger

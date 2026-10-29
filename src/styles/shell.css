@@ -109,7 +109,7 @@
   /* Every panel is one height (editor.css), well under this. The bound only
      matters at large text, where the rows grow: the panel then scrolls
      rather than pushing the sheet off the screen. */
-  max-block-size: calc(min(50dvh, 32rem) - var(--large-h, 0px));
+  max-block-size: calc(min(50dvh, 32rem) - var(--large-band, 0px));
   overscroll-behavior: contain;
   /* No top padding: the tabs' band is centred on its own height, so the
      dock's edge is as far above the tab names as the hairline is below. */
@@ -117,26 +117,34 @@
 }
 
 /* ── A very large print, said before the tap ──
-   The dock's first line while it is true (AppShell.tsx): the size, the
-   megapixels and that a phone may not finish it. In the dock, so the sheet is
-   laid out above it and none of the print is under it; its words wrap, never
-   cut. The open panel gives up its height (--large-h, above), so at large
-   text on a small phone the panel scrolls a little more and the sheet keeps
-   its room. Its icon and words, not a colour, say it. */
-.app__large:not([hidden]) {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
+   A line of the dock while it is true (AppShell.tsx): the megapixels and that
+   a phone may not finish it, in words, wrapping, never cut. In the dock, so
+   the sheet is laid out above it and none of the print is under it. Drawn in
+   a band whose height dockLine.ts sets (--large-band, which the open panel's
+   bound gives up): where the panel is at its bound the band takes the
+   panel's own room, at its top or, when the control in use is there, at its
+   foot just above the tools; nothing the panel shows moves either way. Two
+   lines at most at 200% text on a 320 px phone, the room above a tab's first
+   row. */
+.app__large {
+  flex: none;
+  block-size: var(--large-band, 0px);
+  overflow: hidden;
+}
+.app__large[data-at="foot"] { order: 1; }
+.app__large-said {
   margin: 0;
   padding: var(--chrome-2) var(--gutter);
   font: var(--type-meta);
   color: var(--ink);
-  border-block-end: var(--bw-thin) solid var(--ed-hair);
 }
-.app__large > .ic { flex: none; --ic-size: 1.2em; margin-block-start: 0.05em; }
+.app__large[data-at="top"] > .app__large-said { border-block-end: var(--bw-thin) solid var(--ed-hair); }
+.app__large[data-at="foot"] > .app__large-said { border-block-start: var(--bw-thin) solid var(--ed-hair); }
 
 /* ── Bottom row: the tool tray, the full width of the column ── */
 .app__tools {
+  /* After the very-large line's band when that is at the panel's foot. */
+  order: 2;
   padding-block-start: var(--space-1);
   padding-inline: var(--chrome-2);
 }

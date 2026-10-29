@@ -163,11 +163,12 @@ So:
 - [ ] In the Frame tool, VoiceOver reads Save's name with the frame
       ("Save 9016×6440 JPEG with a 644 px frame" for a 40 MP photo on
       Original), so the size the frame makes is heard before the tap
-- [ ] A 40 MP portrait on 16:9 in Fit: before any tap the dock's first
-      line reads "Saves 18414×10358 (190.7 MP): a phone may not finish it.",
-      in every tool and with the tools closed, the sheet above it and none of
-      it under the line; back on Original it goes. With the phone's text at
-      its largest, every word of the line still shows
+- [ ] A 40 MP portrait on 16:9 in Fit: before any tap a line of the dock
+      reads "190.7 MP: a phone may not finish it.", in every tool and with
+      the tools closed, the sheet above it and none of it under the line;
+      back on Original it goes. At 200% text every word of it still shows,
+      and in Frame › Crop a ratio tap that brings it or takes it away moves
+      none of the tab's rows, the chip tapped still under the finger
 - [ ] Frame › Crop: tap Original, then 4:5, then Original: the ratio row
       and Crop | Fit stay where they are (only the line under them changes
       its words)

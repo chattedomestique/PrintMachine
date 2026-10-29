@@ -2293,14 +2293,14 @@ limited enough that it would have to be proven on a device rather than
 assumed.
 
 **In numbers**, against `main` before the frame (c8c0910): 976 tests in 41
-files, from 707 in 24 (`npm test`); 17,316 lines of source in 86 files under
+files, from 707 in 24 (`npm test`); 17,395 lines of source in 87 files under
 `src/`, tests and the vendored style guide not counted, from 13,700 in 69
 (`git ls-files 'src/*.ts' 'src/*.tsx' | grep -v -e '\.test\.' -e
-'^src/vendor/' | xargs cat | wc -l`); 13,774 lines of tests, from 9,380
+'^src/vendor/' | xargs cat | wc -l`); 13,780 lines of tests, from 9,380
 (`git ls-files 'src/*.test.ts' 'src/*.test.tsx' | xargs cat | wc -l`); the
-precache 19 entries and 1.097 MiB, from 18 entries (`verify:offline`); the
-JavaScript 356.9 kB (120.8 kB gzipped), from 324.6 kB (107.5), and the CSS
-207.8 kB, from 203.6 (`npm run build`). Five settings were added (Width,
+precache 19 entries and 1.098 MiB, from 18 entries (`verify:offline`); the
+JavaScript 357.4 kB (121.0 kB gzipped), from 324.6 kB (107.5), and the CSS
+208.1 kB, from 203.6 (`npm run build`). Five settings were added (Width,
 Corners, the fill, Blur, Crop or Fit) and one control replaced (the sheet's
 select, by the ratio chips).
 

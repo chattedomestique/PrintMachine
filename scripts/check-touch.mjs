@@ -801,6 +801,29 @@ try {
       await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="photo"]`)?.getAttribute('aria-pressed') === 'true', border)
       const onPhoto = (await strip.textContent())?.trim()
       check(onFrosted === 'Blur' && onPhoto === 'Width', `a tap on Frosted puts Blur on the strip ("${onFrosted}"), a tap on Photo puts Width back ("${onPhoto}")`)
+      // Keys only: Undo and Redo take the fill across Frosted with focus on
+      // the strip's name; the strip follows the fill in place, so focus stays
+      // on that name (a strip made anew dropped it to the page).
+      await page.locator(`${border} [data-chip="frosted"]`).click()
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="frosted"]`)?.getAttribute('aria-pressed') === 'true', border)
+      await strip.focus()
+      const where = () =>
+        page.evaluate((b) => {
+          const a = document.activeElement
+          return { onName: !!a?.matches(`${b} .paramstrip__pick`), name: !a || a === document.body ? 'the page' : a.textContent?.trim() || a.tagName }
+        }, border)
+      await page.keyboard.press('Control+z')
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="photo"]`)?.getAttribute('aria-pressed') === 'true', border)
+      const undone = await where()
+      await page.keyboard.press('Control+Shift+z')
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="frosted"]`)?.getAttribute('aria-pressed') === 'true', border)
+      const redone = await where()
+      await page.keyboard.press('Control+z')
+      await page.waitForFunction((b) => document.querySelector(`${b} [data-chip="photo"]`)?.getAttribute('aria-pressed') === 'true', border)
+      check(
+        undone.onName && undone.name === 'Width' && redone.onName && redone.name === 'Blur',
+        `keys only: with focus on the strip's name, Ctrl+Z (Frosted to Photo) keeps it there ("${undone.name}"), and so does Ctrl+Shift+Z (Photo to Frosted: "${redone.name}")`,
+      )
     }
 
     // Fit, on a 4:5 sheet: no gesture to teach, nothing moves.

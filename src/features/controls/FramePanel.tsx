@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { Icon, Segmented, type SegmentedOption } from '../../ui/ui.tsx'
 import { ChipRow } from '../../ui/ChipRow.tsx'
 import { ParamStrip } from '../../ui/Slider.tsx'
@@ -64,11 +64,6 @@ export default function FramePanel({
   const media = settings.media
   const frame = settings.frame
   const mode = effectiveMode(settings)
-  // What the strip shows after a fill chip is tapped (Blur for Frosted). The
-  // strip is keyed by whether the fill is Frosted, so it starts again, on
-  // Width, when the fill leaves Frosted by any road (a chip, Undo).
-  const [stripFirst, setStripFirst] = useState<string | undefined>(undefined)
-  const frosted = frame.fill === 'frosted'
 
   const setFrame = (p: Partial<FrameSettings>, how: ChangeHow) => dispatch({ type: 'patchFrame', patch: p, coalesce: !how.discrete, join: how.joins })
   const setPlace = (p: Partial<MediaLayer>, how: ChangeHow) => dispatch({ type: 'patchMedia', patch: p, coalesce: !how.discrete, join: how.joins })
@@ -127,17 +122,14 @@ export default function FramePanel({
               label="Fill"
               items={fillChips(media.palette, settings.paperId, frame.fill, fillPreparing)}
               value={frame.fill}
-              onChange={(fill) => {
-                setStripFirst(stripAfterFill(fill))
-                dispatch({ type: 'patchFrame', patch: { fill } })
-              }}
+              onChange={(fill) => dispatch({ type: 'patchFrame', patch: { fill } })}
             />
             <Rule />
-            <ParamStrip
-              key={frosted ? 'border-frosted' : 'border'}
-              first={frosted ? stripFirst : undefined}
-              params={borderParams(frame, true, setFrame)}
-            />
+            {/* Frosted's one setting, Blur, leads while it is the fill (Border
+                Studio's Fill › Frosted), Width under any other; the strip
+                follows the fill by any road (a chip, Undo, Redo) in place, so
+                focus on its controls stays. */}
+            <ParamStrip key="border" first={stripAfterFill(frame.fill)} params={borderParams(frame, true, setFrame)} />
           </>
         ) : (
           <>

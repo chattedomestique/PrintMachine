@@ -352,7 +352,9 @@ function ParamPicker({
  * the slider. A `lead` (a colour button, say) goes at the start of the name's
  * line, so a second control costs no row. An unavailable setting shows why in
  * place of its value, and its slider is described by those words. `first`
- * names the setting shown when the strip appears (the first, else).
+ * names the setting shown when the strip appears (the first, else), and again
+ * whenever `first` changes: the strip stays mounted, so a control in it that
+ * has focus keeps it while what it shows changes.
  */
 export function ParamStrip({
   params,
@@ -364,7 +366,14 @@ export function ParamStrip({
   first?: string
 }) {
   const all = params.filter((p): p is Param => !!p)
-  const [key, setKey] = useState(all.find((p) => p.key === first)?.key ?? all[0]?.key)
+  const lead1 = () => all.find((p) => p.key === first)?.key ?? all[0]?.key
+  const [key, setKey] = useState(lead1)
+  // `first` changed (a fill chip, Undo, Redo): show it, in place.
+  const [firstWas, setFirstWas] = useState(first)
+  if (first !== firstWas) {
+    setFirstWas(first)
+    setKey(lead1())
+  }
   const [pickOpen, setPickOpen] = useState(false)
   const swipe = useRef<{ y: number; fired: boolean } | null>(null)
   const whyId = useId()

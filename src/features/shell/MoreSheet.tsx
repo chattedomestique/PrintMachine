@@ -43,6 +43,7 @@ export default function MoreSheet({
       open={open}
       onClose={onClose}
       label="More"
+      infoLabel="What Save makes, and offline"
       info={
         <div className="more__facts">
           <div className="more__fact" data-export-size={caption.size ?? ''} data-alert={caption.alert || undefined}>

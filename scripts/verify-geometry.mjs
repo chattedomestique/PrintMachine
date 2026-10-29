@@ -1319,12 +1319,18 @@ async function checkSaveStates(vw, vh, tool) {
         return !!r && r.top >= -0.5 && r.bottom <= innerHeight + 0.5
       }
       const items = [...d.querySelectorAll('.actsheet__list .menu__item')]
-      return { scrolled: d.scrollTop, all: items.length, shown: items.filter(inView).map((i) => i.textContent.trim().slice(0, 24)), facts: d.querySelector('.actsheet__info')?.scrollHeight > d.querySelector('.actsheet__info')?.clientHeight }
+      const info = d.querySelector('.actsheet__info')
+      const facts = !!info && info.scrollHeight > info.clientHeight + 1
+      // A box that scrolls with nothing focusable in it must be a keyboard
+      // stop of its own, named (Safari makes none by itself).
+      const reach = !facts || (info.tabIndex === 0 && info.getAttribute('role') === 'region' && !!info.getAttribute('aria-label'))
+      return { scrolled: d.scrollTop, all: items.length, shown: items.filter(inView).map((i) => i.textContent.trim().slice(0, 24)), facts, reach }
     })
     check(
       more.all >= 2 && more.shown.length === more.all && more.scrolled === 0,
       `${where}, More: its actions on screen as it opens: ${JSON.stringify(more)}`,
     )
+    check(more.reach, `${where}, More: its facts scroll but are not a named region the keyboard reaches: ${JSON.stringify(more)}`)
     await page.keyboard.press('Escape')
     await page.waitForSelector('dialog[open]', { state: 'detached' }).catch(() => undefined)
     await settle(page, `${where}, More closed`)

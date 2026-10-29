@@ -279,6 +279,9 @@ dialog.dialog.actsheet {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* Scrolling, the facts are a stop for the keyboard (ui.tsx): its ring inside
+   the box, which the sheet's edge would cut outside it. */
+.actsheet__info:focus-visible { outline-offset: calc(-1 * var(--ring)); }
 .actsheet__info + .actsheet__list { flex: 0 0 auto; }
 .actsheet__title {
   /* the sheet's name, for orientation: what these rows change */
